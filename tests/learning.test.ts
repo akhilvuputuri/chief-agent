@@ -13,12 +13,13 @@ import {
 } from "../src/learning.js";
 import { documentMessage, forwardedMessage } from "../src/attachments.js";
 import { MemoryStore } from "../src/memory.js";
+import { projectEventRecord } from "../src/ops-log.js";
 import type { Generation, ModelAdapter } from "../src/model.js";
 import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
 
 const DAY = 24 * 3600_000;
-// 04:00 Singapore on 28 October 2026.
-const NIGHT = new Date("2026-10-27T20:00:00Z");
+// 04:00 Singapore on 28 November 2026.
+const NIGHT = new Date("2026-11-27T20:00:00Z");
 
 async function setup(t: { after(fn: () => Promise<void>): void }) {
   const pg = await migratedPGlite();
@@ -272,20 +273,20 @@ test("a night's run starts from 03:30 Singapore, once, and not outside its windo
   const { adapter, inputs } = model(() => [["learn_finish", { summary: "" }]]);
   await task(db, { ownerSays: ["Find me a flight"] });
   const at = (iso: string) => learner(db, adapter, new Date(iso));
-  assert.equal(await at("2026-10-27T19:20:00Z").tick("owner"), null); // 03:20 SGT
+  assert.equal(await at("2026-11-27T19:20:00Z").tick("owner"), null); // 03:20 SGT
   // 03:20 belongs to the previous night, whose window has passed.
-  assert.equal(await at("2026-10-27T19:31:00Z").tick("nobody"), null);
+  assert.equal(await at("2026-11-27T19:31:00Z").tick("nobody"), null);
   assert.equal(
-    (await at("2026-10-27T19:31:00Z").tick("owner"))?.state,
+    (await at("2026-11-27T19:31:00Z").tick("owner"))?.state,
     "completed",
   );
   assert.equal(inputs.length, 1);
-  assert.equal(await at("2026-10-27T21:00:00Z").tick("owner"), null);
+  assert.equal(await at("2026-11-27T21:00:00Z").tick("owner"), null);
   // 10:00 SGT the next day is outside that night's window.
-  assert.equal(await at("2026-10-29T02:00:00Z").tick("owner"), null);
+  assert.equal(await at("2026-11-29T02:00:00Z").tick("owner"), null);
   assert.equal(
-    Learner.nightStart(new Date("2026-10-27T19:20:00Z")).toISOString(),
-    "2026-10-26T19:30:00.000Z",
+    Learner.nightStart(new Date("2026-11-27T19:20:00Z")).toISOString(),
+    "2026-11-26T19:30:00.000Z",
   );
 });
 
@@ -1404,5 +1405,353 @@ test("refused proposals get one more turn even when the model already finished",
   assert.equal(
     (await new MemoryStore(db).active("owner"))[0]?.value,
     "Prefers window seats",
+  );
+});
+
+const batchIds = (input: any) =>
+  JSON.parse(input.messages[1].content).tasks.map((x: any) => x.id);
+
+test("the learner reviews items in batches, each saw its date and earlier batches' items", async (t) => {
+  const db = await setup(t);
+  const ids: string[] = [];
+  for (let i = 0; i < LEARNING_LIMITS.batch + 3; i++)
+    ids.push(await task(db, { ownerSays: ["I prefer window seats always"] }));
+  const { adapter, inputs } = model((input, n) => {
+    const [first] = batchIds(input);
+    return n === 1
+      ? [
+          [
+            "learn_fact",
+            {
+              key: "seat_preference",
+              value: "Prefers window seats",
+              quote: "I prefer window seats",
+              taskIds: [first],
+              reason: "Stated",
+            },
+          ],
+          ["learn_finish", {}],
+        ]
+      : [["learn_finish", {}]];
+  });
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual(
+    [result.state, result.reviewed, result.facts, result.modelCalls],
+    ["completed", LEARNING_LIMITS.batch + 3, 1, 2],
+  );
+  assert.deepEqual(
+    inputs.map((i) => batchIds(i).length),
+    [LEARNING_LIMITS.batch, 3],
+  );
+  const shown = JSON.parse(inputs[0].messages[1].content);
+  assert.equal(shown.tasks[0].date, "2026-11-25");
+  const later = JSON.parse(inputs[1].messages[1].content);
+  assert.ok(later.current.some((c: any) => c.key === "seat_preference"));
+});
+
+test("a failed batch does not hold back later batches, and the next night retries it", async (t) => {
+  const db = await setup(t);
+  for (let i = 0; i < LEARNING_LIMITS.batch * 2 + 1; i++)
+    await task(db, { ownerSays: ["I prefer window seats always"] });
+  const failing = model((_input, n) => {
+    if (n === 2) throw new Error("provider down");
+    return [["learn_finish", {}]];
+  });
+  const result: any = await learner(db, failing.adapter).tick("owner");
+  assert.deepEqual(
+    [result.state, result.failedBatches, result.recorded, result.modelCalls],
+    ["completed", 1, LEARNING_LIMITS.batch + 1, 2],
+  );
+  const reviewed = async () =>
+    (await db.query("SELECT count(*)::int AS n FROM learning_reviews")).rows[0]
+      .n;
+  assert.equal(await reviewed(), LEARNING_LIMITS.batch + 1);
+  const next = model(() => [["learn_finish", {}]]);
+  await learner(db, next.adapter, new Date(NIGHT.getTime() + DAY)).tick(
+    "owner",
+  );
+  assert.equal(batchIds(next.inputs[0]).length, LEARNING_LIMITS.batch);
+  assert.equal(await reviewed(), LEARNING_LIMITS.batch * 2 + 1);
+});
+
+test("an owner turn between batches keeps the finished batch and the next attempt carries on", async (t) => {
+  const db = await setup(t);
+  for (let i = 0; i < LEARNING_LIMITS.batch + 2; i++)
+    await task(db, { ownerSays: ["I prefer window seats always"] });
+  const input = randomUUID();
+  const first = model(async (_input, n) => {
+    if (n === 2)
+      await db.query(
+        "INSERT INTO conversation_inputs(id,user_id,message) VALUES($1,'owner','hi')",
+        [input],
+      );
+    return [["learn_finish", {}]];
+  });
+  const result: any = await learner(db, first.adapter).tick("owner");
+  assert.deepEqual(
+    [result.state, result.recorded],
+    ["deferred", LEARNING_LIMITS.batch],
+  );
+  await db.query("UPDATE conversation_inputs SET state='completed'");
+  const next = model(() => [["learn_finish", {}]]);
+  const resumed: any = await learner(db, next.adapter).tick("owner");
+  assert.equal(resumed.state, "completed");
+  assert.equal(batchIds(next.inputs[0]).length, 2);
+});
+
+test("work from before forwards were marked makes what it produces untrusted", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, {
+    finishedAgo: 40 * DAY,
+    ownerSays: ["I prefer window seats always"],
+  });
+  await db.query("UPDATE work_tasks SET created_at=$1 WHERE id=$2", [
+    new Date("2026-10-19T00:00:00Z"),
+    id,
+  ]);
+  const { adapter } = model(() => [
+    [
+      "learn_fact",
+      {
+        key: "seat_preference",
+        value: "Prefers window seats",
+        quote: "I prefer window seats",
+        taskIds: [id],
+        reason: "Stated",
+      },
+    ],
+    ["learn_finish", {}],
+  ]);
+  await learner(db, adapter).tick("owner");
+  const [row] = (await new MemoryStore(db).active("owner")).filter(
+    (r) => r.key === "seat_preference",
+  );
+  assert.equal(row!.trust, "untrusted");
+  assert.ok(row!.untrusted_sources.includes("possible_forward"));
+});
+
+test("the learner cannot bring back a removed key, and is shown what was removed", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, { ownerSays: ["Find me a flight"] });
+  const store = new MemoryStore(db);
+  await store.write("owner", {
+    key: "lesson:travel:bad-rule",
+    value: "A wrong rule about travel",
+    kind: "lesson",
+    outcome: "success",
+    domain: "travel",
+    origin: "learned",
+    reason: "seed",
+    source: {},
+  });
+  await store.retire("owner", "lesson:travel:bad-rule", {
+    origin: "owner",
+    reason: "wrong",
+  });
+  const { adapter, inputs } = model(() => [
+    [
+      "learn_lesson",
+      {
+        domain: "travel",
+        slug: "bad-rule",
+        outcome: "success",
+        value: "A wrong rule about travel",
+        taskIds: [id],
+        reason: "Again",
+      },
+    ],
+    ["learn_finish", {}],
+  ]);
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.equal(result.lessons, 0);
+  assert.ok(result.refused >= 1);
+  assert.deepEqual(JSON.parse(inputs[0].messages[1].content).removed, [
+    { key: "lesson:travel:bad-rule", value: "A wrong rule about travel" },
+  ]);
+  assert.equal(
+    (await store.active("owner")).some(
+      (r) => r.key === "lesson:travel:bad-rule",
+    ),
+    false,
+  );
+});
+
+test("older work cannot change or retire what newer work established", async (t) => {
+  const db = await setup(t);
+  const old = await task(db, {
+    finishedAgo: 30 * DAY,
+    ownerSays: ["I live in Penang these days"],
+  });
+  const store = new MemoryStore(db);
+  await store.write("owner", {
+    key: "home_city",
+    value: "Lives in Singapore",
+    kind: "fact",
+    origin: "learned",
+    reason: "seed",
+    source: { workDate: "2026-11-20" },
+  });
+  const { adapter } = model(() => [
+    [
+      "learn_fact",
+      {
+        key: "home_city",
+        value: "Lives in Penang",
+        quote: "I live in Penang",
+        taskIds: [old],
+        reason: "Old",
+      },
+    ],
+    ["learn_retire", { key: "home_city", reason: "Old", taskIds: [old] }],
+    ["learn_finish", {}],
+  ]);
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual([result.facts, result.retired], [0, 0]);
+  assert.equal(
+    (await store.active("owner")).find((r) => r.key === "home_city")?.value,
+    "Lives in Singapore",
+  );
+});
+
+test("the learner mines work up to 90 days old, and items a superseded prompt reviewed", async (t) => {
+  const db = await setup(t);
+  const old = await task(db, {
+    finishedAgo: 60 * DAY,
+    ownerSays: ["Find me a flight"],
+  });
+  await task(db, { finishedAgo: 91 * DAY, ownerSays: ["Find me a flight"] });
+  const before = await task(db, { ownerSays: ["Find me a flight"] });
+  const earlier = randomUUID();
+  await db.query(
+    "INSERT INTO learner_runs(id,user_id,state,prompt_version,started_at) VALUES($1,'owner','completed','learner-v3',$2)",
+    [earlier, new Date(NIGHT.getTime() - DAY)],
+  );
+  await db.query(
+    "INSERT INTO learning_reviews(user_id,task_id,learner_run,label,reasons) VALUES('owner',$1,$2,'success','{}')",
+    [before, earlier],
+  );
+  const { adapter, inputs } = model(() => [["learn_finish", {}]]);
+  await learner(db, adapter).tick("owner");
+  assert.deepEqual(batchIds(inputs[0]).sort(), [old, before].sort());
+});
+
+test("a task stored before forwards were marked stays untrusted after a later follow-up", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, { ownerSays: ["I prefer window seats always"] });
+  await db.query("UPDATE work_tasks SET created_at=$1 WHERE id=$2", [
+    new Date("2026-10-20T00:00:00Z"),
+    id,
+  ]);
+  const { adapter, inputs } = model(() => [["learn_finish", {}]]);
+  await learner(db, adapter).tick("owner");
+  assert.deepEqual(
+    JSON.parse(inputs[0].messages[1].content).tasks[0].untrusted,
+    ["possible_forward"],
+  );
+});
+
+test("only the owner's and a rollback's removals block a key", async (t) => {
+  const db = await setup(t);
+  const store = new MemoryStore(db);
+  const write = (key: string, value: string) =>
+    store.write("owner", {
+      key,
+      value,
+      kind: "fact",
+      origin: "learned",
+      reason: "seed",
+      source: {},
+    });
+  await write("by_learner", "Retired by the learner");
+  await store.retire("owner", "by_learner", {
+    origin: "learned",
+    reason: "stale",
+  });
+  await write("by_owner", "Retired by the owner");
+  await store.retire("owner", "by_owner", { origin: "owner", reason: "wrong" });
+  assert.deepEqual(await store.removed("owner"), [
+    { key: "by_owner", value: "Retired by the owner" },
+  ]);
+});
+
+test("a rollback's removal blocks the key, even over the learner's own retirement", async (t) => {
+  const db = await setup(t);
+  const store = new MemoryStore(db);
+  const run = randomUUID();
+  await db.query(
+    "INSERT INTO learner_runs(id,user_id,state,prompt_version) VALUES($1,'owner','completed','learner-v4')",
+    [run],
+  );
+  const write = (key: string) =>
+    store.write("owner", {
+      key,
+      value: "A wrong value",
+      kind: "fact",
+      origin: "learned",
+      reason: "seed",
+      source: {},
+      learnerRun: run,
+    });
+  await write("rolled_back");
+  await write("then_retired");
+  await store.retire("owner", "then_retired", {
+    origin: "learned",
+    reason: "stale",
+    learnerRun: run,
+  });
+  await store.rollback("owner", { learnerRun: run }, "wrong");
+  assert.deepEqual(
+    (await store.removed("owner")).map((r) => r.key),
+    ["rolled_back", "then_retired"],
+  );
+});
+
+test("older work cannot restore a key newer work retired", async (t) => {
+  const db = await setup(t);
+  const old = await task(db, {
+    finishedAgo: 30 * DAY,
+    ownerSays: ["I live in Penang these days"],
+  });
+  const store = new MemoryStore(db);
+  await store.write("owner", {
+    key: "home_city",
+    value: "Lives in Singapore",
+    kind: "fact",
+    origin: "learned",
+    reason: "seed",
+    source: {},
+  });
+  await store.retire(
+    "owner",
+    "home_city",
+    { origin: "learned", reason: "stale" },
+    { workDate: "2026-11-20" },
+  );
+  const { adapter } = model(() => [
+    [
+      "learn_fact",
+      {
+        key: "home_city",
+        value: "Lives in Penang",
+        quote: "I live in Penang",
+        taskIds: [old],
+        reason: "Old",
+      },
+    ],
+    ["learn_finish", {}],
+  ]);
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.equal(result.facts, 0);
+});
+
+test("a run's batch counts reach the operational log", () => {
+  const line: any = projectEventRecord("learner.finished", "run", {
+    state: "completed",
+    recorded: 10,
+    failedBatches: 1,
+  });
+  assert.deepEqual(
+    [line.recordedCount, line.failedBatchCount, line.dropped],
+    [10, 1, undefined],
   );
 });

@@ -164,6 +164,8 @@ const fields: Record<string, Shape> = {
   retiredCount: "count",
   refusedCount: "count",
   modelCalls: "count",
+  recordedCount: "count",
+  failedBatchCount: "count",
 };
 
 // Written as null rather than omitted: an unknown charge stays visibly unknown.
@@ -467,6 +469,8 @@ const projections: Record<string, Projection> = {
       refusedCount: d.refused,
       flaggedCount: d.flagged,
       modelCalls: d.modelCalls,
+      recordedCount: d.recorded,
+      failedBatchCount: d.failedBatches,
     },
   ],
   "recall.searched": (run, d) => [
