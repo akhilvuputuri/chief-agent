@@ -6,7 +6,7 @@ Chief gets `memory_recall`, which searches past messages and memories by meaning
 
 The first night of saving more kept 6 items and refused 5 facts, 3 of them wrongly. The negation check now refuses only an added negation, refused proposals get one more turn, and learned facts and lessons each have half the prompt budget. Two wrong lessons were retired and three facts added in production, approved by the owner. Next: RAG over conversations and learned memories with pgvector. Branch `fix/learner-refusals-budget`. See [journal 130](journey/130-nightly-learner.md#first-night-under-the-new-rules-and-pruning--2026-11-01).
 
-# The learner looks further back — 1 November 2026
+# The learner looks further back — live in `ffca692`, 1 November 2026
 
 Only 55 of 183 conversation turns were within the learner's 14-day limit, and its one `learner-v3` run lost 5 of 6 facts to checks since relaxed. Prompt `learner-v4` reviews up to 90 days back, oldest first, in batches of 10 kept as they finish, and mines `learner-v3`'s items again. See [learning](learning.md) and [journal 130](journey/130-nightly-learner.md#looking-further-back--2026-11-01).
 
