@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import type { Database } from "../src/db.js";
 import type { Embedder } from "../src/mail-recall.js";
@@ -148,6 +149,26 @@ test("a NUL in a query, a restored learned memory and memory-heavy keyword lists
     fused.map((h) => h.keywordRank),
     [1, 1],
   );
+});
+
+test("the rollout's own queries are valid SQL on a real database", async (t) => {
+  const db = await setup(t);
+  const script = await readFile(
+    new URL("../scripts/deploy-pgvector.py", import.meta.url),
+    "utf8",
+  );
+  // The Python tests stub sql(), so only this parses what the rollout really sends.
+  const identity = script
+    .match(/^DATABASE_IDENTITY = \(([\s\S]*?)\)$/m)![1]!
+    .match(/"[^"]*"/g)!
+    .map((part) => part.slice(1, -1))
+    .join("");
+  const rows = (await db.query(identity)).rows;
+  assert.match(String(Object.values(rows[0]!)[0]), /^17\.\d+\/\w\//);
+  for (const probe of script.matchAll(
+    /sql\((["'])((?:SELECT|SHOW)(?:(?!\1).)*)\1\)/g,
+  ))
+    await db.query(probe[2]!);
 });
 
 test("fusion ranks items both searches found above items only one found", () => {

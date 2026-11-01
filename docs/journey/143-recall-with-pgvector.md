@@ -44,6 +44,8 @@ Independent review of `edd6a13` (Opus 5.5, 1 November): changes requested.
 - **Also fixed:** a restored learned memory reported as not learned; memories outranking messages in the keyword list; NUL in a query; a hung query embedding holding the turn; a backup that exits 0 without a dump; and a lost reply after COMMIT choosing the wrong rollback.
 - **Accepted, documented:** indexing cost is not in `provider_charges`, and `Dockerfile.postgres` is outside the release guard.
 
+Re-review of `06fe7fe` (Opus 5.5, 1 November): changes requested. All the earlier findings were fixed, but the fixes added two faults. The identity query was invalid on Postgres 17 (`text || "char"`), and my Python stubs hid it because they never parse SQL; a TypeScript test now runs the rollout's real queries on PGlite. A new CI probe compared two lines of `psql` output with one value, so it failed; it is now two commands.
+
 ## Verification and outcome
 
 - 1,452 TypeScript tests pass locally, and the 18 rollout tests pass.

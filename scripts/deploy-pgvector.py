@@ -29,7 +29,7 @@ COMPOSE_ADDITION = b'        "-f",\n        "/migrations/034_embeddings.sql",\n'
 POSTGRES_IMAGE = 'chief-postgres:17-alpine-pgvector-0.8.7'
 BACKUPS = pathlib.Path('/var/backups/hermes-companion')
 # The same binaries must see the same data files: version and collation, compared across the swap.
-DATABASE_IDENTITY = ("SELECT current_setting('server_version')||'/'||datlocprovider||'/'||datcollate||'/'||"
+DATABASE_IDENTITY = ("SELECT current_setting('server_version')||'/'||datlocprovider::text||'/'||datcollate||'/'||"
                      "datctype||'/'||coalesce(datcollversion,'') FROM pg_database WHERE datname=current_database()")
 OLD_SERVICE = b'  postgres:\n    image: postgres:17-alpine\n'
 NEW_SERVICE = (b'  postgres:\n'
