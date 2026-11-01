@@ -2,7 +2,7 @@
 
 - **Code.** The host compares parked coding PRs with GitHub every 15 minutes, and `coding_cancel` checks first, so a PR merged or closed outside Chief finishes its job. No worker image, database or Compose change.
 - **Why.** PR 305 merged on 21 October but its job still looked open, and Chief told the owner to close it. See [journal 145](journey/145-prs-finished-on-github.md).
-- **Deployment.** Not yet recorded as live; update this entry on release.
+- **Deployment.** [PR 402](https://github.com/akhilvuputuri/chief-agent/pull/402) merged as `615b77e`, and the automatic release (run 41326916652) succeeded. The first sweep moved `8dfdfbf0` to `merged_on_github` and left open draft PR 232 parked, with no check failures logged.
 
 ## Procedures replace one-item lessons (1 November 2026)
 

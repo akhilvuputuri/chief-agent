@@ -1,7 +1,7 @@
 # 145 — How does a parked coding job learn its PR is gone?
 
 Work date: 2026-11-01. Written: 2026-11-01.
-Status: tested on synthetic jobs; deployment recorded in [releases](../releases.md). The first live sweep is not yet recorded.
+Status: released in `615b77e`. The first live sweep settled `8dfdfbf0`.
 
 ## User-visible problem and preceding iteration
 
@@ -45,4 +45,4 @@ Limitations:
 ## Verification and outcome
 
 - **Tested:** `tests/coding-settle-outside.test.ts`, with a fake repository. It covers merged, closed, open, failed reads, rate, rotation, leases, watched stages, stops after Chief's own merge, drafts, auto-merge cancel, resume and owner-wait, plus the GitHub read with a fake API.
-- **Not tested:** the read against real GitHub. The first live check is whether `8dfdfbf0` moves to `merged_on_github` after release.
+- **Measured:** after release, the first live sweep moved `8dfdfbf0` to `merged_on_github` with merge commit `02d49c4`, left open draft PR 232 parked at `pr_ready`, and logged no `coding.parked_check_failed`. The live cancel path has not been used yet.
