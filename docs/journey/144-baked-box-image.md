@@ -1,7 +1,7 @@
 # 144 — Can a prepared image shorten a coding box's boot?
 
 Work date: 1 November 2026. Written: 1 November 2026.
-Status: boot script released in `64758a0`. The AWS stacks are not applied, so boxes still use stock Amazon Linux and nothing is measured.
+Status: live. Coding boxes launch from the baked image since the owner's rollout on 1 November. No box has launched from it yet, so the speed-up is not measured.
 
 ## User-visible problem and preceding iteration
 
@@ -59,7 +59,17 @@ Pending: the owner's [rollout](../../deploy/boxes/README.md#baked-coding-image),
 ### Release closure — 1 November 2026
 
 - **Application:** [PR 397](https://github.com/akhilvuputuri/chief-agent/pull/397), approved head `fbe06f4`, merged as `64758a0`. Checks run 41302523760 and release run 41302711999 succeeded. Read-only host check: gateway on `64758a0` and healthy.
-- **Not yet done:** the owner's AWS rollout, so no box has used the baked image or the guards' skip paths.
+
+### AWS rollout — 1 November 2026
+
+The owner ran the [rollout](../../deploy/boxes/README.md#baked-coding-image) with administrator credentials. Observed:
+
+- **Stack:** `chief-box-image-prod` created first time.
+- **Builds:** build 1 started on its own when the stack was created, about 7 minutes before the manual start, which became build 2. Build 1 reached `TESTING`, then published `ami-0aa74abc5e04aadba` to the parameter. The final state of build 2 was not read.
+- **Boxes stack:** updated with the baked parameter. The update created template version 2, and `modify-launch-template` reported default and latest version 2. Read back, the default version's image is the baked parameter.
+- **Controller permissions, dry run from the gateway:** coding template 16 passed, 0 failed, 4 inconclusive. The launch from the template was allowed through the new statement, and every inconclusive case is one where AWS rejected a made-up value first. The echo template's legitimate launch was allowed, and 2 of its later cases hit `RequestLimitExceeded`, so they prove nothing.
+
+**Not yet shown:** a real box launching from this image, its boot timings, and the guards' skip paths. The weekly schedule and the retention policy have not run past this first build.
 
 ## Follow-up and next iteration
 

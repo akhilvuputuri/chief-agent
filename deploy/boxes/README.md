@@ -76,7 +76,7 @@ Optional, and separate from the boxes stack. `box-image.json` creates a weekly I
    aws cloudformation deploy --region ap-southeast-1 --stack-name chief-box-image-prod --template-file deploy/boxes/box-image.json --capabilities CAPABILITY_IAM --parameter-overrides Environment=prod VpcId=vpc-XXXX SubnetId=subnet-XXXX
    ```
 
-2. Build the first image, and wait until the parameter exists (about 20–40 minutes, estimated):
+2. Creating the stack starts the first build by itself, as seen on 1 November. To start one by hand, for example to refresh sooner, run the first command. The second prints the image ID once a build has published it:
 
    ```bash
    aws imagebuilder start-image-pipeline-execution --region ap-southeast-1 --image-pipeline-arn "$(aws cloudformation describe-stacks --region ap-southeast-1 --stack-name chief-box-image-prod --query "Stacks[0].Outputs[?OutputKey=='PipelineArn'].OutputValue" --output text)"
