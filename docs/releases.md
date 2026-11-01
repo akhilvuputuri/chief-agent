@@ -2,7 +2,8 @@
 
 - **Code.** The boot script skips Docker's install and the image pull when already present. `deploy/boxes/box-image.json` adds the weekly image pipeline, and the boxes stack gains the `CodingImage` parameter and permission to launch the baked image. No migration.
 - **Why.** Each box installs Docker and pulls 331 MB on every boot. See [journal 144](journey/144-baked-box-image.md).
-- **Deployment.** Not yet recorded as live; update this entry on release. The AWS stacks are applied by the owner.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `750faaa` (the image parameter could not be written, and switching `CodingImage` would have changed nothing), then approved `fbe06f4`.
+- **Deployment.** [PR 397](https://github.com/akhilvuputuri/chief-agent/pull/397) merged as `64758a0`. Release run 41302711999 succeeded, and the host reports `64758a0` with a healthy gateway. The boot script's guards are live. The AWS stacks are not applied, so boxes still use stock Amazon Linux.
 
 ## The learner looks further back (1 November 2026)
 
