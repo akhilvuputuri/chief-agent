@@ -2,7 +2,7 @@
 
 Issue [#326](https://github.com/akhilvuputuri/chief-agent/issues/326). Chief should get better with use without the owner asking it to remember things. A background learner reviews completed work items, labels their outcomes, and writes reusable facts, lessons and skills. There are no approvals in v1 (owner decision, 27 October 2026). Safety comes from provenance, immutable revisions, flags, measurement and bulk rollback instead of gates.
 
-Status: phase 1 (revisioned memory) live in `e6f75f7` since 28 October 2026, after the operator rollout of migration 010; phase 2 (the nightly learner) live in `d7df9aa` since 28 October 2026; phases 3 and 4 not started. See journals [129](journey/129-revisioned-memory.md) and [130](journey/130-nightly-learner.md).
+Status: phase 1 (revisioned memory) live in `e6f75f7` since 28 October 2026, after the operator rollout of migration 010; phase 2 (the nightly learner) live in `d7df9aa` since 28 October 2026; phases 3 and 4 not started. Procedures replace one-item lessons from `learner-v5` and `procedures-v1` (1 November). See journals [129](journey/129-revisioned-memory.md) and [130](journey/130-nightly-learner.md).
 
 ## Decisions
 
@@ -18,6 +18,7 @@ The owner asked for the recommended defaults for the issue's open questions on 2
 | Cost                    | No dollar cap ([AGENTS.md](../AGENTS.md#product-and-safety-constraints)). Each run has fixed allocations instead: at most 40 tasks and 100 turns reviewed, in batches of 10 items with at most 5 model calls and a bounded input each, and its cost is recorded against its own run ID in `provider_charges`, separate from owner turns. |
 | First cut-back analysis | Four weeks after the learner goes live. Signals: flagged items, items never in context, items in context for runs that failed or were corrected, and the with/without-learning eval (#323).                                                                                                                                              |
 | Saving (1 November)     | Err toward saving; the owner prunes later. Pruning is done through a coding session for now (`MemoryStore` rollback and retirement); a Telegram tool waits until the core works. Items reviewed under `learner-v1`, `learner-v2` and `learner-v3` are mined again once.                                                                  |
+| Procedures (1 November) | How-to knowledge comes from reading work across days, not one item at a time. The owner chose this over loosening the old rules after an offline comparison ([journal 130](journey/130-nightly-learner.md#procedures-replace-one-item-lessons--2026-11-01)). Facts keep their quote.                                                     |
 | Packaging               | A module in this repository (`src/memory.ts`, later `src/learning/`) with the issue's `Store`/`Model`/`SuccessSignal`/`TrustPolicy`/`Clock` boundaries kept internal. Extracting it into a package waits for the #323 repository.                                                                                                        |
 
 ## Phases
@@ -111,7 +112,7 @@ Turn evidence is the owner's messages, Chief's last reply, call counts per opera
 
 The learner calls the `standard` tier (resolved from `config/model-policy.json`, Claude Opus 5.5 today) at most 10 times, with its own run ID so its charges in `provider_charges` stay separate from owner turns, and its own prompt-cache key. Its input is, per labelled task: the label and reasons, the request, step titles, statuses and short results, receipt counts per operation, up to five owner messages, Chief's last reply, and the kinds of untrusted content the task read (email, web, document, agent report, calendar, from its operations). It also sees the current memory items, marked when learned: owner facts first, then learned items newest first, up to 40,000 characters. Each task is held to about 12,000 characters.
 
-It is offered four tools and nothing else: `learn_fact`, `learn_lesson`, `learn_retire` and `learn_finish`. Since `learner-v3` the instructions tell it to err toward saving: the owner wants memory to accumulate and will prune it later (1 November), after two nights of the earlier "nothing is worth saving" default saved nothing from 55 turns. It keeps Hermes's rules against capturing quoted email or web text, transient failures, negative claims about tools and unresolved attempts.
+It is offered three tools and nothing else: `learn_fact`, `learn_retire` and `learn_finish`. Until `learner-v5` it could also write a lesson from one item; [procedures](#procedures) replaced that. Since `learner-v3` the instructions tell it to err toward saving: the owner wants memory to accumulate and will prune it later (1 November), after two nights of the earlier "nothing is worth saving" default saved nothing from 55 turns. It keeps Hermes's rules against capturing quoted email or web text, transient failures, negative claims about tools and unresolved attempts.
 
 Since `learner-v4` it reviews 10 items at a time, and each item shows its date, because some are months old. Forwarded messages were not marked before 29 October, so items older than that are tagged `possible_forward`, which makes what they produce `untrusted`. Each batch is applied and recorded before the next starts, so a failure or an owner turn loses only the batch in progress and the next attempt carries on.
 
@@ -128,7 +129,7 @@ Every proposal is checked before it is accepted, and a refusal is returned to th
 - Cited task IDs must be ones it was shown.
 - A fact needs a quote of the owner's own words from a cited item (whitespace, quote marks, dashes and case normalized). It may be reworded, but it may not add a negation the quote lacks ("not", "no", "never", "without", "n't"), every number must come from the quote, and at least half of its content words (everything but function words and a few framing words such as "prefers" or "usually", compared after crude stemming) must too. A fact therefore cannot carry a number the owner did not state or be pinned on an unrelated sentence, but up to half its content words, including names, addresses and spelled-out numbers, may come from outside the quote; the task's untrusted tags still apply. A fact that is reworded beyond the quote, or that drops a negation the quote has, is applied and flagged `paraphrased`, so it is easy to find when pruning. That flag alone does not count as flagged in `memory.selected` or raise it to a warning, since it is normal under "save, prune later"; threat and conflict flags do. The check compares words, not meaning: a reworded fact can still be wrong ("Prefers window seats" from "I prefer aisle seats"), and it does not stop a value that recombines the owner's own words or changes a pronoun or modal verb.
 - A fact may not use a key that holds one of the owner's own facts, checked when proposed and again when applied. Until phase 3 lets the owner see and undo learned changes, their own facts stay as they are.
-- A lesson's outcome must match the label of every task it cites. Lessons are not quote-checked; they carry their tasks' untrusted tags instead, so they can be rolled back by source.
+- `learn_retire` may not touch a key starting `lesson:procedure:`, because one item should not undo what was read across days.
 - One key once per batch.
 - A key the owner or a rollback removed cannot be proposed again; removed keys and their last wording are shown to the model so it does not reword them under another key. Rewording under a new key is still possible, as is a value undone by a rollback that restored an earlier one, because that key stays active. The learner's own retirements stay open to newer work.
 - Work older than the work behind a key's latest value or retirement cannot change it. The date comes from `source.workDate`, or the revision's date for items written before `learner-v4`.
@@ -137,11 +138,34 @@ Every proposal is checked before it is accepted, and a refusal is returned to th
 
 Accepted items are applied after each batch, through `MemoryStore`, with `origin: learned`, the learner run, the cited task, run and owner-message IDs and the prompt version as provenance, and the union of the cited tasks' untrusted kinds, which makes them `untrusted`. An item identical to the current value is not rewritten. Owner activity is checked before each model call and again before applying: if the owner started a turn, the batch in progress applies nothing and labels nothing, the run is deferred, and the next tick carries on with what is still unreviewed. A batch that throws waits for the next night without holding back later batches; the run fails only if every batch does. A batch that always fails holds its items back until they age out at 90 days. Items are written one at a time; a crash part-way leaves the written ones (rollback by learner run removes them), the run is marked failed at the next start, and its tasks are reviewed again the next night, where unchanged values are not rewritten.
 
-While a run is calling the model, its `runtime_runs` row is `running`, so the release and rollout guards that wait for idle (`scripts/cloud-release.py`, the `deploy-*.py` scripts) and the coding automation's idle check wait for it too, for up to 70 calls of at most five minutes each, though the last measured run took 39 seconds for 40 items.
+While a run is calling the model, its `runtime_runs` row is `running`, so the release and rollout guards that wait for idle (`scripts/cloud-release.py`, the `deploy-*.py` scripts) and the coding automation's idle check wait for it too, for up to 70 calls of at most five minutes each, though the last measured run took 39 seconds for 40 items. A procedure run adds up to 20 more calls.
+
+### Procedures
+
+Reading one item at a time produced narrow rules overgeneralised from one example, so since `learner-v5` the nightly pass saves facts only and a second pass writes how-to knowledge. It runs under its own `learner_runs` row and prompt version (`procedures-v1`), on a later tick than the item pass of the same night, with the same deferral rules.
+
+**What it reads.** Two weeks of the owner's tasks and turns as one body of evidence, in date order, with their labels, including work the nightly pass already reviewed. `learning_reviews` is not changed. Owner messages keep the same attachment and forward handling. Each message and reply is cut to share about 150,000 characters, between 300 and 1,500 per message, and a pass reads at most 300 items. The bound is soft: 300 items with several messages each could exceed it, though 14 days measured about 43,000 characters.
+
+**When.** The window moves a week at a time, so a pattern can span two passes. The first window is the oldest two weeks within the 90-day limit. A window must have passed the 24-hour success window. Up to four windows with work run a night, oldest first, so a backlog spreads over nights and then a pass runs weekly. A window with no work advances without a model call. Progress is the `through` value in `learner_runs.summary`, written after each window, so a failure or owner turn repeats only that window. A window that fails stops the run until the next night, because skipping it would leave a gap. A window that always fails therefore holds procedures back, and `learner.finished` shows `failed` each night.
+
+**What it writes.** `learn_procedure` writes one procedure per kind of work, up to 800 characters, at `lesson:procedure:<domain>`, stored as kind `lesson` with its domain and no outcome, so there is no migration and turns select it like other lessons. A revision sends the whole new text and is a new revision of the same key. It can name learned lessons it `absorbs`, which are retired in the same learner run, so undoing the run removes the procedure and restores them. `learn_retire` here retires learned lessons and procedures only, never facts.
+
+**Host checks.**
+
+- Cited IDs must be ones shown in that pass.
+- A new procedure must cite at least two items. A revision of an existing one may cite one.
+- Only learned, active, non-procedure lessons can be absorbed.
+- A procedure the owner or a rollback removed cannot return under that domain, though it could under another.
+- One change per key in a pass.
+- Dates are not compared: windows run in order, and the model revises from the current text.
+
+**Trust.** The model read every item in the window together, so every item's untrusted kinds tag what it writes, not only those it cites. In practice most procedures will be `untrusted`, and rollback by source removes them. That is broad, but citing is not proof that an uncited email had no effect.
+
+**Losing detail.** Rewriting can compress away what mattered, so a revision under 60% of the previous length is flagged `shrunk`. Like `paraphrased`, it is findable but raises no warning. Each earlier version stays in `memory_revisions`. Nothing checks whether a longer revision lost detail.
 
 ### Telemetry and the private record
 
-`learner.finished` logs the state and counts (tasks reviewed, successes, pitfalls, facts, lessons, retirements, refusals, flagged, model calls). `learner.failed` and `learner.item_refused` log the error class only.
+`learner.finished` logs the state and counts (tasks reviewed, successes, pitfalls, facts, retirements, refusals, flagged, model calls), and for a procedure pass the procedures written, lessons absorbed and windows read. `lessonCount` remains for older records. `learner.failed` and `learner.item_refused` log the error class only.
 
 Each run also keeps a private record in the Postgres `events` table, under the run's `runtime_runs` ID, with credentials scrubbed. These event types are not in the ops-log projection, so their text never leaves the host:
 
@@ -149,7 +173,7 @@ Each run also keeps a private record in the Postgres `events` table, under the r
 - `learner.model_call`: each call's model, finish reason, text and the tools it called.
 - `learner.proposal`: each tool call as the model sent it, with the host's verdict and refusal reason.
 - `learner.retry`: a response that finished with refusals, and how many, when it earned another turn.
-- `learner.applied`: what finally happened to each accepted item (`written` with its revision ID, `unchanged`, `skipped_owner_fact`, `skipped_not_learned`, `failed`).
+- `learner.applied`: what finally happened to each accepted item (`written` with its revision ID, `unchanged`, `absorbed`, `retired`, `skipped_owner_fact`, `skipped_not_learned`, `failed`).
 
 A pre-empted run keeps its record, so a deferred attempt can be read too. The record is best effort: the memory tables are the ledger, so a failed insert logs `learner.trace_failed` and learning carries on. A model call that throws leaves no `learner.model_call`, only the failed run and its error class. Runs before this record existed left counts only. To read the latest run's proposals on the host:
 

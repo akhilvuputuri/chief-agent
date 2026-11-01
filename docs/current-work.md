@@ -1,3 +1,7 @@
+# Procedures replace one-item lessons — proposed, 1 November 2026
+
+An offline comparison over 14 days found one-item lessons were clearly useful 1 time in 33, against 8 in 11 for procedures written by reading across days, while quoted facts were far better supported than inferred ones (one judge, simulated). The owner chose to replace the lessons. Prompt `learner-v5` saves facts only, and `procedures-v1` reads two weeks at a time and revises one procedure per kind of work. No migration. See [procedures](learning.md#procedures) and [journal 130](journey/130-nightly-learner.md#procedures-replace-one-item-lessons--2026-11-01).
+
 # Baked coding box image — boot script live in `64758a0`, AWS rollout pending, 1 November 2026
 
 The owner chose a baked machine image over a stopped spare box to shorten coding box boots. A weekly Image Builder pipeline bakes Docker and the pinned worker image into Amazon Linux 2023, and the boot script skips what is already present. Boxes stay on stock Amazon Linux until the owner applies the stack and switches `CodingImage`; no timing is measured yet. See [journal 144](journey/144-baked-box-image.md) and [the rollout](../deploy/boxes/README.md#baked-coding-image).

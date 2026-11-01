@@ -119,6 +119,32 @@ The owner asked the learner to save more, after only 14 memories had built up. P
 
 **Hypotheses, not measured.** Smaller batches may find more per item. By proportion, 140 items would cost about $0.60 a night, and the backlog should clear in about two nights. Old lessons may describe failures fixed since, which the owner would prune. More learned items than the prompt budget holds stay reachable through `memory_recall`, but are not in every turn's context. A removed lesson could still return reworded under a new key.
 
+## Procedures replace one-item lessons — 2026-11-01
+
+The owner asked whether the answer to thin memory was looser rules or a different mechanism, because "sometimes the problem is the mechanism".
+
+**Experiment (private and offline; the exported data was deleted and none is recorded here).** Both designs ran over the same 14 days of production conversation, simulated by Claude Opus 5.5 subagents. One blind judge, also Opus 5.5, scored all 83 results shuffled together, with no sign of which design wrote them.
+
+| Measured by the judge                  | One item at a time, loosened     | All 14 days read together |
+| -------------------------------------- | -------------------------------- | ------------------------- |
+| Saved                                  | 49, of which 10 internal repeats | 34, no repeats            |
+| How-to: strongly useful                | 1 of 33                          | 8 of 11                   |
+| How-to: clearly backed by the messages | 3 of 33                          | 5 of 11                   |
+| Facts: strongly useful                 | 2 of 16                          | 1 of 23                   |
+| Facts: clearly backed by the messages  | 13 of 16                         | 6 of 23                   |
+
+Of the 7 most valuable clusters, 5 appeared in both designs and each design alone found 1. So the redesign mostly did not find new things. It expressed how-to knowledge better, while its facts were largely guesses.
+
+**Limits.** One judge from the same model family, one small sample, and simulation rather than the production pipeline. Procedures are longer, which may have favoured them, and whether replies improve was not tested. The first design was given looser rules than production, so its yield does not predict production's.
+
+**Decision (owner, 1 November).** Keep the store, revisions, rollback, nightly job and pgvector. Replace one-item lessons with procedures first. Facts keep the quote, and the idea of allowing implied facts is dropped, because the experiment undercut it. Turning the word-matching refusals into flags is the next step, not in this change.
+
+**Change, prompts `learner-v5` and `procedures-v1`.** The nightly pass saves facts only. A second pass reads two weeks at a time, moving a week per pass, and revises one procedure per kind of work, retiring the lessons each absorbs. See [procedures](../learning.md#procedures). No migration. `learner-v4` is not superseded, because it asked for the same facts. Tested with a fake model in `tests/learning.test.ts`.
+
+**Hypotheses, not measured.** Production procedures may be as useful as the simulated ones, and the two-item rule may keep out one-off rules without losing good ones. By proportion to the $0.17 for 40 items, a window of about 70 items would cost about $0.30, so about six backlog windows would cost about $2 once, then about $0.30 a week. Repeated revision may drift from what the owner wants. Revising in place may lose detail that the `shrunk` flag does not catch.
+
+**Accepted risk.** Every procedure sits in the prompt, is written after reading untrusted content, and has no quote check. It stays labelled as data, carries the window's untrusted tags, is threat-scanned and can be rolled back. A permanently failing window stops procedures until it ages out at 90 days.
+
 ## Follow-up and next iteration
 
 After the phase 1 rollout and this release: check the first night's `learner.finished` counts and charges, and read what it wrote (`memory_revisions` with `origin='learned'`). Phase 3 adds the weekly digest with undo and skills drafted from two independent successes. The owner decided on 29 October not to use reactions or any other manual labelling, so outcomes come only from task proof and corrections in the owner's next message.

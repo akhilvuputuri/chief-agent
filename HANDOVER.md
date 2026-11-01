@@ -12,6 +12,7 @@
 - **Step 2, recall (1 November):** `memory_recall` with pgvector ([recall](docs/recall.md)), live in `48d22d1`, fusion fix live in `40e9a6f`. First evaluation done. Next: see whether Chief actually calls it (`recall.searched`).
 - **First night of saving more (1 November):** 1 fact and 5 lessons saved, 5 facts refused, $0.17. Two wrong lessons retired and three facts added in production. Fixes live in `58a921a`. Next feature: RAG with pgvector over conversations and learned memories (owner's choice: Postgres, not a separate store).
 - **The learner looks further back (1 November), live in `ffca692`:** prompt `learner-v4` reviews up to 90 days back in batches of 10, and mines `learner-v3`'s items again ([journal 130](docs/journey/130-nightly-learner.md#looking-further-back--2026-11-01)). Next: read the next two nights' counts and charges.
+- **Procedures (1 November), proposed:** `learner-v5` saves facts only and `procedures-v1` revises one procedure per kind of work from two-week windows ([journal 130](docs/journey/130-nightly-learner.md#procedures-replace-one-item-lessons--2026-11-01)). Next after it: turn the facts' word-matching refusals into flags.
 - **Next:** after it ships, check the next night's counts, charges and learned items; then phase 3 (weekly digest with undo, learner-drafted skills). No reaction signals: the owner does not want to label anything (29 October).
 
 # Dependency hardening (#329, closed) — live in `211b2a2`, `9ab96c2`, `c4ba246` and `da2a5ff`, 27 October 2026

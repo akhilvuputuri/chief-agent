@@ -1,3 +1,9 @@
+## Procedures replace one-item lessons (1 November 2026)
+
+- **Code.** Prompt `learner-v5` saves facts only. `procedures-v1` reads two weeks of work together and revises one procedure per kind of work. No migration.
+- **Why.** One-item lessons were clearly useful 1 time in 33 in an offline comparison, against 8 in 11 for procedures. See [journal 130](journey/130-nightly-learner.md#procedures-replace-one-item-lessons--2026-11-01).
+- **Review and deployment.** Pending; update this entry on release.
+
 ## Baked coding box image (1 November 2026)
 
 - **Code.** The boot script skips Docker's install and the image pull when already present. `deploy/boxes/box-image.json` adds the weekly image pipeline, and the boxes stack gains the `CodingImage` parameter and permission to launch the baked image. No migration.
