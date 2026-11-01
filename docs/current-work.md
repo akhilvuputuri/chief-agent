@@ -1,6 +1,6 @@
-# Mail recall on pgvector — merged code awaiting operator rollout, 1 November 2026
+# Mail recall on pgvector — live in `d58a9ca`, 1 November 2026
 
-`gmail_recall` moves from a search in gateway memory to an exact pgvector query in Postgres, reusing the stored vectors, so results should not change. Migration 035 keeps the old column for rollback. See [journal 146](journey/146-mail-recall-pgvector.md).
+`gmail_recall` now searches with an exact pgvector query in Postgres, reusing the stored vectors with no new embedding. On 30 real questions the top 10 matched the old in-memory scan every time; search takes about 57 ms instead of 6. Migration 035 keeps the old column for rollback, and a later migration drops it. Live use is not measured. See [journal 146](journey/146-mail-recall-pgvector.md).
 
 # Procedures replace one-item lessons — live in `385e0d7`, 1 November 2026
 

@@ -1,7 +1,7 @@
 # 146 — Moving mail recall to pgvector
 
 Work date: 2026-11-01. Written: 2026-11-01.
-Status: tested on synthetic data; operator rollout pending. No production measurement yet.
+Status: released in `d58a9ca`. Same top results on 30 real questions; the search itself is slower but still small. Live use of `gmail_recall` is not measured.
 
 ## User-visible problem and preceding iteration
 
@@ -14,8 +14,8 @@ This should not change what the owner sees. Exact search over the same vectors s
 - **Measured (production, 1 November):** 2,809 mail chunks for 1,434 messages, 8,216 kB in `mail_index_chunks`; gateway using 109 MiB. The raw vectors are about 6 MB (arithmetic).
 - **Tested:** on 60 synthetic messages with one to four chunks each and three queries, the pgvector query returned the same order as an exact scan in JavaScript, with scores within 0.00001.
 - **Tested:** converting bytes to the `vector` column preserved every float32 value exactly, on the small test vectors.
-- **Not measured:** search time, and equality on real vectors and real questions. Both are planned after the rollout.
-- **Hypothesis:** near ties could swap, because pgvector's arithmetic may round differently from the JavaScript scan. The production comparison should show whether this happens.
+- **Not measured before the rollout:** search time, and equality on real vectors and real questions. [Verification](#verification-and-outcome) has both.
+- **Hypothesis before the rollout:** near ties could swap, because pgvector's arithmetic may round differently from the JavaScript scan. The production comparison should show whether this happens.
 
 ## Diagnosis and alternatives
 
@@ -50,14 +50,33 @@ Independent review (Opus 5.5) of `73f2e4a` requested changes:
 
 ## Verification and outcome
 
-Pending the rollout. Planned on production, with private questions kept in the operations folder:
+Measured on production on 1 November, read-only, with `d58a9ca` and the 30 private questions from the 29 October export. Each question ran through the old scan over `vector`, reimplemented in a private script, and the new query over `embedding`. The script and its output stay in the operations folder.
 
-1. All 2,809 chunks have `embedding`, and no embedding tokens were spent.
-2. The earlier private eval questions rank the same through the old scan over `vector` and the new query over `embedding`.
-3. The query's own time, measured apart from the embedding call.
-4. A restart logs `mail_index.loaded`.
+| Measure                                 | Result                                     |
+| --------------------------------------- | ------------------------------------------ |
+| Chunks with `embedding`                 | 2,811 of 2,811 (1,435 messages)            |
+| Embedding tokens spent by the rollout   | 0                                          |
+| Top 8 and top 10 identical              | 30 of 30 questions                         |
+| Full order identical (all 1,435)        | 27 of 30 questions                         |
+| Where order differed                    | 6 positions, each moved by one             |
+| Largest score gap at a swapped position | 0.00000002                                 |
+| Largest score difference                | 0.0000002                                  |
+| Search time, median and slowest         | new 57 and 109 ms; old 6 and 59 ms         |
+| `mail_index_chunks` size                | 16 MB, up from 8 MB, while both forms stay |
+| `mail_index.loaded` on start            | 4,375 ms while filling, then 21 ms         |
+
+- **Growth:** one more email (2 chunks) had been indexed between the 2,809 reading and the rollout. The rollout's first start loaded 1,435 messages and logged `mail_index.built` with 0 input tokens, so that email was not embedded by the rollout.
+- **Ranking:** the hypothesis held. The swaps are floating-point near ties, all below the top 10. This compared meaning search alone. Fusion was not run on these questions, though it takes the same ranking as input.
+- **Speed:** search is about 50 ms slower than the in-memory scan, on one sample just after the rollout. The migration did not make it faster.
+- **Memory:** not compared. The readings available were taken at different moments after restarts, and the raw vectors were only about 6 MB.
+- **Not measured:** `gmail_recall` called through a real Telegram turn since this release, and whether the owner's own questions are answered better.
+
+### Release closure — 2026-11-01
+
+[PR 404](https://github.com/akhilvuputuri/chief-agent/pull/404) merged as `d58a9ca` with `46b0aef` approved. `scripts/deploy-mail-vectors.py` exited 0 with migration 35 on the expected baseline `790c2f7`. Postgres stayed up. Release run 41330931237 succeeded, and the host reports `d58a9ca` with a healthy gateway. `mail_index.built` reported 0 messages left out and 0 input tokens.
 
 ## Follow-up and next iteration
 
 - Drop `vector`, `encodeVector` and the fill step in a later migration, once this has run in production.
 - Owner-written questions and live use still decide whether `gmail_recall` is worth keeping. This migration does not measure that.
+- Low findings left as they are: a stopped `--export` leaves a partial file `run.py` would accept, so check for the summary line; five deleted messages in a row can end an export until the next gateway start removes them.

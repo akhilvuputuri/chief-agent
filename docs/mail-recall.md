@@ -1,6 +1,6 @@
 # Email memory (mail recall) — MVP
 
-Status (1 November 2026): migration to pgvector is merged code awaiting its operator rollout; see [journal 146](journey/146-mail-recall-pgvector.md). Before that rollout, production searches in gateway memory. Earlier: live with a 12-month window, quota-paced builds and fused meaning and keyword search, with persistence since `e99ee8d`. See [journal 120](journey/120-email-memory-mvp.md).
+Status (1 November 2026): live with a 12-month window, quota-paced builds and fused meaning and keyword search, stored and searched in Postgres with pgvector since `d58a9ca`. Live use is not measured. See [journal 120](journey/120-email-memory-mvp.md) and [journal 146](journey/146-mail-recall-pgvector.md).
 
 ## What it does
 
