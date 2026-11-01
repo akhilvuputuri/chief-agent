@@ -323,3 +323,5 @@ Evidence boundary:
 - **Not yet measured:** an Opus 5.5 review on a Pi job.
 
 **An approval is about the spec (31 October).** Switching a paused job's reviewer by editing its settings invalidated the owner's approval, because the approval hashed the whole settings block. The owner's point: a plan is a spec, and any agent can implement it. The approval now covers only the objective, context and plan, and a stopped job's models and limits can change on request ([journal 142](142-approval-covers-the-spec.md)). Lesson: before editing stored state directly, find everything derived from it. And bind an approval to what the person actually read, not to everything nearby.
+
+**A record that stops watching goes stale (1 November).** PR 305 merged on GitHub on 21 October, but its job stayed at `manual_review`, because automation stops watching a parked job. Eleven days later the owner asked Chief to stop a job; Chief tried this one, was refused, and told the owner to close an already merged PR ([journal 145](145-prs-finished-on-github.md)). Lesson: when an outside system owns the truth, either keep watching it or check it before saying anything about it.
