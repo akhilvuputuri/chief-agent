@@ -1,22 +1,28 @@
-// Email memory MVP (docs/mail-recall.md). An in-memory meaning index over the primary
-// mailbox's Primary-category mail from the last 12 months. Nothing is persisted: the index is
-// rebuilt after each gateway start, and Gmail stays the source of truth. Results are message
-// and thread IDs that the email agent confirms with gmail_thread before reporting.
+// Email memory MVP (docs/mail-recall.md). A meaning index over the primary mailbox's
+// Primary-category mail from the last 12 months, stored and searched in Postgres with pgvector.
+// Gmail stays the source of truth. Results are message and thread IDs that the email agent
+// confirms with gmail_thread before reporting.
 import { z } from "zod";
 import type { GmailTools } from "./gmail.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { spending } from "./spending.js";
-import type { MailIndexStore, StoredMessage } from "./mail-index-store.js";
+import {
+  isDataError,
+  type MailIndexStore,
+  type StoredHeaders,
+  type StoredMessage,
+} from "./mail-index-store.js";
 import { discardBody, readBody } from "./http-body.js";
 
 export const MAIL_INDEX_DAYS = 365;
 /** Received Primary-category mail; sent mail, chats, spam and trash are left out. */
 export const MAIL_INDEX_QUERY =
   "category:primary -in:sent -in:chats -in:spam -in:trash";
+export const MAIL_INDEX_DAY_MS = 86_400_000;
 export const EMBEDDING_MODEL = "openai/text-embedding-3-small";
 /** text-embedding-3 vectors are trained to stay meaningful when cut short (Matryoshka), so
  * keeping the first 512 values and re-normalising trades a little quality for a third of
- * the memory. */
+ * the storage. */
 const DIMENSIONS = 512;
 const MAX_MESSAGES = 3000;
 const CHUNK_CHARS = 1500;
@@ -39,9 +45,8 @@ const QUOTA_REFUSED = /\((403|429)\)/;
 const TOP_UP_LIMIT = 50;
 const TOP_UP_MS = 10_000;
 const RETRY_MS = 300_000;
-const RESULTS = 8;
+export const MAIL_RECALL_RESULTS = 8;
 const EXCERPT = 300;
-const DAY_MS = 86_400_000;
 /** What stored vectors depend on: changing any of these rebuilds the persisted index. */
 const STORE_CONFIG = {
   model: `${EMBEDDING_MODEL}#chunks=${CHUNK_CHARS}/${CHUNK_OVERLAP}/${MAX_CHUNKS}`,
@@ -138,19 +143,6 @@ export class OpenRouterEmbedder implements Embedder {
 }
 
 type Message = Awaited<ReturnType<GmailTools["indexMessage"]>>;
-type Entry = {
-  messageId: string;
-  threadId: string;
-  at: number;
-  from: string;
-  subject: string;
-  date: string;
-  /** Chunk text, held only in memory for messages indexed by this process; "" when loaded. */
-  text: string;
-  /** Gmail's short snippet, which is persisted and stands in for text after a restart. */
-  snippet: string;
-  vector: Float32Array;
-};
 
 /** Body text without quoted earlier messages, which would make every reply match its thread. */
 export function withoutQuotes(text: string) {
@@ -316,7 +308,6 @@ const SERIALISED_LIMIT = 11_000;
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 
 export class MailIndex {
-  private entries: Entry[] = [];
   private indexed = new Set<string>();
   /** Listed but not yet indexed, oldest first. Nothing listed is lost when a call stops early. */
   private pending = new Set<string>();
@@ -331,13 +322,14 @@ export class MailIndex {
   private catchingUp = false;
   /** The last start-up listing failed after a load; its failure was logged instead of a build. */
   private catchUpFailed = false;
-  private persistWarned = false;
+  private bookkeepingWarned = false;
   private nextRead = 0;
   private quotaPauses = 0;
   state: MailIndexState = "idle";
   constructor(
     private gmail: Pick<GmailTools, "indexPage" | "indexMessage">,
     private embedder: Embedder & { tokens?: number },
+    private store: MailIndexStore,
     readonly owner: string,
     private now: () => number = Date.now,
     private pace = {
@@ -345,50 +337,9 @@ export class MailIndex {
       quotaPauseMs: QUOTA_PAUSE_MS,
       topUpMs: TOP_UP_MS,
     },
-    private store?: MailIndexStore,
   ) {}
   get messages() {
     return this.indexed.size;
-  }
-  /** Stable chunk IDs (message ID and chunk number) in index order. */
-  private chunkIds() {
-    const seen = new Map<string, number>();
-    return this.entries.map((e) => {
-      const n = seen.get(e.messageId) ?? 0;
-      seen.set(e.messageId, n + 1);
-      return `${e.messageId}:${n}`;
-    });
-  }
-  /** Every chunk and its message headers without vectors, for the operator-run export. */
-  exportChunks(user: string) {
-    if (user !== this.owner)
-      throw new Error("Gmail is not connected for this user");
-    const ids = this.chunkIds();
-    return this.entries.map(({ vector, ...e }, i) => ({
-      chunkId: ids[i]!,
-      ...e,
-    }));
-  }
-  /** Each chunk's cosine score against a query, by chunk ID, for the operator-run export. */
-  async scoreChunks(user: string, query: string) {
-    if (user !== this.owner)
-      throw new Error("Gmail is not connected for this user");
-    const [q] = await this.embedder.embed([query.slice(0, 2000)]);
-    const ids = this.chunkIds();
-    const scores: Record<string, number> = {};
-    this.entries.forEach((e, i) => {
-      let score = 0;
-      for (let d = 0; d < DIMENSIONS; d++) score += e.vector[d]! * q![d]!;
-      scores[ids[i]!] = Math.round(score * 1e6) / 1e6;
-    });
-    return scores;
-  }
-  /** One entry per indexed message (its first chunk), for the operator-run eval. */
-  sample() {
-    const first = new Map<string, Entry>();
-    for (const e of this.entries)
-      if (!first.has(e.messageId)) first.set(e.messageId, e);
-    return [...first.values()].map(({ vector, ...e }) => e);
   }
   /** Starts the backfill once. A failed build resumes from what it indexed. */
   start() {
@@ -449,26 +400,23 @@ export class MailIndex {
    */
   private async backfill() {
     const started = this.now();
-    let loaded = false;
-    if (this.store) {
-      const stored = await this.store
-        .load(this.owner, STORE_CONFIG)
-        .catch((error) => {
-          throw new DependencyError("postgres", error);
-        });
-      if (stored?.length) {
-        this.restore(stored);
-        loaded = true;
-        this.state = "ready";
-        opsLog("mail_index.loaded", "info", {
-          messages: this.indexed.size,
-          latencyMs: this.now() - started,
-        });
-      } else
-        await this.store.begin(this.owner, STORE_CONFIG).catch((error) => {
-          throw new DependencyError("postgres", error);
-        });
-    }
+    const stored = await this.store
+      .load(this.owner, STORE_CONFIG)
+      .catch((error) => {
+        throw new DependencyError("postgres", error);
+      });
+    const loaded = !!stored?.length;
+    if (stored?.length) {
+      this.indexed = new Set(stored);
+      this.state = "ready";
+      opsLog("mail_index.loaded", "info", {
+        messages: this.indexed.size,
+        latencyMs: this.now() - started,
+      });
+    } else
+      await this.store.begin(this.owner, STORE_CONFIG).catch((error) => {
+        throw new DependencyError("postgres", error);
+      });
     this.catchingUp = true;
     try {
       const listed = new Set(
@@ -479,13 +427,13 @@ export class MailIndex {
       );
       const gone = [...this.indexed].filter((id) => !listed.has(id));
       if (gone.length) {
-        const removed = new Set(gone);
-        this.entries = this.entries.filter((e) => !removed.has(e.messageId));
+        await this.store.remove(this.owner, gone).catch((error) => {
+          throw new DependencyError("postgres", error);
+        });
         for (const id of gone) this.indexed.delete(id);
-        await this.persist(() => this.store!.remove(this.owner, gone));
       }
       this.synced = started;
-      await this.persist(() => this.store!.synced(this.owner, started));
+      await this.bookkeeping(() => this.store.synced(this.owner, started));
       await this.add(Infinity);
     } catch (error) {
       // A loaded index keeps answering; the next start or top-up lists again.
@@ -501,38 +449,20 @@ export class MailIndex {
       this.catchingUp = false;
     }
   }
-  private restore(stored: StoredMessage[]) {
-    for (const m of stored) {
-      for (const vector of m.vectors)
-        this.entries.push({
-          messageId: m.messageId,
-          threadId: m.threadId,
-          at: m.at,
-          from: m.from,
-          subject: m.subject,
-          date: m.date,
-          text: "",
-          snippet: m.snippet,
-          vector,
-        });
-      this.indexed.add(m.messageId);
-    }
-  }
-  /** Best-effort persistence: a failure is logged once and repaired by the next start's listing. */
-  private async persist(write: () => Promise<void>) {
-    if (!this.store) return;
+  /** A failure here is logged once and costs nothing: the next listing repeats the work. */
+  private async bookkeeping(write: () => Promise<unknown>) {
     try {
       await write();
     } catch (error) {
-      if (!this.persistWarned)
+      if (!this.bookkeepingWarned)
         opsLog("mail_index.persist_failed", "warn", errorFields(error));
-      this.persistWarned = true;
+      this.bookkeepingWarned = true;
     }
   }
   /**
    * Fetches, chunks and embeds pending messages in small groups, so memory stays bounded and
    * a failure keeps what was already indexed. A message is marked indexed only once all its
-   * chunks are embedded. A message that cannot be read is retried once, then abandoned. A
+   * chunks are saved. A message that cannot be read is retried once, then abandoned. A
    * Gmail quota refusal is not the message's fault: reading pauses and the message stays queued.
    */
   private async add(limit: number, signal?: AbortSignal) {
@@ -579,17 +509,6 @@ export class MailIndex {
       }
       const stored = new Map<string, StoredMessage>();
       parts.forEach((b, i) => {
-        this.entries.push({
-          messageId: b.m.id,
-          threadId: b.m.threadId,
-          at: b.m.at,
-          from: b.m.from,
-          subject: b.m.subject,
-          date: b.m.date,
-          text: b.text,
-          snippet: b.m.snippet ?? "",
-          vector: vectors[i]!,
-        });
         const message = stored.get(b.m.id) ?? {
           messageId: b.m.id,
           threadId: b.m.threadId,
@@ -603,15 +522,39 @@ export class MailIndex {
         message.vectors.push(vectors[i]!);
         stored.set(b.m.id, message);
       });
-      for (const m of fetched) {
-        this.indexed.add(m.id);
-        this.pending.delete(m.id);
-        this.attempts.delete(m.id);
+      for (const m of await this.save([...stored.values()])) {
+        this.indexed.add(m.messageId);
+        this.pending.delete(m.messageId);
+        this.attempts.delete(m.messageId);
       }
-      await this.persist(() =>
-        this.store!.save(this.owner, [...stored.values()]),
-      );
     }
+  }
+  /**
+   * Saves a group and returns what was saved. A row Postgres can never accept is left out and
+   * counted, so one bad email cannot block the queue behind it. Any other failure stops the pass.
+   */
+  private async save(group: StoredMessage[]) {
+    const stored = (messages: StoredMessage[]) =>
+      this.store.save(this.owner, messages).then(
+        () => true,
+        (error) => {
+          if (!isDataError(error)) throw new DependencyError("postgres", error);
+          return false;
+        },
+      );
+    if (await stored(group)) return group;
+    const saved: StoredMessage[] = [];
+    for (const m of group)
+      if (await stored([m])) saved.push(m);
+      else {
+        this.pending.delete(m.messageId);
+        this.attempts.delete(m.messageId);
+        this.abandoned += 1;
+        opsLog("mail_index.message_refused", "warn", {
+          omittedCount: this.abandoned,
+        });
+      }
+    return saved;
   }
   /**
    * Lists mail that arrived since the last listing and indexes a bounded amount of what is
@@ -622,28 +565,29 @@ export class MailIndex {
       const listedAt = this.now();
       // Gmail's after: takes epoch seconds; an hour of overlap absorbs delivery delays.
       const since = Math.floor(
-        Math.max(this.synced, listedAt - MAIL_INDEX_DAYS * DAY_MS) / 1000 -
+        Math.max(this.synced, listedAt - MAIL_INDEX_DAYS * MAIL_INDEX_DAY_MS) /
+          1000 -
           3600,
       );
       await this.list(`${MAIL_INDEX_QUERY} after:${since}`, MAX_MESSAGES);
       this.synced = listedAt;
-      await this.persist(() => this.store!.synced(this.owner, listedAt));
+      await this.bookkeeping(() => this.store.synced(this.owner, listedAt));
       await this.add(TOP_UP_LIMIT, AbortSignal.timeout(this.pace.topUpMs));
       return this.pending.size === 0;
     })().finally(() => (this.topping = undefined));
     return this.topping;
   }
-  private prune() {
-    const cutoff = this.now() - MAIL_INDEX_DAYS * DAY_MS;
-    if (!this.entries.some((e) => e.at < cutoff)) return;
-    this.entries = this.entries.filter((e) => e.at >= cutoff);
-    this.indexed = new Set(this.entries.map((e) => e.messageId));
-    void this.persist(() => this.store!.prune(this.owner, cutoff));
+  /** Search applies the window itself, so a failed delete cannot return old mail. */
+  private prune(cutoff: number) {
+    return this.bookkeeping(async () => {
+      for (const id of await this.store.prune(this.owner, cutoff))
+        this.indexed.delete(id);
+    });
   }
   async recall(
     user: string,
     query: string,
-    limit = RESULTS,
+    limit = MAIL_RECALL_RESULTS,
     keyword?: KeywordResults,
   ) {
     if (user !== this.owner)
@@ -684,7 +628,7 @@ export class MailIndex {
         results: keywordIds
           .slice(0, count)
           .map((id, i) =>
-            this.row(id, undefined, hits.get(id), undefined, i + 1),
+            this.row(id, undefined, undefined, hits.get(id), undefined, i + 1),
           ),
         omitted: 0,
       });
@@ -708,22 +652,18 @@ export class MailIndex {
     } finally {
       clearTimeout(timer);
     }
-    this.prune();
+    const cutoff = this.now() - MAIL_INDEX_DAYS * MAIL_INDEX_DAY_MS;
+    await this.prune(cutoff);
     const [q] = await this.embedder.embed([query.slice(0, 2000)]);
-    const best = new Map<string, { entry: Entry; score: number }>();
-    for (const entry of this.entries) {
-      let score = 0;
-      for (let i = 0; i < DIMENSIONS; i++) score += entry.vector[i]! * q![i]!;
-      const seen = best.get(entry.messageId);
-      if (!seen || score > seen.score)
-        best.set(entry.messageId, { entry, score });
-    }
-    const meaningIds = [...best.entries()]
-      .sort((a, b) => b[1].score - a[1].score || (a[0] < b[0] ? -1 : 1))
-      .map(([id]) => id);
+    const best = await this.store.search(this.owner, q!, cutoff);
+    const scores = new Map(best.map((m) => [m.messageId, m.score]));
+    const meaningIds = best.map((m) => m.messageId);
     const meaningRank = new Map(meaningIds.map((id, i) => [id, i + 1]));
     const keywordRank = new Map(keywordIds.map((id, i) => [id, i + 1]));
-    const ranking = keyword ? fuse([meaningIds, keywordIds]) : meaningIds;
+    const ranking = (
+      keyword ? fuse([meaningIds, keywordIds]) : meaningIds
+    ).slice(0, count);
+    const indexed = await this.store.headers(this.owner, ranking);
     const notes = [
       ...(complete
         ? []
@@ -737,11 +677,13 @@ export class MailIndex {
       indexedMessages: this.indexed.size,
       ...(notes.length ? { note: notes.join(" ") } : {}),
       results: ranking
-        .slice(0, count)
+        // A message removed between the two queries has nothing left to show.
+        .filter((id) => indexed.has(id) || hits.has(id))
         .map((id) =>
           this.row(
             id,
-            best.get(id),
+            indexed.get(id),
+            scores.get(id),
             hits.get(id),
             meaningRank.get(id),
             keywordRank.get(id),
@@ -753,27 +695,29 @@ export class MailIndex {
         : "Ranked by meaning, not keywords: the top result is the closest match, not necessarily a match. Confirm with gmail_thread before reporting. No match does not prove an email does not exist, and older or non-Primary mail is outside this index.",
     });
   }
-  /** One result: indexed text when the message is indexed, else Gmail's own headers and snippet. */
+  /** One result: stored headers when the message is indexed, else Gmail's own headers and snippet. */
   private row(
     id: string,
-    indexed: { entry: Entry; score: number } | undefined,
+    e: StoredHeaders | undefined,
+    score: number | undefined,
     hit: KeywordHit | undefined,
     meaningRank: number | undefined,
     keywordRank: number | undefined,
   ) {
     const clean = (text: string | undefined) =>
       (text ?? "").replace(CONTROL, " ").replace(/\s+/g, " ").trim();
-    const e = indexed?.entry;
     return {
       messageId: id,
       threadId: e?.threadId ?? hit?.threadId ?? "",
       from: clean(e?.from ?? hit?.from),
       subject: clean(e?.subject ?? hit?.subject),
       date: clean(e?.date ?? hit?.date),
-      ...(indexed ? { score: Math.round(indexed.score * 1000) / 1000 } : {}),
+      ...(score !== undefined
+        ? { score: Math.round(score * 1000) / 1000 }
+        : {}),
       meaningRank: meaningRank ?? null,
       keywordRank: keywordRank ?? null,
-      excerpt: clean(e ? e.text || e.snippet : hit?.snippet).slice(0, EXCERPT),
+      excerpt: clean(e?.snippet || hit?.snippet).slice(0, EXCERPT),
       // Gmail could not fetch this hit's details; say so instead of showing blanks.
       ...(!e && !hit?.from && !hit?.subject && hit?.detail
         ? { detail: clean(hit.detail) }

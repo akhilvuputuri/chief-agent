@@ -22,8 +22,9 @@ ssh -F "$OPS/ssh_config" chief-lightsail \
   > "$OPS/mail-recall/$(date +%F)-export.jsonl"
 ```
 
-- **Build time:** the eval builds its own index first (about 17 minutes for 12 months).
-- **Quota:** the build reads against the same Gmail per-user quota as Chief.
+- **Index:** the eval reads the gateway's stored index without changing it.
+- **Time and quota:** chunk text is not stored, so the export reads every indexed message from Gmail again (about 12 minutes for 1,400 messages), against the same per-user quota as Chief.
+- **Check:** the summary's `unreadable` should be 0. A message left out shifts the ranks of everything below it.
 - **What it writes for each question:**
   - the question;
   - the target message;
