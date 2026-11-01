@@ -98,7 +98,7 @@ Optional, and separate from the boxes stack. `box-image.json` creates a weekly I
    aws ec2 modify-launch-template --region ap-southeast-1 --launch-template-name chief-box-prod-coding --default-version "$(aws cloudformation describe-stacks --region ap-southeast-1 --stack-name chief-boxes-prod --query "Stacks[0].Outputs[?OutputKey=='CodingLaunchTemplateLatestVersion'].OutputValue" --output text)"
    ```
 
-5. Confirm that the default version uses it, then rerun the IAM check in step 5 above. "Launch from the template" now proves that the controller can launch the baked image:
+5. Confirm that the default version uses it, then rerun the IAM check from [Verify the permissions](#5-verify-the-permissions-no-instance-launches). "Launch from the template" now proves that the controller can launch the baked image:
 
    ```bash
    aws ec2 describe-launch-template-versions --region ap-southeast-1 --launch-template-name chief-box-prod-coding --versions '$Default' --query 'LaunchTemplateVersions[0].LaunchTemplateData.ImageId' --output text
