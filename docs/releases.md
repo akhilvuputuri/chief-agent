@@ -2,7 +2,8 @@
 
 - **Code.** Prompt `learner-v4`: 90 days back instead of 14, up to 40 tasks and 100 turns a run, batches of 10 kept as they finish, `learner-v3` items mined again. No migration.
 - **Why.** 128 of 183 turns had never been reviewed. See [journal 130](journey/130-nightly-learner.md#looking-further-back--2026-11-01).
-- **Deployment.** Not yet recorded as live; update this entry on release.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `7c242bc`, `829f813` and `05f3b8b`, then approved `8538984`.
+- **Deployment.** [PR 395](https://github.com/akhilvuputuri/chief-agent/pull/395) merged as `ffca692`. The automatic release succeeded, and the host reports `ffca692` with a healthy gateway since 11:04:55 UTC on 1 November. First run due at 03:30 Singapore on 2 November.
 
 ## Recall over conversations and memories (1 November 2026)
 
