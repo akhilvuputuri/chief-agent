@@ -1,7 +1,7 @@
 # 144 — Can a prepared image shorten a coding box's boot?
 
 Work date: 1 November 2026. Written: 1 November 2026.
-Status: live. Coding boxes launch from the baked image since the owner's rollout on 1 November. No box has launched from it yet, so the speed-up is not measured.
+Status: configuration live. Since the owner's rollout on 1 November, coding boxes are set to launch from the baked image. No new coding box had been created when last read at 14:16 UTC that day, so neither the launch nor the speed-up has been observed.
 
 ## User-visible problem and preceding iteration
 
@@ -52,9 +52,9 @@ The same review led to the test component running the boot script's `docker crea
 
 **Tested:** template lint on both stacks (one expected warning, as `CodingImage` is deliberately a string for `resolve:ssm:`), the component YAML and shell syntax, and the digest extraction against the real pin and unsafe values. Lint proves the property names and values only. It cannot show that the stacks deploy or that a build works.
 
-**Not tested:** any AWS call. The stacks, the first build, the weekly schedule and the retention policy have never run, and neither has a real box on this image. No check covers an untagged image in this account being refused, because it would need a real image to name.
+**Not tested before the rollout below:** any AWS call. The stacks, the first build, the weekly schedule and the retention policy had not run, and neither had a real box on this image. No check covers an untagged image in this account being refused, because it would need a real image to name.
 
-Pending: the owner's [rollout](../../deploy/boxes/README.md#baked-coding-image), then `kite run logs:cloudwatch -- boot --since 24h` after a coding job, compared with a stock box.
+Pending: `kite run logs:cloudwatch -- boot --since 24h` after a coding job, compared with a stock box.
 
 ### Release closure — 1 November 2026
 
@@ -62,14 +62,20 @@ Pending: the owner's [rollout](../../deploy/boxes/README.md#baked-coding-image),
 
 ### AWS rollout — 1 November 2026
 
-The owner ran the [rollout](../../deploy/boxes/README.md#baked-coding-image) with administrator credentials. Observed:
+The owner ran the [rollout](../../deploy/boxes/README.md#baked-coding-image). Observed:
 
-- **Stack:** `chief-box-image-prod` created first time.
-- **Builds:** build 1 started on its own when the stack was created, about 7 minutes before the manual start, which became build 2. Build 1 reached `TESTING`, then published `ami-0aa74abc5e04aadba` to the parameter. The final state of build 2 was not read.
-- **Boxes stack:** updated with the baked parameter. The update created template version 2, and `modify-launch-template` reported default and latest version 2. Read back, the default version's image is the baked parameter.
-- **Controller permissions, dry run from the gateway:** coding template 16 passed, 0 failed, 4 inconclusive. The launch from the template was allowed through the new statement, and every inconclusive case is one where AWS rejected a made-up value first. The echo template's legitimate launch was allowed, and 2 of its later cases hit `RequestLimitExceeded`, so they prove nothing.
+- **Stack:** the `chief-box-image-prod` deploy reported success.
+- **Builds:** build 1 was created at 13:41:36 UTC, before the manual start and not from it. The manual start returned build 2, created at 13:48:27 UTC. Build 1 was in `TESTING` and build 2 in `BUILDING` when listed. Their final states were not read.
+- **Image:** the parameter then returned `ami-0aa74abc5e04aadba`. Which build produced it was not read; build 1 is likely, as it was the further along.
+- **Boxes stack:** the deploy reported success with the baked parameter. `modify-launch-template` reported default and latest version 2. Read back, the default version's image is the baked parameter.
+- **Coding template, dry-run permission check from the gateway:** 16 passed, 0 failed, 4 inconclusive. The launch from the template was allowed.
+- **Echo template, same check:** 15 passed, 0 failed, 5 inconclusive. The launch from the template was allowed. The fifth case was throttled (`RequestLimitExceeded`), and an earlier filtered run throttled two others.
 
-**Not yet shown:** a real box launching from this image, its boot timings, and the guards' skip paths. The weekly schedule and the retention policy have not run past this first build.
+The inconclusive cases prove nothing either way. A made-up key pair and instance profile were rejected first, and the security group and subnet overrides conflict with the template's network interface (`InvalidParameterCombination`).
+
+**Inferred, not observed:** the coding launch was allowed by the new statement, as an image in this account cannot match the Amazon-owner statement, assuming no other policy allows it. The first build's cause is also unproven: creating the stack or the `rate(7 days)` schedule.
+
+**Not yet shown:** a real box launching from this image, its boot timings and the guards' skip paths. No scheduled weekly build or retention run has been seen.
 
 ## Follow-up and next iteration
 

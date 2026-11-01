@@ -10,7 +10,7 @@
 - **Why.** Each box installs Docker and pulls 331 MB on every boot. See [journal 144](journey/144-baked-box-image.md).
 - **Review.** Independent review (Claude Opus 5.5) requested changes on `750faaa` (the image parameter could not be written, and switching `CodingImage` would have changed nothing), then approved `fbe06f4`.
 - **Deployment.** [PR 397](https://github.com/akhilvuputuri/chief-agent/pull/397) merged as `64758a0`. Release run 41302711999 succeeded, and the host reports `64758a0` with a healthy gateway. The boot script's guards are live.
-- **AWS rollout.** The owner applied both stacks on 1 November. The first image built, tested and published, and the coding template's default version 2 uses it. Dry-run permission check on the coding template: 16 passed, 0 failed, 4 inconclusive. No box has launched from it yet.
+- **AWS rollout.** The owner applied both stacks on 1 November. An image was published to the parameter, and the coding template's default version 2 reads it. Dry-run permission check on the coding template: 16 passed, 0 failed, 4 inconclusive. No new coding box had been created at 14:16 UTC, so no launch from it has been observed.
 
 ## The learner looks further back (1 November 2026)
 
