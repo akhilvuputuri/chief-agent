@@ -420,15 +420,16 @@ export async function settleUncertainDrafts(db: Database, user: string) {
 const codingTraces: Record<string, string> = {
   coding_start: `EXISTS(SELECT 1 FROM coding_jobs j WHERE j.user_id=$2 AND j.request_key=$3)`,
   coding_reply: `EXISTS(SELECT 1 FROM coding_revisions v WHERE v.job_id::text=$4 AND v.request_key=$3)`,
+  coding_job_update: `EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id::text=$4 AND e.event_key='settings:'||$3)`,
   coding_resume: `(EXISTS(SELECT 1 FROM coding_revisions v WHERE v.job_id::text=$4 AND v.request_key=$3)
     OR EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id::text=$4
       AND (e.event_key='continue:'||$3 OR (e.event_key ~ '^requirements:[0-9]+:'
         AND regexp_replace(e.event_key,'^requirements:[0-9]+:','')=$3))))`,
 };
 /**
- * Settles the owner's uncertain coding_start/coding_reply/coding_resume calls that
- * provably saved nothing. Each is idempotent by request key: its only write is a job
- * (start), a revision (reply/resume), a continue event or a requirements card (resume),
+ * Settles the owner's uncertain coding_start/coding_reply/coding_resume/coding_job_update
+ * calls that provably saved nothing. Each is idempotent by request key: its only write is a job
+ * (start), a revision (reply/resume), a continue event or a requirements card (resume), a settings event (update),
  * all keyed by that request key and inserted in the dispatcher's single statement. Once
  * the run has stopped, no such row means the call failed. Rows that exist stay uncertain
  * for an operator. Never replays. The update and its event are one statement.

@@ -7,6 +7,7 @@ import { codingDiagnostics } from "./diagnostics.js";
 import {
   modelPreferences,
   setModelPreference,
+  assertEligibleModel,
   type CodingCatalog,
 } from "./model-settings.js";
 import { assertSquadCheckpoint } from "./squad-state.js";
@@ -20,7 +21,11 @@ import {
   type StatusAnchor,
   type StatusLine,
 } from "./notices.js";
-import { CodingRequirements, requirementScope } from "./requirements.js";
+import {
+  CodingRequirements,
+  requirementScope,
+  requirementScopes,
+} from "./requirements.js";
 import { CodingMergeApprovals } from "./merge-approvals.js";
 import type { AgentGitHubTokens, AgentToken } from "./agent-github.js";
 import {
@@ -68,6 +73,23 @@ const active = ["provisioning", "running"];
 export type PauseCause = "sandbox_stopped" | "heartbeat_lost";
 const hash = (v: unknown) =>
   createHash("sha256").update(canonicalJson(v)).digest("hex");
+/** The longest one Pi attempt runs, inside the box task's four-hour deadline. */
+const PI_ATTEMPT_MS = 10_800_000;
+/** The identity a Pi worker derives for a phase or session of this job's approved work. */
+const piIdentity = (
+  job: CodingJob,
+  plan: string,
+  intent: string,
+  value: string,
+) =>
+  hash({
+    objective: job.objective,
+    context: job.context,
+    plan,
+    base: job.base_sha,
+    intent,
+    hash: value,
+  });
 /**
  * Progress-only coding notices (`e` a coding_events row, `j` its job), folded into the
  * status message: worker progress, automatic retry/rebase/feedback re-queues, the approved
@@ -148,7 +170,7 @@ export class CodingController {
     // 40 minutes under CodeBuild's 45-minute cap.) Legacy runtimes keep their allocation.
     return Math.min(
       job.settings.limits.ms,
-      job.settings.runtime === "pi" ? 10_800_000 : job.settings.limits.ms,
+      job.settings.runtime === "pi" ? PI_ATTEMPT_MS : job.settings.limits.ms,
     );
   }
   private automation?: CodingAutomation;
@@ -326,7 +348,7 @@ export class CodingController {
     if (!this.allowed(user)) throw new Error("Coding owner unavailable");
     const rows = (
       await this.db.query(
-        `SELECT id,revision,objective,mode,state,stage,summary,question,base_sha,pr_url,head_sha,cleanup,publication_started,used_models,settings->'limits' AS limits,settings->>'prWorkflow' AS merge_flow,updated_at,checkpoint->'runtimeMemory' AS runtime_memory,checkpoint->'squadState'->>'phase' AS runtime_phase,(SELECT max(created_at) FROM coding_events e WHERE e.job_id=coding_jobs.id AND e.payload->>'kind' IN ('squad_handoff','checkpoint')) AS checkpoint_at FROM coding_jobs WHERE user_id=$1 ${id ? "AND id=$2" : ""} ORDER BY created_at DESC LIMIT 20`,
+        `SELECT id,revision,objective,mode,state,stage,summary,question,base_sha,pr_url,head_sha,cleanup,publication_started,used_models,settings->'limits' AS limits,settings->>'leaderModel' AS leader_model,settings->>'model' AS coder_model,settings->>'reviewerModel' AS reviewer_model,settings->>'prWorkflow' AS merge_flow,updated_at,checkpoint->'runtimeMemory' AS runtime_memory,checkpoint->'squadState'->>'phase' AS runtime_phase,(SELECT max(created_at) FROM coding_events e WHERE e.job_id=coding_jobs.id AND e.payload->>'kind' IN ('squad_handoff','checkpoint')) AS checkpoint_at FROM coding_jobs WHERE user_id=$1 ${id ? "AND id=$2" : ""} ORDER BY created_at DESC LIMIT 20`,
         id ? [user, id] : [user],
       )
     ).rows;
@@ -506,6 +528,7 @@ export class CodingController {
         this.priceFilters.output,
       );
     }
+    if (a.operation === "coding_job_update") return this.updateJob(user, a);
     if (a.operation === "coding_models") {
       const preferences = await modelPreferences(this.db, user, this.settings);
       return {
@@ -513,7 +536,7 @@ export class CodingController {
         appliesTo: "new jobs only",
         bounded: true,
         notice:
-          "The catalog shows up to 100 eligible models; setting an exact ID validates the full live catalog. Running jobs retain their model snapshot.",
+          "The catalog shows up to 100 eligible models; setting an exact ID validates the full live catalog. Existing jobs keep their models unless changed with coding_job_update.",
         ...(a.list
           ? {
               models: ((await this.catalog?.()) ?? [])
@@ -777,6 +800,202 @@ export class CodingController {
       );
     return this.status(user, a.id);
   }
+  /** The checkpoint state that restarts the current step, when that step's model changed. */
+  private freshSession(
+    job: CodingJob,
+    next: CodingSettings,
+    requestKey: string,
+  ) {
+    const pi = job.checkpoint.piState;
+    if (!pi?.sessionScope) return undefined;
+    // An earlier report failure would hold the new model to finishing a session it never saw.
+    const { reportFailure: _earlier, ...kept } = pi;
+    if (pi.phase === "review") {
+      const candidate = pi.reviewCandidate;
+      const round = pi.reviewRound;
+      if (
+        job.settings.reviewerModel === next.reviewerModel ||
+        // A rejected candidate goes to the coder's repair session next, not to a review.
+        (pi.reportDocument?.kind === "review" &&
+          pi.reportDocument.verdict === "REQUEST_CHANGES") ||
+        !candidate ||
+        !round ||
+        round >= 1000
+      )
+        return undefined;
+      // The host binds a review session to its candidate and round, so a fresh one is a new round.
+      return {
+        ...kept,
+        reviewRound: round + 1,
+        sessionScope: piIdentity(
+          job,
+          job.checkpoint.plan,
+          "review-session",
+          `${candidate.hash}:${round + 1}`,
+        ),
+      };
+    }
+    const changed =
+      pi.phase === "build"
+        ? job.mode === "implement" && job.settings.model !== next.model
+        : pi.phase === "plan" &&
+          job.mode === "plan" &&
+          (job.settings.leaderModel ?? job.settings.model) !==
+            (next.leaderModel ?? next.model);
+    return changed
+      ? { ...kept, sessionScope: hash([pi.sessionScope, requestKey]) }
+      : undefined;
+  }
+  /**
+   * The owner changes who carries out a stopped job, or how long it may run. The requirements
+   * are untouched, so their approval stands. A session under a changed model starts fresh on
+   * the same files, because continuing another model's session is untested.
+   */
+  private async updateJob(
+    user: string,
+    a: Extract<CodingAction, { operation: "coding_job_update" }>,
+  ) {
+    const job = (
+      await this.db.query(
+        "SELECT * FROM coding_jobs WHERE id=$1 AND user_id=$2",
+        [a.id, user],
+      )
+    ).rows[0] as CodingJob | undefined;
+    if (!job) throw new Error("Coding job unavailable");
+    const key = `settings:${a.requestKey}`;
+    const request = hash(a);
+    const prior = (
+      await this.db.query(
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
+        [job.id, key],
+      )
+    ).rows[0];
+    if (prior) {
+      if (prior.payload.request !== request)
+        throw new ToolValidationError("Coding update request key conflict");
+      return this.status(user, a.id);
+    }
+    if (job.revision !== a.baseRevision)
+      throw new ToolValidationError(
+        "Coding revision changed; read coding_status and retry with the current revision",
+      );
+    if (a.leaderModel && !job.settings.squad && job.settings.runtime !== "pi")
+      throw new ToolValidationError("This job has no leader model to change");
+    const next = {
+      ...job.settings,
+      ...(a.leaderModel ? { leaderModel: a.leaderModel } : {}),
+      ...(a.coderModel ? { model: a.coderModel } : {}),
+      ...(a.reviewerModel ? { reviewerModel: a.reviewerModel } : {}),
+      limits: { ...job.settings.limits, ...a.limits },
+    };
+    if (job.settings.runtime === "pi" && (a.limits?.ms ?? 0) > PI_ATTEMPT_MS)
+      throw new ToolValidationError(
+        "That time limit is above the most one attempt can run",
+      );
+    const hasLeader = job.settings.squad || job.settings.runtime === "pi";
+    const changes = [
+      ...(hasLeader
+        ? [
+            [
+              "Planner",
+              job.settings.leaderModel ?? job.settings.model,
+              next.leaderModel ?? next.model,
+            ],
+          ]
+        : []),
+      ["Coder", job.settings.model, next.model],
+      ["Reviewer", job.settings.reviewerModel, next.reviewerModel],
+      ["Time limit (ms)", job.settings.limits.ms, next.limits.ms],
+      ["Model calls", job.settings.limits.models, next.limits.models],
+      ["Tool calls", job.settings.limits.tools, next.limits.tools],
+    ].filter(([, from, to]) => from !== to);
+    if (!changes.length)
+      throw new ToolValidationError("The job already has these settings");
+    if (
+      Math.max(
+        job.checkpoint.piState?.toolsUsed ?? 0,
+        job.checkpoint.squadState?.toolsUsed ?? 0,
+      ) > next.limits.tools
+    )
+      throw new ToolValidationError(
+        "The tool-call limit is below what this job has already used",
+      );
+    for (const model of [a.leaderModel, a.coderModel, a.reviewerModel]) {
+      if (!model) continue;
+      if (!this.catalog) throw new Error("Coding model catalog unavailable");
+      await assertEligibleModel(
+        model,
+        this.catalog,
+        this.priceFilters.input,
+        this.priceFilters.output,
+      );
+    }
+    // Only the job's current models keep a window; the snapshot holds at most three.
+    const windows = {
+      ...job.settings.contextWindows,
+      ...(await this.contextWindows(next)),
+    };
+    const current = [
+      next.leaderModel ?? next.model,
+      next.model,
+      next.reviewerModel,
+    ];
+    if (job.settings.runtime === "pi")
+      Object.assign(next, {
+        contextWindows: Object.fromEntries(
+          Object.entries(windows).filter(([id]) => current.includes(id)),
+        ),
+      });
+    const piState = this.freshSession(job, next, a.requestKey);
+    const restarted = !!piState;
+    const checkpoint = piState
+      ? { ...job.checkpoint, piState }
+      : job.checkpoint;
+    const approved =
+      job.mode === "implement" && (await this.requirements.approved(job));
+    const updated = await this.db.query(
+      `WITH changed AS (
+        UPDATE coding_jobs SET settings=$4::jsonb,checkpoint=$5::jsonb
+        WHERE id=$1 AND user_id=$2 AND revision=$3 AND ${RESTARTABLE} AND settings=$6::jsonb AND checkpoint=$7::jsonb RETURNING id
+      ), carried AS (
+        -- Earlier approvals hashed the settings, so carry one to the scope that does not.
+        INSERT INTO coding_events(job_id,event_key,payload,delivery)
+        SELECT id,$8::text,jsonb_build_object('decision','approved','approvedScope',$9::text,'reason','settings_change'),'suppressed'
+        FROM changed WHERE $10::boolean RETURNING job_id
+      ) INSERT INTO coding_events(job_id,event_key,payload)
+        SELECT id,$11::text,$12::jsonb FROM changed RETURNING job_id`,
+      [
+        job.id,
+        user,
+        job.revision,
+        JSON.stringify(next),
+        JSON.stringify(checkpoint),
+        JSON.stringify(job.settings),
+        JSON.stringify(job.checkpoint),
+        `settings-approval:${a.requestKey}`,
+        requirementScope(job),
+        approved,
+        key,
+        JSON.stringify({
+          kind: "settings_change",
+          request,
+          changes: changes.map(([field, from, to]) => ({ field, from, to })),
+          sessionRestarted: restarted,
+          summary: `Job settings changed at your request. ${changes
+            .map(([field, from, to]) => `${field}: ${from} → ${to}`)
+            .join(
+              "; ",
+            )}.${restarted ? " That step restarts in a fresh session; finished work is kept." : ""}${approved ? " Your approval of the requirements still stands." : ""} The job stays stopped until you resume it.`,
+        }),
+      ],
+    );
+    if (!updated.rows.length)
+      throw new ToolValidationError(
+        "Only a stopped job with no pending cleanup or publication can change; inspect status",
+      );
+    opsLog("coding.settings_changed", "info", { ref: job.id });
+    return this.status(user, a.id);
+  }
   /**
    * Work that has waited more than a day restarts only on the owner's explicit request in
    * the current conversation (20 October: a three-day-old parked job was resumed while
@@ -1019,18 +1238,7 @@ export class CodingController {
           "Review recovery requires the exact checked Pi candidate",
         );
       const identity = (intent: string, value: string) =>
-        createHash("sha256")
-          .update(
-            canonicalJson({
-              objective: job.objective,
-              context: job.context,
-              plan: c.plan,
-              base: job.base_sha,
-              intent,
-              hash: value,
-            }),
-          )
-          .digest("hex");
+        piIdentity(job, c.plan, intent, value);
       if (
         c.piState.scopeIdentity !== identity("review", candidate.hash) ||
         c.piState.sessionScope !==
@@ -1649,6 +1857,9 @@ export class CodingController {
              AND v.request_key LIKE 'auto-retry:%')
            AND NOT EXISTS(SELECT 1 FROM coding_revisions v WHERE v.job_id=j.id
              AND v.request_key='auto-retry:'||j.attempt_id::text)
+           -- The owner changed this job while it was stopped, and was told it stays stopped.
+           AND NOT EXISTS(SELECT 1 FROM coding_events s WHERE s.job_id=j.id
+             AND s.event_key LIKE 'settings:%' AND s.created_at>=j.updated_at)
            AND (EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id=j.id
                   AND e.event_key=j.attempt_id::text||':paused'
                   AND e.payload->>'cause' IN ('sandbox_stopped','heartbeat_lost'))
@@ -1677,11 +1888,13 @@ export class CodingController {
     const retried = await this.db.query(
       `WITH changed AS (
       UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,summary='Retrying once automatically after a transient fault',updated_at=now()
-      WHERE id=$1 AND revision=$2 AND state='paused' AND NOT publication_started AND cleanup IN ('none','complete') AND (lease IS NULL OR lease_until<now()) RETURNING id,revision,mode
+      WHERE id=$1 AND revision=$2 AND state='paused' AND NOT publication_started AND cleanup IN ('none','complete') AND (lease IS NULL OR lease_until<now())
+        AND settings=$5::jsonb
+        AND NOT EXISTS(SELECT 1 FROM coding_events s WHERE s.job_id=$1 AND s.event_key LIKE 'settings:%' AND s.created_at>=coding_jobs.updated_at) RETURNING id,revision,mode
     ), revised AS (
       INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$3,$4,mode FROM changed RETURNING job_id
     ) INSERT INTO coding_events(job_id,event_key,payload) SELECT job_id,$3,jsonb_build_object('summary','Retrying once automatically after a transient fault. If it pauses again, it will wait for you.') FROM revised RETURNING job_id`,
-      [j.id, j.revision, key, message],
+      [j.id, j.revision, key, message, JSON.stringify(j.settings)],
     );
     if (retried.rows.length) opsLog("coding.auto_retry", "info", { ref: j.id });
   }
@@ -2042,7 +2255,7 @@ export class CodingController {
               j.mode !== "plan" ||
               j.revision !== req.revision ||
               j.checkpoint.plan !== req.plan ||
-              requirementScope(j) !== req.scope ||
+              !requirementScopes(j).includes(req.scope) ||
               artifactHash(j.checkpoint) !== req.artifact))
         ) {
           await this.db.query(

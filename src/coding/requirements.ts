@@ -4,8 +4,26 @@ import { ToolValidationError } from "../tool-errors.js";
 import type { CodingJob } from "./controller.js";
 import { artifactHash, canonicalJson } from "./github.js";
 
-/** Confirmation authority is a delivered owner message, never a model tool argument. */
+/**
+ * Confirmation authority is a delivered owner message, never a model tool argument.
+ * An approval covers what the owner read: the objective, context and plan. Who carries
+ * it out (models, limits, image) and the base commit are not part of it; merge rules are
+ * enforced at the merge gate and the Merge card.
+ */
 export function requirementScope(job: CodingJob) {
+  return createHash("sha256")
+    .update(
+      canonicalJson({
+        id: job.id,
+        objective: job.objective,
+        context: job.context,
+        plan: job.checkpoint.plan,
+      }),
+    )
+    .digest("hex");
+}
+/** The scope approvals used before 31 October 2026, which also hashed the base and settings. */
+function legacyRequirementScope(job: CodingJob) {
   return createHash("sha256")
     .update(
       canonicalJson({
@@ -19,6 +37,10 @@ export function requirementScope(job: CodingJob) {
     )
     .digest("hex");
 }
+/** Every scope that still identifies this job's requirements; earlier approvals stay valid. */
+export function requirementScopes(job: CodingJob) {
+  return [requirementScope(job), legacyRequirementScope(job)];
+}
 export class CodingRequirements {
   constructor(
     private db: Database,
@@ -29,8 +51,8 @@ export class CodingRequirements {
     if (!this.allowed(job.user_id)) return false;
     return !!(
       await this.db.query(
-        "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload->>'decision'='approved' AND payload->>'approvedScope'=$2 LIMIT 1",
-        [job.id, requirementScope(job)],
+        "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload->>'decision'='approved' AND payload->>'approvedScope'=ANY($2::text[]) LIMIT 1",
+        [job.id, requirementScopes(job)],
       )
     ).rows.length;
   }
@@ -107,7 +129,7 @@ export class CodingRequirements {
       !event.payload.requirements
     )
       throw new Error("Requirement confirmation unavailable");
-    if (event.payload.requirements.scope !== requirementScope(event))
+    if (!requirementScopes(event).includes(event.payload.requirements.scope))
       throw new Error("Requirements changed");
     if (event.payload.decision) {
       if ((event.payload.decision === "approved") !== approve)
@@ -125,7 +147,7 @@ export class CodingRequirements {
       job.mode !== "plan" ||
       job.revision !== requirement.revision ||
       job.checkpoint.plan !== requirement.plan ||
-      requirement.scope !== requirementScope(job) ||
+      !requirementScopes(job).includes(requirement.scope) ||
       requirement.artifact !== artifactHash(job.checkpoint) ||
       !Number.isFinite(new Date(event.payload.confirmUntil).getTime()) ||
       new Date(event.payload.confirmUntil).getTime() <= this.clock().getTime()

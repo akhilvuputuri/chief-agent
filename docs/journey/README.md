@@ -148,6 +148,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1 November | [139 — CI audit and Pi split](139-ci-audit-pi-split.md): what still limits a CI run, and is it safe to run test files in parallel again? | Pi job split; wall time 164 and 168 s, about 12–19 s better. Parallel files: 0 crashes in 102 shard jobs, cause of the old crash unknown, owner to decide. |
 | 1 November | [140 — Docs-only checks](140-docs-only-checks.md): can a docs-only pull request skip the code jobs without weakening the gate? | Forced run took 49 s with the gate intact. TypeScript 7 deferred: identical output, but its compiler API is gone. |
 | 1 November | [141 — Parallel test files](141-parallel-test-files.md): can CI run test files four at a time despite an unexplained crash? | Owner chose yes for CI. Coding boxes stay serial. |
+| 1 November | [142 — What an approval is tied to](142-approval-covers-the-spec.md): must an owner's approval bind who carries out a plan? | Tested on synthetic jobs; release pending. Approval now covers only the objective, context and plan |
 
 ## Coding-agent learning path
 

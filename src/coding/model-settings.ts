@@ -39,11 +39,8 @@ export async function modelPreferences(
       result[row.data.role as CodingRole] = row.data.model;
   return result;
 }
-export async function setModelPreference(
-  db: Database,
-  user: string,
-  defaults: CodingSettings,
-  role: CodingRole,
+/** The live catalog and the existing price filters decide which models a role may use. */
+export async function assertEligibleModel(
   model: string,
   catalog: CodingCatalog,
   inputPrice: number,
@@ -63,6 +60,18 @@ export async function setModelPreference(
     throw new ToolValidationError(
       "Model is unavailable for coding tools or exceeds the existing provider price filters. No setting was changed.",
     );
+}
+export async function setModelPreference(
+  db: Database,
+  user: string,
+  defaults: CodingSettings,
+  role: CodingRole,
+  model: string,
+  catalog: CodingCatalog,
+  inputPrice: number,
+  outputPrice: number,
+) {
+  await assertEligibleModel(model, catalog, inputPrice, outputPrice);
   // Append one role decision per record; concurrent changes to different roles cannot lose data.
   await db.query(
     "INSERT INTO events(user_id,run_id,type,data) VALUES($1,$2,'coding.models',jsonb_build_object('role',$3::text,'model',$4::text))",
