@@ -18,6 +18,7 @@ import {
   type TaskOutcome,
   type TaskRunner,
 } from "../src/boxes/agent.js";
+import { parseBootStages } from "../src/boxes/boot-stages.js";
 import { boxApi } from "../src/boxes/api.js";
 import { server } from "../src/server.js";
 
@@ -989,4 +990,25 @@ test("a task flooding questions is stopped once, with a reason the owner can rea
     .map((c) => c.body.events[0])
     .find((e) => e.kind === "task.failed");
   assert.match(failed.payload.error, /more than 20 questions without answers/);
+});
+
+test("boot stages parse tolerantly, keeping only known stages", () => {
+  assert.deepEqual(
+    parseBootStages(
+      [
+        "script_started 1800000000000",
+        "image_pulled 1800000030000",
+        "made_up_stage 1800000040000",
+        "agent_copied not-a-time",
+        "",
+        "docker_installed 1800000010",
+      ].join("\n"),
+    ),
+    [
+      { stage: "script_started", atMs: 1800000000000 },
+      { stage: "image_pulled", atMs: 1800000030000 },
+      { stage: "docker_installed", atMs: 1800000010 },
+    ],
+  );
+  assert.deepEqual(parseBootStages(""), []);
 });

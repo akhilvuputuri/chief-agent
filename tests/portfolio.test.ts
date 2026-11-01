@@ -291,7 +291,9 @@ test("consent requests only mcp.read with PKCE and connects exactly once per sta
   const row = (await f.db.query("SELECT * FROM brokerage_connections")).rows[0];
   assert.equal(row.state, "connected");
   assert.deepEqual(row.scopes, ["mcp.read"]);
-  assert(!Buffer.from(row.token_box).toString("latin1").includes("r1"));
+  // Quoted, as in the sealed JSON: a bare "r1" turns up in this ciphertext about 1 run in 1,100.
+  const box = Buffer.from(row.token_box).toString("latin1");
+  assert(!box.includes('"r1"') && !box.includes('"a1"'));
   // The client is registered once and reused.
   await f.auth.begin("owner");
   assert.equal(f.ibkr.state.registrations, 1);

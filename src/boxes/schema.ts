@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { bootStageNames } from "./boot-stages.js";
 
 /** One kind of boxed work: what runs, where, and how long a box may live. */
 export const boxProfile = z
@@ -74,5 +75,17 @@ export const helloRequest = z
     credential: z.string().min(16).max(200),
     /** Provider identity proof, such as the EC2 instance identity document. */
     identity: z.unknown().optional(),
+    /** First hello only: when each boot script stage finished. Timing metadata only. */
+    bootStages: z
+      .array(
+        z
+          .object({
+            stage: z.enum(bootStageNames),
+            atMs: z.number().int().positive().max(9_999_999_999_999),
+          })
+          .strict(),
+      )
+      .max(bootStageNames.length)
+      .optional(),
   })
   .strict();

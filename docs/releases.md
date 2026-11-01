@@ -1,8 +1,47 @@
 ## An approval covers the spec, not who carries it out (31 October 2026)
 
 - **Code.** Requirement approval now hashes only the job, objective, context and plan. Earlier approvals stay valid. The new `coding_job_update` changes the models or limits of a stopped job on the owner's request. No worker image, database or Compose change.
-- **Why.** Editing a paused job's reviewer invalidated its approval. See [journal 136](journey/136-approval-covers-the-spec.md).
+- **Why.** Editing a paused job's reviewer invalidated its approval. See [journal 142](journey/142-approval-covers-the-spec.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
+
+## Parallel test files in CI (1 November 2026)
+
+- **What merged.** [PR 389](https://github.com/akhilvuputuri/chief-agent/pull/389) (`a02cbd8`): CI test shards run four test files at a time, by the owner's decision. Everywhere else stays serial. CI configuration only.
+- **Result.** `checks` took 136–138 s on the PR and 151 s on main with the gateway image.
+- **Review.** Independent review (Claude Opus 5.5) approved the merged head `e7a74c3`.
+- **Release.** `checks` on main passed (run 41227670597). The automatic release (run 41227879255) succeeded, and the host reports `a02cbd8` with a healthy gateway. A release for the superseded `d5ac1a3` (run 41227899983) was refused at "Verify current main", as designed.
+- **Open risk.** The crash from journal 123 is still unexplained. See [journal 141](journey/141-parallel-test-files.md) for what to watch for.
+
+## Docs-only checks (1 November 2026)
+
+- **What merged.** [PR 387](https://github.com/akhilvuputuri/chief-agent/pull/387) (`d728e91`): a docs-only pull request skips the jobs that build and run code. `format and types` and the required `test` gate still run, and main still runs everything. CI configuration only.
+- **Review.** Independent review (Claude Opus 5.5) requested changes once and approved the merged head `fbaee10`.
+- **Release.** `checks` on main passed (run 41226490004). The automatic release (run 41226732326) succeeded, and the host reports `d728e91` with a healthy gateway.
+- **Not changed.** TypeScript 7 is deferred, and test files stay serial until the owner decides. See [journal 140](journey/140-docs-only-checks.md).
+
+## Pi CI job split (1 November 2026)
+
+- **What merged.** [PR 386](https://github.com/akhilvuputuri/chief-agent/pull/386) (`9fdbca7`): the Pi job is now `Pi package` and `Pi worker boundary`, and a flaky token assertion is fixed. CI configuration and one test only.
+- **Review.** Independent review (Claude Opus 5.5) requested changes twice on the journal's figures and a workflow comment, and approved the merged head `bf35c81`.
+- **Release.** `checks` on main passed in 167 s (run 41225471428). The automatic release (run 41225693192) succeeded, and the host reports `9fdbca7` with a healthy gateway.
+- **Not changed.** Test files stay serial until the owner decides. See [journal 139](journey/139-ci-audit-pi-split.md).
+
+## Box launch wake-up and boot timings; faster CI (31 October 2026)
+
+- **Box startup.** [PR 376](https://github.com/akhilvuputuri/chief-agent/pull/376) (`304d691`): a requested box starts launching at once instead of waiting for the next 15 s timer tick. Boxes report six boot stages, logged as `box.boot`, and Pi checks report how long they took.
+- **Worker image.** [PR 380](https://github.com/akhilvuputuri/chief-agent/pull/380) (`557aa3f`) pins `sha256:a5bdecec…`, built from `304d691`, after the gateway released. Read-only host check: release `557aa3f`, gateway and agentwatch healthy.
+- **CI.** [PR 379](https://github.com/akhilvuputuri/chief-agent/pull/379) (`9973a81`): test shards balanced by recorded time, esbuild in test jobs, pinned ripgrep, pip cache, and one redundant Pi test run removed. Three runs on the final weights took 180–183 s, against 211–287 s across the last 13 runs on main, with all 1,422 tests accounted for.
+- **Review.** Independent review (Claude Opus 5.5) approved each merged head: `c01e5ff` (#376), `7efc111` (#380) and `ff0ca04` (#379).
+- **Not yet observed.** No coding box has launched since, so the shorter launch wait, the boot timings and Kite's install time in a job are unmeasured.
+
+## Installed `b2fece4` by operator update and release — monitors and Telegram alerts (#323)
+
+- **What merged.** [PR 374](https://github.com/akhilvuputuri/chief-agent/pull/374) merged as `b2fece4`: the gateway polls agentwatch for undelivered alerts every minute and sends them to the owner on Telegram; `compose.yaml` pins the image from agentwatch `3bfb6c3` (agentwatch#17), which adds monitors and upgrades its database to schema 9. No inbound route or shared secret.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on agentwatch#17 (non-rate monitors could flap, 17 alerts in 20 minutes; now a cooldown, 1 alert). On PR 374 it found repeat messages and a queue one unreadable alert could block, both fixed. Both approved at their exact heads, and hosted CI passed.
+- **Release.** The operator ran `deploy-agentwatch-update.py` on 31 October; the gateway was untouched. The automatic release of `b2fece4` then deployed the relay at about 09:10 UTC. Six monitors were created, all OK. A labelled test alert was accepted by Telegram and marked delivered, as was its resolved message.
+- **Pending:** the first real alert; `answer_ok`'s first real turn; replaying the limits over the history; the parcel tool failures found in the history (`parcel_list` 48 of 50).
+
+[Journal 136](journey/136-monitors-and-alerts.md#release-closure--2026-10-31).
 
 ## Installed `de00871` by operator update, and released `a8fd80c` — a judge and Jev's redirect question (#323)
 
@@ -36,7 +75,7 @@
 ## Coding reviewer moves to Claude Opus 5.5 (29 October 2026)
 
 - **Configuration.** `config/coding-pi.json` and `config/coding.json` change the default coding reviewer from `google/gemini-4-argon` to `anthropic/claude-opus-5.5` ($4/$20 per million tokens, inside the existing price ceilings). It applies to new jobs; a job keeps the models it was created with.
-- **Paused job.** At the owner's request, the paused job `a30098ba` had its pinned reviewer changed to Opus 5.5 by a guarded one-row production update (paused, unleased, previous reviewer Gemini), with Opus's 1,000,000-token context window added to its snapshot. **This broke the job:** its approval hashed the settings, so a resume on 31 October was refused with "Requirements must be confirmed before implementation". See [journal 136](journey/136-approval-covers-the-spec.md).
+- **Paused job.** At the owner's request, the paused job `a30098ba` had its pinned reviewer changed to Opus 5.5 by a guarded one-row production update (paused, unleased, previous reviewer Gemini), with Opus's 1,000,000-token context window added to its snapshot. **This broke the job:** its approval hashed the settings, so a resume on 31 October was refused with "Requirements must be confirmed before implementation". See [journal 142](journey/142-approval-covers-the-spec.md).
 - **Why.** The job finished implementation with every check passing, then paused three times at the same step of review: Google cut the Gemini reply off mid-generation (a 502, then empty replies, with no finish reason). See the [coding-agent lessons](journey/coding-agent-lessons.md).
 
 ## Installed `6e90db7` by operator rollout — agentwatch on the host, traces with content (#323)

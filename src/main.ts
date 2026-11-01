@@ -94,6 +94,7 @@ import { stopGateway } from "./gateway-stop.js";
 import { Learner } from "./learning.js";
 import { MemoryStore } from "./memory.js";
 import { captureRequested } from "./otel-content.js";
+import { AlertRelay, alertsBase } from "./trace-alerts.js";
 import {
   logsEndpoint,
   startTracing,
@@ -491,6 +492,14 @@ if (c.BOXES_RUNTIME === "on") {
     (user) => c.TELEGRAM_ALLOWED_USER_IDS.split(",").includes(user),
   );
   await boxes.recoverNotices();
+  // Otherwise a new box waits for the next timer tick, which jobs created on the same 15 s
+  // cadence hit almost a full period late.
+  boxes.onRequested = () =>
+    void boxes
+      ?.wake()
+      .catch((error) =>
+        opsLog("boxes.tick_failed", "error", errorFields(error)),
+      );
 }
 let coding: CodingController | undefined;
 const codingQuietHours = parseQuietHours(c.CODING_QUIET_HOURS);
@@ -1414,6 +1423,19 @@ const gatheringTimer = gathering?.browsers
     }, 10000)
   : undefined;
 gatheringTimer?.unref();
+let alertTimer: NodeJS.Timeout | undefined;
+// Alerts from agentwatch's monitors (docs/tracing.md#monitors-and-alerts), only with export on.
+if (tracesUrl) {
+  const relay = new AlertRelay(
+    alertsBase(tracesUrl),
+    c.TELEGRAM_ALLOWED_USER_IDS.split(","),
+    async (owner, text) => {
+      await bot.api.sendMessage(owner, text);
+    },
+  );
+  alertTimer = setInterval(() => void relay.poll(), 60_000);
+  alertTimer.unref();
+}
 const scheduleTimer = setInterval(() => {
   void worker
     .tick()
@@ -1435,6 +1457,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
     opsLog("gateway.stopping", "info");
     void (async () => {
       clearInterval(scheduleTimer);
+      if (alertTimer) clearInterval(alertTimer);
       clearInterval(gatheringTimer);
       clearInterval(workTimer);
       clearInterval(learnerTimer);

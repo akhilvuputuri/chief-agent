@@ -1,0 +1,16 @@
+name: Set up ripgrep
+description: Installs a pinned, checksum-verified ripgrep, which apt took 7-27 s per job to do.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        version=14.1.1
+        sha256=4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e
+        name="ripgrep-$version-x86_64-unknown-linux-musl"
+        curl -fsSL --retry 3 -o "$RUNNER_TEMP/rg.tgz" "https://github.com/BurntSushi/ripgrep/releases/download/$version/$name.tar.gz"
+        echo "$sha256  $RUNNER_TEMP/rg.tgz" | sha256sum -c -
+        tar -xzf "$RUNNER_TEMP/rg.tgz" -C "$RUNNER_TEMP" "$name/rg"
+        sudo install -m 755 "$RUNNER_TEMP/$name/rg" /usr/local/bin/rg
+        rg --version | head -1

@@ -1,3 +1,24 @@
+# The learner saves more — proposed, 1 November 2026
+
+The owner wants memory to accumulate and will prune it later. Prompt `learner-v3` errs toward saving, a reworded fact is flagged rather than refused (it still needs the owner's quoted words, with no added number or negation), learned items get 12,000 characters of the prompt, and items reviewed under earlier prompts are mined again once. Pruning goes through a coding session for now. Branch `feat/learner-save-more`. See [learning](learning.md#host-checks) and [journal 130](journey/130-nightly-learner.md#saving-more--2026-11-01).
+
+# A private record of what the learner decides — proposed, 31 October 2026
+
+Two nights of learning from turns reviewed 55 turns, saved nothing and refused one proposal a night, and those proposals could not be read: the learner kept only counts. Each run now records its input, model calls, every proposal with the host's verdict, and the final outcome of each item, privately in `events`. Behaviour is unchanged and writes stay on. Branch `feat/learner-trace`. See [learning](learning.md#telemetry-and-the-private-record) and [journal 130](journey/130-nightly-learner.md#no-record-of-what-the-learner-decided--2026-10-31).
+
+# Faster box startup and CI — live since `9973a81`, 31 October 2026
+
+Boxes start launching as soon as they are requested, and report how long each boot stage takes. CI test shards are balanced by recorded time; three runs on the final weights took 180–183 s, against 211–287 s across the last 13 runs on main.
+
+- **Next:** after the next coding job, read `kite run logs:cloudwatch -- boot --since 24h`. Those timings decide whether a baked machine image is worth building.
+- **CI:** test files run four at a time, by the owner's decision. Record any SIGSEGV in a test job in [journal 141](journey/141-parallel-test-files.md) rather than only rerunning it.
+
+See [journal 137](journey/137-box-startup-time.md) and [journal 138](journey/138-faster-ci-checks.md).
+
+# Monitors and Telegram alerts — live in `b2fece4`, 31 October 2026
+
+Issue #323. agentwatch watches six metrics (daily cost, model errors, tool errors, slow model calls, redirected answers, judged answers) with limits set from two months of history. A rate fires only when its 95% Wilson bound clears the limit, and a firing monitor resolves only after an hour of staying good. The gateway delivers alerts to the owner on Telegram. Pending: the first real alert, replaying the limits over the history, and the parcel tool failures the history showed (`parcel_list` failed 48 of 50 calls). See [tracing](tracing.md#monitors-and-alerts) and [journal 136](journey/136-monitors-and-alerts.md).
+
 # A judge and Jev's redirect question — live, 31 October 2026
 
 Issue #323. Each conversation turn is now judged by `answer_ok` in agentwatch (`openai/gpt-6.1-sol`, at most 20 calls a day, about $0.002 each on a short turn). Each follow-up message is also checked by Jev for pushback on the last reply, for about $0.00003, in the effort decision's request. agentwatch's key can reach only OpenRouter, by a server policy its API cannot change. Pending: whether either agrees with the owner, and tuning Jev's 0.5 threshold from recorded probabilities. See [journal 135](journey/135-jev-redirect-and-judge.md).

@@ -19,6 +19,11 @@ test("the worker's internal progress labels are shown to the owner in plain word
     ["Pi check: kite ci: 0", "Check passed: kite ci"],
     ["Pi check: kite run check: 1", "Check failed: kite run check (exit 1)"],
     ["Pi check: kite run build", "Check: kite run build"],
+    ["Pi check: kite ci: 0 in 1.4s", "Check passed: kite ci in 1.4 s"],
+    [
+      "Pi check: kite run check: 1 in 62.0s",
+      "Check failed: kite run check (exit 1) in 62.0 s",
+    ],
     [
       "Pi plan: Requesting one structured final report",
       "Planning: Requesting one structured final report",

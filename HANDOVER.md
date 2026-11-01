@@ -6,6 +6,9 @@
 - **Phase 2, the nightly learner ([journal 130](docs/journey/130-nightly-learner.md)):** live in `d7df9aa` since 16:04 UTC on 28 October. Forwarded Telegram messages are now marked as someone else's words and never parsed as commands or approvals.
 - **First night (29 October):** 7 tasks reviewed, all skipped (six routines, one cancelled), no model call. Most owner requests never become a tracked task.
 - **Live:** learning from ordinary conversation turns (owner's choice), merged as `260c94c`, live since `b6e1071` (now `845595e`), prompt `learner-v2`.
+- **Results so far:** on 30 and 31 October the learner reviewed 55 turns, saved nothing and refused one proposal a night, at about $0.07 a night. Why is unknown, because proposals were not recorded.
+- **Proposed:** a private per-run record of input, model calls, proposals and outcomes (branch `feat/learner-trace`, [journal 130](docs/journey/130-nightly-learner.md#no-record-of-what-the-learner-decided--2026-10-31)). Writes stay on.
+- **Proposed (owner, 1 November):** save more and prune later: prompt `learner-v3`, branch `feat/learner-save-more`. Pruning goes through a coding session for now; a Telegram tool waits until the core works.
 - **Next:** after it ships, check the next night's counts, charges and learned items; then phase 3 (weekly digest with undo, learner-drafted skills). No reaction signals: the owner does not want to label anything (29 October).
 
 # Dependency hardening (#329, closed) — live in `211b2a2`, `9ab96c2`, `c4ba246` and `da2a5ff`, 27 October 2026
@@ -30,7 +33,7 @@
 `checks` takes about 3½ to 5 minutes instead of about 26, and merge to production about 11 minutes instead of about 32. Tests, CI and docs only. [Journal 123](docs/journey/123-faster-checks.md), [release record](docs/releases.md).
 
 - Tests create databases with `migratedPGlite()` and close hooked ones with `closeAfter(t, pg)` from `tests/helpers/pglite.ts`; see [the development guide](docs/portable-development.md#test-databases-and-parallel-tests).
-- Test files run one at a time within each runner; CI runs six shards. Four files at a time lost a test process to SIGSEGV once, cause not established.
+- CI runs six shards at four test files at a time; everywhere else runs serially by default. Four at a time lost a test process to SIGSEGV once, cause not established ([journal 141](docs/journey/141-parallel-test-files.md)).
 - Next: type-check test files, TypeScript 7, a cross-process snapshot cache, duration-balanced shards, measuring a coding box's check time.
 
 # Review fixes 114–119 — live as v0.3.103, 23 October 2026

@@ -11,11 +11,14 @@ const phases: Record<string, string> = {
 };
 
 export function ownerProgress(summary: string): string {
-  const check = /^Pi check: (.+): (-?\d+)$/s.exec(summary);
-  if (check)
+  // Workers on older images report no duration.
+  const check = /^Pi check: (.+): (-?\d+)(?: in ([\d.]+)s)?$/s.exec(summary);
+  if (check) {
+    const took = check[3] ? ` in ${check[3]} s` : "";
     return check[2] === "0"
-      ? `Check passed: ${check[1]}`
-      : `Check failed: ${check[1]} (exit ${check[2]})`;
+      ? `Check passed: ${check[1]}${took}`
+      : `Check failed: ${check[1]} (exit ${check[2]})${took}`;
+  }
   const command = /^Pi check: (.+)$/s.exec(summary);
   if (command) return `Check: ${command[1]}`;
   const state = /^Pi (plan|build|review|learn): (.+)$/s.exec(summary);

@@ -94,6 +94,23 @@ test("event and run queries show delivery, routing and approval fields", () => {
   }
 });
 
+test("the boot query shows every stage box.boot logs", () => {
+  const q = QUERIES.boot.query();
+  assert.match(q, /filter event = "box\.boot"/);
+  for (const field of [
+    "boxProfile",
+    "imageSuffix",
+    "scriptStartedMs",
+    "dockerInstalledMs",
+    "dockerStartedMs",
+    "imagePulledMs",
+    "agentCopiedMs",
+    "agentStartingMs",
+    "helloMs",
+  ])
+    assert.ok(q.includes(field), field);
+});
+
 test("no saved query lists a display field twice", () => {
   for (const [name, spec] of Object.entries(QUERIES)) {
     const q = spec.query("run-1", "tool.finished");

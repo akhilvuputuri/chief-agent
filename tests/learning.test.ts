@@ -7,6 +7,7 @@ import {
   Learner,
   LEARNING_LIMITS,
   ownerWords,
+  quoteRefusal,
   quoteSupports,
   untrustedSources,
 } from "../src/learning.js";
@@ -682,8 +683,7 @@ test("a fact must be stated by the quote, never by attached text, and the owner'
           refused: "The quote must be the owner's exact words in a cited task",
         },
         {
-          refused:
-            "Every content word and number of the value must come from the quote",
+          refused: "Every number in the value must come from the quote",
         },
         { refused: "The owner saved this key themselves; leave it" },
         { accepted: true },
@@ -1048,4 +1048,298 @@ test("a turn that only finished is trivial, and a delegated agent's reads tag th
     ).rows[0].label,
     "skipped",
   );
+});
+
+test("every run records what it read, what the model said and each proposal's verdict and outcome, privately", async (t) => {
+  const { projectEventRecord } = await import("../src/ops-log.js");
+  const db = await setup(t);
+  const id = await task(db, {
+    ownerSays: ["I prefer window seats always, token sk-abcdefghijklmnopqrstu"],
+  });
+  const { adapter } = model(() => [
+    [
+      "learn_fact",
+      {
+        key: "seat_preference",
+        value: "Prefers window seats",
+        quote: "I prefer window seats",
+        taskIds: [id],
+        reason: "Stated",
+      },
+    ],
+    [
+      "learn_fact",
+      {
+        key: "home_city",
+        value: "Lives in Penang",
+        quote: "I live in Penang",
+        taskIds: [id],
+        reason: "Invented",
+      },
+    ],
+    ["learn_fact", { key: "broken" }],
+    ["learn_retire", { key: "style", reason: "stale", taskIds: [id] }],
+    ["learn_finish", {}],
+  ]);
+  const result: any = await learner(db, adapter).tick("owner");
+  const rows = (
+    await db.query(
+      "SELECT type,data FROM events WHERE type LIKE 'learner.%' ORDER BY id",
+    )
+  ).rows;
+  const of = (type: string) =>
+    rows.filter((r) => r.type === type).map((r) => r.data);
+  const [input] = of("learner.input");
+  assert.equal(input.learnerRun, result.learnerRun);
+  assert.equal(input.items[0].id, id);
+  assert.match(JSON.stringify(input.items), /I prefer window seats/);
+  // Credentials are scrubbed from the record like other traces.
+  assert.doesNotMatch(JSON.stringify(rows), /sk-abcdefghijklmnopqrstu/);
+  assert.deepEqual(of("learner.model_call")[0].toolCalls, [
+    "learn_fact",
+    "learn_fact",
+    "learn_fact",
+    "learn_retire",
+    "learn_finish",
+  ]);
+  assert.deepEqual(
+    of("learner.proposal").map((p) => p.verdict),
+    [
+      { accepted: true },
+      { refused: "The quote must be the owner's exact words in a cited task" },
+      { refused: "Invalid arguments" },
+      { accepted: true },
+      { ok: true },
+    ],
+  );
+  // A malformed proposal is kept as the model sent it.
+  assert.match(of("learner.proposal")[2].arguments, /broken/);
+  assert.deepEqual(
+    of("learner.applied").map((a) => [a.key, a.action]),
+    [
+      ["seat_preference", "written"],
+      ["style", "skipped_not_learned"],
+    ],
+  );
+  assert.ok(of("learner.applied")[0].revisionId);
+  // None of this reaches the shipped ops log.
+  for (const type of [
+    "learner.input",
+    "learner.model_call",
+    "learner.proposal",
+    "learner.applied",
+  ])
+    assert.equal(projectEventRecord(type, randomUUID(), { a: 1 }), null, type);
+});
+
+test("a pre-empted run keeps its record even though it applies nothing", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, { ownerSays: ["I prefer window seats always"] });
+  const { adapter } = model(async () => {
+    await db.query(
+      "INSERT INTO conversation_inputs(id,user_id,message) VALUES($1,'owner','hi')",
+      [randomUUID()],
+    );
+    return [
+      [
+        "learn_fact",
+        {
+          key: "seat_preference",
+          value: "Prefers window seats",
+          quote: "I prefer window seats",
+          taskIds: [id],
+          reason: "Stated",
+        },
+      ],
+    ];
+  });
+  assert.equal((await learner(db, adapter).tick("owner"))?.state, "deferred");
+  const types = (
+    await db.query(
+      "SELECT type FROM events WHERE type LIKE 'learner.%' ORDER BY id",
+    )
+  ).rows.map((r) => r.type);
+  assert.ok(types.includes("learner.input"));
+  assert.ok(types.includes("learner.proposal"));
+  assert.ok(!types.includes("learner.applied"));
+});
+
+test("an emoji at a clip boundary or a NUL from the model cannot fail a run or lose its record", async (t) => {
+  const db = await setup(t);
+  const id = await turn(db, {
+    says: "Plan my weekend around the farmers market please",
+    reply:
+      "x".repeat(LEARNING_LIMITS.replyChars - 2) + "😀 and more text after it",
+    at: new Date(NIGHT.getTime() - 40 * 3600_000),
+  });
+  const adapter: ModelAdapter = {
+    generate: async () => ({
+      message: {
+        role: "assistant",
+        content: "thinking\u0000 aloud \ud83d",
+        tool_calls: [
+          {
+            id: randomUUID(),
+            type: "function" as const,
+            function: { name: "learn_finish", arguments: "{}" },
+          },
+        ],
+      },
+    }),
+  };
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.equal(result.state, "completed");
+  const rows = (
+    await db.query(
+      "SELECT type,data FROM events WHERE type IN ('learner.input','learner.model_call') ORDER BY id",
+    )
+  ).rows;
+  assert.deepEqual(
+    rows.map((r) => r.type),
+    ["learner.input", "learner.model_call"],
+  );
+  assert.equal(rows[0].data.items[0].id, id);
+  assert.equal(rows[1].data.content, "thinking aloud \ufffd");
+});
+
+test("a failed record never affects learning: the item is written and the run completes", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, { ownerSays: ["I prefer window seats always"] });
+  const failing: Database = {
+    query: (text, values) =>
+      text.startsWith("INSERT INTO events") &&
+      /^learner\.(input|model_call|proposal|applied)$/.test(String(values?.[2]))
+        ? Promise.reject(new Error("insert refused"))
+        : db.query(text, values),
+    transaction: (db as any).transaction?.bind(db),
+  } as Database;
+  const { adapter } = model(() => [
+    [
+      "learn_fact",
+      {
+        key: "seat_preference",
+        value: "Prefers window seats",
+        quote: "I prefer window seats",
+        taskIds: [id],
+        reason: "Stated",
+      },
+    ],
+    ["learn_finish", {}],
+  ]);
+  const result: any = await learner(failing, adapter).tick("owner");
+  assert.deepEqual([result.state, result.facts], ["completed", 1]);
+  assert.equal(
+    (await new MemoryStore(db).active("owner"))[0]?.value,
+    "Prefers window seats",
+  );
+  assert.equal(
+    (await db.query("SELECT count(*)::int n FROM learning_reviews")).rows[0].n,
+    1,
+  );
+});
+
+test("a reworded fact is accepted and flagged, but it cannot add a number or negation or sit on an unrelated quote", async (t) => {
+  assert.equal(
+    quoteRefusal("I prefer aisle seats", "Prefers aisle seats"),
+    undefined,
+  );
+  // Half its content from the quote: accepted, and quoteSupports says it is reworded.
+  assert.equal(
+    quoteRefusal(
+      "I usually sit by the aisle on planes",
+      "Likes aisle seats on flights",
+    ),
+    "At least half of the value's words must come from the quote",
+  );
+  assert.equal(
+    quoteRefusal("I sit by the aisle", "Sits on aisle seats"),
+    undefined,
+  );
+  assert.ok(!quoteSupports("I sit by the aisle", "Sits on aisle seats"));
+  assert.match(
+    quoteRefusal("Book my flight", "Pays invoices to account 999-000")!,
+    /number/,
+  );
+  assert.match(
+    quoteRefusal("My flat is unit 12", "Lives in unit 13")!,
+    /number/,
+  );
+  assert.match(
+    quoteRefusal("I want aisle seats", "Does not want aisle seats")!,
+    /negation/,
+  );
+  assert.match(quoteRefusal("I don't eat beef", "Eats beef")!, /negation/);
+  assert.match(
+    quoteRefusal(
+      "Please send the report to my boss",
+      "Sends OTP and PIN to Tan",
+    )!,
+    /half/,
+  );
+  assert.match(
+    quoteRefusal("I usually prefer that", "Usually prefers that")!,
+    /framing/,
+  );
+  const db = await setup(t);
+  const id = await task(db, {
+    ownerSays: ["I sit by the aisle whenever I can"],
+  });
+  const { adapter } = model(() => [
+    [
+      "learn_fact",
+      {
+        key: "seating",
+        value: "Sits on aisle seats",
+        quote: "I sit by the aisle",
+        taskIds: [id],
+        reason: "Stated",
+      },
+    ],
+    ["learn_finish", {}],
+  ]);
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual([result.facts, result.flagged], [1, 1]);
+  const [saved] = await new MemoryStore(db).history("owner", "seating");
+  assert.deepEqual(saved!.flags, ["paraphrased"]);
+  // Normal under "save, prune later": it does not turn every owner turn into a warning.
+  assert.equal((await new MemoryStore(db).select("owner")).flagged, 0);
+});
+
+test("items reviewed under a superseded prompt are mined again, once", async (t) => {
+  const db = await setup(t);
+  const id = await turn(db, {
+    says: "Plan my Saturday around the farmers market",
+    reply: "Here is a plan.",
+    at: new Date(NIGHT.getTime() - 40 * 3600_000),
+  });
+  const old = randomUUID();
+  await db.query(
+    "INSERT INTO learner_runs(id,user_id,state,prompt_version,started_at) VALUES($1,'owner','completed','learner-v2',$2)",
+    [old, new Date(NIGHT.getTime() - 2 * DAY)],
+  );
+  await db.query(
+    "INSERT INTO learning_reviews(user_id,task_id,learner_run,label,reasons) VALUES('owner',$1,$2,'success','{turn}')",
+    [id, old],
+  );
+  const first = model(() => [["learn_finish", {}]]);
+  await learner(db, first.adapter).tick("owner");
+  assert.deepEqual(
+    JSON.parse(first.inputs[0].messages[1].content).tasks.map((x: any) => x.id),
+    [id],
+  );
+  const review = (
+    await db.query(
+      "SELECT learner_run FROM learning_reviews WHERE task_id=$1",
+      [id],
+    )
+  ).rows;
+  assert.equal(review.length, 1);
+  assert.notEqual(review[0].learner_run, old);
+  const next = model(() => {
+    throw new Error("nothing left to review");
+  });
+  await learner(db, next.adapter, new Date(NIGHT.getTime() + DAY)).tick(
+    "owner",
+  );
+  assert.equal(next.inputs.length, 0);
 });

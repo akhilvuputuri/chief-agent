@@ -12,6 +12,7 @@ import {
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
+import type { BootStageName } from "./boot-stages.js";
 
 /**
  * The in-box supervisor (docs/boxes.md). It holds the box credential, dials out to the
@@ -437,6 +438,8 @@ export interface AgentOptions {
   shutdown: (reason: string) => Promise<void> | void;
   /** Provider identity proof, such as the EC2 instance identity document. */
   identity?: () => Promise<unknown>;
+  /** When the boot script's stages finished; sent once, with the first hello. */
+  bootStages?: () => { stage: BootStageName; atMs: number }[];
   fetch?: typeof fetch;
   /** Back-off between failed requests. */
   retryMs?: number;
@@ -551,6 +554,10 @@ export class BoxAgent {
             protocol: 1,
             credential: presented,
             ...(this.o.identity ? { identity: await this.o.identity() } : {}),
+            // Only the bootstrap hello: a restarted agent has nothing new to report.
+            ...(this.o.bootStages && presented === this.o.bootstrap
+              ? { bootStages: this.o.bootStages() }
+              : {}),
           }),
           signal: AbortSignal.timeout(30000),
         });
