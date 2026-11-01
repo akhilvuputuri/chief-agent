@@ -9,7 +9,7 @@
 - **Results so far:** on 30 and 31 October the learner reviewed 55 turns, saved nothing and refused one proposal a night, at about $0.07 a night. Why is unknown, because proposals were not recorded.
 - **Live:** a private per-run record of input, model calls, proposals and outcomes (`ea9943c`, [journal 130](docs/journey/130-nightly-learner.md#no-record-of-what-the-learner-decided--2026-10-31)).
 - **Live (owner, 1 November):** save more and prune later: prompt `learner-v3` (`c54ddcb`). Pruning goes through a coding session for now; a Telegram tool waits until the core works.
-- **Step 2, recall (1 November):** `memory_recall` with pgvector ([recall](docs/recall.md)). Needs `scripts/deploy-pgvector.py`, which restarts Postgres; run it only with the owner's go-ahead, then run the evaluation.
+- **Step 2, recall (1 November):** `memory_recall` with pgvector ([recall](docs/recall.md)), live in `48d22d1`. First evaluation done and a fusion fix follows. Next: see whether Chief actually calls it.
 - **First night of saving more (1 November):** 1 fact and 5 lessons saved, 5 facts refused, $0.17. Two wrong lessons retired and three facts added in production. Fixes live in `58a921a`. Next feature: RAG with pgvector over conversations and learned memories (owner's choice: Postgres, not a separate store).
 - **Next:** after it ships, check the next night's counts, charges and learned items; then phase 3 (weekly digest with undo, learner-drafted skills). No reaction signals: the owner does not want to label anything (29 October).
 

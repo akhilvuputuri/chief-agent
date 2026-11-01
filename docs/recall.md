@@ -1,6 +1,6 @@
 # Recall over conversations and memories
 
-Status (1 November 2026): built and tested on synthetic data, not deployed. It needs the operator rollout below. Whether it stays depends on the evaluation below. Step 2 of [issue 326](https://github.com/akhilvuputuri/chief-agent/issues/326); see [journal 143](journey/143-recall-with-pgvector.md).
+Status (1 November 2026): live in `48d22d1`, indexed in two passes (571 messages, 14 memories, 1.9 MB, nothing skipped). The first evaluation below favours keeping it; it found one fusion fault, which is being fixed. Chief's real use is not measured yet. Step 2 of [issue 326](https://github.com/akhilvuputuri/chief-agent/issues/326); see [journal 143](journey/143-recall-with-pgvector.md).
 
 ## What it does
 
@@ -12,7 +12,7 @@ Chief decides when to call it. Nothing is added to the prompt automatically, so 
 
 - **Store.** `embeddings` in the same Postgres ([migration 034](../db/034_embeddings.sql)), with pgvector. Vectors are 512 dimensions from `text-embedding-3-small` through OpenRouter, the model mail recall already uses.
 - **Indexing.** Every 60 seconds, a background pass embeds up to five batches of 64 inputs for each allowed owner: active memories, then messages newest first, so today's messages are searchable before the backlog is done. It uses the same filter as `conversation_search`, so tool output, internal worker messages and blank messages stay out. A message is split into chunks of 1,500 characters with 200 of overlap, six at most, so only about the first 8,000 characters of a very long message are indexed by meaning. Keyword search still covers all of it.
-- **Search.** Exact cosine distance gives up to 30 candidates. Postgres full-text search gives up to 30 from messages and 30 from memories, and any word may match. Reciprocal rank fusion (k = 60) combines the lists, as in [mail recall](mail-recall.md).
+- **Search.** Exact cosine distance gives up to 30 candidates. Postgres full-text search gives up to 30 from messages and 30 from memories, and all the words must match. If there is no embedding to fuse with, any word may match. Reciprocal rank fusion (k = 60) combines the lists, as in [mail recall](mail-recall.md).
 - **Source of truth.** Vectors are only an index. Every result is read again from its source row. A retired or replaced memory and an excluded message cannot come back, even while its old vector exists.
 - **Failure.** If embedding fails or takes over 10 seconds, search still answers by keyword and says `keyword_only`. If an indexing batch fails, each source is tried alone. A source the provider refuses while a probe succeeds is skipped and logged as `recall.source_skipped`, and retried after a restart. If the probe also fails, it is an outage: the pass ends and the next one retries.
 - **Cost.** Indexing is not in `provider_charges`, like the mail index build, because it runs outside any turn's ledger. A query's embedding is charged to its turn.
@@ -54,4 +54,17 @@ FROM events WHERE type = 'recall.searched' GROUP BY 1;
 
 ## Evaluation
 
-Not run yet, and it decides whether this stays. After the backfill, take real-style questions whose answers are in past conversations. Compare what today's `conversation_search` finds against `memory_recall`. If meaning search adds little over keywords, remove the tool, the table and the image. Also watch how often Chief actually calls it, because a tool it never calls helps nothing.
+Measured on 1 November 2026 against production's index, read-only, with `text-embedding-3-small`. Each question targets one real message, and a hit means it appears in the top 8. The questions and targets stay private.
+
+| Question set                       | `conversation_search` | Keywords, any word | Meaning only | As released | All words must match |
+| ---------------------------------- | --------------------- | ------------------ | ------------ | ----------- | -------------------- |
+| Reworded (27)                      | 0                     | 5                  | 21           | 14          | 21                   |
+| Reworded, second sample (16)       | 0                     | 4                  | 13           | 9           | 13                   |
+| Using the message's own words (18) | 15                    | 15                 | 17           | 17          | 18                   |
+
+- **What it suggests.** Meaning search finds what today's search misses when the wording differs, and costs nothing when it matches.
+- **The fault.** As released, any-word keywords lowered results. A message appearing in both lists, even low in each, scored above the top meaning match alone. Requiring all words fixes it.
+- **Limits.** The operator wrote these questions after reading the target messages, so they are not the owner's own. The reworded sets deliberately avoid the message's words, so they favour meaning search and overstate the gap. The variants were compared on all three sets in one run, so "second sample" is a separate sample and not a blind test of the fix. It is 61 questions with one acceptable target each.
+- **Not measured.** Whether Chief calls the tool when it should, and whether answers improve. Check how often `recall.searched` appears over the coming weeks. If Chief rarely calls it, fix that or remove the tool.
+
+Median search time as released was about 1.4 seconds, mostly the embedding call (27 questions, slowest 2.5 seconds). Search covered 585 sources, with exact search.
