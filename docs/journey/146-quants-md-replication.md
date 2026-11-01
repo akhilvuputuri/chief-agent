@@ -1,4 +1,4 @@
-# 145 — Do three quants.md strategies reproduce, and do they beat simple benchmarks?
+# 146 — Do three quants.md strategies reproduce, and do they beat simple benchmarks?
 
 Work date: 2026-11-01. Written: 2026-11-01.
 Status: tested locally; nothing deployed. All three published results reproduced to every published figure from public prices. None showed a significant edge over its benchmarks. All three had much shallower drawdowns than SPY, and over these windows they earned less per year.
