@@ -1050,7 +1050,7 @@ export class Learner {
         messages.push({
           role: "user",
           content:
-            "The host refused some proposals; the tool results give each reason. Propose corrected versions that keep to the owner's words where that is possible, then call learn_finish again.",
+            "The host refused some proposals; the tool results give each reason. Accepted items are kept, so send only corrected versions of the refused ones, keeping to the owner's words where that is possible, then call learn_finish again.",
         });
       }
       if (finished) break;

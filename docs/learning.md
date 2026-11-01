@@ -144,6 +144,7 @@ Each run also keeps a private record in the Postgres `events` table, under the r
 - `learner.input`: the items and current memories the model was shown, and the prompt version.
 - `learner.model_call`: each call's model, finish reason, text and the tools it called.
 - `learner.proposal`: each tool call as the model sent it, with the host's verdict and refusal reason.
+- `learner.retry`: a response that finished with refusals, and how many, when it earned another turn.
 - `learner.applied`: what finally happened to each accepted item (`written` with its revision ID, `unchanged`, `skipped_owner_fact`, `skipped_not_learned`, `failed`).
 
 A pre-empted run keeps its record, so a deferred attempt can be read too. The record is best effort: the memory tables are the ledger, so a failed insert logs `learner.trace_failed` and learning carries on. A model call that throws leaves no `learner.model_call`, only the failed run and its error class. Runs before this record existed left counts only. To read the latest run's proposals on the host:
@@ -151,6 +152,6 @@ A pre-empted run keeps its record, so a deferred attempt can be read too. The re
 ```sql
 SELECT e.type, e.data FROM events e JOIN learner_runs l ON l.run_id = e.run_id
 WHERE l.id = (SELECT id FROM learner_runs WHERE run_id IS NOT NULL ORDER BY started_at DESC LIMIT 1)
-  AND e.type IN ('learner.model_call', 'learner.proposal', 'learner.applied')
+  AND e.type IN ('learner.model_call', 'learner.proposal', 'learner.retry', 'learner.applied')
 ORDER BY e.id;
 ```
