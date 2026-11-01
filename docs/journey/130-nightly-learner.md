@@ -111,11 +111,13 @@ The owner asked the learner to save more, after only 14 memories had built up. P
 - **Facts were refused.** The one `learner-v3` run proposed 6 facts and lost 5 to host checks: 3 on negation, 1 on a number and 1 on word overlap. `58a921a` relaxed the negation check and added a retry after that run, but those items were already marked reviewed under the same prompt version, so they would not have been looked at again.
 - **One pass over everything.** That run reviewed 40 items in one model call and proposed 11 things.
 
-**Change, prompt `learner-v4`.** Work up to 90 days old is reviewed, oldest first. Each run takes up to 40 tasks and 100 turns, in batches of 10, with each batch kept as it finishes. Items reviewed under `learner-v3` are mined again. Items carry their date, and current memory wins over an older item that disagrees, so the backlog cannot overwrite something newer. Tested in `tests/learning.test.ts`. No migration.
+**Change, prompt `learner-v4`.** Work up to 90 days old is reviewed, oldest first. Each run takes up to 40 tasks and 100 turns, in batches of 10, with each batch kept as it finishes. Items reviewed under `learner-v3` are mined again. Tested in `tests/learning.test.ts`. No migration.
+
+**Review found the wider window had three costs (`7c242bc`), now handled.** Forwarded text was stored as the owner's own until 28 October, so items before 29 October are tagged `possible_forward` and what they produce is `untrusted`. Re-mining could bring back the two lessons retired on 1 November, so removed keys are refused and shown to the model. Old work could overwrite newer learned items, so the host refuses a change from work older than the work behind the key's value. A failed batch no longer ends the run, and each model call times out after five minutes.
 
 **Measured.** The counts above, and $0.17 for the 40-item run.
 
-**Hypotheses, not measured.** Smaller batches may find more per item. By proportion, 140 items would cost about $0.60 a night, and the backlog should clear in about two nights. Old lessons may describe failures fixed since, which the owner would prune. More learned items than the prompt budget holds stay reachable through `memory_recall`, but are not in every turn's context.
+**Hypotheses, not measured.** Smaller batches may find more per item. By proportion, 140 items would cost about $0.60 a night, and the backlog should clear in about two nights. Old lessons may describe failures fixed since, which the owner would prune. More learned items than the prompt budget holds stay reachable through `memory_recall`, but are not in every turn's context. A removed lesson could still return reworded under a new key.
 
 ## Follow-up and next iteration
 

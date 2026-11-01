@@ -338,6 +338,28 @@ export class MemoryStore {
     ).rows;
   }
 
+  /**
+   * Keys the owner or a rollback took out, with the wording last removed: retired heads and
+   * undone revisions. The learner must not bring these back.
+   */
+  async removed(user: string): Promise<Array<{ key: string; value: string }>> {
+    const { rows } = await this.db.query(
+      `SELECT DISTINCT ON (key) key,value FROM (
+         SELECT r.key,(SELECT p.value FROM memory_revisions p
+           WHERE p.user_id=r.user_id AND p.key=r.key AND p.value IS NOT NULL
+           ORDER BY p.revision DESC LIMIT 1) AS value
+         FROM memory_heads h JOIN memory_revisions r ON r.id=h.revision_id AND r.user_id=h.user_id
+         WHERE h.user_id=$1 AND r.status='retired'
+         UNION ALL
+         SELECT r.key,r.value FROM memory_undone u
+         JOIN memory_revisions r ON r.id=u.revision_id AND r.user_id=u.user_id
+         WHERE u.user_id=$1 AND r.status='active'
+       ) x WHERE value IS NOT NULL ORDER BY key`,
+      [user],
+    );
+    return rows as Array<{ key: string; value: string }>;
+  }
+
   async history(user: string, key: string): Promise<MemoryRevision[]> {
     return (
       await this.db.query(

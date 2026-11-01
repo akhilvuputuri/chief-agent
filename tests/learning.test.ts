@@ -17,8 +17,8 @@ import type { Generation, ModelAdapter } from "../src/model.js";
 import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
 
 const DAY = 24 * 3600_000;
-// 04:00 Singapore on 28 October 2026.
-const NIGHT = new Date("2026-10-27T20:00:00Z");
+// 04:00 Singapore on 28 November 2026.
+const NIGHT = new Date("2026-11-27T20:00:00Z");
 
 async function setup(t: { after(fn: () => Promise<void>): void }) {
   const pg = await migratedPGlite();
@@ -272,20 +272,20 @@ test("a night's run starts from 03:30 Singapore, once, and not outside its windo
   const { adapter, inputs } = model(() => [["learn_finish", { summary: "" }]]);
   await task(db, { ownerSays: ["Find me a flight"] });
   const at = (iso: string) => learner(db, adapter, new Date(iso));
-  assert.equal(await at("2026-10-27T19:20:00Z").tick("owner"), null); // 03:20 SGT
+  assert.equal(await at("2026-11-27T19:20:00Z").tick("owner"), null); // 03:20 SGT
   // 03:20 belongs to the previous night, whose window has passed.
-  assert.equal(await at("2026-10-27T19:31:00Z").tick("nobody"), null);
+  assert.equal(await at("2026-11-27T19:31:00Z").tick("nobody"), null);
   assert.equal(
-    (await at("2026-10-27T19:31:00Z").tick("owner"))?.state,
+    (await at("2026-11-27T19:31:00Z").tick("owner"))?.state,
     "completed",
   );
   assert.equal(inputs.length, 1);
-  assert.equal(await at("2026-10-27T21:00:00Z").tick("owner"), null);
+  assert.equal(await at("2026-11-27T21:00:00Z").tick("owner"), null);
   // 10:00 SGT the next day is outside that night's window.
-  assert.equal(await at("2026-10-29T02:00:00Z").tick("owner"), null);
+  assert.equal(await at("2026-11-29T02:00:00Z").tick("owner"), null);
   assert.equal(
-    Learner.nightStart(new Date("2026-10-27T19:20:00Z")).toISOString(),
-    "2026-10-26T19:30:00.000Z",
+    Learner.nightStart(new Date("2026-11-27T19:20:00Z")).toISOString(),
+    "2026-11-26T19:30:00.000Z",
   );
 });
 
@@ -1443,46 +1443,169 @@ test("the learner reviews items in batches, each saw its date and earlier batche
     [LEARNING_LIMITS.batch, 3],
   );
   const shown = JSON.parse(inputs[0].messages[1].content);
-  assert.equal(shown.tasks[0].date, "2026-10-25");
+  assert.equal(shown.tasks[0].date, "2026-11-25");
   const later = JSON.parse(inputs[1].messages[1].content);
   assert.ok(later.current.some((c: any) => c.key === "seat_preference"));
 });
 
-test("a failed batch keeps the batches before it, and the next night carries on", async (t) => {
+test("a failed batch does not hold back later batches, and the next night retries it", async (t) => {
   const db = await setup(t);
-  for (let i = 0; i < LEARNING_LIMITS.batch + 2; i++)
+  for (let i = 0; i < LEARNING_LIMITS.batch * 2 + 1; i++)
     await task(db, { ownerSays: ["I prefer window seats always"] });
-  const failing = model((input, n) => {
+  const failing = model((_input, n) => {
     if (n === 2) throw new Error("provider down");
-    return [
-      [
-        "learn_fact",
-        {
-          key: "seat_preference",
-          value: "Prefers window seats",
-          quote: "I prefer window seats",
-          taskIds: [batchIds(input)[0]],
-          reason: "Stated",
-        },
-      ],
-      ["learn_finish", {}],
-    ];
+    return [["learn_finish", {}]];
   });
   const result: any = await learner(db, failing.adapter).tick("owner");
   assert.deepEqual(
-    [result.state, result.facts, result.modelCalls],
-    ["failed", 1, 1],
+    [result.state, result.failedBatches, result.recorded, result.modelCalls],
+    ["completed", 1, LEARNING_LIMITS.batch + 1, 2],
   );
   const reviewed = async () =>
     (await db.query("SELECT count(*)::int AS n FROM learning_reviews")).rows[0]
       .n;
-  assert.equal(await reviewed(), LEARNING_LIMITS.batch);
+  assert.equal(await reviewed(), LEARNING_LIMITS.batch + 1);
   const next = model(() => [["learn_finish", {}]]);
   await learner(db, next.adapter, new Date(NIGHT.getTime() + DAY)).tick(
     "owner",
   );
+  assert.equal(batchIds(next.inputs[0]).length, LEARNING_LIMITS.batch);
+  assert.equal(await reviewed(), LEARNING_LIMITS.batch * 2 + 1);
+});
+
+test("an owner turn between batches keeps the finished batch and the next attempt carries on", async (t) => {
+  const db = await setup(t);
+  for (let i = 0; i < LEARNING_LIMITS.batch + 2; i++)
+    await task(db, { ownerSays: ["I prefer window seats always"] });
+  const input = randomUUID();
+  const first = model(async (_input, n) => {
+    if (n === 2)
+      await db.query(
+        "INSERT INTO conversation_inputs(id,user_id,message) VALUES($1,'owner','hi')",
+        [input],
+      );
+    return [["learn_finish", {}]];
+  });
+  const result: any = await learner(db, first.adapter).tick("owner");
+  assert.deepEqual(
+    [result.state, result.recorded],
+    ["deferred", LEARNING_LIMITS.batch],
+  );
+  await db.query("UPDATE conversation_inputs SET state='completed'");
+  const next = model(() => [["learn_finish", {}]]);
+  const resumed: any = await learner(db, next.adapter).tick("owner");
+  assert.equal(resumed.state, "completed");
   assert.equal(batchIds(next.inputs[0]).length, 2);
-  assert.equal(await reviewed(), LEARNING_LIMITS.batch + 2);
+});
+
+test("work from before forwards were marked makes what it produces untrusted", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, {
+    finishedAgo: 40 * DAY,
+    ownerSays: ["I prefer window seats always"],
+  });
+  const { adapter } = model(() => [
+    [
+      "learn_fact",
+      {
+        key: "seat_preference",
+        value: "Prefers window seats",
+        quote: "I prefer window seats",
+        taskIds: [id],
+        reason: "Stated",
+      },
+    ],
+    ["learn_finish", {}],
+  ]);
+  await learner(db, adapter).tick("owner");
+  const [row] = (await new MemoryStore(db).active("owner")).filter(
+    (r) => r.key === "seat_preference",
+  );
+  assert.equal(row!.trust, "untrusted");
+  assert.ok(row!.untrusted_sources.includes("possible_forward"));
+});
+
+test("the learner cannot bring back a removed key, and is shown what was removed", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, { ownerSays: ["Find me a flight"] });
+  const store = new MemoryStore(db);
+  await store.write("owner", {
+    key: "lesson:travel:bad-rule",
+    value: "A wrong rule about travel",
+    kind: "lesson",
+    outcome: "success",
+    domain: "travel",
+    origin: "learned",
+    reason: "seed",
+    source: {},
+  });
+  await store.retire("owner", "lesson:travel:bad-rule", {
+    origin: "owner",
+    reason: "wrong",
+  });
+  const { adapter, inputs } = model(() => [
+    [
+      "learn_lesson",
+      {
+        domain: "travel",
+        slug: "bad-rule",
+        outcome: "success",
+        value: "A wrong rule about travel",
+        taskIds: [id],
+        reason: "Again",
+      },
+    ],
+    ["learn_finish", {}],
+  ]);
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.equal(result.lessons, 0);
+  assert.ok(result.refused >= 1);
+  assert.deepEqual(JSON.parse(inputs[0].messages[1].content).removed, [
+    { key: "lesson:travel:bad-rule", value: "A wrong rule about travel" },
+  ]);
+  assert.equal(
+    (await store.active("owner")).some(
+      (r) => r.key === "lesson:travel:bad-rule",
+    ),
+    false,
+  );
+});
+
+test("older work cannot change or retire what newer work established", async (t) => {
+  const db = await setup(t);
+  const old = await task(db, {
+    finishedAgo: 30 * DAY,
+    ownerSays: ["I live in Penang these days"],
+  });
+  const store = new MemoryStore(db);
+  await store.write("owner", {
+    key: "home_city",
+    value: "Lives in Singapore",
+    kind: "fact",
+    origin: "learned",
+    reason: "seed",
+    source: { workDate: "2026-11-20" },
+  });
+  const { adapter } = model(() => [
+    [
+      "learn_fact",
+      {
+        key: "home_city",
+        value: "Lives in Penang",
+        quote: "I live in Penang",
+        taskIds: [old],
+        reason: "Old",
+      },
+    ],
+    ["learn_retire", { key: "home_city", reason: "Old", taskIds: [old] }],
+    ["learn_finish", {}],
+  ]);
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual([result.facts, result.retired], [0, 0]);
+  assert.equal(
+    (await store.active("owner")).find((r) => r.key === "home_city")?.value,
+    "Lives in Singapore",
+  );
 });
 
 test("the learner mines work up to 90 days old, and items a superseded prompt reviewed", async (t) => {

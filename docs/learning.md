@@ -93,9 +93,9 @@ Each run looks at up to 40 of the owner's work tasks that are `done`, `paused` o
 - **success:** `done` with no failed receipt and no uncertain or interrupted call. Done already requires each step's proof.
 - **pitfall:** `done` after failed receipts (recovered), or `paused` with failed receipts or blocked steps.
 - **skipped:** cancelled, any uncertain write, a routine occurrence, or a task not started by the owner (a responsibility investigation or a gathering).
-- A paused task with neither, or one paused by a restart or cutover, is not labelled and is looked at again later. Such tasks are excluded before the 20-task limit, so a backlog of them cannot crowd out finished work. Any failed receipt, even a failed read, makes a done task a pitfall: the label errs towards strict.
+- A paused task with neither, or one paused by a restart or cutover, is not labelled and is looked at again later. Such tasks are excluded before the 40-task limit, so a backlog of them cannot crowd out finished work. Any failed receipt, even a failed read, makes a done task a pitfall: the label errs towards strict.
 
-A labelled task or turn is recorded in `learning_reviews` once the run completes, so it is learned from at most once. A run with nothing but skipped tasks makes no model call.
+A labelled task or turn is recorded in `learning_reviews` once its batch is applied, so it is learned from at most once. A run with nothing but skipped tasks makes no model call.
 
 #### Conversation turns
 
@@ -113,7 +113,7 @@ The learner calls the `standard` tier (resolved from `config/model-policy.json`,
 
 It is offered four tools and nothing else: `learn_fact`, `learn_lesson`, `learn_retire` and `learn_finish`. Since `learner-v3` the instructions tell it to err toward saving: the owner wants memory to accumulate and will prune it later (1 November), after two nights of the earlier "nothing is worth saving" default saved nothing from 55 turns. It keeps Hermes's rules against capturing quoted email or web text, transient failures, negative claims about tools and unresolved attempts.
 
-Since `learner-v4` it reviews 10 items at a time, and each item shows its date, because some are months old: when an older item disagrees with current memory, current memory stands. Each batch is applied and recorded before the next starts, so a failure or an owner turn loses only the batch in progress and the next attempt carries on.
+Since `learner-v4` it reviews 10 items at a time, and each item shows its date, because some are months old. Forwarded messages were not marked before 29 October, so items older than that are tagged `possible_forward`, which makes what they produce `untrusted`. Each batch is applied and recorded before the next starts, so a failure or an owner turn loses only the batch in progress and the next attempt carries on.
 
 ### Owner words and untrusted content
 
@@ -129,13 +129,15 @@ Every proposal is checked before it is accepted, and a refusal is returned to th
 - A fact needs a quote of the owner's own words from a cited item (whitespace, quote marks, dashes and case normalized). It may be reworded, but it may not add a negation the quote lacks ("not", "no", "never", "without", "n't"), every number must come from the quote, and at least half of its content words (everything but function words and a few framing words such as "prefers" or "usually", compared after crude stemming) must too. A fact therefore cannot carry a number the owner did not state or be pinned on an unrelated sentence, but up to half its content words, including names, addresses and spelled-out numbers, may come from outside the quote; the task's untrusted tags still apply. A fact that is reworded beyond the quote, or that drops a negation the quote has, is applied and flagged `paraphrased`, so it is easy to find when pruning. That flag alone does not count as flagged in `memory.selected` or raise it to a warning, since it is normal under "save, prune later"; threat and conflict flags do. The check compares words, not meaning: a reworded fact can still be wrong ("Prefers window seats" from "I prefer aisle seats"), and it does not stop a value that recombines the owner's own words or changes a pronoun or modal verb.
 - A fact may not use a key that holds one of the owner's own facts, checked when proposed and again when applied. Until phase 3 lets the owner see and undo learned changes, their own facts stay as they are.
 - A lesson's outcome must match the label of every task it cites. Lessons are not quote-checked; they carry their tasks' untrusted tags instead, so they can be rolled back by source.
-- One key once per run.
-- The model usually proposes everything and finishes in one response, so once a run, if that response had refusals, it gets another turn with their reasons to correct them.
+- One key once per batch.
+- A key the owner or a rollback removed cannot be proposed again; removed keys and their last wording are shown to the model so it does not reword them under another key. Rewording under a new key is still possible.
+- Work older than the work behind a key's current value cannot change or retire it. The date comes from `source.workDate`, or the revision's date for items written before `learner-v4`.
+- The model usually proposes everything and finishes in one response, so once a batch, if that response had refusals, it gets another turn with their reasons to correct them.
 - `learn_retire` applies only to learned items.
 
-Accepted items are applied after each batch, through `MemoryStore`, with `origin: learned`, the learner run, the cited task, run and owner-message IDs and the prompt version as provenance, and the union of the cited tasks' untrusted kinds, which makes them `untrusted`. An item identical to the current value is not rewritten. Owner activity is checked before each model call and again before applying: if the owner started a turn, the run is deferred and applies nothing and labels nothing, so the next tick starts over. Items are written one at a time; a crash part-way leaves the written ones (rollback by learner run removes them), the run is marked failed at the next start, and its tasks are reviewed again the next night, where unchanged values are not rewritten.
+Accepted items are applied after each batch, through `MemoryStore`, with `origin: learned`, the learner run, the cited task, run and owner-message IDs and the prompt version as provenance, and the union of the cited tasks' untrusted kinds, which makes them `untrusted`. An item identical to the current value is not rewritten. Owner activity is checked before each model call and again before applying: if the owner started a turn, the batch in progress applies nothing and labels nothing, the run is deferred, and the next tick carries on with what is still unreviewed. A batch that throws waits for the next night without holding back later batches; the run fails only if every batch does. A batch that always fails holds its items back until they age out at 90 days. Items are written one at a time; a crash part-way leaves the written ones (rollback by learner run removes them), the run is marked failed at the next start, and its tasks are reviewed again the next night, where unchanged values are not rewritten.
 
-While a run is calling the model, its `runtime_runs` row is `running`, so the release and rollout guards that wait for idle (`scripts/cloud-release.py`, the `deploy-*.py` scripts) and the coding automation's idle check wait for it too, for at most ten calls.
+While a run is calling the model, its `runtime_runs` row is `running`, so the release and rollout guards that wait for idle (`scripts/cloud-release.py`, the `deploy-*.py` scripts) and the coding automation's idle check wait for it too, for up to 70 calls of at most five minutes each, though the last measured run took 39 seconds for 40 items.
 
 ### Telemetry and the private record
 
