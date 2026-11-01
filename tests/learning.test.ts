@@ -1406,3 +1406,103 @@ test("refused proposals get one more turn even when the model already finished",
     "Prefers window seats",
   );
 });
+
+const batchIds = (input: any) =>
+  JSON.parse(input.messages[1].content).tasks.map((x: any) => x.id);
+
+test("the learner reviews items in batches, each saw its date and earlier batches' items", async (t) => {
+  const db = await setup(t);
+  const ids: string[] = [];
+  for (let i = 0; i < LEARNING_LIMITS.batch + 3; i++)
+    ids.push(await task(db, { ownerSays: ["I prefer window seats always"] }));
+  const { adapter, inputs } = model((input, n) => {
+    const [first] = batchIds(input);
+    return n === 1
+      ? [
+          [
+            "learn_fact",
+            {
+              key: "seat_preference",
+              value: "Prefers window seats",
+              quote: "I prefer window seats",
+              taskIds: [first],
+              reason: "Stated",
+            },
+          ],
+          ["learn_finish", {}],
+        ]
+      : [["learn_finish", {}]];
+  });
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual(
+    [result.state, result.reviewed, result.facts, result.modelCalls],
+    ["completed", LEARNING_LIMITS.batch + 3, 1, 2],
+  );
+  assert.deepEqual(
+    inputs.map((i) => batchIds(i).length),
+    [LEARNING_LIMITS.batch, 3],
+  );
+  const shown = JSON.parse(inputs[0].messages[1].content);
+  assert.equal(shown.tasks[0].date, "2026-10-25");
+  const later = JSON.parse(inputs[1].messages[1].content);
+  assert.ok(later.current.some((c: any) => c.key === "seat_preference"));
+});
+
+test("a failed batch keeps the batches before it, and the next night carries on", async (t) => {
+  const db = await setup(t);
+  for (let i = 0; i < LEARNING_LIMITS.batch + 2; i++)
+    await task(db, { ownerSays: ["I prefer window seats always"] });
+  const failing = model((input, n) => {
+    if (n === 2) throw new Error("provider down");
+    return [
+      [
+        "learn_fact",
+        {
+          key: "seat_preference",
+          value: "Prefers window seats",
+          quote: "I prefer window seats",
+          taskIds: [batchIds(input)[0]],
+          reason: "Stated",
+        },
+      ],
+      ["learn_finish", {}],
+    ];
+  });
+  const result: any = await learner(db, failing.adapter).tick("owner");
+  assert.deepEqual(
+    [result.state, result.facts, result.modelCalls],
+    ["failed", 1, 1],
+  );
+  const reviewed = async () =>
+    (await db.query("SELECT count(*)::int AS n FROM learning_reviews")).rows[0]
+      .n;
+  assert.equal(await reviewed(), LEARNING_LIMITS.batch);
+  const next = model(() => [["learn_finish", {}]]);
+  await learner(db, next.adapter, new Date(NIGHT.getTime() + DAY)).tick(
+    "owner",
+  );
+  assert.equal(batchIds(next.inputs[0]).length, 2);
+  assert.equal(await reviewed(), LEARNING_LIMITS.batch + 2);
+});
+
+test("the learner mines work up to 90 days old, and items a superseded prompt reviewed", async (t) => {
+  const db = await setup(t);
+  const old = await task(db, {
+    finishedAgo: 60 * DAY,
+    ownerSays: ["Find me a flight"],
+  });
+  await task(db, { finishedAgo: 91 * DAY, ownerSays: ["Find me a flight"] });
+  const before = await task(db, { ownerSays: ["Find me a flight"] });
+  const earlier = randomUUID();
+  await db.query(
+    "INSERT INTO learner_runs(id,user_id,state,prompt_version,started_at) VALUES($1,'owner','completed','learner-v3',$2)",
+    [earlier, new Date(NIGHT.getTime() - DAY)],
+  );
+  await db.query(
+    "INSERT INTO learning_reviews(user_id,task_id,learner_run,label,reasons) VALUES('owner',$1,$2,'success','{}')",
+    [before, earlier],
+  );
+  const { adapter, inputs } = model(() => [["learn_finish", {}]]);
+  await learner(db, adapter).tick("owner");
+  assert.deepEqual(batchIds(inputs[0]).sort(), [old, before].sort());
+});

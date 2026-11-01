@@ -103,6 +103,20 @@ The turn backlog is cleared. Of the 55 turns, one pitfall came from an owner cor
 
 **Still open.** "Not corrected" was read as approval for a format rule, and nothing checks a lesson against earlier decisions. Hermes's "almost never fires" warning cited above concerns its forget-and-recall loop, not review learning (found in the research on 1 November); Chief's measured task shortage stands independently.
 
+## Looking further back — 2026-11-01
+
+The owner asked the learner to save more, after only 14 memories had built up. Production counts showed why so little had come out:
+
+- **It saw little.** Of 183 conversation turns since 13 September, only 55 were within the 14-day limit, so 128 were never reviewed.
+- **Facts were refused.** The one `learner-v3` run proposed 6 facts and lost 5 to host checks: 3 on negation, 1 on a number and 1 on word overlap. `58a921a` relaxed the negation check and added a retry after that run, but those items were already marked reviewed under the same prompt version, so they would not have been looked at again.
+- **One pass over everything.** That run reviewed 40 items in one model call and proposed 11 things.
+
+**Change, prompt `learner-v4`.** Work up to 90 days old is reviewed, oldest first. Each run takes up to 40 tasks and 100 turns, in batches of 10, with each batch kept as it finishes. Items reviewed under `learner-v3` are mined again. Items carry their date, and current memory wins over an older item that disagrees, so the backlog cannot overwrite something newer. Tested in `tests/learning.test.ts`. No migration.
+
+**Measured.** The counts above, and $0.17 for the 40-item run.
+
+**Hypotheses, not measured.** Smaller batches may find more per item. By proportion, 140 items would cost about $0.60 a night, and the backlog should clear in about two nights. Old lessons may describe failures fixed since, which the owner would prune. More learned items than the prompt budget holds stay reachable through `memory_recall`, but are not in every turn's context.
+
 ## Follow-up and next iteration
 
 After the phase 1 rollout and this release: check the first night's `learner.finished` counts and charges, and read what it wrote (`memory_revisions` with `origin='learned'`). Phase 3 adds the weekly digest with undo and skills drafted from two independent successes. The owner decided on 29 October not to use reactions or any other manual labelling, so outcomes come only from task proof and corrections in the owner's next message.

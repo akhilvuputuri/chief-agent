@@ -1,3 +1,9 @@
+## The learner looks further back (1 November 2026)
+
+- **Code.** Prompt `learner-v4`: 90 days back instead of 14, up to 40 tasks and 100 turns a run, batches of 10 kept as they finish, `learner-v3` items mined again. No migration.
+- **Why.** 128 of 183 turns had never been reviewed. See [journal 130](journey/130-nightly-learner.md#looking-further-back--2026-11-01).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Recall over conversations and memories (1 November 2026)
 
 - **Code.** `memory_recall` searches past messages and memories by meaning and keyword. Adds migration 034, the pgvector Postgres image and a background indexer.
