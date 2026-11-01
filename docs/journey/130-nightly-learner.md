@@ -143,7 +143,7 @@ Of the 7 most valuable clusters, 5 appeared in both designs and each design alon
 
 **Hypotheses, not measured.** Production procedures may be as useful as the simulated ones, and the two-item rule may keep out one-off rules without losing good ones. By proportion to the $0.17 for 40 items, a window of about 70 items would cost about $0.30, so the windows from 13 September, about six with work in them, would cost about $2 once, then about $0.30 a week. Repeated revision may drift from what the owner wants. Revising in place may lose detail that the `shrunk` flag does not catch.
 
-**Deployment.** Live in `385e0d7` on 1 November. No production pass has run yet, so everything above about procedures is from the simulation and fake-model tests.
+**Deployment.** Live in `385e0d7` on 1 November. No production pass has run yet, so everything above about procedures is from the simulation and fake-model tests. `learner-v4` never ran either, so the first night is also the first production test of the 90-day batches.
 
 **Accepted risk.** Procedures compete for the prompt's lesson budget, so older ones can be left out of a turn. They are written after reading untrusted content and have no quote check. It stays labelled as data, carries the window's untrusted tags, is threat-scanned and can be rolled back. A permanently failing window stops procedures until it ages out at 90 days. How-to learning now lags by up to about 8 days, and a one-off correction survives only as a quoted fact or by repeating within a window.
 
