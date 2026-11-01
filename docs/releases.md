@@ -37,7 +37,7 @@
 
 - **Code.** Requirement approval now hashes only the job, objective, context and plan. Earlier approvals stay valid. The new `coding_job_update` changes the models or limits of a stopped job on the owner's request. No worker image, database or Compose change.
 - **Why.** Editing a paused job's reviewer invalidated its approval. See [journal 142](journey/142-approval-covers-the-spec.md).
-- **Deployment.** Not yet recorded as live; update this entry on release.
+- **Deployment.** [PR 373](https://github.com/akhilvuputuri/chief-agent/pull/373) merged as `000f2b2`, and the automatic release (run 41269771687) succeeded on 1 November 2026. `coding_job_update` has not yet been used on a live job.
 
 ## Deployed `ea9943c` and `c54ddcb` (untagged) — the learner's record, and saving more (#326)
 

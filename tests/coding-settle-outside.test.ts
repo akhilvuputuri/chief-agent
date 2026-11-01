@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CodingAutomation } from "../src/coding/automation.js";
+import { GitHubAutomation } from "../src/coding/github-automation.js";
 import { ToolValidationError } from "../src/tool-errors.js";
 import type { PrOutcome } from "../src/coding/merge-policy.js";
 import { fixture } from "./helpers/coding-fixture.js";
@@ -172,5 +173,40 @@ test("a finished job explains itself when asked to resume", async (t) => {
       requestKey: "again",
     }),
     /This job is finished: PR was closed/,
+  );
+});
+
+test("GitHub's answer comes only from the job's own PR", async () => {
+  const id = "8dfdfbf0-53de-4b8d-a579-d10ad5efccdf";
+  const repo = "example/repo";
+  const pr = {
+    merged: true,
+    state: "closed",
+    merge_commit_sha: "c".repeat(40),
+    head: { ref: `chief/coding-${id}-r2`, repo: { full_name: repo } },
+    base: { ref: "main", repo: { full_name: repo } },
+  };
+  const paths: string[] = [];
+  const gh = new GitHubAutomation(
+    repo,
+    (async (path: string) => {
+      paths.push(path);
+      return pr;
+    }) as any,
+    (async () => ({})) as any,
+  );
+  assert.deepEqual(await gh.outcome({ id, url }), {
+    merged: true,
+    closed: true,
+    mergeSha: "c".repeat(40),
+  });
+  assert.deepEqual(paths, ["pulls/7"]);
+  await assert.rejects(
+    gh.outcome({ id: "another-job", url }),
+    /ownership changed/,
+  );
+  await assert.rejects(
+    gh.outcome({ id, url: "https://github.com/other/repo/pull/7" }),
+    /Invalid owned PR target/,
   );
 });
