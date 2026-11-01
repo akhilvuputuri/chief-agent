@@ -835,9 +835,6 @@ export class Learner {
               ...summary(),
               reason: "owner_active",
             });
-          // Text with no learn_finish means the window was not worked through.
-          if (!outcome.finished)
-            throw new Error("Procedure pass did not finish");
           const written = await this.applyProcedures(
             user,
             id,
@@ -1320,11 +1317,10 @@ export class Learner {
     let refused = 0;
     let modelCalls = 0;
     let retried = false;
-    let done = false;
+    let reminded = false;
     for (let i = 0; i < LEARNING_LIMITS.modelCalls; i++) {
       // Pre-empted when the owner starts a turn; nothing is applied.
-      if (await this.ownerActive(user))
-        return { deferred: true, finished: false, accepted };
+      if (await this.ownerActive(user)) return { deferred: true, accepted };
       const generation = await this.options.model.generate({
         messages,
         tools,
@@ -1346,9 +1342,16 @@ export class Learner {
         toolCalls: calls.map((c) => c.function.name),
       });
       if (!calls.length) {
-        // After a retry the model had already finished once.
-        done = retried;
-        break;
+        // A cut-off response has already thrown, so this one chose to stop. It may have more
+        // to send, so it is reminded once, and what it proposed stands either way.
+        if (!pass.request.requireComplete || reminded) break;
+        reminded = true;
+        messages.push({
+          role: "user",
+          content:
+            "Send any remaining proposals as tool calls, then call learn_finish, even if there is nothing to save.",
+        });
+        continue;
       }
       let finished = false;
       const refusedBefore = refused;
@@ -1408,12 +1411,9 @@ export class Learner {
             "The host refused some proposals; the tool results give each reason. Accepted items are kept, so send only corrected versions of the refused ones, keeping to the evidence and the owner's words where that is possible, then call learn_finish again.",
         });
       }
-      if (finished) {
-        done = true;
-        break;
-      }
+      if (finished) break;
     }
-    return { deferred: false, finished: done, accepted };
+    return { deferred: false, accepted };
   }
 
   private itemPass: Pass = {
@@ -1427,7 +1427,7 @@ export class Learner {
   private procedurePass: Pass = {
     instructions: PROCEDURE_INSTRUCTIONS,
     tools: procedureTools,
-    // A cut-off response would otherwise pass for a window with nothing to save.
+    // A cut-off response would otherwise pass for a window with nothing to save, so it fails.
     request: {
       requireComplete: true,
       maxOutputTokens: LEARNING_LIMITS.procedureOutputTokens,

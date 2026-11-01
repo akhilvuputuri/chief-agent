@@ -2249,38 +2249,93 @@ test("a procedure pass cannot retire what newer work set, and always sees every 
   );
 });
 
-test("a text-only response fails the window, and a procedure pass asks for complete output", async (t) => {
+test("a response that stops in plain text is reminded once, keeps its proposals and moves on", async (t) => {
   const db = await setup(t);
-  await twoTurns(db);
+  const [news, markets] = await twoTurns(db);
+  const text = (content: string): Generation => ({
+    message: { role: "assistant", content, tool_calls: [] },
+  });
   const requests: any[] = [];
   const adapter: ModelAdapter = {
     generate: async (input): Promise<Generation> => {
       const procedures = input.tools.some((x) => x.name === "learn_procedure");
-      if (procedures) requests.push(input);
+      if (!procedures)
+        return {
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: randomUUID(),
+                type: "function" as const,
+                function: { name: "learn_finish", arguments: "{}" },
+              },
+            ],
+          },
+        };
+      requests.push(JSON.parse(JSON.stringify(input)));
+      if (requests.length > 1) return text("Saved one procedure.");
+      const [name, args] = procedure([news!, markets!]);
       return {
         message: {
           role: "assistant",
-          content: procedures ? "I ran out of room" : null,
-          tool_calls: procedures
-            ? []
-            : [
-                {
-                  id: randomUUID(),
-                  type: "function" as const,
-                  function: { name: "learn_finish", arguments: "{}" },
-                },
-              ],
+          content: null,
+          tool_calls: [
+            {
+              id: randomUUID(),
+              type: "function" as const,
+              function: { name, arguments: JSON.stringify(args) },
+            },
+          ],
         },
       };
     },
   };
   const result = await procedurePass(db, adapter);
-  assert.equal(result.state, "failed");
-  assert.ok(new Date(result.through).getTime() < IN_ONE_PERIOD.getTime());
+  assert.deepEqual(
+    [result.state, result.procedures, result.periods],
+    ["completed", 1, 1],
+  );
+  assert.equal(new Date(result.through) > IN_ONE_PERIOD, true);
+  // The proposal's response, a text answer, then one reminder and no more.
+  assert.equal(requests.length, 3);
+  assert.match(requests[2].messages.at(-1).content, /learn_finish/);
   assert.deepEqual(
     [requests[0].requireComplete, requests[0].maxOutputTokens],
     [true, LEARNING_LIMITS.procedureOutputTokens],
   );
+});
+
+test("a model error applies nothing from that window, and the window is tried again", async (t) => {
+  const db = await setup(t);
+  const [news, markets] = await twoTurns(db);
+  await seedLesson(db, "lesson:news:short");
+  let failing = true;
+  const { adapter } = model((input) => {
+    if (!isProcedurePass(input)) return [["learn_finish", {}]];
+    if (input.messages.some((m: any) => m.role === "tool")) {
+      if (failing) throw new Error("incomplete");
+      return [["learn_finish", {}]];
+    }
+    return [procedure([news!, markets!], { absorbs: ["lesson:news:short"] })];
+  });
+  const result = await procedurePass(db, adapter);
+  assert.deepEqual(
+    [result.state, result.procedures, result.absorbed],
+    ["failed", 0, 0],
+  );
+  const store = new MemoryStore(db);
+  assert.deepEqual(
+    (await store.active("owner")).map((r) => r.key),
+    ["lesson:news:short"],
+  );
+  failing = false;
+  const next = await procedurePass(
+    db,
+    adapter,
+    new Date(NIGHT.getTime() + DAY),
+  );
+  assert.deepEqual([next.state, next.procedures], ["completed", 1]);
 });
 
 test("a run from an earlier prompt tonight still lets the procedure pass follow", async (t) => {
