@@ -118,7 +118,9 @@ test("cancelling a job with a published PR fails with the reason and leaves it u
       e instanceof ToolValidationError &&
       /Merge card/.test(e.message) &&
       /no tool to close pull requests/.test(e.message) &&
-      /If the PR is already closed, nothing further happens/.test(e.message),
+      /Once the PR is merged or closed on GitHub, Chief marks this job finished/.test(
+        e.message,
+      ),
   );
   assert.equal((await f.row(owner)).state, "pr_ready");
 

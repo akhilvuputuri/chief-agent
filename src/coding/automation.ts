@@ -31,14 +31,20 @@ type Record = z.infer<typeof record>;
 /** An owner decision or other writer changed the job after this tick read it; stop without writing. */
 class StageChanged extends Error {}
 const key = (revision: number) => `automation:${revision}`;
-/** Stages where nothing watches a job's PR, so a merge or close on GitHub goes unseen. */
-const PARKED_STAGES = ["manual_review", "merge_declined", "pr_ready"];
+/** Parked with nothing watching its PR, so a merge or close on GitHub goes unseen. */
+const isParked = (j: CodingJob) =>
+  j.stage === "manual_review" ||
+  j.stage === "merge_declined" ||
+  (j.stage === "pr_ready" && !j.settings.autoMerge && !j.settings.prWorkflow);
+/** Chief merged this PR itself, so the stop is about its release, which GitHub cannot settle. */
+const NOT_OWN_MERGE = `NOT EXISTS(SELECT 1 FROM coding_events m WHERE m.job_id=coding_jobs.id AND m.event_key LIKE 'automation:%' AND m.payload ? 'mergeSha')`;
 /** How often parked PRs are compared with GitHub. */
 const PARKED_SWEEP_MS = 900000;
 /** Durable publication/feedback/merge state, separate from the sandbox's checkpoints. */
 export class CodingAutomation {
   private busy = false;
   private lastParkedSweep = 0;
+  private parkedCursor = "00000000-0000-0000-0000-000000000000";
   constructor(
     private db: Database,
     private repository: PrAutomationRepository,
@@ -47,51 +53,55 @@ export class CodingAutomation {
     private now: () => Date,
   ) {}
   /**
-   * Finishes a parked job whose PR was merged or closed on GitHub, outside this workflow.
-   * Only GitHub's own answer changes the job; a failed read leaves it as it was.
+   * Finishes a parked job whose PR was merged or closed on GitHub. Only GitHub's own answer
+   * changes the job; a failed read leaves it as it was. This corrects the record, so it sends
+   * no message: only the owner can merge or close on GitHub.
    */
-  async settleOutside(j: CodingJob, notify = false) {
+  async settleOutside(j: CodingJob) {
     const url = (j as any).pr_url as string | null;
-    if (j.state !== "pr_ready" || !url || !PARKED_STAGES.includes(j.stage))
-      return false;
+    if (j.state !== "pr_ready" || !url || !isParked(j)) return false;
     const pr = await this.repository.outcome({ id: j.id, url });
     if (!pr.merged && !pr.closed) return false;
+    const stage = pr.merged ? "merged_on_github" : "closed_on_github";
     const summary = pr.merged
-      ? `PR was merged on GitHub${pr.mergeSha ? ` as ${pr.mergeSha}` : ""}, outside this workflow, so this job is finished. This job did not watch its release.`
+      ? `PR was merged on GitHub${pr.mergeSha ? ` as ${pr.mergeSha}` : ""}, so this job is finished. This job did not confirm its release.`
       : "PR was closed on GitHub without merging, so this job is finished.";
     const settled = await this.db.query(
       `WITH changed AS (UPDATE coding_jobs SET stage=$3,summary=$4,updated_at=now()
-         WHERE id=$1 AND revision=$2 AND state='pr_ready' AND stage=$5 AND pr_url=$6 AND (lease IS NULL OR lease_until<now()) RETURNING id)
+         WHERE id=$1 AND revision=$2 AND state='pr_ready' AND stage=$5 AND pr_url=$6 AND (lease IS NULL OR lease_until<now()) AND ${NOT_OWN_MERGE} RETURNING id)
        INSERT INTO coding_events(job_id,event_key,payload,delivery)
-       SELECT id,$7,$8::jsonb,$9 FROM changed RETURNING job_id`,
+       SELECT id,$7,$8::jsonb,'suppressed' FROM changed RETURNING job_id`,
       [
         j.id,
         j.revision,
-        pr.merged ? "merged_outside" : "closed_outside",
+        stage,
         summary,
         j.stage,
         url,
-        `settled-outside:${j.revision}`,
-        JSON.stringify({ kind: "settled_outside", summary, url }),
-        notify ? "pending" : "suppressed",
+        `settled-on-github:${j.revision}`,
+        JSON.stringify({ kind: "settled_on_github", summary, url }),
       ],
     );
-    if (settled.rows.length)
-      j.stage = pr.merged ? "merged_outside" : "closed_outside";
+    if (settled.rows.length) j.stage = stage;
     return settled.rows.length > 0;
   }
-  /** The owner made these changes on GitHub, so correcting the record sends no message. */
+  /** Takes the next 20 in turn, so newer open PRs cannot crowd out older parked jobs. */
   private async sweepParked() {
     const now = this.now().getTime();
     if (now - this.lastParkedSweep < PARKED_SWEEP_MS) return;
     this.lastParkedSweep = now;
     const parked = (
       await this.db.query(
-        `SELECT * FROM coding_jobs WHERE state='pr_ready' AND pr_url IS NOT NULL AND stage=ANY($1::text[])
-         AND (lease IS NULL OR lease_until<now()) ORDER BY updated_at DESC LIMIT 20`,
-        [PARKED_STAGES],
+        `SELECT * FROM coding_jobs WHERE state='pr_ready' AND pr_url IS NOT NULL AND id>$1::uuid
+         AND (stage IN ('manual_review','merge_declined') OR (stage='pr_ready' AND NOT settings ? 'prWorkflow' AND COALESCE(settings->>'autoMerge','false')<>'true'))
+         AND (lease IS NULL OR lease_until<now()) AND ${NOT_OWN_MERGE} ORDER BY id LIMIT 20`,
+        [this.parkedCursor],
       )
     ).rows as CodingJob[];
+    this.parkedCursor =
+      parked.length === 20
+        ? parked[19]!.id
+        : "00000000-0000-0000-0000-000000000000";
     for (const j of parked)
       await this.settleOutside(j).catch((error) =>
         opsLog("coding.parked_check_failed", "warn", {

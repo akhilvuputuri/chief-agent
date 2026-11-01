@@ -22,24 +22,27 @@ The stored stage answered a question only GitHub can answer. Alternatives:
 - Return parked jobs to automation. Automation would also re-run gates and could rebase, which is not what a parked job should do.
 - Let Chief close PRs. That is a new outward write nobody asked for.
 
-Chosen: a sweep every 15 minutes, so status stays a database read that is at most about 15 minutes behind, plus a live check in `coding_cancel`, the one place a stale answer misleads at once.
+Chosen: a sweep every 15 minutes, so status stays a database read that is usually at most about 15 minutes behind (longer if more than 20 jobs are parked), plus a live check in `coding_cancel`, the one place a stale answer misleads at once.
 
 ## Implementation and review
 
 - `src/coding/github-automation.ts`: `outcome` reads one owned PR. It keeps the ownership check and needs no recorded merge target, which old jobs may lack.
-- `src/coding/automation.ts`: `settleOutside` and `sweepParked`. The write is guarded by revision, stage, PR URL and lease. A failed read changes nothing.
+- `src/coding/automation.ts`: `settleOutside` and `sweepParked`. The write is guarded by revision, stage, PR URL and lease. A failed read changes nothing. The sweep takes 20 jobs in turn by id, so newer open PRs cannot crowd out old jobs.
 - `src/coding/controller.ts`: cancel checks first; refusals and resume explain a finished job.
 
-The sweep sends no message, because the owner made the change on GitHub. Jobs stay `pr_ready`, because the state constraint has no merged value and this avoids a migration. The new stages fall out of `CODING_WAITS_ON_OWNER` by not being listed.
+Independent review found that `manual_review` is also where a failed release stops. The first version would have replaced "merged, but release failed" with "finished". Any job whose automation record holds Chief's own `mergeSha` is now left alone. An uncertain merge has no such record and can still settle, so the wording says only that the PR merged on GitHub, not who merged it.
+
+The sweep sends no message, because only the owner can merge or close on GitHub. Jobs stay `pr_ready`, because the state constraint has no merged value and this avoids a migration. The new stages fall out of `CODING_WAITS_ON_OWNER` by not being listed.
 
 Limitations:
 
-- `merged_outside` does not verify a release.
+- `merged_on_github` does not confirm a release.
+- `closed_on_github` is final. A PR closed and reopened across a sweep stays recorded as closed, and the job needs replacing.
 - Open PRs stay parked, including draft PR 232, until the owner closes them. Chief still cannot close PRs.
 - A PR whose branch name no longer matches the job fails the ownership check, so it stays parked and logs `coding.parked_check_failed`.
-- `lastParkedSweep` is in memory, so every gateway start runs one sweep.
+- The sweep's clock and cursor are in memory, so every gateway start runs one sweep from the first job.
 
 ## Verification and outcome
 
-- **Tested:** `tests/coding-settle-outside.test.ts`, with a fake repository. It covers merged, closed, open, failed reads, rate, leases, watched stages, cancel, resume and owner-wait.
-- **Not tested:** `GitHubAutomation.outcome` against real GitHub. The first live check is whether `8dfdfbf0` moves to `merged_outside` after release.
+- **Tested:** `tests/coding-settle-outside.test.ts`, with a fake repository. It covers merged, closed, open, failed reads, rate, rotation, leases, watched stages, stops after Chief's own merge, drafts, auto-merge cancel, resume and owner-wait, plus the GitHub read with a fake API.
+- **Not tested:** the read against real GitHub. The first live check is whether `8dfdfbf0` moves to `merged_on_github` after release.

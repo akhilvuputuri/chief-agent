@@ -14,7 +14,9 @@ An approval covers what the owner read: the objective, context and plan, for tha
 
 ### PRs merged or closed on GitHub
 
-Automation stops watching a job once it parks at `manual_review` or `merge_declined`, and a draft job is never watched. A PR merged or closed on GitHub would leave such a job looking open. Every 15 minutes the host compares up to 20 parked PRs with GitHub and moves the finished ones to stage `merged_outside` or `closed_outside`, with no message, because the owner made that change. `coding_cancel` makes the same check first. If the PR is gone, the job finishes and the call says so. If it is still open, or GitHub cannot be read, the existing refusal stands. These stages no longer count as waiting on the owner. A `merged_outside` job did not watch its release.
+Automation stops watching a job once it parks at `manual_review` or `merge_declined`, and a draft job is never watched. A PR merged or closed on GitHub would leave such a job looking open. Every 15 minutes the host takes the next 20 parked PRs in turn, compares them with GitHub and moves the finished ones to stage `merged_on_github` or `closed_on_github`, with no message. `coding_cancel` makes the same check first. If the PR is gone, the job finishes and the call says so. If it is still open, or GitHub cannot be read, the job behaves as before. These stages no longer count as waiting on the owner.
+
+A stop after Chief's own merge, such as a failed release, is never changed this way, because GitHub cannot settle a release. `merged_on_github` does not confirm a release. `closed_on_github` is final: a PR reopened later stays recorded as closed, so further work needs a new job.
 
 ### Changing a stopped job
 

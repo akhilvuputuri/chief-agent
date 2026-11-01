@@ -120,8 +120,8 @@ export function cancelRefusal(job: {
   merge_flow?: string | null;
 }) {
   if (job.state === "pr_ready") {
-    if (job.stage === "merged_outside" || job.stage === "closed_outside")
-      return `Nothing to cancel: this job's PR (${job.pr_url}) was already ${job.stage === "merged_outside" ? "merged" : "closed"} on GitHub, so the job is finished. It holds no worker and needs nothing from the owner.`;
+    if (job.stage === "merged_on_github" || job.stage === "closed_on_github")
+      return `Nothing to cancel: this job's PR (${job.pr_url}) was already ${job.stage === "merged_on_github" ? "merged" : "closed"} on GitHub, so the job is finished. It holds no worker and needs nothing from the owner.`;
     if (
       job.stage === "merging" ||
       job.stage === "release_pending" ||
@@ -135,7 +135,7 @@ export function cancelRefusal(job: {
         : job.merge_flow === "owner_merge"
           ? "To abandon it, the owner closes the PR on GitHub; it never merges without the owner's tap on its Merge card."
           : "To abandon it, the owner closes the PR on GitHub; it is a draft PR that only the owner can merge there."
-    } If the PR is already closed, nothing further happens: the job stays as a record of it.`;
+    } Once the PR is merged or closed on GitHub, Chief marks this job finished.`;
   }
   return `Not cancelled: the job is ${job.state}${job.stage ? ` (stage ${job.stage})` : ""}. Read coding_status and retry only if its state changed.`;
 }
@@ -630,6 +630,24 @@ export class CodingController {
       return this.status(user, id);
     }
     if (a.operation === "coding_cancel") {
+      // Its PR may already be gone on GitHub, which finishes the job. A failed read changes nothing.
+      const parked = (
+        await this.db.query(
+          "SELECT * FROM coding_jobs WHERE id=$1 AND user_id=$2 AND state='pr_ready'",
+          [a.id, user],
+        )
+      ).rows[0] as CodingJob | undefined;
+      if (
+        parked &&
+        (await this.automation?.settleOutside(parked).catch((error) => {
+          opsLog("coding.parked_check_failed", "warn", {
+            ref: a.id,
+            ...errorFields(error),
+          });
+          return false;
+        }))
+      )
+        return this.status(user, a.id);
       // Only a running attempt needs its sandbox cleaned up. A paused job's cleanup is
       // already settled, and reopening it would occupy the one-active-worker slot.
       const publishing = (
@@ -643,7 +661,7 @@ export class CodingController {
           "PR publication is in flight or uncertain; inspect its result before cancelling",
         );
       await this.db.query(
-        `WITH changed AS (UPDATE coding_jobs SET state='cancelled',summary='Cancelled by the owner',cleanup=CASE WHEN attempt_id IS NOT NULL AND state IN ('provisioning','running','publishing') THEN 'pending' ELSE cleanup END,updated_at=now() WHERE id=$1 AND user_id=$2 AND state!='cancelled' AND (state!='pr_ready' OR (settings->>'autoMerge'='true' AND stage NOT IN ('merging','release_pending','deployed'))) AND NOT (state='publishing' AND publication_started) RETURNING id)
+        `WITH changed AS (UPDATE coding_jobs SET state='cancelled',summary='Cancelled by the owner',cleanup=CASE WHEN attempt_id IS NOT NULL AND state IN ('provisioning','running','publishing') THEN 'pending' ELSE cleanup END,updated_at=now() WHERE id=$1 AND user_id=$2 AND state!='cancelled' AND (state!='pr_ready' OR (settings->>'autoMerge'='true' AND stage NOT IN ('merging','release_pending','deployed','merged_on_github','closed_on_github'))) AND NOT (state='publishing' AND publication_started) RETURNING id)
         INSERT INTO coding_events(job_id,event_key,payload) SELECT id,'cancelled',jsonb_build_object('summary','Coding job cancelled; its coding box is cleaned up separately.') FROM changed ON CONFLICT DO NOTHING`,
         [a.id, user],
       );
@@ -658,16 +676,8 @@ export class CodingController {
           "PR publication is in flight or uncertain; inspect its result before cancelling",
         );
       if (current?.state === "cancelled") this.abortModels(a.id);
-      else if (current) {
-        // Its PR may already be gone on GitHub, which finishes the job. A failed read changes nothing.
-        const row = (
-          await this.db.query("SELECT * FROM coding_jobs WHERE id=$1", [a.id])
-        ).rows[0] as CodingJob;
-        if (await this.automation?.settleOutside(row).catch(() => false))
-          return this.status(user, a.id);
-        // Nothing changed: say why, so the job is never reported as cancelled while it is not.
-        throw new ToolValidationError(cancelRefusal(current));
-      }
+      // Nothing changed: say why, so the job is never reported as cancelled while it is not.
+      else if (current) throw new ToolValidationError(cancelRefusal(current));
       return this.status(user, a.id);
     }
     const job = (
@@ -797,7 +807,7 @@ export class CodingController {
       throw new ToolValidationError(
         job.state !== "pr_ready"
           ? "Coding scope changed, job is active, or sandbox cleanup is pending; inspect status before revising"
-          : job.stage === "merged_outside" || job.stage === "closed_outside"
+          : job.stage === "merged_on_github" || job.stage === "closed_on_github"
             ? `This job is finished: ${job.summary} Start a new job for further work.`
             : job.settings.prWorkflow === "owner_merge" &&
                 (job.stage === "manual_review" ||
