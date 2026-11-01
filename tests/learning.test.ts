@@ -1056,31 +1056,35 @@ test("every run records what it read, what the model said and each proposal's ve
   const id = await task(db, {
     ownerSays: ["I prefer window seats always, token sk-abcdefghijklmnopqrstu"],
   });
-  const { adapter } = model(() => [
-    [
-      "learn_fact",
-      {
-        key: "seat_preference",
-        value: "Prefers window seats",
-        quote: "I prefer window seats",
-        taskIds: [id],
-        reason: "Stated",
-      },
-    ],
-    [
-      "learn_fact",
-      {
-        key: "home_city",
-        value: "Lives in Penang",
-        quote: "I live in Penang",
-        taskIds: [id],
-        reason: "Invented",
-      },
-    ],
-    ["learn_fact", { key: "broken" }],
-    ["learn_retire", { key: "style", reason: "stale", taskIds: [id] }],
-    ["learn_finish", {}],
-  ]);
+  const { adapter } = model((_input, n) =>
+    n > 1
+      ? [["learn_finish", {}]]
+      : [
+          [
+            "learn_fact",
+            {
+              key: "seat_preference",
+              value: "Prefers window seats",
+              quote: "I prefer window seats",
+              taskIds: [id],
+              reason: "Stated",
+            },
+          ],
+          [
+            "learn_fact",
+            {
+              key: "home_city",
+              value: "Lives in Penang",
+              quote: "I live in Penang",
+              taskIds: [id],
+              reason: "Invented",
+            },
+          ],
+          ["learn_fact", { key: "broken" }],
+          ["learn_retire", { key: "style", reason: "stale", taskIds: [id] }],
+          ["learn_finish", {}],
+        ],
+  );
   const result: any = await learner(db, adapter).tick("owner");
   const rows = (
     await db.query(
@@ -1109,6 +1113,8 @@ test("every run records what it read, what the model said and each proposal's ve
       { refused: "The quote must be the owner's exact words in a cited task" },
       { refused: "Invalid arguments" },
       { accepted: true },
+      { ok: true },
+      // The retry turn that the refusals earned.
       { ok: true },
     ],
   );
@@ -1268,7 +1274,14 @@ test("a reworded fact is accepted and flagged, but it cannot add a number or neg
     quoteRefusal("I want aisle seats", "Does not want aisle seats")!,
     /negation/,
   );
-  assert.match(quoteRefusal("I don't eat beef", "Eats beef")!, /negation/);
+  // A "not" elsewhere in the quote does not block the fact, as it did on 1 November. A
+  // dropped negation is accepted and flagged as reworded.
+  const study =
+    "No not to reader, this is for ai learning not for offline, store this separately";
+  assert.equal(quoteRefusal(study, "Stores ai learning separately"), undefined);
+  assert.ok(!quoteSupports(study, "Stores ai learning separately"));
+  assert.equal(quoteRefusal("I don't eat beef", "Eats beef"), undefined);
+  assert.ok(!quoteSupports("I don't eat beef", "Eats beef"));
   assert.match(
     quoteRefusal(
       "Please send the report to my boss",
@@ -1342,4 +1355,54 @@ test("items reviewed under a superseded prompt are mined again, once", async (t)
     "owner",
   );
   assert.equal(next.inputs.length, 0);
+});
+
+test("refused proposals get one more turn even when the model already finished", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, { ownerSays: ["I prefer window seats always"] });
+  const bad = [
+    "learn_fact",
+    {
+      key: "seat_preference",
+      value: "Prefers window seats in row 12",
+      quote: "I prefer window seats",
+      taskIds: [id],
+      reason: "Stated",
+    },
+  ] as Call;
+  const { adapter, inputs } = model((input, n) => {
+    if (n === 1) return [bad, ["learn_finish", {}]];
+    assert.match(input.messages.at(-1).content, /refused some proposals/);
+    if (n === 2)
+      return [
+        [
+          "learn_fact",
+          {
+            key: "seat_preference",
+            value: "Prefers window seats",
+            quote: "I prefer window seats",
+            taskIds: [id],
+            reason: "Stated",
+          },
+        ],
+        bad,
+        ["learn_finish", {}],
+      ];
+    throw new Error("only one retry");
+  });
+  const result: any = await learner(db, adapter).tick("owner");
+  // The second finish is honoured even with a new refusal, so a run cannot loop.
+  assert.deepEqual(
+    [result.state, result.facts, result.refused, result.modelCalls],
+    ["completed", 1, 2, 2],
+  );
+  assert.equal(inputs.length, 2);
+  const retries = (
+    await db.query("SELECT data FROM events WHERE type='learner.retry'")
+  ).rows;
+  assert.equal(retries.length, 1);
+  assert.equal(
+    (await new MemoryStore(db).active("owner"))[0]?.value,
+    "Prefers window seats",
+  );
 });

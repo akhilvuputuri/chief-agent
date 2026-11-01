@@ -4,6 +4,13 @@
 - **Why.** Editing a paused job's reviewer invalidated its approval. See [journal 142](journey/142-approval-covers-the-spec.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
 
+## Deployed `ea9943c` and `c54ddcb` (untagged) — the learner's record, and saving more (#326)
+
+- **What merged.** [PR 375](https://github.com/akhilvuputuri/chief-agent/pull/375) as `ea9943c`: each learner run keeps a private record of its input, model calls, proposals with verdicts, and item outcomes. [PR 385](https://github.com/akhilvuputuri/chief-agent/pull/385) as `c54ddcb`: prompt `learner-v3` errs toward saving, reworded facts are flagged rather than refused, learned items get 12,000 characters of the prompt, up to 60 turns a night, and items reviewed under earlier prompts are mined again once. No migration.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `c233481` (half an emoji or a failed insert could fail a run) and on `5c449bb` (a paraphrased fact would make every owner turn log a warning), then approved `e566ac5` and `0e5de43`. Hosted CI passed on both.
+- **Release.** `c54ddcb` recorded at 17:20:30 UTC on 31 October; the host reported it healthy, with no `error`- or `warn`-level line in the gateway container's log at that point.
+- **First run.** 03:32 SGT on 1 November: 55 items, 1 fact and 5 lessons saved, 5 facts refused, $0.17. See [journal 130](journey/130-nightly-learner.md#first-night-under-the-new-rules-and-pruning--2026-11-01).
+
 ## Parallel test files in CI (1 November 2026)
 
 - **What merged.** [PR 389](https://github.com/akhilvuputuri/chief-agent/pull/389) (`a02cbd8`): CI test shards run four test files at a time, by the owner's decision. Everywhere else stays serial. CI configuration only.

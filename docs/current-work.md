@@ -1,10 +1,14 @@
-# The learner saves more — proposed, 1 November 2026
+# Learner refusals and prompt budget — proposed, 1 November 2026
 
-The owner wants memory to accumulate and will prune it later. Prompt `learner-v3` errs toward saving, a reworded fact is flagged rather than refused (it still needs the owner's quoted words, with no added number or negation), learned items get 12,000 characters of the prompt, and items reviewed under earlier prompts are mined again once. Pruning goes through a coding session for now. Branch `feat/learner-save-more`. See [learning](learning.md#host-checks) and [journal 130](journey/130-nightly-learner.md#saving-more--2026-11-01).
+The first night of saving more kept 6 items and refused 5 facts, 3 of them wrongly. The negation check now refuses only an added negation, refused proposals get one more turn, and learned facts and lessons each have half the prompt budget. Two wrong lessons were retired and three facts added in production, approved by the owner. Next: RAG over conversations and learned memories with pgvector. Branch `fix/learner-refusals-budget`. See [journal 130](journey/130-nightly-learner.md#first-night-under-the-new-rules-and-pruning--2026-11-01).
 
-# A private record of what the learner decides — proposed, 31 October 2026
+# The learner saves more — live in `c54ddcb`, 1 November 2026
 
-Two nights of learning from turns reviewed 55 turns, saved nothing and refused one proposal a night, and those proposals could not be read: the learner kept only counts. Each run now records its input, model calls, every proposal with the host's verdict, and the final outcome of each item, privately in `events`. Behaviour is unchanged and writes stay on. Branch `feat/learner-trace`. See [learning](learning.md#telemetry-and-the-private-record) and [journal 130](journey/130-nightly-learner.md#no-record-of-what-the-learner-decided--2026-10-31).
+The owner wants memory to accumulate and will prune it later. Prompt `learner-v3` errs toward saving, a reworded fact is flagged rather than refused (it still needs the owner's quoted words, with no added number or negation), learned items get 12,000 characters of the prompt, and items reviewed under earlier prompts are mined again once. Pruning goes through a coding session for now. See [learning](learning.md#host-checks) and [journal 130](journey/130-nightly-learner.md#saving-more--2026-11-01).
+
+# A private record of what the learner decides — live in `ea9943c`, 31 October 2026
+
+Two nights of learning from turns reviewed 55 turns, saved nothing and refused one proposal a night, and those proposals could not be read: the learner kept only counts. Each run now records its input, model calls, every proposal with the host's verdict, and the final outcome of each item, privately in `events`. Behaviour is unchanged and writes stay on. See [learning](learning.md#telemetry-and-the-private-record) and [journal 130](journey/130-nightly-learner.md#no-record-of-what-the-learner-decided--2026-10-31).
 
 # Faster box startup and CI — live since `9973a81`, 31 October 2026
 

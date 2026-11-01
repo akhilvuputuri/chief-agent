@@ -7,8 +7,9 @@
 - **First night (29 October):** 7 tasks reviewed, all skipped (six routines, one cancelled), no model call. Most owner requests never become a tracked task.
 - **Live:** learning from ordinary conversation turns (owner's choice), merged as `260c94c`, live since `b6e1071` (now `845595e`), prompt `learner-v2`.
 - **Results so far:** on 30 and 31 October the learner reviewed 55 turns, saved nothing and refused one proposal a night, at about $0.07 a night. Why is unknown, because proposals were not recorded.
-- **Proposed:** a private per-run record of input, model calls, proposals and outcomes (branch `feat/learner-trace`, [journal 130](docs/journey/130-nightly-learner.md#no-record-of-what-the-learner-decided--2026-10-31)). Writes stay on.
-- **Proposed (owner, 1 November):** save more and prune later: prompt `learner-v3`, branch `feat/learner-save-more`. Pruning goes through a coding session for now; a Telegram tool waits until the core works.
+- **Live:** a private per-run record of input, model calls, proposals and outcomes (`ea9943c`, [journal 130](docs/journey/130-nightly-learner.md#no-record-of-what-the-learner-decided--2026-10-31)).
+- **Live (owner, 1 November):** save more and prune later: prompt `learner-v3` (`c54ddcb`). Pruning goes through a coding session for now; a Telegram tool waits until the core works.
+- **First night of saving more (1 November):** 1 fact and 5 lessons saved, 5 facts refused, $0.17. Two wrong lessons retired and three facts added in production. Fixes in branch `fix/learner-refusals-budget`. Next feature: RAG with pgvector over conversations and learned memories (owner's choice: Postgres, not a separate store).
 - **Next:** after it ships, check the next night's counts, charges and learned items; then phase 3 (weekly digest with undo, learner-drafted skills). No reaction signals: the owner does not want to label anything (29 October).
 
 # Dependency hardening (#329, closed) — live in `211b2a2`, `9ab96c2`, `c4ba246` and `da2a5ff`, 27 October 2026

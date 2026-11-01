@@ -254,8 +254,10 @@ export function quoteRefusal(quote: string, value: string): string | undefined {
   const quoted = words(quote);
   const stated = words(value);
   const negated = (list: string[]) => list.some((w) => NEGATION.has(w));
-  if (negated(quoted) !== negated(stated))
-    return "The value must not add or drop a negation from the quote";
+  // Only an added negation refuses: a quote's "not" is often unrelated to the fact. A
+  // dropped one is flagged paraphrased, because quoteSupports requires both to agree.
+  if (negated(stated) && !negated(quoted))
+    return "The value must not add a negation the quote does not have";
   const digits = new Set(quoted.filter((w) => /\d/.test(w)));
   if (stated.some((w) => /\d/.test(w) && !digits.has(w)))
     return "Every number in the value must come from the quote";
@@ -966,6 +968,7 @@ export class Learner {
     const accepted: Array<{ name: ToolName; args: any }> = [];
     let refused = 0;
     let modelCalls = 0;
+    let retried = false;
     const controller = new AbortController();
     for (let i = 0; i < LEARNING_LIMITS.modelCalls; i++) {
       // Pre-empted when the owner starts a turn; nothing is applied.
@@ -991,6 +994,7 @@ export class Learner {
       });
       if (!calls.length) break;
       let finished = false;
+      const refusedBefore = refused;
       for (const call of calls) {
         const name = call.function.name as ToolName;
         let result: Record<string, unknown>;
@@ -1031,6 +1035,22 @@ export class Learner {
           role: "tool",
           tool_call_id: call.id,
           content: JSON.stringify(result),
+        });
+      }
+      // It usually proposes everything and finishes in one response, so it would never see
+      // why something was refused. Once a run, it gets one more turn to correct them.
+      if (finished && refused > refusedBefore && !retried) {
+        retried = true;
+        finished = false;
+        await this.trace(user, run, "learner.retry", {
+          learnerRun,
+          call: modelCalls,
+          refused: refused - refusedBefore,
+        });
+        messages.push({
+          role: "user",
+          content:
+            "The host refused some proposals; the tool results give each reason. Propose corrected versions that keep to the owner's words where that is possible, then call learn_finish again.",
         });
       }
       if (finished) break;
