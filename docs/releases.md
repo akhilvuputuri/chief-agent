@@ -2,7 +2,8 @@
 
 - **Code.** Prompt `learner-v5` saves facts only. `procedures-v1` reads two weeks of work together and revises one procedure per kind of work. No migration.
 - **Why.** One-item lessons were clearly useful 1 time in 33 in an offline comparison, against 8 in 11 for procedures. See [journal 130](journey/130-nightly-learner.md#procedures-replace-one-item-lessons--2026-11-01).
-- **Review and deployment.** Pending; update this entry on release.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `8111a1a` and `c04c301`, then approved `b4e8f84`. Its one remaining low finding: an empty model response after accepted proposals fails that window until the next night.
+- **Deployment.** [PR 399](https://github.com/akhilvuputuri/chief-agent/pull/399) merged as `385e0d7`. Release run 41314961290 succeeded, and the host reports `385e0d7` with a healthy gateway since 14:12 UTC on 1 November. First run due from 03:30 Singapore on 2 November; what it writes is not yet measured.
 
 ## Baked coding box image (1 November 2026)
 
