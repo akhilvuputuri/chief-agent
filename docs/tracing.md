@@ -107,6 +107,12 @@ The monitors on the host are created through agentwatch's Alerts page or API, ov
 | Redirected answers | `user_redirected`, 7 days, at least 10     | above 30%  | 6% as detected, likely about 12% |
 | Judged answers     | `answer_ok`, 7 days, at least 10           | below 60%  | none yet                         |
 
+## Drift
+
+agentwatch also compares a metric with the window directly before it, on its Drift page and as a drift monitor ([agentwatch's design notes](https://github.com/akhilvuputuri/agentwatch/blob/main/docs/design.md)). It reports a change, not a level: once a shift fills both windows, the monitor resolves whatever the level is, so the relay words a drift resolve as "no longer differs" and never as recovered.
+
+Simulated traffic with ordinary bunching fires falsely up to about 1.8 times a month, so a drift monitor on the host starts `muted`: it records what it would have sent, shown on the Alerts page, and the relay never receives it. A resolve follows its firing alert, so toggling mute mid-incident cannot leave the owner on a "firing" that never ends ([journal 147](journey/147-drift-detection.md)).
+
 ## Backfilling history
 
 Live export to the host's agentwatch started on 29 October 2026 at 15:00:16 UTC (the gateway's `trace.export_enabled` line), and no run started between then and the first live trace. Runs from before then (Chief's Postgres keeps them from 6 September 2026) can be rebuilt into agentwatch from the database, in the same shape as live traces. Code: [scripts/trace-backfill.sql](../scripts/trace-backfill.sql) reads the rows, [src/trace-backfill.ts](../src/trace-backfill.ts) turns them into spans and evaluations and posts them. Tests: [tests/trace-backfill.test.ts](../tests/trace-backfill.test.ts), which drives a real `Execution` on PGlite with live export on, runs the query over the same database and checks that the rebuilt spans have the live spans' names, kinds, status, tree, trace IDs and attributes.
