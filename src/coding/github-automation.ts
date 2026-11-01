@@ -28,33 +28,45 @@ export class GitHubAutomation implements PrAutomationRepository {
       variables: Record<string, unknown>,
     ) => Promise<any>,
   ) {}
-  private number(t: MergeTarget) {
+  private prNumber(url: string) {
     const prefix = `https://github.com/${this.repository}/pull/`;
     if (
-      !t.url.startsWith(prefix) ||
-      !/^[1-9][0-9]*$/.test(t.url.slice(prefix.length)) ||
-      ![t.head, t.baseSha, t.tree].every(sha)
+      !url.startsWith(prefix) ||
+      !/^[1-9][0-9]*$/.test(url.slice(prefix.length))
     )
       throw new Error("Invalid owned PR target");
-    return Number(t.url.slice(prefix.length));
+    return Number(url.slice(prefix.length));
   }
-  private async owned(t: MergeTarget, signal?: AbortSignal) {
-    const pr = await this.api(
-      `pulls/${this.number(t)}`,
-      undefined,
-      undefined,
-      signal,
-    );
+  private number(t: MergeTarget) {
+    if (![t.head, t.baseSha, t.tree].every(sha))
+      throw new Error("Invalid owned PR target");
+    return this.prNumber(t.url);
+  }
+  private owned(t: MergeTarget, signal?: AbortSignal) {
+    return this.ownedPr(t.id, this.number(t), signal);
+  }
+  private async ownedPr(id: string, number: number, signal?: AbortSignal) {
+    const pr = await this.api(`pulls/${number}`, undefined, undefined, signal);
     if (
       pr.head?.repo?.full_name !== this.repository ||
       pr.base?.repo?.full_name !== this.repository ||
       pr.base?.ref !== "main" ||
-      !new RegExp(`^chief/coding-${t.id}-r[1-9][0-9]*$`).test(
-        pr.head?.ref ?? "",
-      )
+      !new RegExp(`^chief/coding-${id}-r[1-9][0-9]*$`).test(pr.head?.ref ?? "")
     )
       throw new Error("PR ownership changed");
     return pr;
+  }
+  async outcome(job: { id: string; url: string }) {
+    const pr = await this.ownedPr(
+      job.id,
+      this.prNumber(job.url),
+      AbortSignal.timeout(30000),
+    );
+    return {
+      merged: pr.merged === true,
+      closed: pr.state !== "open",
+      mergeSha: pr.merge_commit_sha,
+    };
   }
   async inspect(t: MergeTarget): Promise<PrInspection> {
     const limit = AbortSignal.timeout(120000);

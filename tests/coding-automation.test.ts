@@ -112,6 +112,7 @@ async function fixture(t: TestContext) {
     release: "pending" | "success" | "failure" = "pending";
   const repository = {
     inspect: async () => inspection,
+    outcome: async () => inspection,
     ready: async () => {
       inspection = { ...inspection, draft: false };
     },

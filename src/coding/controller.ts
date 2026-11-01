@@ -120,6 +120,8 @@ export function cancelRefusal(job: {
   merge_flow?: string | null;
 }) {
   if (job.state === "pr_ready") {
+    if (job.stage === "merged_outside" || job.stage === "closed_outside")
+      return `Nothing to cancel: this job's PR (${job.pr_url}) was already ${job.stage === "merged_outside" ? "merged" : "closed"} on GitHub, so the job is finished. It holds no worker and needs nothing from the owner.`;
     if (
       job.stage === "merging" ||
       job.stage === "release_pending" ||
@@ -656,8 +658,16 @@ export class CodingController {
           "PR publication is in flight or uncertain; inspect its result before cancelling",
         );
       if (current?.state === "cancelled") this.abortModels(a.id);
-      // Nothing changed: say why, so the job is never reported as cancelled while it is not.
-      else if (current) throw new ToolValidationError(cancelRefusal(current));
+      else if (current) {
+        // Its PR may already be gone on GitHub, which finishes the job. A failed read changes nothing.
+        const row = (
+          await this.db.query("SELECT * FROM coding_jobs WHERE id=$1", [a.id])
+        ).rows[0] as CodingJob;
+        if (await this.automation?.settleOutside(row).catch(() => false))
+          return this.status(user, a.id);
+        // Nothing changed: say why, so the job is never reported as cancelled while it is not.
+        throw new ToolValidationError(cancelRefusal(current));
+      }
       return this.status(user, a.id);
     }
     const job = (
@@ -787,16 +797,19 @@ export class CodingController {
       throw new ToolValidationError(
         job.state !== "pr_ready"
           ? "Coding scope changed, job is active, or sandbox cleanup is pending; inspect status before revising"
-          : job.settings.prWorkflow === "owner_merge" &&
-              (job.stage === "manual_review" || job.stage === "merge_declined")
-            ? `This job's PR stopped for owner attention (${job.summary}). If the owner asks to continue, use coding_resume on this job: it re-runs the merge checks and rebases if needed; holds that still apply (protected files, exhausted allocation, two rebases) come back with their reason.`
-            : job.stage === "manual_review" || job.stage === "merge_declined"
-              ? `This job's PR stopped for owner attention (${job.summary}). It will not continue automatically and Chief cannot merge it in this state; explain the reason, then the owner can act on GitHub or start a new job.`
-              : job.settings.prWorkflow === "owner_merge"
-                ? "This job already has a PR and continues on its own: Chief handles Devin and MR feedback, rebases onto main when it moves, re-runs checks and review, then sends the owner a Merge / Keep open card. Nothing to resume or revise; report its stage from coding_status."
-                : job.settings.autoMerge
-                  ? "This job already has a PR and continues through its automatic merge workflow; report its stage from coding_status."
-                  : "This job already has a draft PR; it predates the owner-merge workflow, so it can only be merged on GitHub or replaced by a new job.",
+          : job.stage === "merged_outside" || job.stage === "closed_outside"
+            ? `This job is finished: ${job.summary} Start a new job for further work.`
+            : job.settings.prWorkflow === "owner_merge" &&
+                (job.stage === "manual_review" ||
+                  job.stage === "merge_declined")
+              ? `This job's PR stopped for owner attention (${job.summary}). If the owner asks to continue, use coding_resume on this job: it re-runs the merge checks and rebases if needed; holds that still apply (protected files, exhausted allocation, two rebases) come back with their reason.`
+              : job.stage === "manual_review" || job.stage === "merge_declined"
+                ? `This job's PR stopped for owner attention (${job.summary}). It will not continue automatically and Chief cannot merge it in this state; explain the reason, then the owner can act on GitHub or start a new job.`
+                : job.settings.prWorkflow === "owner_merge"
+                  ? "This job already has a PR and continues on its own: Chief handles Devin and MR feedback, rebases onto main when it moves, re-runs checks and review, then sends the owner a Merge / Keep open card. Nothing to resume or revise; report its stage from coding_status."
+                  : job.settings.autoMerge
+                    ? "This job already has a PR and continues through its automatic merge workflow; report its stage from coding_status."
+                    : "This job already has a draft PR; it predates the owner-merge workflow, so it can only be merged on GitHub or replaced by a new job.",
       );
     return this.status(user, a.id);
   }

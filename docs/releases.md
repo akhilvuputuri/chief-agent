@@ -1,3 +1,9 @@
+## Coding jobs notice PRs finished on GitHub (1 November 2026)
+
+- **Code.** The host compares parked coding PRs with GitHub every 15 minutes, and `coding_cancel` checks first, so a PR merged or closed outside Chief finishes its job. No worker image, database or Compose change.
+- **Why.** PR 305 merged on 21 October but its job still looked open, and Chief told the owner to close it. See [journal 145](journey/145-prs-finished-on-github.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Procedures replace one-item lessons (1 November 2026)
 
 - **Code.** Prompt `learner-v5` saves facts only. `procedures-v1` reads two weeks of work together and revises one procedure per kind of work. No migration.

@@ -151,6 +151,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1 November | [142 — What an approval is tied to](142-approval-covers-the-spec.md): must an owner's approval bind who carries out a plan? | Tested on synthetic jobs; release pending. Approval now covers only the objective, context and plan |
 | 1 November | [143 — Recall with pgvector](143-recall-with-pgvector.md): can Chief find what the owner half-remembers? | Released; first operator-written evaluation favours keeping it; real use not measured. |
 | 1 November | [144 — Baked coding box image](144-baked-box-image.md): can a prepared image shorten a box's boot? | Configuration live after the owner's AWS rollout; no launch from it observed yet, so the speed-up is not measured |
+| 1 November | [145 — PRs finished on GitHub](145-prs-finished-on-github.md): how does a parked coding job learn its PR is gone? | Tested on synthetic jobs; release pending. A sweep and a check on cancel finish jobs whose PR was merged or closed |
 
 ## Coding-agent learning path
 

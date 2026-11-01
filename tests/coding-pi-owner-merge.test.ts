@@ -104,6 +104,7 @@ async function fixture(
     readies = 0;
   let onInspect: (() => Promise<void>) | undefined;
   const repository = {
+    outcome: async () => inspection,
     inspect: async () => {
       const hook = onInspect;
       onInspect = undefined;

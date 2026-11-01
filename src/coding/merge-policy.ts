@@ -71,8 +71,15 @@ export type MergeTarget = {
   url: string;
   tree: string;
 };
+export type PrOutcome = {
+  merged: boolean;
+  closed: boolean;
+  mergeSha?: string | null;
+};
 export interface PrAutomationRepository {
   inspect(target: MergeTarget): Promise<PrInspection>;
+  /** Whether a job's own PR was merged or closed, with no merge target recorded for it. */
+  outcome(job: { id: string; url: string }): Promise<PrOutcome>;
   ready(target: MergeTarget): Promise<void>;
   attest(
     target: MergeTarget,
