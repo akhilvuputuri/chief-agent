@@ -637,6 +637,20 @@ export class CodingController {
           [a.id, user],
         )
       ).rows[0] as CodingJob | undefined;
+      // A stop after Chief's own merge is about the release, so closing the PR cannot help.
+      const ownMerge =
+        parked && ["manual_review", "merge_declined"].includes(parked.stage)
+          ? (
+              await this.db.query(
+                "SELECT payload->>'mergeSha' AS sha FROM coding_events WHERE job_id=$1 AND event_key LIKE 'automation:%' AND payload ? 'mergeSha' LIMIT 1",
+                [a.id],
+              )
+            ).rows[0]?.sha
+          : undefined;
+      if (ownMerge)
+        throw new ToolValidationError(
+          `Not cancelled: this job's PR already merged as ${ownMerge} (${parked!.summary}), so there is nothing to cancel or close. Explain the reason; the release must be inspected separately.`,
+        );
       if (
         parked &&
         (await this.automation?.settleOutside(parked).catch((error) => {

@@ -54,8 +54,8 @@ export class CodingAutomation {
   ) {}
   /**
    * Finishes a parked job whose PR was merged or closed on GitHub. Only GitHub's own answer
-   * changes the job; a failed read leaves it as it was. This corrects the record, so it sends
-   * no message: only the owner can merge or close on GitHub.
+   * changes the job; a failed read leaves it as it was. This corrects the record and asks
+   * nothing of the owner, so it sends no message.
    */
   async settleOutside(j: CodingJob) {
     const url = (j as any).pr_url as string | null;

@@ -30,9 +30,9 @@ Chosen: a sweep every 15 minutes, so status stays a database read that is usuall
 - `src/coding/automation.ts`: `settleOutside` and `sweepParked`. The write is guarded by revision, stage, PR URL and lease. A failed read changes nothing. The sweep takes 20 jobs in turn by id, so newer open PRs cannot crowd out old jobs.
 - `src/coding/controller.ts`: cancel checks first; refusals and resume explain a finished job.
 
-Independent review found that `manual_review` is also where a failed release stops. The first version would have replaced "merged, but release failed" with "finished". Any job whose automation record holds Chief's own `mergeSha` is now left alone. An uncertain merge has no such record and can still settle, so the wording says only that the PR merged on GitHub, not who merged it.
+Independent review found that `manual_review` is also where a failed release stops. The first version would have replaced "merged, but release failed" with "finished". Any job whose automation record holds Chief's own `mergeSha` is now left alone, and cancelling one says the PR already merged and its release needs inspecting, rather than telling the owner to close it. An uncertain merge has no such record and can still settle, so the wording says only that the PR merged on GitHub, not who merged it.
 
-The sweep sends no message, because only the owner can merge or close on GitHub. Jobs stay `pr_ready`, because the state constraint has no merged value and this avoids a migration. The new stages fall out of `CODING_WAITS_ON_OWNER` by not being listed.
+The sweep sends no message, because it only corrects the record and asks nothing of the owner. Jobs stay `pr_ready`, because the state constraint has no merged value and this avoids a migration. The new stages fall out of `CODING_WAITS_ON_OWNER` by not being listed.
 
 Limitations:
 

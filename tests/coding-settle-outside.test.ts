@@ -177,6 +177,21 @@ test("a stop after Chief's own merge keeps its release warning", async (t) => {
   const job = await s.f.row(id);
   assert.equal(job.stage, "manual_review");
   assert.equal(job.summary, warning);
+  await assert.rejects(s.cancel(id), (e: any) => {
+    assert(e instanceof ToolValidationError);
+    assert.match(e.message, /already merged as c{40}/);
+    assert.match(e.message, /release must be inspected/);
+    assert.doesNotMatch(e.message, /closes the PR/);
+    return true;
+  });
+  await s.f.db.query(
+    `UPDATE coding_jobs SET settings=settings||'{"autoMerge":true}'::jsonb WHERE id=$1`,
+    [id],
+  );
+  await assert.rejects(s.cancel(id), /already merged/);
+  const after = await s.f.row(id);
+  assert.equal(after.state, "pr_ready");
+  assert.equal(after.summary, warning);
 });
 
 test("a draft job is checked, but a pr_ready job automation is handling is not", async (t) => {
