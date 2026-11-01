@@ -27,6 +27,10 @@ MIGRATION = '034_embeddings.sql'
 COMPOSE_ANCHOR = b'        "/migrations/033_mail_index.sql",\n'
 COMPOSE_ADDITION = b'        "-f",\n        "/migrations/034_embeddings.sql",\n'
 POSTGRES_IMAGE = 'chief-postgres:17-alpine-pgvector-0.8.7'
+BACKUPS = pathlib.Path('/var/backups/hermes-companion')
+# The same binaries must see the same data files: version and collation, compared across the swap.
+DATABASE_IDENTITY = ("SELECT current_setting('server_version')||'/'||datlocprovider||'/'||datcollate||'/'||"
+                     "datctype||'/'||coalesce(datcollversion,'') FROM pg_database WHERE datname=current_database()")
 OLD_SERVICE = b'  postgres:\n    image: postgres:17-alpine\n'
 NEW_SERVICE = (b'  postgres:\n'
                b'    # pgvector compiled onto the exact image that ran before it (docs/recall.md).\n'
@@ -65,6 +69,17 @@ def healthy():
                 return True
         time.sleep(2)
     return False
+
+
+def running_postgres_digest():
+    image = compose('images', '-q', 'postgres', text=True).stdout.strip()
+    return run(['docker', 'image', 'inspect', '--format', '{{json .RepoDigests}}', image], text=True).stdout
+
+
+def fresh_backup(started):
+    # The backup script exits 0 without a dump when another backup holds its lock.
+    return any(path.stat().st_mtime >= started and path.stat().st_size > 0
+               for path in BACKUPS.glob('database-*.dump.cms'))
 
 
 def postgres_ready():
@@ -196,6 +211,10 @@ def main():
             backup.mkdir()
             unpack(archive_path, sha, stage)
             validate_changes(stage)
+            bases = set(re.findall(r'^FROM postgres:17-alpine@(sha256:[0-9a-f]{64})',
+                                   (stage / 'Dockerfile.postgres').read_text(), re.M))
+            if len(bases) != 1 or bases.pop() not in running_postgres_digest():
+                raise RuntimeError('Running Postgres is not the base of the pgvector image; live application unchanged')
             original = backup_source(stage, backup)
             candidate = IMAGE + ':' + sha
             try:
@@ -215,12 +234,16 @@ def main():
             previous = compose('images', '-q', 'gateway', text=True).stdout.strip()
             if not previous:
                 raise RuntimeError('Previous image unavailable')
-            old_version = sql('SHOW server_version')
+            old_identity = sql(DATABASE_IDENTITY)
+            started = int(time.time())
             try:
                 # A recovery point from just before the database restarts.
                 run(['systemctl', 'start', 'hermes-backup.service'])
+                backed_up = fresh_backup(started)
             except Exception:
-                raise RuntimeError('Fresh backup failed; live application unchanged') from None
+                backed_up = False
+            if not backed_up:
+                raise RuntimeError('Fresh backup failed; live application unchanged')
             old_compose = (LIVE / 'compose.yaml').read_bytes()
             run(['docker', 'tag', previous, IMAGE + ':rollback'])
             source_changed = False
@@ -233,8 +256,8 @@ def main():
                 compose('up', '-d', '--no-deps', '--no-build', 'postgres')
                 if not postgres_ready():
                     raise RuntimeError('Postgres did not come back on the pgvector image')
-                if sql('SHOW server_version') != old_version:
-                    raise RuntimeError('The pgvector image changed the Postgres version')
+                if sql(DATABASE_IDENTITY) != old_identity:
+                    raise RuntimeError('The pgvector image changed the Postgres version or collation')
                 sql((stage / 'db' / MIGRATION).read_text())
                 migration_applied = True
                 if sql('SELECT count(*) FROM runtime_migrations WHERE version=34') != '1':
@@ -249,6 +272,12 @@ def main():
                 publish_source(stage)
                 write_release((sha + '\n').encode())
             except Exception:
+                try:
+                    # A lost reply after COMMIT must not bring back an image that cannot read it.
+                    if image_replaced and not migration_applied:
+                        migration_applied = sql('SELECT count(*) FROM runtime_migrations WHERE version=34') == '1'
+                except Exception:
+                    pass
                 try:
                     compose('stop', 'gateway')
                     if source_changed:
@@ -273,9 +302,9 @@ def main():
                     raise RuntimeError('Rollback needs operator inspection; a fresh backup exists; no database reversal or task replay was attempted') from None
                 if migration_applied:
                     # The plain image cannot read vector columns, so Postgres keeps this one.
-                    # The old gateway ignores the table. Automatic releases stay refused until
-                    # an operator finishes this rollout.
-                    raise RuntimeError('Candidate failed; previous gateway healthy on the pgvector image; migration 034 and the Compose change retained; finish this rollout by hand') from None
+                    # The old gateway ignores the table. This script cannot run again, and the
+                    # release guard now passes, so a release deploys the same candidate.
+                    raise RuntimeError('Candidate failed; previous gateway healthy on the pgvector image; migration 034 and the Compose change retained; automatic releases are no longer refused, so find the cause first: a release of this commit deploys the same candidate, with its own rollback') from None
                 raise RuntimeError('Candidate failed; previous application healthy on the plain Postgres image; nothing retained') from None
             # The trusted /usr/local/sbin release command is unchanged and is not installed here.
             print(json.dumps({'deployed': sha, 'healthy': True, 'migration': 34, 'postgres': POSTGRES_IMAGE}))

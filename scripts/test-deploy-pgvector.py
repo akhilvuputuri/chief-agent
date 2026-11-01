@@ -43,6 +43,7 @@ class PgvectorRolloutTests(unittest.TestCase):
         self.scenario(baseline='b' * 40, expected_error='exact documented baseline')
 
     def scenario(self, *, version_change=False, postgres_failure=False, backup_failure=False,
+                 digest='sha256:' + 'b' * 64, no_new_dump=False, ack_lost=False,
                  ready=None, running=0, pending=0, baseline=None, requested_sha=SHA,
                  archive_sha=SHA, changes=None, unsafe=None, health=None,
                  build_failure=False, migration_failure=False, publish_failure=False,
@@ -70,7 +71,8 @@ class PgvectorRolloutTests(unittest.TestCase):
             candidate['docs/new.md'] = 'New reviewed source\n'
             candidate['db/' + release.MIGRATION] = (ROOT / 'db' / release.MIGRATION).read_text()
             candidate['compose.yaml'] = candidate_compose()
-            candidate['Dockerfile.postgres'] = 'FROM postgres:17-alpine\n'
+            candidate['Dockerfile.postgres'] = ('FROM postgres:17-alpine@sha256:' + 'b' * 64 + ' AS build\n'
+                                                'FROM postgres:17-alpine@sha256:' + 'b' * 64 + '\n')
             for name, content in (changes or {}).items():
                 if content is None:
                     candidate.pop(name, None)
@@ -105,6 +107,8 @@ class PgvectorRolloutTests(unittest.TestCase):
                     raise subprocess.CalledProcessError(1, args, stderr='PRIVATE_SENTINEL')
                 if args[0] == 'systemctl' and backup_failure:
                     raise subprocess.CalledProcessError(1, args, stderr='PRIVATE_SENTINEL')
+                if args[:3] == ['docker', 'image', 'inspect']:
+                    return subprocess.CompletedProcess(args, 0, stdout=f'["postgres@{digest}"]\n')
                 return subprocess.CompletedProcess(args, 0, stdout='')
 
             def compose(*args, **kwargs):
@@ -117,9 +121,9 @@ class PgvectorRolloutTests(unittest.TestCase):
                     return str(running)
                 if statement == "SELECT count(*) FROM conversation_inputs WHERE state IN ('queued','running')":
                     return str(pending)
-                if statement == 'SHOW server_version':
+                if statement == release.DATABASE_IDENTITY:
                     versions.append(statement)
-                    return '17.12' if version_change and len(versions) > 1 else '17.11'
+                    return '17.12/c' if version_change and len(versions) > 1 else '17.11/c'
                 if statement == "SELECT '[1,0]'::vector <=> '[1,0]'::vector":
                     return '0'
                 if statement == 'SELECT count(*) FROM runtime_migrations WHERE version=34':
@@ -133,6 +137,8 @@ class PgvectorRolloutTests(unittest.TestCase):
                 if migration_failure:
                     raise RuntimeError('simulated transactional migration failure')
                 database['migration34'] = True
+                if ack_lost:
+                    raise RuntimeError('simulated lost reply after commit')
                 return ''
 
             real_publish = release.publish_source
@@ -155,6 +161,7 @@ class PgvectorRolloutTests(unittest.TestCase):
                     patch.object(release, 'healthy', side_effect=health or [True, True]), \
                     patch.object(release, 'postgres_ready', side_effect=ready or [True, True]), \
                     patch.object(release, 'publish_source', side_effect=publish), \
+                    patch.object(release, 'fresh_backup', return_value=not no_new_dump), \
                     contextlib.redirect_stdout(output):
                 if expected_error:
                     with self.assertRaisesRegex(RuntimeError, expected_error) as caught:
@@ -239,6 +246,8 @@ class PgvectorRolloutTests(unittest.TestCase):
         self.scenario(build_failure=True, expected_error='Candidate build failed')
         self.scenario(postgres_failure=True, expected_error='Postgres image build failed')
         self.scenario(backup_failure=True, expected_error='Fresh backup failed')
+        self.scenario(no_new_dump=True, expected_error='Fresh backup failed')
+        self.scenario(digest='sha256:' + 'c' * 64, expected_error='not the base of the pgvector image')
         self.scenario(health=[False], expected_error='Baseline application is not healthy')
 
     def test_compose_must_also_carry_the_exact_pgvector_image(self):
@@ -260,6 +269,21 @@ class PgvectorRolloutTests(unittest.TestCase):
                                  expected_migration=True)
         # The plain image cannot read vector columns, so Postgres is not replaced again.
         self.assertEqual(commands.count(('compose', 'up', '-d', '--no-deps', '--no-build', 'postgres')), 1)
+
+    def test_lost_reply_after_commit_keeps_pgvector_image(self):
+        commands = self.scenario(ack_lost=True, health=[True, True],
+                                 expected_error='previous gateway healthy on the pgvector image',
+                                 expected_migration=True)
+        self.assertEqual(commands.count(('compose', 'up', '-d', '--no-deps', '--no-build', 'postgres')), 1)
+
+    def test_fresh_backup_needs_a_new_dump(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(release, 'BACKUPS', pathlib.Path(directory)):
+                self.assertFalse(release.fresh_backup(0))
+                dump = pathlib.Path(directory) / 'database-1.dump.cms'
+                dump.write_bytes(b'x')
+                self.assertTrue(release.fresh_backup(int(dump.stat().st_mtime)))
+                self.assertFalse(release.fresh_backup(int(dump.stat().st_mtime) + 10))
 
     def test_failed_migration_restores_plain_image_and_previous_app(self):
         commands = self.scenario(migration_failure=True, health=[True, True],

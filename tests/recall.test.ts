@@ -86,6 +86,70 @@ test("long text is split with overlap and capped", () => {
   assert.equal(chunks("x".repeat(100000)).length, 6);
 });
 
+test("a chunk never ends or starts inside an emoji", () => {
+  const halfAnEmoji =
+    /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+  for (const text of [
+    "x".repeat(1499) + "😀".repeat(2000),
+    "y".repeat(1301) + "😀".repeat(1000),
+  ])
+    for (const part of chunks(text)) assert.doesNotMatch(part, halfAnEmoji);
+});
+
+test("a refused source is skipped and the rest are indexed; an outage skips nothing", async (t) => {
+  const db = await setup(t);
+  for (let i = 0; i < 5; i++)
+    await message(db, "owner", "user", i === 2 ? "refuse this" : `fine ${i}`);
+  let down = true;
+  const index = new RecallIndex(db, {
+    embed: async (texts) => {
+      if (down) throw new Error("outage");
+      if (texts.some((x) => x.includes("refuse")))
+        throw new Error("Embedding request failed (400)");
+      return texts.map(vectorFor);
+    },
+  });
+  const count = async () =>
+    Number((await db.query("SELECT count(*) AS n FROM embeddings")).rows[0].n);
+  await assert.rejects(index.tick("owner"), /outage/);
+  assert.equal(await count(), 0);
+  down = false;
+  assert.equal(await index.tick("owner"), 4);
+  assert.equal(await count(), 4);
+  assert.equal(await index.tick("owner"), 0);
+  await message(db, "owner", "user", "new after the skip");
+  assert.equal(await index.tick("owner"), 1);
+  // A fresh process tries the refused one again, and still gets past it.
+  assert.equal(await new RecallIndex(db, embedder()).tick("owner"), 1);
+});
+
+test("a NUL in a query, a restored learned memory and memory-heavy keyword lists", async (t) => {
+  const db = await setup(t);
+  await message(db, "owner", "user", "the landlord called about rent");
+  const found = await recall(db, "owner", run(), "land\0lord rent");
+  assert.equal(found.mode, "keyword_only");
+  assert.equal(found.results.length, 1);
+  const restored = randomUUID();
+  await db.query(
+    `INSERT INTO memory_revisions(id,user_id,key,revision,kind,status,value,origin,reason,source,trust)
+     VALUES($1,'owner','airline',2,'fact','active','Flies with a rent discount','rollback','r',
+     '{"restoredOrigin":"learned"}'::jsonb,'owner')`,
+    [restored],
+  );
+  await db.query(
+    "INSERT INTO memory_heads(user_id,key,revision_id) VALUES('owner','airline',$1)",
+    [restored],
+  );
+  const memories = (await recall(db, "owner", run(), "discount")).results;
+  assert.equal(memories[0]!.learned, true);
+  const keyword = [{ type: "memory" as const, id: "m" }];
+  const fused = fuse([], keyword, [{ type: "message", id: "a" }]);
+  assert.deepEqual(
+    fused.map((h) => h.keywordRank),
+    [1, 1],
+  );
+});
+
 test("fusion ranks items both searches found above items only one found", () => {
   const hit = (id: string) => ({ type: "message" as const, id });
   const fused = fuse([hit("a"), hit("b")], [hit("c"), hit("b")]);

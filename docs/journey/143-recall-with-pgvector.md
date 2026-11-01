@@ -36,7 +36,13 @@ See [recall](../recall.md) for the design and rollout.
 
 **Bug found by the rollout's tests (1 November):** if publishing the source failed after the migration, the rollback restored the old Compose file, which names the plain image. The next full start would then have run a database with vector columns on an image that cannot read them. A later failure left the new Compose file without the migration file it names. Now everything the new Compose file needs stays once the migration has run.
 
-Independent review: pending.
+Independent review of `edd6a13` (Opus 5.5, 1 November): changes requested.
+
+- **Indexer could stall (confirmed with a fake embedder).** One input the provider refused blocked its batch on every pass. Chunking could also cut an emoji in half, a likely trigger, though the provider's response to that is unverified. Chunks now respect emoji, a failing batch falls back to one source at a time, and a probe separates a refused source from an outage.
+- **Rollback message was false (confirmed).** It said automatic releases stay refused after a post-migration failure, but the guard passes in that state. The message and doc now say what happens.
+- **Digest unchecked and image inexact (confirmed).** Nothing compared the running digest, and the build upgraded musl in the final image. The script now refuses on a digest mismatch and compares version and collation across the swap. A multi-stage build keeps the upgrade out of the final image. Measured on the host on 1 November: production runs the pinned digest.
+- **Also fixed:** a restored learned memory reported as not learned; memories outranking messages in the keyword list; NUL in a query; a hung query embedding holding the turn; a backup that exits 0 without a dump; and a lost reply after COMMIT choosing the wrong rollback.
+- **Accepted, documented:** indexing cost is not in `provider_charges`, and `Dockerfile.postgres` is outside the release guard.
 
 ## Verification and outcome
 
