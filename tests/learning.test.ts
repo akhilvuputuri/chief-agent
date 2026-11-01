@@ -3,6 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { Database } from "../src/db.js";
 import {
+  type Evidence,
+  fitted,
   labelTask,
   Learner,
   LEARNING_LIMITS,
@@ -2143,5 +2145,247 @@ test("a procedure run's counts reach the operational log", () => {
   assert.deepEqual(
     [line.procedureCount, line.absorbedCount, line.periodCount],
     [2, 3, 1],
+  );
+});
+
+test("revising or absorbing keeps earlier untrusted tags, so a rollback by source finds the text", async (t) => {
+  const db = await setup(t);
+  const news = await turn(db, {
+    says: "Summarise this week's news for me",
+    reply: "Done.",
+    at: IN_ONE_PERIOD,
+  });
+  const markets = await turn(db, {
+    says: "Summarise the markets for me too",
+    reply: "Done.",
+    at: IN_ONE_PERIOD,
+  });
+  const store = new MemoryStore(db);
+  for (const key of ["lesson:procedure:news", "lesson:news:x"])
+    await store.write("owner", {
+      key,
+      value: `Earlier text of ${key}`,
+      kind: "lesson",
+      domain: "news",
+      origin: "learned",
+      reason: "seed",
+      source: {},
+      untrustedSources: ["email"],
+    });
+  const { adapter } = model((input) =>
+    isProcedurePass(input) &&
+    !input.messages.some((m: any) => m.role === "tool")
+      ? [
+          procedure([news, markets], { absorbs: ["lesson:news:x"] }),
+          ["learn_finish", {}],
+        ]
+      : [["learn_finish", {}]],
+  );
+  await procedurePass(db, adapter);
+  const [revision] = (
+    await store.history("owner", "lesson:procedure:news")
+  ).slice(-1);
+  assert.deepEqual(
+    [revision!.trust, revision!.untrusted_sources],
+    ["untrusted", ["email"]],
+  );
+  await store.rollback("owner", { untrustedSource: "email" }, "Bad mail");
+  const active = (await store.active("owner")).map((r) => r.key);
+  assert.equal(active.includes("lesson:procedure:news"), false);
+});
+
+test("a procedure pass cannot retire what newer work set, and always sees every procedure", async (t) => {
+  const db = await setup(t);
+  const [news, markets] = await twoTurns(db);
+  const store = new MemoryStore(db);
+  await store.write("owner", {
+    key: "lesson:news:newer",
+    value: "A rule from later work",
+    kind: "lesson",
+    domain: "news",
+    origin: "learned",
+    reason: "seed",
+    source: { workDate: "2026-11-26" },
+  });
+  await seedLesson(db, "lesson:procedure:old");
+  // Enough newer items to push the procedure past the list's character bound.
+  for (let i = 0; i < 150; i++)
+    await store.write("owner", {
+      key: `seed_${"abcdefghij"[i % 10]}_${"abcdefghij"[Math.floor(i / 10) % 10]}_${"abcdefghij"[Math.floor(i / 100)]}`,
+      value: "x".repeat(300),
+      kind: "fact",
+      origin: "learned",
+      reason: "seed",
+      source: {},
+    });
+  let verdict: any;
+  const { adapter, inputs } = model((input) => {
+    if (!isProcedurePass(input)) return [["learn_finish", {}]];
+    const told = input.messages.filter((m: any) => m.role === "tool");
+    if (told.length) {
+      verdict = JSON.parse(told[0].content);
+      return [["learn_finish", {}]];
+    }
+    return [
+      [
+        "learn_retire",
+        {
+          key: "lesson:news:newer",
+          reason: "Older work disagrees",
+          taskIds: [news, markets],
+        },
+      ],
+      ["learn_finish", {}],
+    ];
+  });
+  await procedurePass(db, adapter);
+  assert.deepEqual(verdict, {
+    refused: "Newer work set this key; older items cannot retire it",
+  });
+  const shown = JSON.parse(inputs.find(isProcedurePass).messages[1].content);
+  assert.ok(shown.current.some((c: any) => c.key === "lesson:procedure:old"));
+  assert.ok(
+    (await store.active("owner")).some((r) => r.key === "lesson:news:newer"),
+  );
+});
+
+test("a text-only response fails the window, and a procedure pass asks for complete output", async (t) => {
+  const db = await setup(t);
+  await twoTurns(db);
+  const requests: any[] = [];
+  const adapter: ModelAdapter = {
+    generate: async (input): Promise<Generation> => {
+      const procedures = input.tools.some((x) => x.name === "learn_procedure");
+      if (procedures) requests.push(input);
+      return {
+        message: {
+          role: "assistant",
+          content: procedures ? "I ran out of room" : null,
+          tool_calls: procedures
+            ? []
+            : [
+                {
+                  id: randomUUID(),
+                  type: "function" as const,
+                  function: { name: "learn_finish", arguments: "{}" },
+                },
+              ],
+        },
+      };
+    },
+  };
+  const result = await procedurePass(db, adapter);
+  assert.equal(result.state, "failed");
+  assert.ok(new Date(result.through).getTime() < IN_ONE_PERIOD.getTime());
+  assert.deepEqual(
+    [requests[0].requireComplete, requests[0].maxOutputTokens],
+    [true, LEARNING_LIMITS.procedureOutputTokens],
+  );
+});
+
+test("a run from an earlier prompt tonight still lets the procedure pass follow", async (t) => {
+  const db = await setup(t);
+  await twoTurns(db);
+  await db.query(
+    `INSERT INTO learner_runs(id,user_id,state,prompt_version,started_at)
+     VALUES($1,'owner','completed','learner-v4',$2)`,
+    [randomUUID(), new Date(NIGHT.getTime() - 3600_000 / 4)],
+  );
+  const { adapter, inputs } = model(() => [["learn_finish", {}]]);
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual([result.state, result.periods], ["completed", 1]);
+  assert.ok(inputs.every(isProcedurePass));
+});
+
+test("a procedure pass gives up for the night after three deferrals", async (t) => {
+  const db = await setup(t);
+  await twoTurns(db);
+  const { adapter } = model(() => [["learn_finish", {}]]);
+  await learner(db, adapter).tick("owner");
+  await db.query(
+    "INSERT INTO conversation_inputs(id,user_id,message) VALUES($1,'owner','hi')",
+    [randomUUID()],
+  );
+  for (let i = 0; i < LEARNING_LIMITS.deferrals; i++)
+    assert.equal((await learner(db, adapter).tick("owner"))?.state, "deferred");
+  await db.query("UPDATE conversation_inputs SET state='completed'");
+  assert.equal(await learner(db, adapter).tick("owner"), null);
+  assert.equal((await procedureRuns(db)).length, LEARNING_LIMITS.deferrals);
+});
+
+test("windows a deferred attempt finished count towards the night's limit", async (t) => {
+  const db = await setup(t);
+  for (let weeks = 1; weeks <= 11; weeks++)
+    await turn(db, {
+      says: `Please look into topic number ${weeks}`,
+      reply: "Done.",
+      at: new Date(NIGHT.getTime() - weeks * 7 * DAY - DAY),
+    });
+  let passes = 0;
+  const { adapter, inputs } = model(async (input) => {
+    if (isProcedurePass(input) && ++passes === 4)
+      await db.query(
+        "INSERT INTO conversation_inputs(id,user_id,message) VALUES($1,'owner','hi')",
+        [randomUUID()],
+      );
+    return [["learn_finish", {}]];
+  });
+  const first = await procedurePass(db, adapter);
+  assert.deepEqual([first.state, first.periods], ["deferred", 3]);
+  await db.query("UPDATE conversation_inputs SET state='completed'");
+  const second: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual([second.state, second.periods], ["completed", 1]);
+  assert.equal(inputs.filter(isProcedurePass).length, 5);
+});
+
+test("a window's input has a hard limit, and what is left unread is counted", () => {
+  const item = (id: number, date: string, chars: number): Evidence => ({
+    id: String(id),
+    kind: "turn",
+    label: "success",
+    reasons: [],
+    date,
+    request: "x".repeat(chars),
+    steps: [],
+    operations: {},
+    ownerMessages: [{ id: "m", text: "x".repeat(chars) }],
+    reply: "y".repeat(chars),
+    untrusted: [],
+    runIds: [],
+  });
+  const few = fitted([
+    item(2, "2026-11-02", 2000),
+    item(1, "2026-11-01", 2000),
+  ]);
+  assert.deepEqual(
+    few.items.map((e) => e.id),
+    ["1", "2"],
+  );
+  assert.equal(
+    few.items[0]!.reply.length,
+    LEARNING_LIMITS.procedureMessageChars,
+  );
+  assert.equal(few.unread, 0);
+  const many = fitted(
+    Array.from({ length: LEARNING_LIMITS.procedureItems + 5 }, (_, i) =>
+      item(i, "2026-11-01", 200),
+    ),
+  );
+  assert.equal(many.items.length, LEARNING_LIMITS.procedureItems);
+  assert.equal(many.unread, 5);
+  const heavy = fitted(
+    Array.from({ length: 100 }, (_, i) => ({
+      ...item(i, "2026-11-01", 200),
+      steps: Array.from({ length: 30 }, () => ({
+        title: "t".repeat(200),
+        status: "done",
+        result: "r".repeat(300),
+      })),
+    })),
+  );
+  assert.ok(heavy.unread > 0);
+  assert.ok(
+    JSON.stringify(heavy.items).length <
+      LEARNING_LIMITS.procedureMaxChars * 1.5,
   );
 });

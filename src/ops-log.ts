@@ -169,6 +169,7 @@ const fields: Record<string, Shape> = {
   procedureCount: "count",
   absorbedCount: "count",
   periodCount: "count",
+  unreadCount: "count",
 };
 
 // Written as null rather than omitted: an unknown charge stays visibly unknown.
@@ -477,6 +478,7 @@ const projections: Record<string, Projection> = {
       procedureCount: d.procedures,
       absorbedCount: d.absorbed,
       periodCount: d.periods,
+      unreadCount: d.unread,
     },
   ],
   "recall.searched": (run, d) => [

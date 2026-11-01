@@ -76,6 +76,10 @@ export const LEARNING_LIMITS = {
   procedureItems: 300,
   /** Characters of evidence one pass aims for; messages and replies are cut to fit. */
   procedureChars: 150000,
+  /** The most one pass reads: newer items past this wait for the next, overlapping window. */
+  procedureMaxChars: 300000,
+  /** Enough to write several procedures after reasoning over this much evidence. */
+  procedureOutputTokens: 16000,
   /** Longest and shortest cut of one message or reply in a procedure pass. */
   procedureMessageChars: 1500,
   procedureMessageFloor: 300,
@@ -306,7 +310,7 @@ export function quoteRefusal(quote: string, value: string): string | undefined {
   return undefined;
 }
 
-interface Evidence {
+export interface Evidence {
   id: string;
   /** A tracked work task, or one ordinary conversation turn (its run ID). */
   kind: "task" | "turn";
@@ -438,6 +442,8 @@ interface Known {
 interface Pass {
   instructions: string;
   tools: Record<string, z.ZodType>;
+  /** Added to each model request. */
+  request: { requireComplete?: boolean; maxOutputTokens?: number };
   check: (
     name: string,
     args: any,
@@ -530,10 +536,14 @@ export class Learner {
       return null;
     const runs = (
       await this.db.query(
-        "SELECT state,prompt_version FROM learner_runs WHERE user_id=$1 AND started_at>=$2",
+        "SELECT state,prompt_version,summary FROM learner_runs WHERE user_id=$1 AND started_at>=$2",
         [user, night],
       )
-    ).rows as Array<{ state: string; prompt_version: string }>;
+    ).rows as Array<{
+      state: string;
+      prompt_version: string;
+      summary: { periods?: number };
+    }>;
     const ofPass = (procedures: boolean) =>
       runs
         .filter(
@@ -558,7 +568,14 @@ export class Learner {
       return { state: "deferred" as const };
     }
     return itemsDone
-      ? this.runProcedures(user, now, periods)
+      ? this.runProcedures(
+          user,
+          now,
+          periods,
+          // Windows a deferred attempt finished tonight count towards the night's limit.
+          LEARNING_LIMITS.procedurePasses -
+            runs.reduce((n, r) => n + (r.summary.periods ?? 0), 0),
+        )
       : this.run(user, now);
   }
 
@@ -773,6 +790,7 @@ export class Learner {
     user: string,
     now: Date,
     periods: Array<{ from: Date; until: Date }>,
+    passes: number,
   ) {
     const { id, run, finish } = await this.open(
       user,
@@ -789,20 +807,22 @@ export class Learner {
       flagged: 0,
       periods: 0,
       reviewed: 0,
+      unread: 0,
     };
     let through: string | undefined;
     const summary = () => ({ ...progress, ...(through ? { through } : {}) });
     try {
       const spend = new Spending(this.db, user, run);
       for (const period of periods) {
-        if (progress.periods >= LEARNING_LIMITS.procedurePasses) break;
+        if (progress.periods >= passes) break;
         const { evidence } = await this.gather(user, {
           ...period,
           tasks: LEARNING_LIMITS.procedureItems,
           turns: LEARNING_LIMITS.procedureItems,
           reviewedToo: true,
         });
-        const items = fitted(evidence);
+        const { items, unread } = fitted(evidence);
+        progress.unread += unread;
         if (items.length) {
           const outcome = await spending.run(spend, () =>
             this.propose(user, run, id, items, progress, this.procedurePass, {
@@ -815,6 +835,9 @@ export class Learner {
               ...summary(),
               reason: "owner_active",
             });
+          // Text with no learn_finish means the window was not worked through.
+          if (!outcome.finished)
+            throw new Error("Procedure pass did not finish");
           const written = await this.applyProcedures(
             user,
             id,
@@ -1236,22 +1259,25 @@ export class Learner {
     };
     // Owner facts first, then learned items newest first, within a bound: the list grows
     // as the learner adds items, until staleness retires them (phase 4).
+    // A procedure pass always sees every procedure, because a revision replaces the text.
+    const always = period ? items.filter((r) => isProcedure(r.key)) : [];
     const ordered = [
       ...items.filter((r) => !isLearned(r)),
       ...items
-        .filter((r) => isLearned(r))
+        .filter((r) => isLearned(r) && !always.includes(r))
         .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)),
     ];
-    const current: Array<Record<string, unknown>> = [];
+    const entryOf = (r: (typeof items)[number]) => ({
+      key: r.key,
+      kind: r.kind,
+      // Whole for a procedure, which a revision has to carry forward.
+      value: clip(r.value!, 1000),
+      ...(isLearned(r) ? { learned: true } : {}),
+    });
+    const current: Array<Record<string, unknown>> = always.map(entryOf);
     let currentSize = 0;
     for (const r of ordered) {
-      const entry = {
-        key: r.key,
-        kind: r.kind,
-        // Whole for a procedure, which a revision has to carry forward.
-        value: clip(r.value!, 1000),
-        ...(isLearned(r) ? { learned: true } : {}),
-      };
+      const entry = entryOf(r);
       currentSize += JSON.stringify(entry).length + 1;
       if (currentSize > LEARNING_LIMITS.currentChars) break;
       current.push(entry);
@@ -1294,15 +1320,18 @@ export class Learner {
     let refused = 0;
     let modelCalls = 0;
     let retried = false;
+    let done = false;
     for (let i = 0; i < LEARNING_LIMITS.modelCalls; i++) {
       // Pre-empted when the owner starts a turn; nothing is applied.
-      if (await this.ownerActive(user)) return { deferred: true, accepted };
+      if (await this.ownerActive(user))
+        return { deferred: true, finished: false, accepted };
       const generation = await this.options.model.generate({
         messages,
         tools,
         reasoning: "medium",
         signal: AbortSignal.timeout(LEARNING_LIMITS.callMs),
         cacheKey: `learner:${user}`,
+        ...pass.request,
       });
       modelCalls++;
       progress.modelCalls++;
@@ -1316,7 +1345,11 @@ export class Learner {
         content: generation.message.content,
         toolCalls: calls.map((c) => c.function.name),
       });
-      if (!calls.length) break;
+      if (!calls.length) {
+        // After a retry the model had already finished once.
+        done = retried;
+        break;
+      }
       let finished = false;
       const refusedBefore = refused;
       for (const call of calls) {
@@ -1375,14 +1408,18 @@ export class Learner {
             "The host refused some proposals; the tool results give each reason. Accepted items are kept, so send only corrected versions of the refused ones, keeping to the evidence and the owner's words where that is possible, then call learn_finish again.",
         });
       }
-      if (finished) break;
+      if (finished) {
+        done = true;
+        break;
+      }
     }
-    return { deferred: false, accepted };
+    return { deferred: false, finished: done, accepted };
   }
 
   private itemPass: Pass = {
     instructions: LEARNER_INSTRUCTIONS,
     tools: learnTools,
+    request: {},
     check: (name, args, evidence, accepted, known) =>
       this.check(name, args, evidence, accepted, known),
   };
@@ -1390,6 +1427,11 @@ export class Learner {
   private procedurePass: Pass = {
     instructions: PROCEDURE_INSTRUCTIONS,
     tools: procedureTools,
+    // A cut-off response would otherwise pass for a window with nothing to save.
+    request: {
+      requireComplete: true,
+      maxOutputTokens: LEARNING_LIMITS.procedureOutputTokens,
+    },
     check: (name, args, evidence, accepted, known) =>
       this.checkProcedure(name, args, evidence, accepted, known),
   };
@@ -1439,8 +1481,9 @@ export class Learner {
   }
 
   /**
-   * Host checks for a procedure pass. Dates are not compared: periods run in order, and the
-   * model revises from the current text, so a revision citing the period's older items is fine.
+   * Host checks for a procedure pass. A revision's dates are not compared: periods run in
+   * order, and the model revises from the current text, so citing the period's older items is
+   * fine. A retirement carries nothing forward, so older work cannot retire newer work.
    */
   private checkProcedure(
     name: string,
@@ -1458,6 +1501,14 @@ export class Learner {
     if (name === "learn_retire") {
       if (!known.learnedLessons.has(args.key))
         return "Only a learned lesson or procedure in current can be retired here";
+      const newest = evidence
+        .filter((e) => args.taskIds.includes(e.id))
+        .map((e) => e.date)
+        .sort()
+        .at(-1)!;
+      const held = known.workDates.get(args.key);
+      if (held && newest < held)
+        return "Newer work set this key; older items cannot retire it";
       if (accepted.some((a) => keysOf(a).includes(args.key)))
         return "This key was already proposed in this review";
       return undefined;
@@ -1614,7 +1665,13 @@ export class Learner {
     const active = new Map(
       (await this.store.active(user)).map((r) => [r.key, r]),
     );
-    const untrusted = [...new Set(evidence.flatMap((t) => t.untrusted))];
+    // Text carried forward keeps its tags, so a rollback by source still finds it.
+    const tagged = (...keys: string[]) => [
+      ...new Set([
+        ...evidence.flatMap((t) => t.untrusted),
+        ...keys.flatMap((k) => active.get(k)?.untrusted_sources ?? []),
+      ]),
+    ];
     for (const { name, args } of accepted) {
       const key =
         name === "learn_retire" ? args.key : procedureKey(args.domain);
@@ -1641,7 +1698,7 @@ export class Learner {
             origin: "learned",
             reason,
             learnerRun,
-            untrustedSources: untrusted,
+            untrustedSources: tagged(target),
           },
           source,
         ));
@@ -1656,11 +1713,17 @@ export class Learner {
         });
       try {
         if (name === "learn_retire") {
-          if (await retire(key, args.reason)) written.retired++;
-          await outcome("retired");
+          if (await retire(key, args.reason)) {
+            written.retired++;
+            await outcome("retired");
+          } else await outcome("skipped_not_learned");
           continue;
         }
         const existing = active.get(key);
+        if (existing && !isLearned(existing)) {
+          await outcome("skipped_not_learned");
+          continue;
+        }
         if (existing?.value === args.value) {
           written.unchanged++;
           await outcome("unchanged");
@@ -1674,7 +1737,7 @@ export class Learner {
             reason: args.reason,
             source,
             learnerRun,
-            untrustedSources: untrusted,
+            untrustedSources: tagged(key, ...args.absorbs),
             // Rewriting can lose detail, so a much shorter revision is easy to find and compare.
             ...(existing?.value &&
             args.value.length <
@@ -1746,32 +1809,44 @@ function keysOf(a: { name: ToolName; args: any }): string[] {
 }
 
 /**
- * A period's items for a procedure pass, each message and reply cut to share the character
- * budget. The first owner message is also the request, so both are cut alike.
+ * A period's items for a procedure pass, in date order, with each message and reply cut to
+ * share the character budget. The first owner message is also the request, so both are cut
+ * alike. Newer items past the hard limits are left unread and counted.
  */
-function fitted(evidence: Evidence[]): Evidence[] {
+export function fitted(evidence: Evidence[]) {
   // Tasks were gathered before turns, and the model is told it reads in date order.
-  const items = [...evidence]
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(0, LEARNING_LIMITS.procedureItems);
+  const sorted = [...evidence].sort((a, b) => a.date.localeCompare(b.date));
+  const capped = sorted.slice(0, LEARNING_LIMITS.procedureItems);
+  const pieces = capped.reduce(
+    (n, e) => n + e.ownerMessages.length + (e.reply ? 1 : 0),
+    0,
+  );
   const each = Math.max(
     LEARNING_LIMITS.procedureMessageFloor,
     Math.min(
       LEARNING_LIMITS.procedureMessageChars,
-      Math.floor(LEARNING_LIMITS.procedureChars / (2 * (items.length || 1))),
+      Math.floor(LEARNING_LIMITS.procedureChars / (pieces || 1)),
     ),
   );
-  return items.map((e) => ({
-    ...e,
-    request: clip(e.request, each),
-    reply: clip(e.reply, each),
-    ownerMessages: e.ownerMessages.map((m) => ({
-      ...m,
-      text: clip(m.text, each),
-    })),
-    steps: e.steps.map((x) => ({
-      ...x,
-      result: clip(x.result, LEARNING_LIMITS.procedureMessageFloor),
-    })),
-  }));
+  const items: Evidence[] = [];
+  let size = 0;
+  for (const e of capped) {
+    const item = {
+      ...e,
+      request: clip(e.request, each),
+      reply: clip(e.reply, each),
+      ownerMessages: e.ownerMessages.map((m) => ({
+        ...m,
+        text: clip(m.text, each),
+      })),
+      steps: e.steps.map((x) => ({
+        ...x,
+        result: clip(x.result, LEARNING_LIMITS.procedureMessageFloor),
+      })),
+    };
+    size += JSON.stringify(shown(item)).length;
+    if (items.length && size > LEARNING_LIMITS.procedureMaxChars) break;
+    items.push(item);
+  }
+  return { items, unread: sorted.length - items.length };
 }
