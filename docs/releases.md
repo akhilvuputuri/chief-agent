@@ -1,3 +1,11 @@
+## Mail recall on pgvector (1 November 2026)
+
+- **Code.** `gmail_recall` searches with an exact pgvector query in Postgres instead of scanning in gateway memory. Migration 035 adds the column, filled from the stored vectors without re-embedding. The old column stays for rollback. Saves are now required, and excerpts are always Gmail's snippet.
+- **Why.** Chief had two ways of doing the same search once pgvector was installed. See [journal 146](journey/146-mail-recall-pgvector.md) and [mail recall](mail-recall.md).
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `73f2e4a`, because one unsavable email could stop indexing, then approved `46b0aef`.
+- **Deployment.** [PR 404](https://github.com/akhilvuputuri/chief-agent/pull/404) merged as `d58a9ca`. `scripts/deploy-mail-vectors.py` applied migration 35 with Postgres left running, and release run 41330931237 succeeded. The host reports `d58a9ca` with a healthy gateway.
+- **Measured.** On 30 real questions the top 10 matched the old scan every time. All 2,811 chunks converted with 0 embedding tokens. Search takes a median 57 ms, up from 6 ms. Live use through Telegram is not measured.
+
 ## Coding jobs notice PRs finished on GitHub (1 November 2026)
 
 - **Code.** The host compares parked coding PRs with GitHub every 15 minutes, and `coding_cancel` checks first, so a PR merged or closed outside Chief finishes its job. No worker image, database or Compose change.
