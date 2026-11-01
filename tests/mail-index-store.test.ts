@@ -10,6 +10,7 @@ import {
 } from "../src/mail-index-store.js";
 
 const DAY = 86_400_000;
+const CONFIG = { model: "m", dimensions: 512, windowDays: 365 };
 const NOW = Date.UTC(2026, 9, 29);
 const FAST = { readMs: 0, quotaPauseMs: 0, topUpMs: 10_000 };
 
@@ -102,10 +103,10 @@ test("a restarted index loads from Postgres without reading mail again", async (
   const first = new MailIndex(
     box.gmail,
     words,
+    new MailIndexStore(db),
     "owner",
     () => NOW,
     FAST,
-    new MailIndexStore(db),
   );
   await first.start();
   assert.equal(first.messages, 3);
@@ -125,10 +126,10 @@ test("a restarted index loads from Postgres without reading mail again", async (
   const second = new MailIndex(
     box.gmail,
     words,
+    new MailIndexStore(db),
     "owner",
     () => NOW,
     FAST,
-    new MailIndexStore(db),
   );
   await second.start();
   assert.equal(second.state, "ready");
@@ -146,10 +147,10 @@ test("on start, mail that left the mailbox is removed and new mail is indexed", 
   await new MailIndex(
     box.gmail,
     words,
+    new MailIndexStore(db),
     "owner",
     () => NOW,
     FAST,
-    new MailIndexStore(db),
   ).start();
   box.mail.splice(
     box.mail.findIndex((m) => m.id === "b2"),
@@ -165,10 +166,10 @@ test("on start, mail that left the mailbox is removed and new mail is indexed", 
   const index = new MailIndex(
     box.gmail,
     words,
+    new MailIndexStore(db),
     "owner",
     () => NOW,
     FAST,
-    new MailIndexStore(db),
   );
   await index.start();
   assert.equal(index.messages, 3);
@@ -193,20 +194,20 @@ test("an index stored under another configuration is rebuilt", async (t) => {
   await new MailIndex(
     box.gmail,
     words,
+    new MailIndexStore(db),
     "owner",
     () => NOW,
     FAST,
-    new MailIndexStore(db),
   ).start();
   await db.query("UPDATE mail_index_state SET model='older-model'");
   const reads = box.reads.length;
   const index = new MailIndex(
     box.gmail,
     words,
+    new MailIndexStore(db),
     "owner",
     () => NOW,
     FAST,
-    new MailIndexStore(db),
   );
   await index.start();
   assert.equal(index.messages, 3);
@@ -226,24 +227,27 @@ test("a failed save does not stop recall, and the next start repairs it", async 
   const first = new MailIndex(
     box.gmail,
     words,
+    failing,
     "owner",
     () => NOW,
     FAST,
-    failing,
   );
   await first.start();
-  assert.equal(first.state, "ready");
-  assert.equal(first.messages, 3);
+  assert.equal(first.state, "failed");
+  assert.equal(first.messages, 0);
+  const reads = box.reads.length;
   const index = new MailIndex(
     box.gmail,
     words,
+    new MailIndexStore(db),
     "owner",
     () => NOW,
     FAST,
-    new MailIndexStore(db),
   );
   await index.start();
+  assert.equal(index.state, "ready");
   assert.equal(index.messages, 3);
+  assert.ok(box.reads.length > reads, "unsaved messages are read again");
   const rows = (
     await db.query("SELECT count(*)::int AS n FROM mail_index_messages")
   ).rows[0].n;
@@ -260,10 +264,10 @@ test("pruned mail leaves Postgres too, and another user's index stays separate",
   const index = new MailIndex(
     box.gmail,
     words,
+    new MailIndexStore(db),
     "owner",
     () => now,
     FAST,
-    new MailIndexStore(db),
   );
   await index.start();
   now = NOW + 2 * DAY;
@@ -283,4 +287,204 @@ test("pruned mail leaves Postgres too, and another user's index stays separate",
     }),
     null,
   );
+});
+
+/** A seeded unit vector, so a failure can be reproduced. */
+function randomUnit(seed: number) {
+  let state = seed;
+  const v = Float32Array.from({ length: 512 }, () => {
+    state = (state * 1664525 + 1013904223) % 4294967296;
+    return state / 4294967296 - 0.5;
+  });
+  const n = Math.hypot(...v);
+  return v.map((x) => x / n);
+}
+
+const cosine = (a: Float32Array, b: Float32Array) =>
+  a.reduce((sum, x, i) => sum + x * b[i]!, 0);
+
+test("search matches an exact cosine scan, scoring each message by its best chunk", async (t) => {
+  const db = await database(t);
+  const store = new MailIndexStore(db);
+  await store.begin("owner", CONFIG);
+  const messages = Array.from({ length: 60 }, (_, i) => ({
+    messageId: `m${i}`,
+    threadId: `t${i}`,
+    at: NOW - i * DAY,
+    from: "a@example.com",
+    subject: "s",
+    date: "d",
+    snippet: "n",
+    vectors: Array.from({ length: 1 + (i % 4) }, (_, c) =>
+      randomUnit(1000 * i + c + 1),
+    ),
+  }));
+  await store.save("owner", messages);
+  for (const seed of [7, 8, 9]) {
+    const query = randomUnit(seed);
+    const expected = messages
+      .map((m) => ({
+        id: m.messageId,
+        score: Math.max(...m.vectors.map((v) => cosine(v, query))),
+      }))
+      .sort((a, b) => b.score - a.score);
+    const found = await store.search("owner", query, 0);
+    assert.deepEqual(
+      found.map((m) => m.messageId),
+      expected.map((m) => m.id),
+    );
+    found.forEach((m, i) =>
+      assert.ok(Math.abs(m.score - expected[i]!.score) < 1e-5),
+    );
+  }
+  // The window is applied by the query, whether or not old rows were deleted.
+  const recent = await store.search("owner", randomUnit(7), NOW - 9.5 * DAY);
+  assert.equal(recent.length, 10);
+  assert.ok(recent.every((m) => Number(m.messageId.slice(1)) < 10));
+});
+
+test("start fills the vector column from the stored bytes without embedding again", async (t) => {
+  const db = await database(t);
+  const box = mailbox(mails());
+  await new MailIndex(
+    box.gmail,
+    words,
+    new MailIndexStore(db),
+    "owner",
+    () => NOW,
+    FAST,
+  ).start();
+  // The state migration 035 finds, and what a rolled-back gateway writes.
+  await db.query("UPDATE mail_index_chunks SET embedding=NULL");
+  let embedded = 0;
+  const counting: Embedder = {
+    async embed(texts, signal) {
+      embedded += texts.length;
+      return words.embed(texts, signal);
+    },
+  };
+  const index = new MailIndex(
+    box.gmail,
+    counting,
+    new MailIndexStore(db),
+    "owner",
+    () => NOW,
+    FAST,
+  );
+  await index.start();
+  assert.equal(embedded, 0);
+  assert.equal(index.messages, 3);
+  const rows = (
+    await db.query(
+      "SELECT vector,embedding::text AS text FROM mail_index_chunks",
+    )
+  ).rows;
+  assert.equal(rows.length, 3);
+  // Every value survives the conversion exactly.
+  for (const row of rows)
+    assert.deepEqual(
+      Float32Array.from(JSON.parse(row.text) as number[]),
+      decodeVector(row.vector, 512),
+    );
+  const found = await index.recall("owner", "late sofa delivery apology");
+  assert.equal(found.results[0]!.messageId, "a1");
+});
+
+test("new chunks keep the bytes the previous gateway reads, so a rollback works", async (t) => {
+  const db = await database(t);
+  const store = new MailIndexStore(db);
+  const vector = randomUnit(3);
+  await store.begin("owner", CONFIG);
+  await store.save("owner", [
+    {
+      messageId: "m",
+      threadId: "t",
+      at: NOW,
+      from: "f",
+      subject: "s",
+      date: "d",
+      snippet: "n",
+      vectors: [vector],
+    },
+  ]);
+  const row = (await db.query("SELECT vector FROM mail_index_chunks")).rows[0];
+  assert.deepEqual(decodeVector(row.vector, 512), vector);
+  assert.deepEqual(await store.load("owner", CONFIG), ["m"]);
+});
+
+test("a changed configuration deletes the stored index", async (t) => {
+  const db = await database(t);
+  const store = new MailIndexStore(db);
+  await store.begin("owner", CONFIG);
+  await store.save("owner", [
+    {
+      messageId: "m",
+      threadId: "t",
+      at: NOW,
+      from: "f",
+      subject: "s",
+      date: "d",
+      snippet: "n",
+      vectors: [randomUnit(4)],
+    },
+  ]);
+  assert.equal(await store.load("owner", { ...CONFIG, model: "new" }), null);
+  assert.deepEqual(await store.search("owner", randomUnit(4), 0), []);
+});
+
+test("a NUL in an email's headers is removed, not a reason to refuse the message", async (t) => {
+  const db = await database(t);
+  const box = mailbox(mails());
+  const reader = box.gmail.indexMessage;
+  box.gmail.indexMessage = async (user, id) => {
+    const message = await reader(user, id);
+    return id === "b2"
+      ? { ...message, subject: "Le\u0000ase", snippet: "sn\u0000ip" }
+      : message;
+  };
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    new MailIndexStore(db),
+    "owner",
+    () => NOW,
+    FAST,
+  );
+  await index.start();
+  assert.equal(index.state, "ready");
+  assert.equal(index.messages, 3);
+  const stored = (await new MailIndexStore(db).headers("owner", ["b2"])).get(
+    "b2",
+  )!;
+  assert.equal(stored.subject, "Lease");
+  assert.equal(stored.snippet, "snip");
+});
+
+test("a row Postgres refuses is left out without blocking the mail behind it", async (t) => {
+  const db = await database(t);
+  const box = mailbox(mails());
+  const refusing = new MailIndexStore(db);
+  const save = refusing.save.bind(refusing);
+  refusing.save = async (user, messages) => {
+    if (messages.some((m) => m.messageId === "b2"))
+      throw Object.assign(new Error("bad row"), { code: "22021" });
+    return save(user, messages);
+  };
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    refusing,
+    "owner",
+    () => NOW,
+    FAST,
+  );
+  await index.start();
+  assert.equal(index.state, "ready");
+  assert.equal(index.messages, 2);
+  const ids = (await refusing.headers("owner")).keys();
+  assert.deepEqual([...ids].sort(), ["a1", "c3"]);
+  // Once it is outside the top-up's hour of overlap, calls no longer read it.
+  const reads = box.reads.length;
+  await index.recall("owner", "sofa");
+  assert.equal(box.reads.length, reads);
 });

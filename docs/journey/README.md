@@ -152,6 +152,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1 November | [143 — Recall with pgvector](143-recall-with-pgvector.md): can Chief find what the owner half-remembers? | Released; first operator-written evaluation favours keeping it; real use not measured. |
 | 1 November | [144 — Baked coding box image](144-baked-box-image.md): can a prepared image shorten a box's boot? | Configuration live after the owner's AWS rollout; no launch from it observed yet, so the speed-up is not measured |
 | 1 November | [145 — PRs finished on GitHub](145-prs-finished-on-github.md): how does a parked coding job learn its PR is gone? | Released in `615b77e`; the first live sweep settled `8dfdfbf0`. A sweep and a check on cancel finish jobs whose PR was merged or closed |
+| 1 November | [146 — Moving mail recall to pgvector](146-mail-recall-pgvector.md): can email search share one search path without changing results? | Tested on synthetic data; operator rollout pending. |
 
 ## Coding-agent learning path
 

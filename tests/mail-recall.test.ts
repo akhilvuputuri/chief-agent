@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
+import { ensureUser, type Database } from "../src/db.js";
 import { GmailTools, indexBody } from "../src/gmail.js";
+import { MailIndexStore } from "../src/mail-index-store.js";
 import {
   chunks,
   fuse,
@@ -22,6 +25,15 @@ const DAY = 86_400_000;
 /** No read pacing or quota pause in tests. */
 const FAST = { readMs: 0, quotaPauseMs: 0, topUpMs: 10_000 };
 const NOW = Date.UTC(2026, 9, 25);
+
+/** A fresh index store on a real database with pgvector. */
+async function store(t: { after(fn: () => Promise<void>): void }) {
+  const pg = await migratedPGlite();
+  closeAfter(t, pg);
+  const db = pg as unknown as Database;
+  await ensureUser(db, "owner");
+  return new MailIndexStore(db);
+}
 
 /** Deterministic bag-of-words vectors: texts sharing words score higher. */
 const words: Embedder = {
@@ -73,6 +85,7 @@ function mailbox(initial: Mail[]) {
         subject: m.subject,
         date: new Date(m.at).toUTCString(),
         text: m.text,
+        snippet: m.text,
       };
     },
   };
@@ -126,7 +139,7 @@ test("HTML-only messages are indexed as display text", () => {
   );
 });
 
-test("recall finds an email by what it was about, owner-scoped", async () => {
+test("recall finds an email by what it was about, owner-scoped", async (t) => {
   const box = mailbox([
     {
       id: "a1",
@@ -147,7 +160,14 @@ test("recall finds an email by what it was about, owner-scoped", async () => {
       text: "The security deposit for the flat is two months of rent.",
     },
   ]);
-  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    await store(t),
+    "owner",
+    () => NOW,
+    FAST,
+  );
   const early = await index.recall("owner", "deposit for the flat");
   assert.equal(early.status, "building");
   await index.start();
@@ -161,17 +181,21 @@ test("recall finds an email by what it was about, owner-scoped", async () => {
   const projected = projectObservation("gmail_recall", found).result;
   assert.match(projected.warning, /Untrusted email content/);
   await assert.rejects(index.recall("intruder", "deposit"), /not connected/);
-  assert.throws(() => index.exportChunks("intruder"), /not connected/);
-  await assert.rejects(index.scoreChunks("intruder", "x"), /not connected/);
-  assert.equal(index.exportChunks("owner").length, 3);
 });
 
-test("new mail is topped up on recall and old mail leaves the window", async () => {
+test("new mail is topped up on recall and old mail leaves the window", async (t) => {
   let now = NOW;
   const box = mailbox([
     { id: "a1", at: NOW - 364 * DAY, subject: "Old", text: "dentist checkup" },
   ]);
-  const index = new MailIndex(box.gmail, words, "owner", () => now, FAST);
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    await store(t),
+    "owner",
+    () => now,
+    FAST,
+  );
   await index.start();
   box.mail.push({
     id: "n9",
@@ -191,7 +215,7 @@ test("new mail is topped up on recall and old mail leaves the window", async () 
   assert.equal(box.reads.filter((id) => id === "n9").length, 1);
 });
 
-test("a failed build reports unavailable and can be retried", async () => {
+test("a failed build reports unavailable and can be retried", async (t) => {
   let fail = true;
   const box = mailbox([{ id: "a1", at: NOW, subject: "s", text: "hello" }]);
   const flaky: Embedder = {
@@ -200,7 +224,14 @@ test("a failed build reports unavailable and can be retried", async () => {
       return words.embed(texts);
     },
   };
-  const index = new MailIndex(box.gmail, flaky, "owner", () => NOW, FAST);
+  const index = new MailIndex(
+    box.gmail,
+    flaky,
+    await store(t),
+    "owner",
+    () => NOW,
+    FAST,
+  );
   await index.start();
   assert.equal(index.state, "failed");
   assert.equal((await index.recall("owner", "hello")).status, "unavailable");
@@ -372,7 +403,7 @@ test("the email agent runs without the index and gains gmail_recall with it", as
   }
 });
 
-test("a burst of new mail is indexed over several recalls without gaps", async () => {
+test("a burst of new mail is indexed over several recalls without gaps", async (t) => {
   let now = NOW;
   const box = mailbox([
     { id: "a0", at: NOW - DAY, subject: "s", text: "seed" },
@@ -383,7 +414,14 @@ test("a burst of new mail is indexed over several recalls without gaps", async (
     const page = await listNewestFirst(user, query);
     return { messages: page.messages.reverse() };
   };
-  const index = new MailIndex(box.gmail, words, "owner", () => now, FAST);
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    await store(t),
+    "owner",
+    () => now,
+    FAST,
+  );
   await index.start();
   for (let i = 1; i <= 80; i++)
     box.mail.push({
@@ -407,7 +445,7 @@ test("a burst of new mail is indexed over several recalls without gaps", async (
   assert.equal(index.messages, 82);
 });
 
-test("a failed build keeps its progress, pauses before retrying and runs outside the turn ledger", async () => {
+test("a failed build keeps its progress, pauses before retrying and runs outside the turn ledger", async (t) => {
   let now = NOW;
   const mail = Array.from({ length: 25 }, (_, i) => ({
     id: "m" + i,
@@ -425,7 +463,14 @@ test("a failed build keeps its progress, pauses before retrying and runs outside
       return words.embed(texts);
     },
   };
-  const index = new MailIndex(box.gmail, flaky, "owner", () => now, FAST);
+  const index = new MailIndex(
+    box.gmail,
+    flaky,
+    await store(t),
+    "owner",
+    () => now,
+    FAST,
+  );
   await index.start();
   assert.equal(index.state, "failed");
   assert.equal(index.messages, 10);
@@ -447,7 +492,7 @@ test("a failed build keeps its progress, pauses before retrying and runs outside
   assert.equal(ledgers, 0);
 });
 
-test("an unreadable message is retried once and then left out", async () => {
+test("an unreadable message is retried once and then left out", async (t) => {
   const box = mailbox([
     { id: "ok", at: NOW, subject: "s", text: "fine" },
     { id: "bad", at: NOW, subject: "s", text: "broken" },
@@ -457,7 +502,14 @@ test("an unreadable message is retried once and then left out", async () => {
     if (id === "bad") throw new Error("Gmail request failed (500)");
     return read(user, id);
   };
-  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    await store(t),
+    "owner",
+    () => NOW,
+    FAST,
+  );
   await index.start();
   assert.equal(index.state, "ready");
   assert.equal(index.messages, 1);
@@ -465,7 +517,7 @@ test("an unreadable message is retried once and then left out", async () => {
   assert.equal(index.messages, 1);
 });
 
-test("a full page of escape-heavy results keeps its warning field", async () => {
+test("a full page of escape-heavy results keeps its warning field", async (t) => {
   const dense = '"\\'.repeat(60);
   const box = mailbox(
     Array.from({ length: 10 }, (_, i) => ({
@@ -476,7 +528,14 @@ test("a full page of escape-heavy results keeps its warning field", async () => 
       text: dense.repeat(10) + " common words",
     })),
   );
-  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    await store(t),
+    "owner",
+    () => NOW,
+    FAST,
+  );
   await index.start();
   const found = await index.recall("owner", "common words", 10);
   assert.ok(JSON.stringify(found).length < 12_000);
@@ -495,7 +554,7 @@ test("quoted history in HTML replies is not indexed", () => {
   );
 });
 
-test("a Gmail quota refusal pauses reading without leaving mail out", async () => {
+test("a Gmail quota refusal pauses reading without leaving mail out", async (t) => {
   const box = mailbox(
     Array.from({ length: 6 }, (_, i) => ({
       id: "q" + i,
@@ -515,20 +574,34 @@ test("a Gmail quota refusal pauses reading without leaving mail out", async () =
     }
     return read(user, id);
   };
-  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    await store(t),
+    "owner",
+    () => NOW,
+    FAST,
+  );
   await index.start();
   assert.equal(index.state, "ready");
   assert.equal(index.messages, 6);
 });
 
-test("a Gmail that keeps refusing fails the build instead of abandoning mail", async () => {
+test("a Gmail that keeps refusing fails the build instead of abandoning mail", async (t) => {
   const box = mailbox([{ id: "q1", at: NOW, subject: "s", text: "body" }]);
   let reads = 0;
   box.gmail.indexMessage = async () => {
     reads += 1;
     throw new Error("Gmail request failed (429)");
   };
-  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    await store(t),
+    "owner",
+    () => NOW,
+    FAST,
+  );
   await index.start();
   assert.equal(index.state, "failed");
   // Five pauses, then the sixth refusal fails the build; the message stays queued.
@@ -536,7 +609,7 @@ test("a Gmail that keeps refusing fails the build instead of abandoning mail", a
   assert.equal(index.messages, 0);
 });
 
-test("reads are paced one at a time", async () => {
+test("reads are paced one at a time", async (t) => {
   const box = mailbox(
     Array.from({ length: 5 }, (_, i) => ({
       id: "p" + i,
@@ -556,27 +629,41 @@ test("reads are paced one at a time", async () => {
       active -= 1;
     }
   };
-  const index = new MailIndex(box.gmail, words, "owner", () => NOW, {
-    readMs: 20,
-    quotaPauseMs: 0,
-    topUpMs: 10_000,
-  });
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    await store(t),
+    "owner",
+    () => NOW,
+    {
+      readMs: 20,
+      quotaPauseMs: 0,
+      topUpMs: 10_000,
+    },
+  );
   const started = Date.now();
   await index.start();
   assert.equal(most, 1);
   assert.ok(Date.now() - started >= 75);
 });
 
-test("a top-up cut short keeps the messages it already read", async () => {
+test("a top-up cut short keeps the messages it already read", async (t) => {
   let now = NOW;
   const box = mailbox([
     { id: "s0", at: NOW - DAY, subject: "s", text: "seed" },
   ]);
-  const index = new MailIndex(box.gmail, words, "owner", () => now, {
-    readMs: 20,
-    quotaPauseMs: 0,
-    topUpMs: 150,
-  });
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    await store(t),
+    "owner",
+    () => now,
+    {
+      readMs: 20,
+      quotaPauseMs: 0,
+      topUpMs: 150,
+    },
+  );
   await index.start();
   for (let i = 1; i <= 25; i++)
     box.mail.push({
@@ -595,7 +682,7 @@ test("a top-up cut short keeps the messages it already read", async () => {
   assert.ok(index.messages > 1);
 });
 
-test("fusion ranks a message both searches return first and keeps keyword-only hits", async () => {
+test("fusion ranks a message both searches return first and keeps keyword-only hits", async (t) => {
   assert.equal(
     fuse([
       ["a", "b", "c"],
@@ -628,7 +715,14 @@ test("fusion ranks a message both searches return first and keeps keyword-only h
       text: "deposit is two months rent",
     },
   ]);
-  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    await store(t),
+    "owner",
+    () => NOW,
+    FAST,
+  );
   await index.start();
   const found = await index.recall("owner", "late sofa delivery apology", 8, {
     lists: [
@@ -660,9 +754,16 @@ test("fusion ranks a message both searches return first and keeps keyword-only h
   assert.match(found.warning, /Untrusted email content/);
 });
 
-test("keyword results are returned while the index builds, and failures are noted", async () => {
+test("keyword results are returned while the index builds, and failures are noted", async (t) => {
   const box = mailbox([{ id: "a1", at: NOW, subject: "s", text: "body" }]);
-  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    await store(t),
+    "owner",
+    () => NOW,
+    FAST,
+  );
   const early = await index.recall("owner", "anything", 8, {
     lists: [[{ id: "k1", threadId: "tk1", subject: "Hit" }]],
     failed: 1,
@@ -755,11 +856,18 @@ test("keyword searches run on the primary mailbox with the turn's budget", async
   );
 });
 
-test("a keyword hit keeps details any search returned, and says when Gmail had none", async () => {
+test("a keyword hit keeps details any search returned, and says when Gmail had none", async (t) => {
   const box = mailbox([
     { id: "a1", at: NOW - DAY, subject: "s", text: "unrelated body" },
   ]);
-  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  const index = new MailIndex(
+    box.gmail,
+    words,
+    await store(t),
+    "owner",
+    () => NOW,
+    FAST,
+  );
   await index.start();
   const found = await index.recall("owner", "parcel", 8, {
     lists: [

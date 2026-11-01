@@ -100,6 +100,8 @@ services:
         "/migrations/033_mail_index.sql",
         "-f",
         "/migrations/034_embeddings.sql",
+        "-f",
+        "/migrations/035_mail_index_vectors.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }

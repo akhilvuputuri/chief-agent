@@ -285,18 +285,15 @@ const mailIndex =
   c.MAIL_INDEX === "on" &&
   c.GMAIL_OWNER_USER_ID &&
   c.GOOGLE_REFRESH_TOKEN &&
-  c.OPENROUTER_API_KEY
+  c.OPENROUTER_API_KEY &&
+  // The index lives in Postgres, so gmail_recall needs migration 035.
+  (await db.query("SELECT 1 FROM runtime_migrations WHERE version=35")).rows
+    .length
     ? new MailIndex(
         gmail,
         new OpenRouterEmbedder(c.OPENROUTER_API_KEY),
+        new MailIndexStore(db),
         c.GMAIL_OWNER_USER_ID,
-        undefined,
-        undefined,
-        // Persisted once migration 033 is installed; in memory only before that.
-        (await db.query("SELECT 1 FROM runtime_migrations WHERE version=33"))
-          .rows.length
-          ? new MailIndexStore(db)
-          : undefined,
       )
     : undefined;
 const calendar = new CalendarTools({

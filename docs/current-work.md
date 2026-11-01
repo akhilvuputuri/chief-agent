@@ -1,3 +1,7 @@
+# Mail recall on pgvector — merged code awaiting operator rollout, 1 November 2026
+
+`gmail_recall` moves from a search in gateway memory to an exact pgvector query in Postgres, reusing the stored vectors, so results should not change. Migration 035 keeps the old column for rollback. See [journal 146](journey/146-mail-recall-pgvector.md).
+
 # Procedures replace one-item lessons — live in `385e0d7`, 1 November 2026
 
 An offline comparison over 14 days found one-item lessons were clearly useful 1 time in 33, against 8 in 11 for procedures written by reading across days, while quoted facts were far better supported than inferred ones (one judge, simulated). The owner chose to replace the lessons. Prompt `learner-v5` saves facts only, and `procedures-v1` reads two weeks at a time and revises one procedure per kind of work. No migration. First run due from 03:30 Singapore on 2 November, not yet observed. See [procedures](learning.md#procedures) and [journal 130](journey/130-nightly-learner.md#procedures-replace-one-item-lessons--2026-11-01).

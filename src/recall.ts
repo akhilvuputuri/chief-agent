@@ -7,6 +7,7 @@ import { event, type Database } from "./db.js";
 import { transaction } from "./db-transaction.js";
 import { conversational } from "./history.js";
 import { isLearned } from "./memory.js";
+import { literal } from "./mail-index-store.js";
 import { EMBEDDING_MODEL, type Embedder } from "./mail-recall.js";
 import { errorFields, opsLog } from "./ops-log.js";
 
@@ -42,8 +43,6 @@ export function chunks(text: string) {
   }
   return out;
 }
-
-const literal = (vector: Float32Array) => `[${Array.from(vector).join(",")}]`;
 
 // Revisions a search may return: current, active items. Learned and owner items alike.
 const ACTIVE_REVISIONS = `SELECT r.id FROM memory_heads h JOIN memory_revisions r

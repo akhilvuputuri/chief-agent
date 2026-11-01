@@ -1,5 +1,6 @@
-// Postgres persistence for the gmail_recall index (migration 033, docs/mail-recall.md).
-// Headers, Gmail's snippet and embedding vectors only: no email body text is stored.
+// The gmail_recall index in Postgres (migrations 033 and 035, docs/mail-recall.md). Headers,
+// Gmail's snippet and embedding vectors only: no email body text is stored. Search is an exact
+// cosine query with pgvector.
 import type { Database } from "./db.js";
 import { transaction } from "./db-transaction.js";
 
@@ -10,7 +11,7 @@ export type IndexConfig = {
   windowDays: number;
 };
 
-export type StoredMessage = {
+export type StoredHeaders = {
   messageId: string;
   threadId: string;
   at: number;
@@ -18,8 +19,32 @@ export type StoredMessage = {
   subject: string;
   date: string;
   snippet: string;
-  vectors: Float32Array[];
 };
+
+export type StoredMessage = StoredHeaders & { vectors: Float32Array[] };
+
+/** pgvector's text form. A float32 survives it exactly, because JavaScript prints enough digits. */
+export const literal = (vector: Float32Array) =>
+  `[${Array.from(vector).join(",")}]`;
+
+const FILL_BATCH = 500;
+
+/** Postgres text cannot hold NUL, and email senders control these fields. */
+const storable = (text: string) => text.replaceAll("\u0000", "");
+
+/** A Postgres data exception: this row will fail again however often it is retried. */
+export const isDataError = (error: unknown) =>
+  String((error as { code?: unknown })?.code ?? "").startsWith("22");
+
+const headers = (m: Record<string, any>): StoredHeaders => ({
+  messageId: m.message_id,
+  threadId: m.thread_id,
+  at: new Date(m.received_at).getTime(),
+  from: m.sender,
+  subject: m.subject,
+  date: m.date_header,
+  snippet: m.snippet,
+});
 
 /** Little-endian float32, independent of the host's byte order. */
 export function encodeVector(vector: Float32Array) {
@@ -41,8 +66,8 @@ export class MailIndexStore {
   constructor(private db: Database) {}
 
   /**
-   * The owner's stored index, or null when there is none. An index stored under a different
-   * configuration is deleted first, so the caller builds a fresh one.
+   * The owner's indexed message IDs, or null when there is no index. An index stored under a
+   * different configuration is deleted first, so the caller builds a fresh one.
    */
   async load(user: string, config: IndexConfig) {
     const state = (
@@ -60,37 +85,91 @@ export class MailIndexStore {
       await this.clear(user);
       return null;
     }
-    const messages = (
+    await this.fill(user, config.dimensions);
+    return (
+      await this.db.query(
+        `SELECT m.message_id FROM mail_index_messages m WHERE m.user_id=$1 AND EXISTS(
+           SELECT 1 FROM mail_index_chunks c WHERE c.user_id=m.user_id AND c.message_id=m.message_id)`,
+        [user],
+      )
+    ).rows.map((m): string => m.message_id);
+  }
+
+  /**
+   * Copies bytea vectors into the pgvector column. It covers the rows from before migration 035,
+   * and any the previous gateway wrote after a rollback. Nothing is embedded again.
+   */
+  private async fill(user: string, dimensions: number) {
+    for (;;) {
+      const rows = (
+        await this.db.query(
+          `SELECT message_id,chunk,vector FROM mail_index_chunks
+           WHERE user_id=$1 AND embedding IS NULL LIMIT ${FILL_BATCH}`,
+          [user],
+        )
+      ).rows;
+      if (!rows.length) return;
+      await transaction(this.db, async (client) => {
+        for (const row of rows)
+          await client.query(
+            "UPDATE mail_index_chunks SET embedding=$4::vector WHERE user_id=$1 AND message_id=$2 AND chunk=$3",
+            [
+              user,
+              row.message_id,
+              row.chunk,
+              literal(decodeVector(row.vector, dimensions)),
+            ],
+          );
+      });
+    }
+  }
+
+  /**
+   * Every message received since `since`, closest first, scored by its best chunk. Exact search:
+   * it reads every vector, so nothing is missed, and it needs no index at this size.
+   */
+  async search(user: string, vector: Float32Array, since: number) {
+    return (
+      await this.db.query(
+        `SELECT c.message_id,1-min(c.embedding <=> $2::vector) AS score
+         FROM mail_index_chunks c JOIN mail_index_messages m USING(user_id,message_id)
+         WHERE c.user_id=$1 AND c.embedding IS NOT NULL
+         AND m.received_at >= to_timestamp($3::double precision/1000)
+         GROUP BY c.message_id ORDER BY score DESC,c.message_id COLLATE "C"`,
+        [user, literal(vector), since],
+      )
+    ).rows.map((r) => ({
+      messageId: r.message_id as string,
+      score: Number(r.score),
+    }));
+  }
+
+  /** Each chunk's cosine score against a vector, for the operator-run export. */
+  async scoreChunks(user: string, vector: Float32Array) {
+    return (
+      await this.db.query(
+        `SELECT message_id,chunk,1-(embedding <=> $2::vector) AS score FROM mail_index_chunks
+         WHERE user_id=$1 AND embedding IS NOT NULL`,
+        [user, literal(vector)],
+      )
+    ).rows.map((r) => ({
+      messageId: r.message_id as string,
+      chunk: Number(r.chunk),
+      score: Number(r.score),
+    }));
+  }
+
+  /** Headers for the given messages, or for all of them. */
+  async headers(user: string, messageIds?: string[]) {
+    const rows = (
       await this.db.query(
         `SELECT message_id,thread_id,received_at,sender,subject,date_header,snippet
-         FROM mail_index_messages WHERE user_id=$1 ORDER BY received_at,message_id`,
-        [user],
+         FROM mail_index_messages WHERE user_id=$1
+         ${messageIds ? "AND message_id = ANY($2::text[])" : ""}`,
+        messageIds ? [user, messageIds] : [user],
       )
     ).rows;
-    const chunks = (
-      await this.db.query(
-        "SELECT message_id,vector FROM mail_index_chunks WHERE user_id=$1 ORDER BY message_id,chunk",
-        [user],
-      )
-    ).rows;
-    const vectors = new Map<string, Float32Array[]>();
-    for (const c of chunks) {
-      const list = vectors.get(c.message_id) ?? [];
-      list.push(decodeVector(c.vector, config.dimensions));
-      vectors.set(c.message_id, list);
-    }
-    return messages
-      .filter((m) => vectors.has(m.message_id))
-      .map((m): StoredMessage => ({
-        messageId: m.message_id,
-        threadId: m.thread_id,
-        at: new Date(m.received_at).getTime(),
-        from: m.sender,
-        subject: m.subject,
-        date: m.date_header,
-        snippet: m.snippet,
-        vectors: vectors.get(m.message_id)!,
-      }));
+    return new Map(rows.map((m) => [m.message_id as string, headers(m)]));
   }
 
   /** Records the configuration a fresh build uses, before its first save. */
@@ -119,10 +198,10 @@ export class MailIndexStore {
             m.messageId,
             m.threadId,
             m.at,
-            m.from,
-            m.subject,
-            m.date,
-            m.snippet,
+            storable(m.from),
+            storable(m.subject),
+            storable(m.date),
+            storable(m.snippet),
           ],
         );
         await client.query(
@@ -131,8 +210,9 @@ export class MailIndexStore {
         );
         for (const [chunk, vector] of m.vectors.entries())
           await client.query(
-            "INSERT INTO mail_index_chunks(user_id,message_id,chunk,vector) VALUES($1,$2,$3,$4)",
-            [user, m.messageId, chunk, encodeVector(vector)],
+            `INSERT INTO mail_index_chunks(user_id,message_id,chunk,vector,embedding)
+             VALUES($1,$2,$3,$4,$5::vector)`,
+            [user, m.messageId, chunk, encodeVector(vector), literal(vector)],
           );
       }
     });
@@ -145,12 +225,15 @@ export class MailIndexStore {
     );
   }
 
-  /** Deletes messages received before `cutoff`; their vectors cascade. */
+  /** Deletes messages received before `cutoff` and returns their IDs; their vectors cascade. */
   async prune(user: string, cutoff: number) {
-    await this.db.query(
-      "DELETE FROM mail_index_messages WHERE user_id=$1 AND received_at < to_timestamp($2::double precision/1000)",
-      [user, cutoff],
-    );
+    return (
+      await this.db.query(
+        `DELETE FROM mail_index_messages WHERE user_id=$1
+         AND received_at < to_timestamp($2::double precision/1000) RETURNING message_id`,
+        [user, cutoff],
+      )
+    ).rows.map((r): string => r.message_id);
   }
 
   /** Deletes the given messages, for mail that left the mailbox or the indexed category. */

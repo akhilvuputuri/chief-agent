@@ -9,13 +9,30 @@
 // it, without the subject's or sender's words. Two retrieval conditions are compared:
 //   keyword: up to three Gmail searches a model writes for the question (today's email agent)
 //   recall:  the same searches plus gmail_recall's top results (the agent with both tools)
-// A question counts as found when the target message is among the results.
+// A question counts as found when the target message is among the results. It only reads the
+// stored index, which it shares with the running gateway. Email text comes from Gmail.
 import { z } from "zod";
 import { readConfig } from "./config.js";
+import { connect } from "./db.js";
 import { GmailTools } from "./gmail.js";
-import { MailIndex, OpenRouterEmbedder } from "./mail-recall.js";
+import { MailIndexStore } from "./mail-index-store.js";
+import {
+  chunks,
+  MAIL_INDEX_DAY_MS,
+  MAIL_INDEX_DAYS,
+  MAIL_RECALL_RESULTS,
+  OpenRouterEmbedder,
+} from "./mail-recall.js";
 
 const MODEL = "google/gemini-3.8-flash";
+/** The index's own Gmail read pace (src/mail-recall.ts), which leaves quota for the agent. */
+const READ_INTERVAL_MS = 500;
+/** A refused read waits for the per-minute quota to renew. A lost message would shift ranks. */
+const READ_RETRY_MS = 60_000;
+const READ_RETRIES = 3;
+const QUOTA_REFUSED = /\((403|429)\)/;
+/** Consecutive unreadable messages that mean something larger is wrong, such as a revoked token. */
+const UNREADABLE_LIMIT = 5;
 const STOP = new Set(
   "the and for you your with from this that have has are was were our not but all any can will about re fwd fw".split(
     " ",
@@ -101,13 +118,12 @@ async function main() {
     clientSecret: c.GOOGLE_CLIENT_SECRET,
     refreshToken: c.GOOGLE_REFRESH_TOKEN,
   });
-  const index = new MailIndex(
-    gmail,
-    new OpenRouterEmbedder(c.OPENROUTER_API_KEY),
-    owner,
-  );
-  await index.start();
-  if (index.state !== "ready") throw new Error("The mail index did not build");
+  const embedder = new OpenRouterEmbedder(c.OPENROUTER_API_KEY);
+  const db = connect(c.DATABASE_URL);
+  const store = new MailIndexStore(db);
+  const stored = await store.headers(owner);
+  if (!stored.size) throw new Error("The mail index is empty");
+  const since = Date.now() - MAIL_INDEX_DAYS * MAIL_INDEX_DAY_MS;
   let cost = 0;
   // recallAlone: gmail_recall by itself; recallExtra: found by gmail_recall and not by keyword.
   const totals = {
@@ -117,12 +133,16 @@ async function main() {
     recallAlone: 0,
     recallExtra: 0,
   };
-  for (const m of shuffle(index.sample())) {
+  for (const m of shuffle([...stored.values()])) {
     if (totals.questions >= wanted) break;
-    if (m.text.trim().length < 80) continue;
+    const text = await gmail
+      .indexMessage(owner, m.messageId)
+      .then((message) => chunks(message)[0]?.text ?? "")
+      .catch(() => "");
+    if (text.trim().length < 80) continue;
     const written = await ask(
       c.OPENROUTER_API_KEY,
-      `Here is an email the owner received in the last year.\n\nFrom: ${m.from}\nSubject: ${m.subject}\nDate: ${m.date}\n\n${m.text.slice(0, 1200)}\n\nWrite one question the owner might ask an assistant to find this email weeks later, half-remembering what it was about. Describe its content in everyday words. Do not use the sender's name or organisation, the subject's words, or distinctive phrases from the email. If the email is an automated notice with nothing a person would look for again, answer {"skip": true}. Otherwise answer {"question": "..."}.`,
+      `Here is an email the owner received in the last year.\n\nFrom: ${m.from}\nSubject: ${m.subject}\nDate: ${m.date}\n\n${text.slice(0, 1200)}\n\nWrite one question the owner might ask an assistant to find this email weeks later, half-remembering what it was about. Describe its content in everyday words. Do not use the sender's name or organisation, the subject's words, or distinctive phrases from the email. If the email is an automated notice with nothing a person would look for again, answer {"skip": true}. Otherwise answer {"question": "..."}.`,
     );
     cost += written.cost;
     const q = z
@@ -177,8 +197,11 @@ async function main() {
         keywordLists.push([]);
       }
     }
-    const recalled = await index.recall(owner, question);
-    const hits = "results" in recalled ? recalled.results : [];
+    const [vector] = await embedder.embed([question.slice(0, 2000)]);
+    const hits = (await store.search(owner, vector!, since)).slice(
+      0,
+      MAIL_RECALL_RESULTS,
+    );
     const recallIds = new Set(hits.map((r) => r.messageId));
     const keyword = keywordIds.has(m.messageId);
     const recall = keyword || recallIds.has(m.messageId);
@@ -202,19 +225,53 @@ async function main() {
               type: "question",
               keywordLists,
               keywordMeta,
-              dense: await index.scoreChunks(owner, question),
+              dense: Object.fromEntries(
+                (await store.scoreChunks(owner, vector!)).map((s) => [
+                  `${s.messageId}:${s.chunk}`,
+                  Math.round(s.score * 1e6) / 1e6,
+                ]),
+              ),
             }
           : {}),
       }),
     );
   }
+  // Chunk text is not stored, so it is read again from Gmail at the index's own pace.
+  let unreadable = 0;
+  let consecutive = 0;
   if (exporting)
-    for (const chunk of index.exportChunks(owner))
-      console.log(JSON.stringify({ type: "chunk", ...chunk }));
+    for (const m of stored.values()) {
+      await new Promise((resolve) => setTimeout(resolve, READ_INTERVAL_MS));
+      let message: Awaited<ReturnType<typeof gmail.indexMessage>> | undefined;
+      for (let tries = 0; !message && tries <= READ_RETRIES; tries++) {
+        if (tries)
+          await new Promise((resolve) => setTimeout(resolve, READ_RETRY_MS));
+        const read = await gmail.indexMessage(owner, m.messageId).then(
+          (value) => ({ value, error: undefined }),
+          (error: unknown) => ({ value: undefined, error }),
+        );
+        message = read.value;
+        if (!QUOTA_REFUSED.test(String((read.error as Error)?.message))) break;
+      }
+      consecutive = message ? 0 : consecutive + 1;
+      if (consecutive >= UNREADABLE_LIMIT)
+        throw new Error("Gmail refused too many reads in a row");
+      if (!message) unreadable += 1;
+      for (const [n, part] of (message ? chunks(message) : []).entries())
+        console.log(
+          JSON.stringify({
+            type: "chunk",
+            chunkId: `${m.messageId}:${n}`,
+            ...m,
+            text: part.text,
+          }),
+        );
+    }
   console.log(
     JSON.stringify({
       summary: true,
-      indexedMessages: index.messages,
+      indexedMessages: stored.size,
+      ...(exporting ? { unreadable } : {}),
       ...totals,
       keywordRate: totals.questions ? totals.keyword / totals.questions : 0,
       recallRate: totals.questions ? totals.recall / totals.questions : 0,
@@ -224,6 +281,7 @@ async function main() {
       modelCostUsd: Math.round(cost * 10000) / 10000,
     }),
   );
+  await db.end();
 }
 
 await main();
