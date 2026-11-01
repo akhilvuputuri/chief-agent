@@ -31,6 +31,10 @@ export interface MonitorAlert {
   reason?: string | null;
   /** Unix nanoseconds, as a decimal string. */
   created_ns?: string;
+  /** "drift" compares the window with the one before it, rather than with a limit. */
+  mode?: string;
+  baseline_value?: number | null;
+  baseline_minutes?: number | null;
 }
 
 const RATES = new Set(["model_error_rate", "tool_error_rate"]);
@@ -43,7 +47,9 @@ function amount(metric: string, value: number | null) {
   )
     return `${Math.round(value * 1000) / 10}%`;
   if (metric === "cost_usd") return `$${value.toFixed(2)}`;
-  if (metric === "model_p95_ms") return `${(value / 1000).toFixed(1)} s`;
+  if (metric === "cost_per_trace") return `$${value.toFixed(3)}`;
+  if (metric === "model_p95_ms" || metric === "model_mean_ms")
+    return `${(value / 1000).toFixed(1)} s`;
   return `${Math.round(value * 1000) / 1000}`;
 }
 
@@ -64,6 +70,28 @@ function late(alert: MonitorAlert, now: number) {
     : `, raised ${Math.round(minutes / 60)} hours ago`;
 }
 
+/**
+ * A drift alert compares two windows, so its threshold is the smallest change watched, not a
+ * limit; and a resolve means the windows no longer differ, not that the level recovered: a
+ * lasting shift ends up in both.
+ */
+function driftText(alert: MonitorAlert, name: string, now: number) {
+  const current = amount(alert.metric, alert.value);
+  const earlier = span(alert.baseline_minutes ?? alert.window_minutes);
+  if (alert.kind === "resolved") {
+    if (alert.value === null) return null;
+    return `Drift ended: ${name} no longer differs from the previous ${earlier}. It is now ${current}, which is not necessarily back to normal.`;
+  }
+  const baseline = amount(alert.metric, alert.baseline_value ?? null);
+  const moved =
+    alert.value !== null &&
+    typeof alert.baseline_value === "number" &&
+    alert.value < alert.baseline_value
+      ? "fell"
+      : "rose";
+  return `Drift: ${name} ${moved} from ${baseline} to ${current} over the last ${span(alert.window_minutes)}, compared with the previous ${earlier}${late(alert, now)}. Details in agentwatch.`;
+}
+
 /** The Telegram text of one alert. Plain text: it is sent without a parse mode. */
 export function alertText(alert: MonitorAlert, now = Date.now()) {
   // Anyone who can reach agentwatch sets this name, so it is reduced to one plain line. Not
@@ -72,6 +100,10 @@ export function alertText(alert: MonitorAlert, now = Date.now()) {
     .replace(/[\p{Cc}\p{Cf}\s]+/gu, " ")
     .trim()
     .slice(0, 200);
+  if (alert.mode === "drift") {
+    const text = driftText(alert, name, now);
+    if (text) return text;
+  }
   const value = amount(alert.metric, alert.value);
   const threshold = amount(alert.metric, alert.threshold);
   if (alert.kind === "resolved" && alert.reason === "removed")

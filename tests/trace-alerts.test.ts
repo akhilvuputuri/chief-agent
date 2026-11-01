@@ -247,6 +247,55 @@ test("a retry repeats nothing to whoever already has the alert", async () => {
   }
 });
 
+test("a drift alert says what moved, and a resolve does not claim recovery", () => {
+  const drift = alert({
+    mode: "drift",
+    metric: "tool_error_rate",
+    threshold: 0.05,
+    value: 0.237,
+    bound: 0.1,
+    baseline_value: 0.1,
+    window_minutes: 7 * 1440,
+    baseline_minutes: 7 * 1440,
+  });
+  assert.equal(
+    alertText(drift),
+    "Drift: Tool errors rose from 10% to 23.7% over the last 7 days, compared with the previous 7 days. Details in agentwatch.",
+  );
+  assert.match(
+    alertText({ ...drift, value: 0.05, baseline_value: 0.2 }),
+    /fell from 20% to 5%/,
+  );
+  assert.equal(
+    alertText({ ...drift, kind: "resolved", value: 0.402 }),
+    "Drift ended: Tool errors no longer differs from the previous 7 days. It is now 40.2%, which is not necessarily back to normal.",
+  );
+  // A monitor edited or deleted while drifting has no reading to report.
+  assert.match(
+    alertText({ ...drift, kind: "resolved", value: null, reason: "removed" }),
+    /no longer applies; the monitor was deleted/,
+  );
+  // Units for the metrics only drift monitors use.
+  assert.match(
+    alertText({
+      ...drift,
+      metric: "cost_per_trace",
+      value: 0.25,
+      baseline_value: 0.125,
+    }),
+    /from \$0\.125 to \$0\.250/,
+  );
+  assert.match(
+    alertText({
+      ...drift,
+      metric: "model_mean_ms",
+      value: 9000,
+      baseline_value: 5000,
+    }),
+    /from 5\.0 s to 9\.0 s/,
+  );
+});
+
 test("a resolved message cannot overtake its alert", async () => {
   const restore = setOpsSink(() => undefined);
   try {
