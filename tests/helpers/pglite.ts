@@ -2,6 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { vector } from "@electric-sql/pglite/vector";
 
 // Booting PGlite compiles its WASM module and runs initdb, which costs more than the
 // migrations themselves. Each test process compiles once, applies a migration list once,
@@ -21,8 +22,15 @@ const loadRuntime = async () => ({
   fsBundle: new Blob([await readFile(join(dist, "pglite.data"))]),
 });
 
+// Production compiles pgvector into Postgres; PGlite loads it as an extension.
+const extensionsFor = (files: string[]) =>
+  files.some((file) => file.startsWith("034_")) ? { vector } : undefined;
+
 async function snapshot(files: string[]) {
-  const template = await PGlite.create(await (runtime ??= loadRuntime()));
+  const template = await PGlite.create({
+    ...(await (runtime ??= loadRuntime())),
+    extensions: extensionsFor(files),
+  });
   for (const file of files)
     await template.exec(
       await readFile(new URL(`../../db/${file}`, import.meta.url), "utf8"),
@@ -47,6 +55,7 @@ export async function migratedPGlite(migrations?: string[]): Promise<PGlite> {
   if (!data) snapshots.set(key, (data = snapshot(files)));
   return PGlite.create({
     ...(await (runtime ??= loadRuntime())),
+    extensions: extensionsFor(files),
     loadDataDir: await data,
   });
 }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID, createHmac } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
+import { vector } from "@electric-sql/pglite/vector";
 import { Gathering } from "../dist/gathering/controller.js";
 import { FileVault, encryptBytes } from "../dist/gathering/vault.js";
 import { GatheringBrowsers } from "../dist/gathering/sessions.js";
@@ -47,7 +48,7 @@ async function fixture({
   browser = false,
   text = "OpenAI ChatGPT Invoice number INV-001 Invoice date September 5, 2026 USD 20.00 Bill to Personal account",
 } = {}) {
-  const db = new PGlite();
+  const db = new PGlite({ extensions: { vector } });
   for (const f of (await readdir(root + "/db"))
     .filter((x) => x.endsWith(".sql"))
     .sort())

@@ -9,6 +9,7 @@
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
+import { vector } from "@electric-sql/pglite/vector";
 import { Assistant } from "../../src/agent.js";
 import { CustomAgent } from "../../src/custom-agent.js";
 import { JobTools } from "../../src/tools.js";
@@ -127,7 +128,7 @@ const MEMORIES: [string, string][] = [
 ];
 
 async function database() {
-  const pg = new PGlite();
+  const pg = new PGlite({ extensions: { vector } });
   const files = readdirSync(new URL("db/", root))
     .filter((f) => f.endsWith(".sql"))
     .sort();

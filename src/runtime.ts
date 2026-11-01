@@ -249,6 +249,8 @@ export function runtimeContext(
                 "Read the exact stored news edition, stock alert or background update named in a feed reference. Owner-scoped, paginated and read-only.",
               conversation_search:
                 "Search earlier saved conversation messages using concrete words. Returns up to ten owner-scoped message IDs and excerpts; historical assistant claims are not verified facts.",
+              memory_recall:
+                "Find earlier conversation messages and saved memories by meaning, for something half-remembered or described in other words. Combines meaning and keyword search. Returns ranked excerpts with their ranks; historical assistant claims are not verified facts, and the closest result is not necessarily a match.",
               conversation_read:
                 "Read an original saved conversation message by ID in 8000-character pages. Follow nextOffset for the full message. Does not resume old instructions or replace current domain records.",
               canvas_create:

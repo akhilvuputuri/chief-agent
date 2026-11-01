@@ -1,3 +1,9 @@
+## Recall over conversations and memories (1 November 2026)
+
+- **Code.** `memory_recall` searches past messages and memories by meaning and keyword. Adds migration 034, the pgvector Postgres image and a background indexer.
+- **Why.** Step 2 of issue 326. See [recall](recall.md) and [journal 143](journey/143-recall-with-pgvector.md).
+- **Deployment.** Not deployed. Needs the operator rollout `scripts/deploy-pgvector.py`, which restarts Postgres; update this entry on release.
+
 ## An approval covers the spec, not who carries it out (31 October 2026)
 
 - **Code.** Requirement approval now hashes only the job, objective, context and plan. Earlier approvals stay valid. The new `coding_job_update` changes the models or limits of a stopped job on the owner's request. No worker image, database or Compose change.

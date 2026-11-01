@@ -31,6 +31,7 @@ export const readOperations = new Set([
   "finish_turn",
   "feed_read",
   "conversation_search",
+  "memory_recall",
   "conversation_read",
   "canvas_list",
   "canvas_read",

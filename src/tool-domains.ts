@@ -8,6 +8,7 @@ export const CORE_OPERATIONS = new Set([
   "link_resolve",
   "feed_read",
   "conversation_search",
+  "memory_recall",
   "conversation_read",
   "observation_read",
   "source_read",

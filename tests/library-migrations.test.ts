@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
+import { vector } from "@electric-sql/pglite/vector";
 import { ensureUser, type Database } from "../src/db.js";
 
 const operations = [
@@ -21,7 +22,7 @@ async function applyAll(pg: PGlite) {
 }
 
 test("the full sorted migration directory applies, keeps library rows across a re-run, and 003/009/016 agree on the approvals constraint", async () => {
-  const pg = new PGlite();
+  const pg = new PGlite({ extensions: { vector } });
   const db = pg as unknown as Database;
   try {
     await applyAll(pg);

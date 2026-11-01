@@ -9,7 +9,7 @@ import { completeMessageGroups } from "./context-continuity.js";
 
 // Tool outputs include copies of earlier search results. They remain immutable history,
 // but are not original conversational evidence and must never become fresh search hits.
-const conversational = `e.delivery_state IN ('recorded','sent') AND c.payload->>'role' IN ('user','assistant')
+export const conversational = `e.delivery_state IN ('recorded','sent') AND c.payload->>'role' IN ('user','assistant')
   AND jsonb_typeof(c.payload->'content')='string'
   AND length(btrim(c.payload->>'content'))>0
   AND NOT (c.payload ? 'tool_call_id')

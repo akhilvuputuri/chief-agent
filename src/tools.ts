@@ -33,7 +33,8 @@ import type { StockLookup } from "./stock-lookup.js";
 import { RuleTools } from "./stock-rules.js";
 import type { SingaporeTools } from "./singapore/tools.js";
 import { isSingaporeAction } from "./singapore/schema.js";
-import { keywordSearch, type MailIndex } from "./mail-recall.js";
+import { keywordSearch, type Embedder, type MailIndex } from "./mail-recall.js";
+import { recall } from "./recall.js";
 import { isLearned, MemoryStore } from "./memory.js";
 export class JobTools {
   constructor(
@@ -57,6 +58,7 @@ export class JobTools {
     readonly links?: LinkResolver,
     readonly singapore?: SingaporeTools,
     readonly mailRecall?: Pick<MailIndex, "recall">,
+    private recallEmbedder?: Embedder,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -187,6 +189,16 @@ export class JobTools {
       return readFeed(db, user, a.kind, a.id, a.offset);
     if (a.operation === "conversation_search")
       return new HistoryStore(db).search(user, a.query);
+    if (a.operation === "memory_recall")
+      return recall(
+        db,
+        user,
+        run,
+        a.query,
+        this.recallEmbedder,
+        a.limit,
+        signal,
+      );
     if (a.operation === "conversation_read")
       return new HistoryStore(db).read(user, a.id, a.offset);
     const canvases = new Canvases(db);

@@ -75,6 +75,8 @@ const schema = z.object({
   MAIL_INDEX: z.enum(["on", "off"]).default("on"),
   /** The nightly learner (docs/learning.md); "off" in config/runtime.json stops it. */
   LEARNING: z.enum(["on", "off"]).default("on"),
+  /** Background embedding for memory_recall (docs/recall.md); "off" leaves keyword search. */
+  RECALL_INDEX: z.enum(["on", "off"]).default("on"),
   // Shadow decisions (#127): Jev predicts beside each turn without changing it. Separate
   // from TOOL_PICKER so the picker can be turned off while measurement continues.
   SHADOW_DECISIONS: z.enum(["jev", "off"]).default("jev"),
@@ -174,6 +176,7 @@ export const RUNTIME_SETTINGS = [
   "TOOL_PICKER",
   "MAIL_INDEX",
   "LEARNING",
+  "RECALL_INDEX",
   "SHADOW_DECISIONS",
   "EFFORT_PICKER",
   "TELEGRAM_TOPICS",
