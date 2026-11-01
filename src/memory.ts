@@ -444,12 +444,13 @@ export class MemoryStore {
       selected: [...selected],
       omitted,
       // Learned items only, rescanned on load so a pattern added later also flags older
-      // ones. The owner's own facts are theirs to word as they like. A reworded fact is
-      // normal under "save, prune later": findable by its flag, but not a warning.
+      // ones. The owner's own facts are theirs to word as they like. A reworded fact or a
+      // shortened procedure is normal under "save, prune later": findable by its flag, but
+      // not a warning.
       flagged: candidates.filter(
         (r) =>
           selected.has(r.id) &&
-          (r.flags.some((f) => f !== "paraphrased") ||
+          (r.flags.some((f) => f !== "paraphrased" && f !== "shrunk") ||
             scanThreats(r.value!).length > 0),
       ).length,
       chars: JSON.stringify(explicit).length + chars,

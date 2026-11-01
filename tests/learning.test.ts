@@ -3,10 +3,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { Database } from "../src/db.js";
 import {
+  type Evidence,
+  fitted,
   labelTask,
   Learner,
   LEARNING_LIMITS,
   ownerWords,
+  PROCEDURE_PROMPT_VERSION,
   quoteRefusal,
   quoteSupports,
   untrustedSources,
@@ -281,7 +284,12 @@ test("a night's run starts from 03:30 Singapore, once, and not outside its windo
     "completed",
   );
   assert.equal(inputs.length, 1);
-  assert.equal(await at("2026-11-27T21:00:00Z").tick("owner"), null);
+  // The next tick is the procedure pass, and after that the night is done.
+  assert.equal(
+    (await at("2026-11-27T21:00:00Z").tick("owner"))?.state,
+    "completed",
+  );
+  assert.equal(await at("2026-11-27T21:10:00Z").tick("owner"), null);
   // 10:00 SGT the next day is outside that night's window.
   assert.equal(await at("2026-11-29T02:00:00Z").tick("owner"), null);
   assert.equal(
@@ -290,7 +298,7 @@ test("a night's run starts from 03:30 Singapore, once, and not outside its windo
   );
 });
 
-test("a run writes checked facts and lessons with provenance and trust, refuses the rest, and labels each task once", async (t) => {
+test("a run writes checked facts with provenance and trust, refuses the rest, and labels each task once", async (t) => {
   const db = await setup(t);
   const success = await task(db, {
     ownerSays: ["I always prefer aisle seats on long flights, please."],
@@ -351,25 +359,12 @@ test("a run writes checked facts and lessons with provenance and trust, refuses 
         [
           "learn_lesson",
           {
-            domain: "parcels",
-            slug: "retry-record",
-            outcome: "pitfall",
-            value:
-              "Retry a failed parcel record once, because the first write can race the tracker.",
-            taskIds: [success],
-            reason: "Mislabelled",
-          },
-        ],
-        [
-          "learn_lesson",
-          {
             domain: "summaries",
             slug: "five-bullets",
             outcome: "success",
-            value:
-              "Keep weekly summaries to five bullets, because the owner reads them on a phone.",
+            value: "Keep weekly summaries to five bullets.",
             taskIds: [plain],
-            reason: "Worked",
+            reason: "Lessons are no longer written one item at a time",
           },
         ],
         ["learn_fact", { key: "x" }],
@@ -382,12 +377,11 @@ test("a run writes checked facts and lessons with provenance and trust, refuses 
     assert.deepEqual(results, [
       { accepted: true },
       { refused: "The quote must be the owner's exact words in a cited task" },
-      { refused: "A pitfall lesson must cite only pitfall tasks" },
-      { accepted: true },
+      { refused: "Unknown tool" },
       { refused: "Invalid arguments" },
       { refused: "Unknown tool" },
     ]);
-    return [["learn_finish", { summary: "Saved two items" }]];
+    return [["learn_finish", { summary: "Saved one item" }]];
   });
   const result: any = await learner(db, adapter).tick("owner");
   assert.equal(inputs.length, 2);
@@ -398,16 +392,14 @@ test("a run writes checked facts and lessons with provenance and trust, refuses 
       result.success,
       result.pitfall,
       result.facts,
-      result.lessons,
       result.refused,
     ],
-    ["completed", 4, 2, 1, 1, 1, 4],
+    ["completed", 4, 2, 1, 1, 4],
   );
   // The model was offered learning tools only.
   assert.deepEqual(inputs[0].tools.map((x: any) => x.name).sort(), [
     "learn_fact",
     "learn_finish",
-    "learn_lesson",
     "learn_retire",
   ]);
   const store = new MemoryStore(db);
@@ -418,13 +410,9 @@ test("a run writes checked facts and lessons with provenance and trust, refuses 
   );
   assert.deepEqual(fact!.source.taskIds, [success]);
   assert.equal((fact!.source.messageIds as string[]).length, 1);
-  const [lesson] = await store.history(
-    "owner",
-    "lesson:summaries:five-bullets",
-  );
   assert.deepEqual(
-    [lesson!.kind, lesson!.outcome, lesson!.domain, lesson!.trust],
-    ["lesson", "success", "summaries", "owner"],
+    await store.history("owner", "lesson:summaries:five-bullets"),
+    [],
   );
   assert.deepEqual(await store.history("owner", "home_city"), []);
   const reviews = (
@@ -464,10 +452,7 @@ test("a run writes checked facts and lessons with provenance and trust, refuses 
       c.key,
       c.learned,
     ]),
-    [
-      ["lesson:summaries:five-bullets", true],
-      ["seat_preference", true],
-    ],
+    [["seat_preference", true]],
   );
 });
 
@@ -918,24 +903,12 @@ test("ordinary conversation turns are labelled, a correction becomes owner evide
           reason: "Stated by the owner",
         },
       ],
-      [
-        "learn_lesson",
-        {
-          domain: "news",
-          slug: "short-summaries",
-          outcome: "pitfall",
-          value:
-            "Keep weekly news summaries to three bullets, because the owner asked to shorten a long one.",
-          taskIds: [summary],
-          reason: "Owner correction",
-        },
-      ],
     ];
   });
   const result: any = await learner(db, adapter).tick("owner");
   assert.deepEqual(
-    [result.state, result.facts, result.lessons, result.refused],
-    ["completed", 1, 1, 0],
+    [result.state, result.facts, result.refused],
+    ["completed", 1, 0],
   );
   assert.equal(inputs.length, 2);
   const store = new MemoryStore(db);
@@ -1532,30 +1505,28 @@ test("work from before forwards were marked makes what it produces untrusted", a
 
 test("the learner cannot bring back a removed key, and is shown what was removed", async (t) => {
   const db = await setup(t);
-  const id = await task(db, { ownerSays: ["Find me a flight"] });
+  const says = "I always want a window seat on trains";
+  const id = await task(db, { ownerSays: [says] });
   const store = new MemoryStore(db);
   await store.write("owner", {
-    key: "lesson:travel:bad-rule",
-    value: "A wrong rule about travel",
-    kind: "lesson",
-    outcome: "success",
-    domain: "travel",
+    key: "seat_rule",
+    value: "Wants a window seat",
+    kind: "fact",
     origin: "learned",
     reason: "seed",
     source: {},
   });
-  await store.retire("owner", "lesson:travel:bad-rule", {
+  await store.retire("owner", "seat_rule", {
     origin: "owner",
     reason: "wrong",
   });
   const { adapter, inputs } = model(() => [
     [
-      "learn_lesson",
+      "learn_fact",
       {
-        domain: "travel",
-        slug: "bad-rule",
-        outcome: "success",
-        value: "A wrong rule about travel",
+        key: "seat_rule",
+        value: "Wants a window seat on trains",
+        quote: says,
         taskIds: [id],
         reason: "Again",
       },
@@ -1563,15 +1534,13 @@ test("the learner cannot bring back a removed key, and is shown what was removed
     ["learn_finish", {}],
   ]);
   const result: any = await learner(db, adapter).tick("owner");
-  assert.equal(result.lessons, 0);
+  assert.equal(result.facts, 0);
   assert.ok(result.refused >= 1);
   assert.deepEqual(JSON.parse(inputs[0].messages[1].content).removed, [
-    { key: "lesson:travel:bad-rule", value: "A wrong rule about travel" },
+    { key: "seat_rule", value: "Wants a window seat" },
   ]);
   assert.equal(
-    (await store.active("owner")).some(
-      (r) => r.key === "lesson:travel:bad-rule",
-    ),
+    (await store.active("owner")).some((r) => r.key === "seat_rule"),
     false,
   );
 });
@@ -1753,5 +1722,725 @@ test("a run's batch counts reach the operational log", () => {
   assert.deepEqual(
     [line.recordedCount, line.failedBatchCount, line.dropped],
     [10, 1, undefined],
+  );
+});
+
+// Ten days before the test night falls in exactly one period: the one ending 21 November.
+const IN_ONE_PERIOD = new Date(NIGHT.getTime() - 10 * DAY);
+const isProcedurePass = (input: any) =>
+  input.tools.some((x: any) => x.name === "learn_procedure");
+const procedureRuns = async (db: Database) =>
+  (
+    await db.query(
+      "SELECT state,summary FROM learner_runs WHERE prompt_version LIKE 'procedures-%' ORDER BY started_at",
+    )
+  ).rows;
+// The item pass, then the procedure pass on the next tick.
+async function procedurePass(db: Database, adapter: ModelAdapter, now = NIGHT) {
+  await learner(db, adapter, now).tick("owner");
+  return (await learner(db, adapter, now).tick("owner")) as any;
+}
+const twoTurns = async (db: Database) => [
+  await turn(db, {
+    says: "Summarise this week's news for me",
+    reply: "Here is a long summary.",
+    at: IN_ONE_PERIOD,
+  }),
+  await turn(db, {
+    says: "Summarise the markets for me too",
+    reply: "Here are three bullets.",
+    at: new Date(IN_ONE_PERIOD.getTime() + 3 * 3600_000),
+    calls: [["gmail_search", "success"]],
+  }),
+];
+const seedLesson = (db: Database, key: string, value = "A narrow rule here") =>
+  new MemoryStore(db).write("owner", {
+    key,
+    value,
+    kind: "lesson",
+    outcome: "success",
+    domain: key.split(":")[1]!,
+    origin: "learned",
+    reason: "seed",
+    source: {},
+  });
+const procedure = (
+  ids: string[],
+  o: { domain?: string; value?: string; absorbs?: string[] } = {},
+): Call => [
+  "learn_procedure",
+  {
+    domain: o.domain ?? "news",
+    value:
+      o.value ??
+      "Keep news summaries short, because the owner reads on a phone.",
+    taskIds: ids,
+    absorbs: o.absorbs ?? [],
+    reason: "Seen across days",
+  },
+];
+
+test("a procedure pass reads reviewed work together, revises one key per kind of work and absorbs narrow lessons", async (t) => {
+  const db = await setup(t);
+  const [news, markets] = await twoTurns(db);
+  await seedLesson(db, "lesson:news:short");
+  const { adapter, inputs } = model((input) =>
+    isProcedurePass(input) &&
+    !input.messages.some((m: any) => m.role === "tool")
+      ? [
+          procedure([news!, markets!], { absorbs: ["lesson:news:short"] }),
+          ["learn_finish", {}],
+        ]
+      : [["learn_finish", {}]],
+  );
+  await learner(db, adapter).tick("owner");
+  const reviewed = (
+    await db.query("SELECT count(*)::int n FROM learning_reviews")
+  ).rows[0].n;
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual(
+    [
+      result.state,
+      result.procedures,
+      result.absorbed,
+      result.periods,
+      result.reviewed,
+    ],
+    ["completed", 1, 1, 1, 2],
+  );
+  const pass = inputs.find(isProcedurePass);
+  assert.deepEqual(pass.tools.map((x: any) => x.name).sort(), [
+    "learn_finish",
+    "learn_procedure",
+    "learn_retire",
+  ]);
+  const shown = JSON.parse(pass.messages[1].content);
+  assert.deepEqual(
+    shown.tasks.map((x: any) => x.id),
+    [news, markets],
+  );
+  assert.deepEqual(shown.period, { from: "2026-11-07", until: "2026-11-21" });
+  // Reading does not relabel anything.
+  assert.equal(
+    (await db.query("SELECT count(*)::int n FROM learning_reviews")).rows[0].n,
+    reviewed,
+  );
+  const store = new MemoryStore(db);
+  const [saved] = await store.history("owner", "lesson:procedure:news");
+  assert.deepEqual(
+    [saved!.kind, saved!.domain, saved!.outcome, saved!.origin],
+    ["lesson", "news", null, "learned"],
+  );
+  assert.equal(saved!.source.promptVersion, PROCEDURE_PROMPT_VERSION);
+  assert.deepEqual(saved!.source.turnRunIds, [news, markets]);
+  // It read the whole period, so the period's untrusted kinds tag it.
+  assert.deepEqual(saved!.untrusted_sources, ["email"]);
+  assert.equal(saved!.trust, "untrusted");
+  const active = (await store.active("owner")).map((r) => r.key);
+  assert.deepEqual(active, ["lesson:procedure:news"]);
+  // Undoing the run takes the procedure out and brings the absorbed lesson back.
+  await store.rollback("owner", { learnerRun: result.learnerRun }, "Undo");
+  assert.deepEqual(
+    (await store.active("owner")).map((r) => r.key),
+    ["lesson:news:short"],
+  );
+});
+
+test("a procedure pass untrusted tag covers items it did not cite", async (t) => {
+  const db = await setup(t);
+  const [news] = await twoTurns(db);
+  const other = await turn(db, {
+    says: "Summarise the sport for me",
+    reply: "Done.",
+    at: IN_ONE_PERIOD,
+  });
+  const { adapter } = model((input) =>
+    isProcedurePass(input) &&
+    !input.messages.some((m: any) => m.role === "tool")
+      ? [procedure([news!, other]), ["learn_finish", {}]]
+      : [["learn_finish", {}]],
+  );
+  await procedurePass(db, adapter);
+  const [saved] = await new MemoryStore(db).history(
+    "owner",
+    "lesson:procedure:news",
+  );
+  assert.deepEqual(saved!.untrusted_sources, ["email"]);
+});
+
+test("the host holds procedures to two items, shown evidence, lessons it may absorb and what was removed", async (t) => {
+  const db = await setup(t);
+  const [news, markets] = await twoTurns(db);
+  const store = new MemoryStore(db);
+  await seedLesson(db, "lesson:procedure:mail", "How to work through mail.");
+  await seedLesson(db, "lesson:procedure:gone");
+  await store.retire("owner", "lesson:procedure:gone", {
+    origin: "owner",
+    reason: "wrong",
+  });
+  await store.write("owner", {
+    key: "home_city",
+    value: "Lives in Singapore",
+    kind: "fact",
+    origin: "learned",
+    reason: "seed",
+    source: {},
+  });
+  const results: any[] = [];
+  const { adapter } = model((input) => {
+    if (!isProcedurePass(input)) return [["learn_finish", {}]];
+    const told = input.messages.filter((m: any) => m.role === "tool");
+    if (told.length) {
+      results.push(...told.map((m: any) => JSON.parse(m.content)));
+      return [["learn_finish", {}]];
+    }
+    return [
+      procedure([news!]),
+      procedure([news!, randomUUID()]),
+      procedure([news!, markets!], { absorbs: ["home_city"] }),
+      procedure([news!, markets!], { absorbs: ["lesson:procedure:mail"] }),
+      procedure([news!, markets!], { domain: "gone" }),
+      ["learn_retire", { key: "home_city", reason: "stale", taskIds: [news] }],
+      // A revision may rest on one new item, because the pattern is already established.
+      procedure([news!], {
+        domain: "mail",
+        value: "Mail, revised from one item.",
+      }),
+      procedure([news!, markets!], { domain: "mail", value: "Mail again." }),
+      procedure([news!, markets!]),
+      ["learn_finish", {}],
+    ];
+  });
+  const result = await procedurePass(db, adapter);
+  assert.deepEqual(results.slice(0, 10), [
+    { refused: "A new procedure needs at least two items showing the pattern" },
+    { refused: "Cite only task IDs shown to you" },
+    {
+      refused: "Only learned lessons in current can be absorbed, not home_city",
+    },
+    {
+      refused:
+        "Only learned lessons in current can be absorbed, not lesson:procedure:mail",
+    },
+    { refused: "The owner or a rollback removed this procedure; leave it out" },
+    {
+      refused:
+        "Only a learned lesson or procedure in current can be retired here",
+    },
+    { accepted: true },
+    { refused: "This procedure was already proposed in this review" },
+    { accepted: true },
+    { ok: true },
+  ]);
+  assert.equal(result.procedures, 2);
+  assert.equal(
+    (await store.active("owner")).find((r) => r.key === "home_city")?.value,
+    "Lives in Singapore",
+  );
+});
+
+test("a revision replaces the procedure in place, sees the whole earlier text, and is flagged when much shorter", async (t) => {
+  const db = await setup(t);
+  const [news, markets] = await twoTurns(db);
+  const whole = "Long detail. ".repeat(60);
+  await seedLesson(db, "lesson:procedure:news", whole);
+  const { adapter, inputs } = model((input) =>
+    isProcedurePass(input) &&
+    !input.messages.some((m: any) => m.role === "tool")
+      ? [
+          procedure([news!, markets!], { value: "Keep it short now." }),
+          ["learn_finish", {}],
+        ]
+      : [["learn_finish", {}]],
+  );
+  const result = await procedurePass(db, adapter);
+  assert.equal(result.flagged, 1);
+  const shown = JSON.parse(inputs.find(isProcedurePass).messages[1].content);
+  assert.equal(
+    shown.current.find((c: any) => c.key === "lesson:procedure:news").value,
+    whole,
+  );
+  const store = new MemoryStore(db);
+  const history = await store.history("owner", "lesson:procedure:news");
+  assert.deepEqual(
+    history.map((r) => r.value),
+    [whole, "Keep it short now."],
+  );
+  assert.deepEqual(history[1]!.flags, ["shrunk"]);
+  // A shortened procedure is findable but does not raise every turn's log to a warning.
+  assert.equal((await store.select("owner")).flagged, 0);
+});
+
+test("the nightly pass cannot change a procedure", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, { ownerSays: ["Find me a flight"] });
+  await seedLesson(db, "lesson:procedure:travel");
+  const { adapter } = model((input) =>
+    input.messages.some((m: any) => m.role === "tool")
+      ? [["learn_finish", {}]]
+      : [
+          [
+            "learn_retire",
+            {
+              key: "lesson:procedure:travel",
+              reason: "One item",
+              taskIds: [id],
+            },
+          ],
+        ],
+  );
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual([result.retired, result.refused], [0, 1]);
+});
+
+test("procedure passes work through a backlog over nights, then run weekly on an overlapping window", async (t) => {
+  const db = await setup(t);
+  // A turn a week back to September, so every period has work in it.
+  for (let weeks = 1; weeks <= 11; weeks++)
+    await turn(db, {
+      says: `Please look into topic number ${weeks}`,
+      reply: "Done.",
+      at: new Date(NIGHT.getTime() - weeks * 7 * DAY - DAY),
+    });
+  const { adapter, inputs } = model(() => [["learn_finish", {}]]);
+  const passes = () => inputs.filter(isProcedurePass);
+  const periods = () =>
+    passes().map((i) => JSON.parse(i.messages[1].content).period);
+  const first: any = await procedurePass(db, adapter);
+  assert.equal(first.periods, LEARNING_LIMITS.procedurePasses);
+  assert.equal(passes().length, LEARNING_LIMITS.procedurePasses);
+  assert.equal(
+    new Date(first.through).getTime() < NIGHT.getTime() - 7 * DAY,
+    true,
+  );
+  // The windows overlap by a week, oldest first.
+  const seen = periods();
+  for (let i = 1; i < seen.length; i++)
+    assert.equal(seen[i].from < seen[i - 1].until, true);
+  // The same night does not run again.
+  assert.equal(await learner(db, adapter).tick("owner"), null);
+  // Later nights finish the backlog, carrying on from where the last one stopped.
+  for (let night = 1; night <= 3; night++) {
+    const at = new Date(NIGHT.getTime() + night * DAY);
+    await procedurePass(db, adapter, at);
+  }
+  const all = periods();
+  assert.equal(new Set(all.map((p) => p.until)).size, all.length);
+  const count = all.length;
+  // Periods are shown by day; each really ends at the test night's hour, 20:00 UTC.
+  const last = Date.parse(all.at(-1).until) + 20 * 3600_000;
+  // Caught up: nothing is due until a week of newer work has passed its success window.
+  const sameWeek = new Date(last + 6 * DAY);
+  await procedurePass(db, adapter, sameWeek);
+  assert.equal(periods().length, count);
+  const nextWeek = new Date(last + 8 * DAY);
+  await turn(db, {
+    says: "Please look into the newest topic",
+    reply: "Done.",
+    at: new Date(last + 3 * DAY),
+  });
+  await procedurePass(db, adapter, nextWeek);
+  assert.equal(periods().length, count + 1);
+});
+
+test("periods with no work advance without a model call", async (t) => {
+  const db = await setup(t);
+  const { adapter, inputs } = model(() => [["learn_finish", {}]]);
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.equal(result.state, "completed");
+  const second: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual([second.state, second.periods], ["completed", 0]);
+  assert.equal(inputs.length, 0);
+  assert.ok(second.through);
+  const [run] = await procedureRuns(db);
+  assert.equal(run.state, "completed");
+});
+
+test("a failed period stops the run and is tried again the next night", async (t) => {
+  const db = await setup(t);
+  const [news, markets] = await twoTurns(db);
+  let failing = true;
+  const { adapter, inputs } = model((input) => {
+    if (!isProcedurePass(input)) return [["learn_finish", {}]];
+    if (failing) throw new Error("provider down");
+    return input.messages.some((m: any) => m.role === "tool")
+      ? [["learn_finish", {}]]
+      : [procedure([news!, markets!]), ["learn_finish", {}]];
+  });
+  const result = await procedurePass(db, adapter);
+  assert.equal(result.state, "failed");
+  // A period before the failure was recorded, and the failed one was not.
+  const through = result.through;
+  assert.ok(new Date(through).getTime() < IN_ONE_PERIOD.getTime());
+  failing = false;
+  const next = await procedurePass(
+    db,
+    adapter,
+    new Date(NIGHT.getTime() + DAY),
+  );
+  assert.deepEqual([next.state, next.procedures], ["completed", 1]);
+  assert.ok(inputs.length > 0);
+});
+
+test("an owner turn during a procedure pass keeps earlier periods and applies nothing from the current one", async (t) => {
+  const db = await setup(t);
+  const [news, markets] = await twoTurns(db);
+  const { adapter } = model(async (input) => {
+    if (!isProcedurePass(input)) return [["learn_finish", {}]];
+    await db.query(
+      "INSERT INTO conversation_inputs(id,user_id,message) VALUES($1,'owner','hi')",
+      [randomUUID()],
+    );
+    return [procedure([news!, markets!]), ["learn_finish", {}]];
+  });
+  const result = await procedurePass(db, adapter);
+  assert.equal(result.state, "deferred");
+  assert.deepEqual(
+    await new MemoryStore(db).history("owner", "lesson:procedure:news"),
+    [],
+  );
+  assert.ok(new Date(result.through).getTime() < IN_ONE_PERIOD.getTime());
+  await db.query("UPDATE conversation_inputs SET state='completed'");
+  const { adapter: second, inputs } = model(() => [["learn_finish", {}]]);
+  const retried: any = await learner(db, second).tick("owner");
+  assert.deepEqual([retried.state, retried.periods], ["completed", 1]);
+  assert.equal(inputs.length, 1);
+});
+
+test("a procedure pass cuts long messages and shows items in date order", async (t) => {
+  const db = await setup(t);
+  const old = await turn(db, {
+    says: "x".repeat(2500) + " first",
+    reply: "y".repeat(1800),
+    at: IN_ONE_PERIOD,
+  });
+  const id = await task(db, {
+    ownerSays: ["Find me a flight"],
+    finishedAgo: 8 * DAY,
+  });
+  const { adapter, inputs } = model(() => [["learn_finish", {}]]);
+  await procedurePass(db, adapter);
+  const shown = JSON.parse(inputs.find(isProcedurePass).messages[1].content);
+  assert.deepEqual(
+    shown.tasks.map((x: any) => x.id),
+    [old, id],
+  );
+  assert.equal(
+    shown.tasks[0].request.length,
+    LEARNING_LIMITS.procedureMessageChars,
+  );
+  assert.equal(
+    shown.tasks[0].reply.length,
+    LEARNING_LIMITS.procedureMessageChars,
+  );
+});
+
+test("a procedure run's counts reach the operational log", () => {
+  const line: any = projectEventRecord("learner.finished", "run", {
+    state: "completed",
+    procedures: 2,
+    absorbed: 3,
+    periods: 1,
+  });
+  assert.deepEqual(
+    [line.procedureCount, line.absorbedCount, line.periodCount],
+    [2, 3, 1],
+  );
+});
+
+test("revising or absorbing keeps earlier untrusted tags, so a rollback by source finds the text", async (t) => {
+  const db = await setup(t);
+  const news = await turn(db, {
+    says: "Summarise this week's news for me",
+    reply: "Done.",
+    at: IN_ONE_PERIOD,
+  });
+  const markets = await turn(db, {
+    says: "Summarise the markets for me too",
+    reply: "Done.",
+    at: IN_ONE_PERIOD,
+  });
+  const store = new MemoryStore(db);
+  for (const key of ["lesson:procedure:news", "lesson:news:x"])
+    await store.write("owner", {
+      key,
+      value: `Earlier text of ${key}`,
+      kind: "lesson",
+      domain: "news",
+      origin: "learned",
+      reason: "seed",
+      source: {},
+      untrustedSources: ["email"],
+    });
+  const { adapter } = model((input) =>
+    isProcedurePass(input) &&
+    !input.messages.some((m: any) => m.role === "tool")
+      ? [
+          procedure([news, markets], { absorbs: ["lesson:news:x"] }),
+          ["learn_finish", {}],
+        ]
+      : [["learn_finish", {}]],
+  );
+  await procedurePass(db, adapter);
+  const [revision] = (
+    await store.history("owner", "lesson:procedure:news")
+  ).slice(-1);
+  assert.deepEqual(
+    [revision!.trust, revision!.untrusted_sources],
+    ["untrusted", ["email"]],
+  );
+  await store.rollback("owner", { untrustedSource: "email" }, "Bad mail");
+  const active = (await store.active("owner")).map((r) => r.key);
+  assert.equal(active.includes("lesson:procedure:news"), false);
+});
+
+test("a procedure pass cannot retire what newer work set, and always sees every procedure", async (t) => {
+  const db = await setup(t);
+  const [news, markets] = await twoTurns(db);
+  const store = new MemoryStore(db);
+  await store.write("owner", {
+    key: "lesson:news:newer",
+    value: "A rule from later work",
+    kind: "lesson",
+    domain: "news",
+    origin: "learned",
+    reason: "seed",
+    source: { workDate: "2026-11-26" },
+  });
+  await seedLesson(db, "lesson:procedure:old");
+  // Enough newer items to push the procedure past the list's character bound.
+  for (let i = 0; i < 150; i++)
+    await store.write("owner", {
+      key: `seed_${"abcdefghij"[i % 10]}_${"abcdefghij"[Math.floor(i / 10) % 10]}_${"abcdefghij"[Math.floor(i / 100)]}`,
+      value: "x".repeat(300),
+      kind: "fact",
+      origin: "learned",
+      reason: "seed",
+      source: {},
+    });
+  let verdict: any;
+  const { adapter, inputs } = model((input) => {
+    if (!isProcedurePass(input)) return [["learn_finish", {}]];
+    const told = input.messages.filter((m: any) => m.role === "tool");
+    if (told.length) {
+      verdict = JSON.parse(told[0].content);
+      return [["learn_finish", {}]];
+    }
+    return [
+      [
+        "learn_retire",
+        {
+          key: "lesson:news:newer",
+          reason: "Older work disagrees",
+          taskIds: [news, markets],
+        },
+      ],
+      ["learn_finish", {}],
+    ];
+  });
+  await procedurePass(db, adapter);
+  assert.deepEqual(verdict, {
+    refused: "Newer work set this key; older items cannot retire it",
+  });
+  const shown = JSON.parse(inputs.find(isProcedurePass).messages[1].content);
+  assert.ok(shown.current.some((c: any) => c.key === "lesson:procedure:old"));
+  assert.ok(
+    (await store.active("owner")).some((r) => r.key === "lesson:news:newer"),
+  );
+});
+
+test("a response that stops in plain text is reminded once, keeps its proposals and moves on", async (t) => {
+  const db = await setup(t);
+  const [news, markets] = await twoTurns(db);
+  const text = (content: string): Generation => ({
+    message: { role: "assistant", content, tool_calls: [] },
+  });
+  const requests: any[] = [];
+  const adapter: ModelAdapter = {
+    generate: async (input): Promise<Generation> => {
+      const procedures = input.tools.some((x) => x.name === "learn_procedure");
+      if (!procedures)
+        return {
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: randomUUID(),
+                type: "function" as const,
+                function: { name: "learn_finish", arguments: "{}" },
+              },
+            ],
+          },
+        };
+      requests.push(JSON.parse(JSON.stringify(input)));
+      if (requests.length > 1) return text("Saved one procedure.");
+      const [name, args] = procedure([news!, markets!]);
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: randomUUID(),
+              type: "function" as const,
+              function: { name, arguments: JSON.stringify(args) },
+            },
+          ],
+        },
+      };
+    },
+  };
+  const result = await procedurePass(db, adapter);
+  assert.deepEqual(
+    [result.state, result.procedures, result.periods],
+    ["completed", 1, 1],
+  );
+  assert.equal(new Date(result.through) > IN_ONE_PERIOD, true);
+  // The proposal's response, a text answer, then one reminder and no more.
+  assert.equal(requests.length, 3);
+  assert.match(requests[2].messages.at(-1).content, /learn_finish/);
+  assert.deepEqual(
+    [requests[0].requireComplete, requests[0].maxOutputTokens],
+    [true, LEARNING_LIMITS.procedureOutputTokens],
+  );
+});
+
+test("a model error applies nothing from that window, and the window is tried again", async (t) => {
+  const db = await setup(t);
+  const [news, markets] = await twoTurns(db);
+  await seedLesson(db, "lesson:news:short");
+  let failing = true;
+  const { adapter } = model((input) => {
+    if (!isProcedurePass(input)) return [["learn_finish", {}]];
+    if (input.messages.some((m: any) => m.role === "tool")) {
+      if (failing) throw new Error("incomplete");
+      return [["learn_finish", {}]];
+    }
+    return [procedure([news!, markets!], { absorbs: ["lesson:news:short"] })];
+  });
+  const result = await procedurePass(db, adapter);
+  assert.deepEqual(
+    [result.state, result.procedures, result.absorbed],
+    ["failed", 0, 0],
+  );
+  const store = new MemoryStore(db);
+  assert.deepEqual(
+    (await store.active("owner")).map((r) => r.key),
+    ["lesson:news:short"],
+  );
+  failing = false;
+  const next = await procedurePass(
+    db,
+    adapter,
+    new Date(NIGHT.getTime() + DAY),
+  );
+  assert.deepEqual([next.state, next.procedures], ["completed", 1]);
+});
+
+test("a run from an earlier prompt tonight still lets the procedure pass follow", async (t) => {
+  const db = await setup(t);
+  await twoTurns(db);
+  await db.query(
+    `INSERT INTO learner_runs(id,user_id,state,prompt_version,started_at)
+     VALUES($1,'owner','completed','learner-v4',$2)`,
+    [randomUUID(), new Date(NIGHT.getTime() - 3600_000 / 4)],
+  );
+  const { adapter, inputs } = model(() => [["learn_finish", {}]]);
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual([result.state, result.periods], ["completed", 1]);
+  assert.ok(inputs.every(isProcedurePass));
+});
+
+test("a procedure pass gives up for the night after three deferrals", async (t) => {
+  const db = await setup(t);
+  await twoTurns(db);
+  const { adapter } = model(() => [["learn_finish", {}]]);
+  await learner(db, adapter).tick("owner");
+  await db.query(
+    "INSERT INTO conversation_inputs(id,user_id,message) VALUES($1,'owner','hi')",
+    [randomUUID()],
+  );
+  for (let i = 0; i < LEARNING_LIMITS.deferrals; i++)
+    assert.equal((await learner(db, adapter).tick("owner"))?.state, "deferred");
+  await db.query("UPDATE conversation_inputs SET state='completed'");
+  assert.equal(await learner(db, adapter).tick("owner"), null);
+  assert.equal((await procedureRuns(db)).length, LEARNING_LIMITS.deferrals);
+});
+
+test("windows a deferred attempt finished count towards the night's limit", async (t) => {
+  const db = await setup(t);
+  for (let weeks = 1; weeks <= 11; weeks++)
+    await turn(db, {
+      says: `Please look into topic number ${weeks}`,
+      reply: "Done.",
+      at: new Date(NIGHT.getTime() - weeks * 7 * DAY - DAY),
+    });
+  let passes = 0;
+  const { adapter, inputs } = model(async (input) => {
+    if (isProcedurePass(input) && ++passes === 4)
+      await db.query(
+        "INSERT INTO conversation_inputs(id,user_id,message) VALUES($1,'owner','hi')",
+        [randomUUID()],
+      );
+    return [["learn_finish", {}]];
+  });
+  const first = await procedurePass(db, adapter);
+  assert.deepEqual([first.state, first.periods], ["deferred", 3]);
+  await db.query("UPDATE conversation_inputs SET state='completed'");
+  const second: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual([second.state, second.periods], ["completed", 1]);
+  assert.equal(inputs.filter(isProcedurePass).length, 5);
+});
+
+test("a window's input has a hard limit, and what is left unread is counted", () => {
+  const item = (id: number, date: string, chars: number): Evidence => ({
+    id: String(id),
+    kind: "turn",
+    label: "success",
+    reasons: [],
+    date,
+    request: "x".repeat(chars),
+    steps: [],
+    operations: {},
+    ownerMessages: [{ id: "m", text: "x".repeat(chars) }],
+    reply: "y".repeat(chars),
+    untrusted: [],
+    runIds: [],
+  });
+  const few = fitted([
+    item(2, "2026-11-02", 2000),
+    item(1, "2026-11-01", 2000),
+  ]);
+  assert.deepEqual(
+    few.items.map((e) => e.id),
+    ["1", "2"],
+  );
+  assert.equal(
+    few.items[0]!.reply.length,
+    LEARNING_LIMITS.procedureMessageChars,
+  );
+  assert.equal(few.unread, 0);
+  const many = fitted(
+    Array.from({ length: LEARNING_LIMITS.procedureItems + 5 }, (_, i) =>
+      item(i, "2026-11-01", 200),
+    ),
+  );
+  assert.equal(many.items.length, LEARNING_LIMITS.procedureItems);
+  assert.equal(many.unread, 5);
+  const heavy = fitted(
+    Array.from({ length: 100 }, (_, i) => ({
+      ...item(i, "2026-11-01", 200),
+      steps: Array.from({ length: 30 }, () => ({
+        title: "t".repeat(200),
+        status: "done",
+        result: "r".repeat(300),
+      })),
+    })),
+  );
+  assert.ok(heavy.unread > 0);
+  assert.ok(
+    JSON.stringify(heavy.items).length <
+      LEARNING_LIMITS.procedureMaxChars * 1.5,
   );
 });
