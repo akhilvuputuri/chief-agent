@@ -76,6 +76,15 @@ class SimulationTests(unittest.TestCase):
         rule = {"kind": "sma", "universe": ["A"], "fast": 2, "slow": 4, "cap": 1.0}
         self.assertEqual(sr.rule_weights(rule, data)[-1], {"A": 1.0})
 
+    def test_sma_signals_use_adjusted_prices_unless_told_otherwise(self):
+        data = {
+            "close": {"A": [float(100 - i) for i in range(20)]},
+            "adj": {"A": [float(100 + i) for i in range(20)]},
+        }
+        rule = {"kind": "sma", "universe": ["A"], "fast": 2, "slow": 4, "cap": 1.0}
+        self.assertEqual(sr.rule_weights(rule, data)[-1], {"A": 1.0})
+        self.assertEqual(sr.rule_weights({**rule, "signalPrice": "close"}, data)[-1], {"A": 0.0})
+
     def test_costs_are_charged_on_traded_value(self):
         out = sr.simulate(
             [{"A": 1.0}] * 2,

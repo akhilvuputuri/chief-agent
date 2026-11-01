@@ -73,11 +73,12 @@ SCENARIOS = {
 BORROW_SPREAD = 0.01
 
 NEIGHBOURS = {
-    "W01": [{"fast": 40, "slow": 160}, {"fast": 60, "slow": 240}],
+    "W01": [{"fast": 40, "slow": 160}, {"fast": 60, "slow": 240}, {"signalPrice": "close"}],
     "W05": [{"lookback": 42}, {"lookback": 126}],
     "W17": [
         {"fast": 40, "slow": 160},
         {"fast": 60, "slow": 240},
+        {"signalPrice": "close"},
         {"volTarget": {"target": 0.08, "lookback": 63, "maxLeverage": 1.5}},
         {"volTarget": {"target": 0.12, "lookback": 63, "maxLeverage": 1.5}},
     ],
@@ -304,10 +305,13 @@ def scenario_returns(data, kind):
 
 def rule_weights(rule, data):
     """Target weights from the rule's own universe, even if data also holds benchmark prices."""
-    closes = {s: data["close"][s] for s in rule["universe"]}
     adj = {s: data["adj"][s] for s in rule["universe"]}
     if rule["kind"] == "sma":
-        rows = sma_weights(closes, rule["fast"], rule["slow"], rule["cap"])
+        # The published runs reproduce exactly only with signals on dividend-adjusted prices.
+        # Later dividends rescale a whole window, so this leaks nothing into the crossover.
+        source = data["close"] if rule.get("signalPrice") == "close" else data["adj"]
+        signal = {s: source[s] for s in rule["universe"]}
+        rows = sma_weights(signal, rule["fast"], rule["slow"], rule["cap"])
     else:
         rows = inverse_vol_weights(adj, rule["lookback"], rule["cap"])
     if "volTarget" in rule:
