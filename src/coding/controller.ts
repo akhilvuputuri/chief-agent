@@ -636,7 +636,7 @@ export class CodingController {
           "SELECT * FROM coding_jobs WHERE id=$1 AND user_id=$2 AND state='pr_ready'",
           [a.id, user],
         )
-      ).rows[0] as CodingJob | undefined;
+      ).rows[0] as (CodingJob & { summary: string }) | undefined;
       // A stop after Chief's own merge is about the release, so closing the PR cannot help.
       const ownMerge =
         parked && ["manual_review", "merge_declined"].includes(parked.stage)
