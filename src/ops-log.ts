@@ -467,6 +467,8 @@ const projections: Record<string, Projection> = {
       refusedCount: d.refused,
       flaggedCount: d.flagged,
       modelCalls: d.modelCalls,
+      recordedCount: d.recorded,
+      failedBatchCount: d.failedBatches,
     },
   ],
   "recall.searched": (run, d) => [

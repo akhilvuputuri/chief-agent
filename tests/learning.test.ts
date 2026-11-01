@@ -1504,6 +1504,10 @@ test("work from before forwards were marked makes what it produces untrusted", a
     finishedAgo: 40 * DAY,
     ownerSays: ["I prefer window seats always"],
   });
+  await db.query("UPDATE work_tasks SET created_at=$1 WHERE id=$2", [
+    new Date("2026-10-19T00:00:00Z"),
+    id,
+  ]);
   const { adapter } = model(() => [
     [
       "learn_fact",
@@ -1628,4 +1632,43 @@ test("the learner mines work up to 90 days old, and items a superseded prompt re
   const { adapter, inputs } = model(() => [["learn_finish", {}]]);
   await learner(db, adapter).tick("owner");
   assert.deepEqual(batchIds(inputs[0]).sort(), [old, before].sort());
+});
+
+test("a task stored before forwards were marked stays untrusted after a later follow-up", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, { ownerSays: ["I prefer window seats always"] });
+  await db.query("UPDATE work_tasks SET created_at=$1 WHERE id=$2", [
+    new Date("2026-10-20T00:00:00Z"),
+    id,
+  ]);
+  const { adapter, inputs } = model(() => [["learn_finish", {}]]);
+  await learner(db, adapter).tick("owner");
+  assert.deepEqual(
+    JSON.parse(inputs[0].messages[1].content).tasks[0].untrusted,
+    ["possible_forward"],
+  );
+});
+
+test("only the owner's and a rollback's removals block a key", async (t) => {
+  const db = await setup(t);
+  const store = new MemoryStore(db);
+  const write = (key: string, value: string) =>
+    store.write("owner", {
+      key,
+      value,
+      kind: "fact",
+      origin: "learned",
+      reason: "seed",
+      source: {},
+    });
+  await write("by_learner", "Retired by the learner");
+  await store.retire("owner", "by_learner", {
+    origin: "learned",
+    reason: "stale",
+  });
+  await write("by_owner", "Retired by the owner");
+  await store.retire("owner", "by_owner", { origin: "owner", reason: "wrong" });
+  assert.deepEqual(await store.removed("owner"), [
+    { key: "by_owner", value: "Retired by the owner" },
+  ]);
 });

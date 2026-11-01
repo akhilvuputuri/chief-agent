@@ -113,7 +113,7 @@ The owner asked the learner to save more, after only 14 memories had built up. P
 
 **Change, prompt `learner-v4`.** Work up to 90 days old is reviewed, oldest first. Each run takes up to 40 tasks and 100 turns, in batches of 10, with each batch kept as it finishes. Items reviewed under `learner-v3` are mined again. Tested in `tests/learning.test.ts`. No migration.
 
-**Review found the wider window had three costs (`7c242bc`), now handled.** Forwarded text was stored as the owner's own until 28 October, so items before 29 October are tagged `possible_forward` and what they produce is `untrusted`. Re-mining could bring back the two lessons retired on 1 November, so removed keys are refused and shown to the model. Old work could overwrite newer learned items, so the host refuses a change from work older than the work behind the key's value. A failed batch no longer ends the run, and each model call times out after five minutes.
+**Review found the wider window had three costs (`7c242bc`), now handled.** Forwarded text was stored as the owner's own until 28 October, so items whose text was stored before 29 October are tagged `possible_forward` and what they produce is `untrusted`. Re-mining could bring back the two lessons retired on 1 November, so keys the owner or a rollback retired are refused and shown to the model. Old work could overwrite newer learned items, so the host refuses a change from work older than the work behind the key's value. A failed batch no longer ends the run, and each model call times out after five minutes.
 
 **Measured.** The counts above, and $0.17 for the 40-item run.
 

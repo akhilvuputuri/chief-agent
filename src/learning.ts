@@ -1,8 +1,8 @@
 // The nightly learner (issue #326 phase 2, design in docs/learning.md).
 //
 // Once a night it labels the owner's work tasks that finished at least a day ago, shows the
-// labelled evidence to one bounded model run with learning tools only, checks every proposed
-// item on the host, and applies the accepted ones together through MemoryStore. No approval
+// labelled evidence to bounded model runs with learning tools only, in batches, checks every
+// proposed item on the host, and applies each batch's accepted ones through MemoryStore. No approval
 // is asked; provenance, trust tags and rollback are the safety net. Nothing here sends a
 // message, calls a domain tool or touches anything outside memory.
 import { randomUUID } from "node:crypto";
@@ -50,6 +50,8 @@ export const LEARNING_LIMITS = {
   replyChars: 2000,
   /** Characters of current memory items shown, newest learned first after owner facts. */
   currentChars: 40000,
+  /** Removed items shown to the model. */
+  removedShown: 100,
   /** A task must have been unchanged this long after it finished (the success window). */
   quietMs: 24 * 3600_000,
   /** Older work is not reviewed. Wide so the backlog is mined, oldest first (owner, 1 November). */
@@ -304,9 +306,14 @@ interface Evidence {
 // Whitespace, quote marks and dashes normalized, case ignored (quote-match.ts).
 const norm = (text: string) => normalizeForQuote(text).text.toLowerCase();
 
-// Never cuts through a surrogate pair: half an emoji is invalid in jsonb.
+const markForwards = (e: Evidence, stored: Date | string) =>
+  day(stored) < FORWARDS_MARKED_SINCE
+    ? { ...e, untrusted: [...e.untrusted, "possible_forward"].sort() }
+    : e;
+
 const day = (at: Date | string) => new Date(at).toISOString().slice(0, 10);
 
+// Never cuts through a surrogate pair: half an emoji is invalid in jsonb.
 const clip = (text: string, max: number) => {
   if (text.length <= max) return text;
   const cut = text.slice(0, max - 1);
@@ -560,6 +567,7 @@ export class Learner {
       // Each batch is kept as it finishes, so an owner turn loses only the batch in progress.
       // A failed batch waits for the next night without holding back the ones after it.
       const batches = Math.ceil(evidence.length / LEARNING_LIMITS.batch);
+      let deferred = false;
       for (let i = 0; i < batches; i++) {
         const at = i * LEARNING_LIMITS.batch;
         const batch = evidence.slice(at, at + LEARNING_LIMITS.batch);
@@ -568,12 +576,10 @@ export class Learner {
             this.propose(user, run, id, batch, progress),
           );
           // Checked again before applying: an owner turn during the last call also defers.
-          if (outcome.deferred || (await this.ownerActive(user)))
-            return await finish("deferred", {
-              ...counts,
-              ...progress,
-              reason: "owner_active",
-            });
+          if (outcome.deferred || (await this.ownerActive(user))) {
+            deferred = true;
+            break;
+          }
           const written = await this.apply(
             user,
             id,
@@ -597,6 +603,12 @@ export class Learner {
           progress.failedBatches++;
         }
       }
+      if (deferred)
+        return await finish("deferred", {
+          ...counts,
+          ...progress,
+          reason: "owner_active",
+        });
       if (progress.failedBatches === batches)
         return await finish("failed", {
           error: "learner_failed",
@@ -624,7 +636,7 @@ export class Learner {
       await this.db.query(
         // A paused task that labelTask would leave for later is excluded here, so a
         // backlog of them cannot fill the limit and starve finished work.
-        `SELECT * FROM (SELECT t.id,t.status,t.pause_reason,t.request,t.updated_at,
+        `SELECT * FROM (SELECT t.id,t.status,t.pause_reason,t.request,t.updated_at,t.created_at,
          t.delivery_context->>'source' AS source,
          EXISTS(SELECT 1 FROM routine_occurrences o WHERE o.task_id=t.id) AS routine,
          (SELECT count(*)::int FROM tool_receipts x WHERE x.user_id=t.user_id AND x.task_id=t.id AND x.status='failed') AS failed,
@@ -663,20 +675,22 @@ export class Learner {
       labelled.push({ id: t.id, ...result });
       if (result.label !== "skipped")
         evidence.push(
-          await this.evidence(user, t.id, t.request, {
-            label: result.label,
-            reasons: result.reasons,
-            date: day(t.updated_at),
-          }),
+          markForwards(
+            await this.evidence(user, t.id, t.request, {
+              label: result.label,
+              reasons: result.reasons,
+              date: day(t.updated_at),
+            }),
+            // When the request was stored; follow-ups move updated_at past the cut-off.
+            t.created_at,
+          ),
         );
     }
     for (const turn of await this.turns(user, now)) {
       labelled.push({ id: turn.id, label: turn.label, reasons: turn.reasons });
-      if (turn.evidence) evidence.push(turn.evidence);
+      if (turn.evidence)
+        evidence.push(markForwards(turn.evidence, turn.evidence.date));
     }
-    for (const e of evidence)
-      if (e.date < FORWARDS_MARKED_SINCE)
-        e.untrusted = [...e.untrusted, "possible_forward"].sort();
     return { labelled, evidence };
   }
 
@@ -1034,6 +1048,10 @@ export class Learner {
         parameters: jsonSchema(schema),
       }),
     );
+    // Bounded for the prompt; every removed key is still refused by the host.
+    const shownRemoved = removed
+      .slice(0, LEARNING_LIMITS.removedShown)
+      .map((r) => ({ key: r.key, value: clip(r.value, 600) }));
     const messages: Message[] = [
       { role: "system", content: LEARNER_INSTRUCTIONS },
       {
@@ -1041,10 +1059,7 @@ export class Learner {
         content: JSON.stringify({
           tasks: evidence.map(shown),
           current,
-          removed: removed.map((r) => ({
-            key: r.key,
-            value: clip(r.value, 600),
-          })),
+          removed: shownRemoved,
         }),
       },
     ];
@@ -1053,6 +1068,7 @@ export class Learner {
       promptVersion: LEARNER_PROMPT_VERSION,
       items: evidence.map(shown),
       current,
+      removed: shownRemoved,
     });
     const accepted: Array<{ name: ToolName; args: any }> = [];
     let refused = 0;
