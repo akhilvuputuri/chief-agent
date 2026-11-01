@@ -68,7 +68,7 @@ ssh -F <ops>/ssh_config chief-lightsail 'cd /opt/hermes-companion && docker comp
 
 ## Baked coding image
 
-Optional, and separate from the boxes stack. `box-image.json` creates a weekly Image Builder pipeline that bakes Docker and the worker image pinned on `main` into the latest Amazon Linux 2023, tests it on an instance launched from the result, publishes it through the SSM parameter `/chief/boxes/<env>/coding-ami`, and keeps the newest three images. The build role belongs to the build and test instances only: boxes still have no instance profile.
+Optional, and separate from the boxes stack. `box-image.json` creates a weekly Image Builder pipeline that bakes Docker and the worker image pinned on `main` into the latest Amazon Linux 2023, tests it on an instance launched from the result, publishes it through the SSM parameter `/imagebuilder/chief/boxes/<env>/coding-ami`, and keeps the newest three images. The build role belongs to the build and test instances only: boxes still have no instance profile.
 
 1. Create the pipeline, using the boxes stack's VPC and subnet:
 
@@ -83,24 +83,38 @@ Optional, and separate from the boxes stack. `box-image.json` creates a weekly I
    ```
 
    ```bash
-   aws ssm get-parameter --region ap-southeast-1 --name /chief/boxes/prod/coding-ami --query Parameter.Value --output text
+   aws ssm get-parameter --region ap-southeast-1 --name /imagebuilder/chief/boxes/prod/coding-ami --query Parameter.Value --output text
    ```
 
 3. Point coding boxes at it. Other parameters keep their values:
 
    ```bash
-   aws cloudformation deploy --region ap-southeast-1 --stack-name chief-boxes-prod --template-file deploy/boxes/boxes.json --capabilities CAPABILITY_IAM --parameter-overrides CodingImage=resolve:ssm:/chief/boxes/prod/coding-ami
+   aws cloudformation deploy --region ap-southeast-1 --stack-name chief-boxes-prod --template-file deploy/boxes/boxes.json --capabilities CAPABILITY_IAM --parameter-overrides CodingImage=resolve:ssm:/imagebuilder/chief/boxes/prod/coding-ami
    ```
 
-4. Confirm that the default template version uses it, then rerun the IAM check in step 5 above:
+4. Make that version the default. Boxes launch the template's default version, and a stack update does not move it:
+
+   ```bash
+   aws ec2 modify-launch-template --region ap-southeast-1 --launch-template-name chief-box-prod-coding --default-version "$(aws cloudformation describe-stacks --region ap-southeast-1 --stack-name chief-boxes-prod --query "Stacks[0].Outputs[?OutputKey=='CodingLaunchTemplateLatestVersion'].OutputValue" --output text)"
+   ```
+
+5. Confirm that the default version uses it, then rerun the IAM check in step 5 above. "Launch from the template" now proves that the controller can launch the baked image:
 
    ```bash
    aws ec2 describe-launch-template-versions --region ap-southeast-1 --launch-template-name chief-box-prod-coding --versions '$Default' --query 'LaunchTemplateVersions[0].LaunchTemplateData.ImageId' --output text
    ```
 
-**To undo:** redeploy the boxes stack with `CodingImage=resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64`. The boot script works on both images. A bad weekly image is undone the same way until a good one is built.
+**To undo:** redeploy the boxes stack with `CodingImage=resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64`, then repeat steps 4 and 5. The boot script works on both images. A bad weekly image is undone the same way until a good one is built.
 
 **A new worker image** needs no rebuild: a box pulls only the layers missing from the baked image. To refresh sooner than weekly, rerun step 2.
+
+**A failed build** keeps the last good image, and nothing alerts on it. Check the state and reason of recent builds here:
+
+```bash
+aws imagebuilder list-image-pipeline-images --region ap-southeast-1 --image-pipeline-arn "$(aws cloudformation describe-stacks --region ap-southeast-1 --stack-name chief-box-image-prod --query "Stacks[0].Outputs[?OutputKey=='PipelineArn'].OutputValue" --output text)" --query 'imageSummaryList[].[dateCreated,state.status,state.reason]' --output table
+```
+
+**Changing the components or the recipe:** Image Builder versions cannot be edited. Raise the component's `Version` and the recipe's `Version` in the same change, or the stack update fails.
 
 ## Rollback
 

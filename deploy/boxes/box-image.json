@@ -102,7 +102,7 @@
         "Name": { "Fn::Sub": "chief-box-${Environment}-coding-test" },
         "Platform": "Linux",
         "Version": "1.0.0",
-        "Description": "An instance launched from the new image has Docker and the worker image",
+        "Description": "An instance launched from the new image can do what the boot script does with it",
         "Data": {
           "Fn::Join": [
             "\n",
@@ -119,7 +119,13 @@
               "            - |",
               "              set -euo pipefail",
               "              systemctl start docker",
-              "              docker image inspect \"$(cat /etc/chief-box-baked-image)\" > /dev/null",
+              "              image=$(cat /etc/chief-box-baked-image)",
+              "              docker image inspect \"$image\" > /dev/null",
+              "              cid=$(docker create \"$image\")",
+              "              docker cp \"$cid:/opt/chief-worker/dist/boxes/agent-main.js\" /tmp/agent-main.js",
+              "              docker cp \"$cid:/usr/local/bin/node\" /tmp/box-node",
+              "              docker rm \"$cid\"",
+              "              rm -f /tmp/agent-main.js /tmp/box-node",
               ""
             ]
           ]
@@ -179,7 +185,7 @@
             "SsmParameterConfigurations": [
               {
                 "ParameterName": {
-                  "Fn::Sub": "/chief/boxes/${Environment}/coding-ami"
+                  "Fn::Sub": "/imagebuilder/chief/boxes/${Environment}/coding-ami"
                 },
                 "DataType": "aws:ec2:image"
               }
@@ -251,7 +257,9 @@
   },
   "Outputs": {
     "ImageParameter": {
-      "Value": { "Fn::Sub": "/chief/boxes/${Environment}/coding-ami" }
+      "Value": {
+        "Fn::Sub": "/imagebuilder/chief/boxes/${Environment}/coding-ami"
+      }
     },
     "PipelineArn": { "Value": { "Ref": "Pipeline" } }
   }

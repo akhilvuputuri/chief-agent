@@ -41,11 +41,18 @@ Every coding job waits for a new box to install Docker and pull the worker image
 
 Volume initialization is left off until the first read has been measured.
 
+**Review (Claude Opus 5.5).** Requested changes on `750faaa`, with two blockers no local check could catch:
+
+- The parameter was outside `/imagebuilder/`, the only path Image Builder's service-linked role may write, so every build would have failed at publishing. It moved under that path rather than adding a custom role.
+- Boxes launch the template's default version, and a stack update does not move it, so switching `CodingImage` would have changed nothing. The AWS statement covers CloudFormation being unable to set the default; that an update leaves it unchanged is from a user's report. The rollout and the undo now set it explicitly and read it back.
+
+The same review led to the test component running the boot script's `docker create` and `docker cp`, how to read a failed build, and a warning that Image Builder versions cannot be edited. A failed weekly build still does not alert.
+
 ## Verification and outcome
 
-**Tested:** template lint on both stacks (one expected warning, as `CodingImage` is deliberately a string for `resolve:ssm:`), the component YAML and shell syntax, and the digest extraction against the real pin and unsafe values.
+**Tested:** template lint on both stacks (one expected warning, as `CodingImage` is deliberately a string for `resolve:ssm:`), the component YAML and shell syntax, and the digest extraction against the real pin and unsafe values. Lint proves the property names and values only. It cannot show that the stacks deploy or that a build works.
 
-**Not tested:** any AWS call. The stacks, the first build, the weekly schedule and the retention policy have never run, and neither has a real box on this image.
+**Not tested:** any AWS call. The stacks, the first build, the weekly schedule and the retention policy have never run, and neither has a real box on this image. No check covers an untagged image in this account being refused, because it would need a real image to name.
 
 Pending: the owner's [rollout](../../deploy/boxes/README.md#baked-coding-image), then `kite run logs:cloudwatch -- boot --since 24h` after a coding job, compared with a stock box.
 
@@ -54,3 +61,4 @@ Pending: the owner's [rollout](../../deploy/boxes/README.md#baked-coding-image),
 - Compare `box.boot` stages on both images, and record what they show here.
 - Turn on volume initialization if the first read is slow. A 12 GiB image would cost about 3.5 cents a box.
 - Reconsider the stopped spare only if neither gets close enough.
+- Decide whether a failed weekly build should alert.

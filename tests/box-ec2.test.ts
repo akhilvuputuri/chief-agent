@@ -476,7 +476,9 @@ test("the CloudFormation template keeps boxes closed and the controller narrow",
     template.Parameters.CodingImage.AllowedPattern,
   );
   assert.ok(imageChoice.test(stock));
-  assert.ok(imageChoice.test("resolve:ssm:/chief/boxes/prod/coding-ami"));
+  assert.ok(
+    imageChoice.test("resolve:ssm:/imagebuilder/chief/boxes/prod/coding-ami"),
+  );
   assert.ok(!imageChoice.test("ami-0dad20bd1b9c8c004"));
   assert.ok(!imageChoice.test("resolve:ssm:/somewhere/else"));
   assert.deepEqual(
@@ -529,11 +531,23 @@ test("the box image stack builds from reviewed pins and never reaches a box", as
   const test_ = lines("TestComponent").join("\n");
   assert.ok(/^  - name: test$/m.test(test_));
   assert.ok(!/^  - name: build$/m.test(test_));
+  // It repeats what the boot script needs from the image, so a broken one is never published.
+  for (const needed of [
+    "docker create",
+    "/opt/chief-worker/dist/boxes/agent-main.js",
+    "/usr/local/bin/node",
+  ])
+    assert.ok(test_.includes(needed), needed);
+  const script = boxUserData(request, { launchTemplate: "t" });
+  assert.ok(script.includes("/opt/chief-worker/dist/boxes"));
+  assert.ok(script.includes("/usr/local/bin/node"));
 
   const distribution = resources.Distribution.Properties.Distributions[0];
   assert.deepEqual(distribution.SsmParameterConfigurations, [
     {
-      ParameterName: { "Fn::Sub": "/chief/boxes/${Environment}/coding-ami" },
+      ParameterName: {
+        "Fn::Sub": "/imagebuilder/chief/boxes/${Environment}/coding-ami",
+      },
       DataType: "aws:ec2:image",
     },
   ]);
