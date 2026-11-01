@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
+import { vector } from "@electric-sql/pglite/vector";
 import { readFile, readdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../src/db.js";
@@ -14,7 +15,7 @@ import { ContextLimitError, contextHardLimit } from "../src/context.js";
 const migration = () =>
   readFile(new URL("../db/012_message_storage.sql", import.meta.url), "utf8");
 async function fixture(legacy = false) {
-  const pg = new PGlite();
+  const pg = new PGlite({ extensions: { vector } });
   for (const f of (await readdir(new URL("../db/", import.meta.url)))
     .filter((f) => f.endsWith(".sql"))
     .sort()) {

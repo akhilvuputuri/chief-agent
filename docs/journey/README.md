@@ -149,6 +149,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1 November | [140 — Docs-only checks](140-docs-only-checks.md): can a docs-only pull request skip the code jobs without weakening the gate? | Forced run took 49 s with the gate intact. TypeScript 7 deferred: identical output, but its compiler API is gone. |
 | 1 November | [141 — Parallel test files](141-parallel-test-files.md): can CI run test files four at a time despite an unexplained crash? | Owner chose yes for CI. Coding boxes stay serial. |
 | 1 November | [142 — What an approval is tied to](142-approval-covers-the-spec.md): must an owner's approval bind who carries out a plan? | Tested on synthetic jobs; release pending. Approval now covers only the objective, context and plan |
+| 1 November | [143 — Recall with pgvector](143-recall-with-pgvector.md): can Chief find what the owner half-remembers? | Tested on synthetic data; not deployed; no retrieval evaluation yet. |
 
 ## Coding-agent learning path
 

@@ -1,6 +1,10 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    # pgvector compiled onto the exact image that ran before it (docs/recall.md).
+    image: chief-postgres:17-alpine-pgvector-0.8.7
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
     environment:
       POSTGRES_DB: companion
       POSTGRES_USER: companion
@@ -94,6 +98,8 @@ services:
         "/migrations/032_boxes.sql",
         "-f",
         "/migrations/033_mail_index.sql",
+        "-f",
+        "/migrations/034_embeddings.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }

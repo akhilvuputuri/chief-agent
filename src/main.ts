@@ -92,6 +92,7 @@ import { EffortPicker } from "./effort.js";
 import { closeServer, server } from "./server.js";
 import { stopGateway } from "./gateway-stop.js";
 import { Learner } from "./learning.js";
+import { RecallIndex } from "./recall.js";
 import { MemoryStore } from "./memory.js";
 import { captureRequested } from "./otel-content.js";
 import { AlertRelay, alertsBase } from "./trace-alerts.js";
@@ -222,6 +223,14 @@ if (
     "STARTUP_MIGRATION_010",
     "Memory migration 010 must be applied with the gateway stopped",
   );
+if (
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=34")).rows
+    .length
+)
+  throw startupError(
+    "STARTUP_MIGRATION_034",
+    "Embeddings migration 034 must be applied with the gateway stopped",
+  );
 // Revisions take over from the memories table: import what they do not hold yet, which
 // is every row on the first start and any row an older image wrote after a rollback.
 const memoryImport = await new MemoryStore(db).importLegacy();
@@ -271,6 +280,7 @@ const gmail = new GmailTools({
     : {}),
 });
 // Email memory MVP: built in the background after start, primary mailbox only.
+const recallEmbedder = new OpenRouterEmbedder(c.OPENROUTER_API_KEY);
 const mailIndex =
   c.MAIL_INDEX === "on" &&
   c.GMAIL_OWNER_USER_ID &&
@@ -828,6 +838,7 @@ const assistant = new Assistant(
     links,
     singapore,
     mailIndex,
+    recallEmbedder,
   ),
   {
     links: !!links,
@@ -1415,6 +1426,27 @@ const learnerTimer = setInterval(() => {
     });
 }, 10 * 60_000);
 learnerTimer.unref();
+// memory_recall's index (docs/recall.md): a failed pass waits for the next one.
+const recallIndex = new RecallIndex(db, recallEmbedder);
+let indexing = false;
+const recallTimer =
+  c.RECALL_INDEX === "on"
+    ? setInterval(() => {
+        if (indexing) return;
+        indexing = true;
+        void (async () => {
+          for (const user of allowed)
+            await recallIndex
+              .tick(user)
+              .catch((error) =>
+                opsLog("recall.tick_failed", "warn", errorFields(error)),
+              );
+        })().finally(() => {
+          indexing = false;
+        });
+      }, 60_000)
+    : undefined;
+recallTimer?.unref();
 const gatheringTimer = gathering?.browsers
   ? setInterval(() => {
       void gathering?.browsers
@@ -1461,6 +1493,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
       clearInterval(gatheringTimer);
       clearInterval(workTimer);
       clearInterval(learnerTimer);
+      clearInterval(recallTimer);
       clearInterval(routineTimer);
       if (boxTimer) clearInterval(boxTimer);
       shutdown.abort();

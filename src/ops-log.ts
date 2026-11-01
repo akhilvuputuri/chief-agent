@@ -151,6 +151,11 @@ const fields: Record<string, Shape> = {
   importedCount: "count",
   projectedCount: "count",
   /** learner.finished (docs/learning.md). Counts only. */
+  /** recall.indexed and recall.searched (docs/recall.md). Counts only. */
+  chunkCount: "count",
+  meaningCount: "count",
+  keywordCount: "count",
+  resultCount: "count",
   reviewedCount: "count",
   successCount: "count",
   pitfallCount: "count",
@@ -462,6 +467,16 @@ const projections: Record<string, Projection> = {
       refusedCount: d.refused,
       flaggedCount: d.flagged,
       modelCalls: d.modelCalls,
+    },
+  ],
+  "recall.searched": (run, d) => [
+    "info",
+    {
+      runId: run,
+      kind: d.mode,
+      meaningCount: d.meaningCount,
+      keywordCount: d.keywordCount,
+      resultCount: d.resultCount,
     },
   ],
   "memory.selected": (run, d) => [

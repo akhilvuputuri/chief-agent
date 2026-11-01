@@ -1,0 +1,12 @@
+# Postgres with pgvector compiled in, on the exact Alpine image production already ran. Staying
+# on it keeps the data files and the libc text collation unchanged; a move to a Debian-based
+# pgvector image could silently invalidate text indexes (docs/recall.md).
+FROM postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+ADD --checksum=sha256:cac0b10c360f05b2d521200105ba3697e773d4cd3731f5a915a7e37ebe0bea85 https://github.com/pgvector/pgvector/archive/refs/tags/v0.8.7.tar.gz /tmp/pgvector.tar.gz
+# with_llvm=no: no JIT bitcode, so no clang or LLVM headers. OPTFLAGS empty: no -march=native,
+# so the image runs on any x86_64 host, not only the one that built it.
+RUN apk add --no-cache --virtual .pgvector-build build-base \
+  && mkdir /tmp/pgvector && tar -xzf /tmp/pgvector.tar.gz -C /tmp/pgvector --strip-components=1 \
+  && make -C /tmp/pgvector OPTFLAGS="" with_llvm=no install \
+  && rm -rf /tmp/pgvector /tmp/pgvector.tar.gz \
+  && apk del .pgvector-build

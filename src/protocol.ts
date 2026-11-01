@@ -135,6 +135,13 @@ export const action = z.discriminatedUnion("operation", [
     .strict(),
   z
     .object({
+      operation: z.literal("memory_recall"),
+      query: z.string().min(1).max(500),
+      limit: z.number().int().min(1).max(20).optional(),
+    })
+    .strict(),
+  z
+    .object({
       operation: z.literal("conversation_read"),
       id: z.string().uuid(),
       offset: z.number().int().min(0).max(10000000).default(0),

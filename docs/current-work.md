@@ -1,3 +1,7 @@
+# Recall over conversations and memories — proposed, 1 November 2026
+
+Chief gets `memory_recall`, which searches past messages and memories by meaning and keyword with pgvector in the existing Postgres. Nothing is added to the prompt unless Chief calls it. It replaces the Postgres image, so the rollout restarts the database. No retrieval evaluation yet; that decides whether it stays. See [recall](recall.md) and [journal 143](journey/143-recall-with-pgvector.md).
+
 # Learner refusals and prompt budget — proposed, 1 November 2026
 
 The first night of saving more kept 6 items and refused 5 facts, 3 of them wrongly. The negation check now refuses only an added negation, refused proposals get one more turn, and learned facts and lessons each have half the prompt budget. Two wrong lessons were retired and three facts added in production, approved by the owner. Next: RAG over conversations and learned memories with pgvector. Branch `fix/learner-refusals-budget`. See [journal 130](journey/130-nightly-learner.md#first-night-under-the-new-rules-and-pruning--2026-11-01).
