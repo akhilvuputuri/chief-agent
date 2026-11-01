@@ -1127,6 +1127,9 @@ export class Assistant {
             throw new Error("Operation unavailable to this agent");
           return this.call(capability, input, childRun);
         },
+        releaseAgent: async (childRun) => {
+          await this.tools.publicBrowser?.release(user, childRun);
+        },
         agentState: async (agentId) =>
           (agentId === "core/gathering" || agentId === "core/bills") &&
           this.tools.gathering

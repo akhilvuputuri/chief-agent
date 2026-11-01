@@ -114,6 +114,8 @@ services:
       GATHERING_BROWSER: ${GATHERING_BROWSER:-off}
       GATHERING_ARTIFACT_KEY: ${GATHERING_ARTIFACT_KEY:-}
       GATHERING_BROWSER_KEY: ${GATHERING_BROWSER_KEY:-}
+      PUBLIC_BROWSER: ${PUBLIC_BROWSER:-off}
+      PUBLIC_BROWSER_KEY: ${PUBLIC_BROWSER_KEY:-}
       BOXES_RUNTIME: ${BOXES_RUNTIME:-off}
       BOX_AUTH_KEY: ${BOX_AUTH_KEY:-}
       BOX_AWS_ACCOUNT_ID: ${BOX_AWS_ACCOUNT_ID:-}
@@ -185,7 +187,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: ${CHIEF_TRACE_ENDPOINT-http://agentwatch:4318}
       OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${CHIEF_TRACE_CONTENT:-true}
     ports: ["127.0.0.1:3000:3000"]
-    networks: [default, browser-control]
+    networks: [default, browser-control, public-browser-control]
     depends_on:
       migrate: { condition: service_completed_successfully }
     read_only: true
@@ -258,6 +260,68 @@ services:
       timeout: 3s
       retries: 3
     restart: unless-stopped
+  # The anonymous browser agent (docs/public-browser.md). Its own proxy and network, so it
+  # shares nothing with the invoice browser above. The gateway joins this network to call it;
+  # Chromium sends every request to the proxy, which refuses internal addresses.
+  public-browser-proxy:
+    profiles: [public-browser]
+    build: { context: ., dockerfile: Dockerfile.browser, target: proxy }
+    image: chief-public-browser-proxy
+    networks: [public-browser-control, default]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 96m
+    pids_limit: 64
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3002/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+  public-browser:
+    profiles: [public-browser]
+    build:
+      { context: ., dockerfile: Dockerfile.browser, target: public-browser }
+    image: chief-public-browser
+    environment:
+      BROWSER_CONTROL_KEY: ${PUBLIC_BROWSER_KEY:-}
+      BROWSER_PROXY: http://public-browser-proxy:3002
+    networks: [public-browser-control]
+    depends_on:
+      public-browser-proxy: { condition: service_healthy }
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:size=192m,mode=1777"]
+    shm_size: 192m
+    cap_drop: [ALL]
+    security_opt:
+      ["no-new-privileges:true", "seccomp:./deploy/browser/seccomp.json"]
+    mem_limit: 640m
+    # No swap, and first to go under memory pressure: it must not slow the gateway or Postgres.
+    memswap_limit: 640m
+    oom_score_adj: 500
+    cpus: 1.0
+    # Chromium, its zygotes and agent-browser's daemon: 192 crashed on the probe (journal 147).
+    pids_limit: 512
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
   agentwatch:
     # Trace viewer for issue #323 (github.com/akhilvuputuri/agentwatch), pinned by digest.
     # The gateway reaches it as agentwatch:4318; the host publishes it on loopback only, for
@@ -296,6 +360,7 @@ services:
     restart: unless-stopped
 networks:
   browser-control: { internal: true }
+  public-browser-control: { internal: true }
 volumes:
   postgres-data:
   agentwatch-data:

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AgentRequest, AgentResponse } from "./protocol.js";
 import { agentRun, agentReport, type AgentReport } from "./agent-schema.js";
 import { plugins } from "./plugin-registry.js";
+import { BROWSER_AGENT } from "./public-browser/commands.js";
 import { OPTIONAL_OPERATIONS } from "./plugins.js";
 import type { PluginAgent, PluginRegistry } from "./plugins.js";
 import { pinPlugin } from "./plugin-execution.js";
@@ -508,6 +509,13 @@ export async function runFindingsAgent(
     if (error && typeof error === "object")
       Object.assign(error, { childRunId: childRun });
     throw error;
+  } finally {
+    // Without this a finished agent's browser would hold the single slot until it idles out.
+    // Not awaited: the close queues behind the browser, and the report is ready now.
+    if (definition.agentId === BROWSER_AGENT)
+      void req
+        .releaseAgent?.(childRun)
+        .catch((e) => opsLog("agent.release_failed", "warn", errorFields(e)));
   }
 }
 
@@ -590,7 +598,7 @@ async function checkReport(
     if (f.quote && !f.sourceId) {
       lost.push("quote");
       problems.push(
-        `finding ${n}: a quote needs the sourceId it came from; add the sourceId your web_read or source_read returned, or drop the quote`,
+        `finding ${n}: a quote needs the sourceId it came from; add the sourceId your web_read, source_read or public_browser read returned, or drop the quote`,
       );
       delete kept.quote;
     }

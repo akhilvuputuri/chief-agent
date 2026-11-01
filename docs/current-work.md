@@ -1,6 +1,10 @@
+# Public browser agent — tested, not deployed, 1 November 2026
+
+The owner asked for an open `agent-browser` for Chief. It runs as a separate agent with one tool, no logins and its own container, so a hostile page has little to reach. The confinement probe passes in the real image on arm64 and in x86-64 CI; the production host has not run it. The Compose change needs the [operator rollout](public-browser.md#rollout), which refuses later releases until it runs. See [journal 147](journey/147-public-browser-agent.md).
+
 # Mail recall on pgvector — live in `d58a9ca`, 1 November 2026
 
-`gmail_recall` now searches with an exact pgvector query in Postgres, reusing the stored vectors with no new embedding. On 30 real questions the top 10 matched the old in-memory scan every time; search takes about 57 ms instead of 6. Migration 035 keeps the old column for rollback, and a later migration drops it. Live use is not measured. See [journal 146](journey/146-mail-recall-pgvector.md).
+`gmail_recall` now searches with an exact pgvector query in Postgres, reusing the stored vectors with no new embedding. On 30 real questions the top 10 matched the old in-memory scan every time; search takes about 57 ms instead of 6. Migration 035 keeps the old column for rollback, and a later migration drops it. Live use is not measured. See [journal 147](journey/146-mail-recall-pgvector.md).
 
 # Procedures replace one-item lessons — live in `385e0d7`, 1 November 2026
 

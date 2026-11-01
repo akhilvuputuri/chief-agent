@@ -1,4 +1,5 @@
 import type { LinkResolver } from "./link-resolution.js";
+import type { PublicBrowser } from "./public-browser/client.js";
 import type { McpTools } from "./mcp.js";
 import type { Gathering } from "./gathering/controller.js";
 import { action as gatheringAction } from "./gathering/schema.js";
@@ -59,6 +60,7 @@ export class JobTools {
     readonly singapore?: SingaporeTools,
     readonly mailRecall?: Pick<MailIndex, "recall">,
     private recallEmbedder?: Embedder,
+    readonly publicBrowser?: PublicBrowser,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -460,6 +462,11 @@ export class JobTools {
     }
     // Handled by the agent loop; it never reaches the domain dispatcher.
     if (a.operation === "tools_load") throw new Error("Operation unavailable");
+    if (a.operation === "public_browser") {
+      if (!this.publicBrowser)
+        throw new Error("The public browser is not configured");
+      return this.publicBrowser.act(user, run, a.command, signal);
+    }
     if (a.operation === "web_search" || a.operation === "web_read") {
       const result = await this.web.call(
         a.operation,

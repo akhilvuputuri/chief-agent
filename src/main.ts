@@ -6,6 +6,7 @@ import { parseQuietHours } from "./coding/notices.js";
 import { selectCodingBackend } from "./coding/backend.js";
 import { randomUUID } from "node:crypto";
 import { LinkResolver, postEvidenceSchema } from "./link-resolution.js";
+import { PublicBrowser } from "./public-browser/client.js";
 import { McpTools, loadMcpRegistry, parseMcpCredentials } from "./mcp.js";
 import { Gathering } from "./gathering/controller.js";
 import { FileVault } from "./gathering/vault.js";
@@ -729,6 +730,18 @@ if (c.GATHERING_RUNTIME === "on") {
     c.MINIAPP_ORIGIN,
   );
 }
+if (c.PUBLIC_BROWSER === "on" && !c.PUBLIC_BROWSER_KEY)
+  throw startupError(
+    "STARTUP_PUBLIC_BROWSER_CONFIG",
+    "Public browser control is not configured",
+  );
+const publicBrowser =
+  c.PUBLIC_BROWSER === "on"
+    ? new PublicBrowser(
+        db,
+        new BrowserRpc("http://public-browser:3001", c.PUBLIC_BROWSER_KEY),
+      )
+    : undefined;
 const linksMigrated = !!(
   await db.query("SELECT 1 FROM runtime_migrations WHERE version=31")
 ).rows.length;
@@ -836,9 +849,11 @@ const assistant = new Assistant(
     singapore,
     mailIndex,
     recallEmbedder,
+    publicBrowser,
   ),
   {
     links: !!links,
+    publicBrowser: !!publicBrowser,
     mcp: !!mcp?.configured,
     canvases: !!c.MINIAPP_ORIGIN,
     web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),
