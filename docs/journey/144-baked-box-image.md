@@ -1,7 +1,7 @@
 # 144 — Can a prepared image shorten a coding box's boot?
 
 Work date: 1 November 2026. Written: 1 November 2026.
-Status: tested in CI only. The AWS stacks are not applied, so boxes still use stock Amazon Linux and nothing is measured.
+Status: boot script released in `64758a0`. The AWS stacks are not applied, so boxes still use stock Amazon Linux and nothing is measured.
 
 ## User-visible problem and preceding iteration
 
@@ -55,6 +55,11 @@ The same review led to the test component running the boot script's `docker crea
 **Not tested:** any AWS call. The stacks, the first build, the weekly schedule and the retention policy have never run, and neither has a real box on this image. No check covers an untagged image in this account being refused, because it would need a real image to name.
 
 Pending: the owner's [rollout](../../deploy/boxes/README.md#baked-coding-image), then `kite run logs:cloudwatch -- boot --since 24h` after a coding job, compared with a stock box.
+
+### Release closure — 1 November 2026
+
+- **Application:** [PR 397](https://github.com/akhilvuputuri/chief-agent/pull/397), approved head `fbe06f4`, merged as `64758a0`. Checks run 41302523760 and release run 41302711999 succeeded. Read-only host check: gateway on `64758a0` and healthy.
+- **Not yet done:** the owner's AWS rollout, so no box has used the baked image or the guards' skip paths.
 
 ## Follow-up and next iteration
 

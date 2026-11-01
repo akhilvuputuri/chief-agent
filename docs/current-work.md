@@ -1,4 +1,4 @@
-# Baked coding box image — proposed, 1 November 2026
+# Baked coding box image — boot script live in `64758a0`, AWS rollout pending, 1 November 2026
 
 The owner chose a baked machine image over a stopped spare box to shorten coding box boots. A weekly Image Builder pipeline bakes Docker and the pinned worker image into Amazon Linux 2023, and the boot script skips what is already present. Boxes stay on stock Amazon Linux until the owner applies the stack and switches `CodingImage`; no timing is measured yet. See [journal 144](journey/144-baked-box-image.md) and [the rollout](../deploy/boxes/README.md#baked-coding-image).
 
