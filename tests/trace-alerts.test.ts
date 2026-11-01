@@ -267,8 +267,24 @@ test("a drift alert says what moved, and a resolve does not claim recovery", () 
     /fell from 20% to 5%/,
   );
   assert.equal(
-    alertText({ ...drift, kind: "resolved", value: 0.402 }),
-    "Drift ended: Tool errors no longer differs from the previous 7 days. It is now 40.2%, which is not necessarily back to normal.",
+    alertText({
+      ...drift,
+      kind: "resolved",
+      value: 0.402,
+      baseline_value: 0.39,
+    }),
+    "Drift ended: Tool errors no longer shows a clear rise of at least 5%. Previous 7 days 39%, last 7 days 40.2%. That is not necessarily back to normal.",
+  );
+  // A brief incident now in the earlier window: the windows still differ, so it says both.
+  assert.equal(
+    alertText({
+      ...drift,
+      kind: "resolved",
+      comparison: "below",
+      value: 0.101,
+      baseline_value: 0.259,
+    }),
+    "Drift ended: Tool errors no longer shows a clear fall of at least 5%. Previous 7 days 25.9%, last 7 days 10.1%. That is not necessarily back to normal.",
   );
   // A monitor edited or deleted while drifting has no reading to report.
   assert.match(
@@ -283,7 +299,35 @@ test("a drift alert says what moved, and a resolve does not claim recovery", () 
       value: 0.25,
       baseline_value: 0.125,
     }),
-    /from \$0\.125 to \$0\.250/,
+    /from \$0\.125 to \$0\.25 /,
+  );
+  // Small values keep their difference, and a 0-5 score does not mix units.
+  assert.match(
+    alertText({
+      ...drift,
+      metric: "cost_per_trace",
+      value: 0.0012,
+      baseline_value: 0.00056,
+    }),
+    /from \$0\.00056 to \$0\.0012 /,
+  );
+  assert.match(
+    alertText({
+      ...drift,
+      metric: "model_mean_ms",
+      value: 39.7,
+      baseline_value: 23.9,
+    }),
+    /from 24 ms to 40 ms /,
+  );
+  assert.match(
+    alertText({
+      ...drift,
+      metric: "score_mean",
+      value: 0.807,
+      baseline_value: 1.37,
+    }),
+    /fell from 1\.37 to 0\.807 /,
   );
   assert.match(
     alertText({
@@ -292,7 +336,7 @@ test("a drift alert says what moved, and a resolve does not claim recovery", () 
       value: 9000,
       baseline_value: 5000,
     }),
-    /from 5\.0 s to 9\.0 s/,
+    /from 5 s to 9 s /,
   );
 });
 

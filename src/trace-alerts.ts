@@ -70,19 +70,43 @@ function late(alert: MonitorAlert, now: number) {
     : `, raised ${Math.round(minutes / 60)} hours ago`;
 }
 
+const figures = (value: number) => Number(value.toPrecision(3));
+
+/** Both windows of a drift alert in one unit, and precise enough that a change shows. */
+function driftAmount(alert: MonitorAlert, value: number | null | undefined) {
+  if (typeof value !== "number") return "no data";
+  if (alert.metric === "cost_per_trace") return `$${figures(value)}`;
+  if (alert.metric === "model_p95_ms" || alert.metric === "model_mean_ms")
+    return value < 1000
+      ? `${Math.round(value)} ms`
+      : `${figures(value / 1000)} s`;
+  if (alert.metric === "score_mean") {
+    const unit = (v: unknown) => typeof v === "number" && v >= 0 && v <= 1;
+    if (!unit(alert.value) || !unit(alert.baseline_value))
+      return `${Math.round(value * 1000) / 1000}`;
+  }
+  return amount(alert.metric, value);
+}
+
 /**
  * A drift alert compares two windows, so its threshold is the smallest change watched, not a
- * limit; and a resolve means the windows no longer differ, not that the level recovered: a
- * lasting shift ends up in both.
+ * limit. A resolve says only that no clear change of that size is left in the watched direction: a
+ * lasting shift ends up in both windows, and a brief incident in the earlier one, so neither the
+ * level nor the windows need agree. It gives both values rather than say more than that.
  */
 function driftText(alert: MonitorAlert, name: string, now: number) {
-  const current = amount(alert.metric, alert.value);
-  const earlier = span(alert.baseline_minutes ?? alert.window_minutes);
+  const current = driftAmount(alert, alert.value);
+  const baseline = driftAmount(alert, alert.baseline_value);
+  const earlier = span(alert.baseline_minutes || alert.window_minutes);
   if (alert.kind === "resolved") {
     if (alert.value === null) return null;
-    return `Drift ended: ${name} no longer differs from the previous ${earlier}. It is now ${current}, which is not necessarily back to normal.`;
+    const change = alert.comparison === "below" ? "fall" : "rise";
+    const size =
+      alert.threshold > 0
+        ? ` of at least ${driftAmount(alert, alert.threshold)}`
+        : "";
+    return `Drift ended: ${name} no longer shows a clear ${change}${size}. Previous ${earlier} ${baseline}, last ${span(alert.window_minutes)} ${current}. That is not necessarily back to normal.`;
   }
-  const baseline = amount(alert.metric, alert.baseline_value ?? null);
   const moved =
     alert.value !== null &&
     typeof alert.baseline_value === "number" &&
