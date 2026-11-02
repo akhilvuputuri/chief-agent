@@ -113,6 +113,10 @@ def main():
             pending = query("SELECT count(*)::int n FROM conversation_inputs WHERE state IN ('queued','running')")[0]['n']
             if pending:
                 raise RuntimeError('Pending conversation input detected; retry after preparation and execution finish')
+            # A worker rides out a restart, so a long coding job does not hold releases back.
+            coding = query("SELECT count(*)::int n FROM coding_jobs WHERE state IN ('provisioning','running','publishing')")[0]['n']
+            if coding:
+                print('Warning: a coding job is running; this restart interrupts it briefly', flush=True)
             previous = compose('images','-q','gateway',text=True,capture_output=True).stdout.strip()
             if not previous:
                 raise RuntimeError('Cannot establish rollback image')

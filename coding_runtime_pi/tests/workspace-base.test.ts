@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Workspace, localExecutor } from "../src/workspace.js";
@@ -72,5 +72,37 @@ test("a large change exports whole: many large files fit, and only a file over 1
   await assert.rejects(
     workspace.snapshot(execute, signal, base),
     /Unsupported artifact file/,
+  );
+});
+
+test("a node_modules link never becomes part of the artifact", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-link-"));
+  const repo = join(root, "repo");
+  await mkdir(join(repo, "pkg"), { recursive: true });
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.name", "Synthetic");
+  git("config", "user.email", "synthetic@example.invalid");
+  await writeFile(join(repo, ".gitignore"), "node_modules/\n");
+  await writeFile(join(repo, "a.txt"), "base\n");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  await writeFile(join(repo, "a.txt"), "changed\n");
+  await symlink(root, join(repo, "node_modules"));
+  await symlink(root, join(repo, "pkg", "node_modules"));
+  const execute = localExecutor(repo, join(root, "home"), () => {});
+  const signal = new AbortController().signal;
+  const workspace = await new Workspace(repo).initialize();
+  const artifact = await workspace.snapshot(execute, signal);
+  assert.deepEqual(
+    artifact.files.map((f) => f.path),
+    ["a.txt"],
+  );
+  assert.doesNotMatch(artifact.patch, /node_modules/);
+  await symlink(root, join(repo, "other-link"));
+  await assert.rejects(
+    workspace.snapshot(execute, signal),
+    /Symlink|regular files/,
   );
 });

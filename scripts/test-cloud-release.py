@@ -65,6 +65,8 @@ class ReleaseGuardTests(unittest.TestCase):
                 if 'conversation_inputs' in sql:
                     self.assertIn("state IN ('queued','running')", sql)
                     return [{'n': pending}]
+                if 'coding_jobs' in sql:
+                    return [{'n': 1}]
                 raise AssertionError(f'Unexpected query: {sql}')
 
             def compose(*args, **kwargs):

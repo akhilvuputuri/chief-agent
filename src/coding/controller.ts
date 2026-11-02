@@ -1877,7 +1877,8 @@ export class CodingController {
    * 17 October 2026; AGENTS.md exception). Eligible pauses: the host saw the sandbox stop
    * without a stated reason or lose its heartbeat, or the worker itself paused when its
    * last model request was rejected as a provider 429 or 5xx (no model call completed after
-   * the rejection, so the fault ended the run). Re-queues through the same guarded update as
+   * the rejection, so the fault ended the run), or a gateway restart cut off its model call.
+   * Re-queues through the same guarded update as
    * coding_resume, keyed auto-retry:<attempt> so it is idempotent, and never again for a
    * revision that an automatic retry created. Jobs with a PR, publication, pending cleanup,
    * leases and revoked owners are left for the owner.
@@ -1903,7 +1904,8 @@ export class CodingController {
              OR (j.result->>'kind'='paused' AND EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id=j.id
                   AND e.event_key=j.attempt_id::text||':finished')
                -- Judge only the latest rejection: an older fault is never a fallback.
-               AND (SELECT (p.payload->>'code'='model_rate_limited' AND p.payload->>'providerStatus'='429'
+               AND (SELECT (p.payload->>'code'='gateway_restart'
+                         OR p.payload->>'code'='model_rate_limited' AND p.payload->>'providerStatus'='429'
                          OR p.payload->>'code'='model_transient_failure'
                             AND p.payload->>'providerStatus' IN ('500','502','503','504'))
                        AND NOT (p.payload ? 'timeoutKind' OR p.payload ? 'finishReason' OR p.payload ? 'providerFailure')
@@ -2065,12 +2067,15 @@ export class CodingController {
             .catch(() => null); // unknown, not "no stated reason"
           const expired =
             new Date(j.attempt_deadline).getTime() <= this.clock().getTime();
+          const exitNote = await this.provider
+            .exitNote?.(j.sandbox_id)
+            .catch(() => undefined);
           await this.stopped(
             j,
             reason ??
               (expired
                 ? "The coding box stopped without a result after its time ran out; the cause is unconfirmed, and saved work is retained"
-                : "The coding box stopped before a result was recorded; saved work is retained"),
+                : `The coding box stopped before a result was recorded${exitNote ? ` (${exitNote})` : ""}; saved work is retained`),
             true,
             undefined,
             // Only a confirmed absence of a provider reason is transient.
@@ -2213,8 +2218,13 @@ export class CodingController {
    * Runs before the worker routes open.
    */
   async recoverModels() {
+    // A call this restart cut off is recorded, so the pause it causes can be retried once.
     await this.db.query(
-      "UPDATE coding_model_calls SET state='uncertain' WHERE state='pending'",
+      `WITH interrupted AS (UPDATE coding_model_calls SET state='uncertain' WHERE state='pending' RETURNING id,job_id,attempt_id)
+       INSERT INTO coding_events(job_id,event_key,payload,delivery)
+       SELECT job_id,attempt_id::text||':request-rejected:'||id::text,
+         jsonb_build_object('kind','worker_request_rejected','phase','model','code','gateway_restart','callId',id::text),'suppressed'
+       FROM interrupted WHERE attempt_id IS NOT NULL ON CONFLICT DO NOTHING`,
     );
     await this.db.query(
       "UPDATE coding_jobs SET model_busy=false WHERE model_busy",

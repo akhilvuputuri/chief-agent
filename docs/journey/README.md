@@ -155,6 +155,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1 November | [146 — Moving mail recall to pgvector](146-mail-recall-pgvector.md): can email search share one search path without changing results? | Released in `d58a9ca`; top results unchanged on 30 real questions, search about 50 ms slower; live use not measured. |
 | 2 November | [147 — Drift detection](147-drift-detection.md): can agentwatch say a metric moved, without crying wolf on Chief's traffic? | Live, muted, in `6409f9a`: simulated false firings up to about 0.75 a month per error-rate monitor at 7-day windows, so five drift monitors record what they would send for a trial. |
 | 1 November | [148 — Public browser agent](148-public-browser-agent.md): can Chief use an open browser without exposing the owner's data? | Confinement probe passes on arm64 and in x86-64 CI; not deployed |
+| 1 November | [149 — Coding through gateway restarts](149-coding-through-gateway-restarts.md): can a coding job survive a gateway restart? | Tested on synthetic jobs; release pending. Workers retry, a restart-cut call is recorded, and exit codes name the failure |
 
 ## Coding-agent learning path
 

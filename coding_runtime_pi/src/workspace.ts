@@ -228,7 +228,8 @@ export class Workspace {
         throw new Error("Git artifact operation failed or exceeded its bound");
       return result.output;
     };
-    await run(["add", "-A"]);
+    // `.gitignore`'s `node_modules/` does not match a link, and a link is never an artifact.
+    await run(["add", "-A", "--", ".", ":(exclude,glob)**/node_modules"]);
     const base = pinned ?? (await run(["rev-parse", "HEAD"])).trim();
     const patch = await run([
       "diff",

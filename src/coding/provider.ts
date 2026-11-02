@@ -23,6 +23,7 @@ export interface SandboxProvider {
   find(attemptId: string, timeoutMinutes?: number): Promise<string | undefined>;
   inspect(id: string): Promise<"running" | "terminal">;
   terminate(id: string): Promise<void>;
+  exitNote?(id: string): Promise<string | undefined>;
   terminalReason?(id: string): Promise<string | undefined>;
   /** Extra time before the first heartbeat is expected from this sandbox. */
   startupGraceMs?(id: string | null | undefined): number;
