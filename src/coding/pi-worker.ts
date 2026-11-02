@@ -153,8 +153,19 @@ export async function runPiWorker(
     if (currentTask) void runtime?.cancel(currentTask);
   };
   stop.addEventListener("abort", abort, { once: true });
+  let beating = false;
   const heartbeat = setInterval(() => {
-    void client.request("heartbeat", {}).catch(abort);
+    if (beating) return;
+    beating = true;
+    void client
+      .request("heartbeat", {})
+      // Only the host saying no ends the run; an unreachable host may just be restarting.
+      .catch((error) => {
+        if (!hostUnreachable(error)) abort();
+      })
+      .finally(() => {
+        beating = false;
+      });
   }, 20000);
   heartbeat.unref();
   let saved = assignment.checkpoint;
@@ -718,29 +729,83 @@ export async function runPiWorker(
   }
 }
 
+/** A failed host request. No status means the host could not be reached at all. */
+export class WorkerRequestError extends Error {
+  constructor(readonly status?: number) {
+    super(`Worker request unavailable (${status ?? "unreachable"})`);
+  }
+}
+/** The gateway is restarting or down, as opposed to answering that this attempt may not go on. */
+export const hostUnreachable = (error: unknown) =>
+  error instanceof WorkerRequestError &&
+  (error.status === undefined || [502, 503, 504].includes(error.status));
+/** A fixed exit code for each kind of failure, because the worker's output is never kept. */
+export const workerExitCode = (error: unknown) =>
+  hostUnreachable(error) ? 10 : error instanceof WorkerRequestError ? 11 : 1;
 export class NativePiWorkerClient implements PiWorkerClient {
   constructor(
     readonly origin: string,
     private id: string,
     readonly token: string,
     private signal: AbortSignal,
+    // A gateway restart takes seconds. The host declares a heartbeat lost after 3 minutes.
+    private outage = {
+      windowMs: 180000,
+      firstDelayMs: 1000,
+      maxDelayMs: 10000,
+    },
   ) {}
+  /** Every worker route is safe to repeat: saves are keyed or replace state, and a repeated finish is recognised. */
   async request(path: string, body?: unknown) {
-    const response = await fetch(
-      `${this.origin}/coding/worker/${this.id}/${path}`,
-      {
-        method: body === undefined ? "GET" : "POST",
-        headers: {
-          Authorization: `Bearer ${this.token}`,
-          "Content-Type": "application/json",
+    let firstFailure: number | undefined;
+    for (
+      let delay = this.outage.firstDelayMs;
+      ;
+      delay = Math.min(delay * 2, this.outage.maxDelayMs)
+    ) {
+      try {
+        return await this.once(path, body);
+      } catch (error) {
+        firstFailure ??= Date.now();
+        if (
+          this.signal.aborted ||
+          !hostUnreachable(error) ||
+          Date.now() - firstFailure + delay > this.outage.windowMs
+        )
+          throw error;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+  private async once(path: string, body?: unknown) {
+    let response: Response;
+    let text: string;
+    try {
+      response = await fetch(
+        `${this.origin}/coding/worker/${this.id}/${path}`,
+        {
+          method: body === undefined ? "GET" : "POST",
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            "Content-Type": "application/json",
+          },
+          signal: AbortSignal.any([this.signal, AbortSignal.timeout(130000)]),
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         },
-        signal: AbortSignal.any([this.signal, AbortSignal.timeout(130000)]),
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      },
-    );
-    if (!response.ok)
-      throw new Error(`Worker request unavailable (${response.status})`);
-    return response.json();
+      );
+      // A reset during the body is the same outage as a reset before the headers.
+      text = await response.text();
+    } catch (error) {
+      if (this.signal.aborted) throw error;
+      throw new WorkerRequestError();
+    }
+    if (!response.ok) throw new WorkerRequestError(response.status);
+    try {
+      return JSON.parse(text);
+    } catch {
+      // The host always answers JSON, so this came from something in front of it.
+      throw new WorkerRequestError();
+    }
   }
 }
 if (process.env.CODING_JOB_ID) {
@@ -765,10 +830,10 @@ if (process.env.CODING_JOB_ID) {
     new NativePiWorkerClient(origin, id, token, stop.signal),
     guard.cleanup,
     stop.signal,
-  ).catch(() => {
+  ).catch((error) => {
     process.stderr.write(
       "Pi worker stopped; inspect the authenticated task record.\n",
     );
-    process.exitCode = 1;
+    process.exitCode = workerExitCode(error);
   });
 }

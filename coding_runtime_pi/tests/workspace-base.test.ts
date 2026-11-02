@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { lstatSync } from "node:fs";
+import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Workspace, localExecutor } from "../src/workspace.js";
@@ -72,5 +73,113 @@ test("a large change exports whole: many large files fit, and only a file over 1
   await assert.rejects(
     workspace.snapshot(execute, signal, base),
     /Unsupported artifact file/,
+  );
+});
+
+test("a node_modules link never becomes part of the artifact", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-link-"));
+  const repo = join(root, "repo");
+  await mkdir(join(repo, "pkg"), { recursive: true });
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.name", "Synthetic");
+  git("config", "user.email", "synthetic@example.invalid");
+  await writeFile(join(repo, ".gitignore"), "node_modules/\n");
+  await writeFile(join(repo, "a.txt"), "base\n");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD");
+  await writeFile(join(repo, "a.txt"), "changed\n");
+  await symlink(root, join(repo, "node_modules"));
+  await symlink(root, join(repo, "pkg", "node_modules"));
+  const execute = localExecutor(repo, join(root, "home"), () => {});
+  const signal = new AbortController().signal;
+  const workspace = await new Workspace(repo).initialize();
+  const artifact = await workspace.snapshot(execute, signal);
+  assert.deepEqual(
+    artifact.files.map((f) => f.path),
+    ["a.txt"],
+  );
+  assert.doesNotMatch(artifact.patch, /node_modules/);
+  git("add", "-f", "node_modules");
+  assert.deepEqual(
+    (await workspace.snapshot(execute, signal)).files.map((f) => f.path),
+    ["a.txt"],
+  );
+  git("add", "-f", "pkg/node_modules");
+  git("commit", "-qm", "the coder committed a link");
+  const committed = await workspace.snapshot(execute, signal, base);
+  assert.deepEqual(
+    committed.files.map((f) => f.path),
+    ["a.txt"],
+  );
+  assert.doesNotMatch(committed.patch, /node_modules/);
+  await symlink(root, join(repo, "other-link"));
+  await assert.rejects(
+    workspace.snapshot(execute, signal),
+    /Symlink|regular files/,
+  );
+});
+
+test("a real tracked node_modules file stays part of the artifact", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-real-"));
+  const repo = join(root, "repo");
+  await mkdir(join(repo, "fixture", "node_modules"), { recursive: true });
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.name", "Synthetic");
+  git("config", "user.email", "synthetic@example.invalid");
+  await writeFile(join(repo, "fixture", "node_modules", "f.js"), "one\n");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  await writeFile(join(repo, "fixture", "node_modules", "f.js"), "two\n");
+  git("add", ".");
+  const workspace = await new Workspace(repo).initialize();
+  const artifact = await workspace.snapshot(
+    localExecutor(repo, join(root, "home"), () => {}),
+    new AbortController().signal,
+  );
+  assert.deepEqual(
+    artifact.files.map((f) => f.path),
+    ["fixture/node_modules/f.js"],
+  );
+});
+
+test("a node_modules link the repository tracks is left as it is", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tracked-link-"));
+  const repo = join(root, "repo");
+  await mkdir(join(repo, "fx"), { recursive: true });
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.name", "Synthetic");
+  git("config", "user.email", "synthetic@example.invalid");
+  await symlink("../vendor", join(repo, "fx", "node_modules"));
+  await writeFile(join(repo, "a.txt"), "base\n");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD");
+  await writeFile(join(repo, "a.txt"), "changed\n");
+  await symlink(root, join(repo, "node_modules"));
+  const execute = localExecutor(repo, join(root, "home"), () => {});
+  const signal = new AbortController().signal;
+  const workspace = await new Workspace(repo).initialize();
+  const artifact = await workspace.snapshot(execute, signal, base);
+  assert.deepEqual(
+    artifact.files.map((f) => f.path),
+    ["a.txt"],
+  );
+  await workspace.removeDependencyLinks(execute, signal, base);
+  assert.throws(() => lstatSync(join(repo, "node_modules")));
+  assert.equal(
+    lstatSync(join(repo, "fx", "node_modules")).isSymbolicLink(),
+    true,
+  );
+  const again = await workspace.snapshot(execute, signal, base);
+  assert.deepEqual(
+    again.files.map((f) => f.path),
+    ["a.txt"],
   );
 });

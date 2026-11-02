@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
+  gatewayOutageFetch,
   terminalHttpRecoveryFetch,
   terminalHttpStatuses,
   retryParentHeader,
@@ -216,3 +217,159 @@ for (const scenario of [
         : 0,
     );
   });
+
+const outage = (fetch: typeof globalThis.fetch, windowMs = 2000) => {
+  let admitted = 0;
+  return {
+    send: gatewayOutageFetch({
+      baseUrl,
+      requestIdField: "runtime_call_id",
+      admit: async () => {
+        admitted++;
+      },
+      fetch,
+      windowMs,
+      firstDelayMs: 1,
+      maxDelayMs: 1,
+    }),
+    admitted: () => admitted,
+  };
+};
+const post = (body: unknown) => ({
+  method: "POST",
+  headers: { "content-type": "application/json", "x-synthetic": "kept" },
+  body: JSON.stringify(body),
+});
+
+test("a model request waits out a gateway restart with a new identity each time", async () => {
+  const seen: any[] = [];
+  const answers: (() => Response)[] = [
+    () => {
+      throw new TypeError("fetch failed");
+    },
+    () => new Response("bad gateway", { status: 502 }),
+    () => new Response("{}", { status: 200 }),
+  ];
+  const original = payload();
+  const { send, admitted } = outage(async (input) => {
+    const request = input as Request;
+    seen.push({
+      body: await request.clone().json(),
+      header: request.headers.get("x-synthetic"),
+    });
+    return answers[seen.length - 1]!();
+  });
+  const response = await send(`${baseUrl}/chat/completions`, post(original));
+  assert.equal(response.status, 200);
+  assert.equal(seen.length, 3);
+  assert.equal(seen[0].body.runtime_call_id, original.runtime_call_id);
+  assert.equal(
+    new Set(seen.map((s) => s.body.runtime_call_id)).size,
+    3,
+    "a call the host may have started is never replayed under its identity",
+  );
+  for (const { body, header } of seen) {
+    assert.deepEqual(
+      { ...body, runtime_call_id: "" },
+      { ...original, runtime_call_id: "" },
+    );
+    assert.equal(header, "kept");
+  }
+  assert.equal(admitted(), 2);
+});
+
+test("a host answer is returned at once and other requests pass through", async () => {
+  for (const status of [200, 401, 409, 429, 500]) {
+    let sends = 0;
+    const { send } = outage(async () => {
+      sends++;
+      return new Response("{}", { status });
+    });
+    const response = await send(`${baseUrl}/chat/completions`, post(payload()));
+    assert.equal(response.status, status);
+    assert.equal(sends, 1);
+  }
+  let sends = 0;
+  const { send } = outage(async () => {
+    sends++;
+    return new Response("x", { status: 502 });
+  });
+  await send(`${baseUrl}/models`);
+  assert.equal(sends, 1);
+});
+
+test("an outage past the window fails, and a cancelled run stops waiting", async () => {
+  const { send } = outage(async () => {
+    throw new TypeError("fetch failed");
+  }, 1);
+  await assert.rejects(
+    send(`${baseUrl}/chat/completions`, post(payload())),
+    /fetch failed/,
+  );
+  const { send: gateway } = outage(
+    async () => new Response("x", { status: 503 }),
+    1,
+  );
+  assert.equal(
+    (await gateway(`${baseUrl}/chat/completions`, post(payload()))).status,
+    503,
+  );
+  const stop = new AbortController();
+  let sends = 0;
+  const { send: cancelled } = outage(async () => {
+    sends++;
+    stop.abort();
+    throw new TypeError("fetch failed");
+  });
+  await assert.rejects(
+    cancelled(`${baseUrl}/chat/completions`, {
+      ...post(payload()),
+      signal: stop.signal,
+    }),
+  );
+  assert.equal(sends, 1);
+});
+
+test("the wait starts at the first failure, however long the call had run", async () => {
+  let sends = 0;
+  let now = 1_000_000;
+  const realNow = Date.now;
+  Date.now = () => now;
+  try {
+    const { send } = outage(async () => {
+      sends++;
+      now += 200_000;
+      if (sends === 1) throw new TypeError("fetch failed");
+      now -= 200_000;
+      if (sends < 4) throw new TypeError("fetch failed");
+      return new Response("{}", { status: 200 });
+    }, 1000);
+    const response = await send(`${baseUrl}/chat/completions`, post(payload()));
+    assert.equal(response.status, 200);
+    assert.equal(sends, 4);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("a resent call that ran for a long time gets its own wait", async () => {
+  let sends = 0;
+  let now = 1_000_000;
+  const realNow = Date.now;
+  Date.now = () => now;
+  try {
+    const { send } = outage(async () => {
+      sends++;
+      if (sends === 2) now += 300_000;
+      if (sends < 4) throw new TypeError("fetch failed");
+      return new Response("{}", { status: 200 });
+    }, 1000);
+    assert.equal(
+      (await send(`${baseUrl}/chat/completions`, post(payload()))).status,
+      200,
+    );
+    assert.equal(sends, 4);
+  } finally {
+    Date.now = realNow;
+  }
+});

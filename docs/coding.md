@@ -12,6 +12,10 @@ Only the allowed owner can confirm the exact delivered brief using its **Approve
 
 An approval covers what the owner read: the objective, context and plan, for that job. It does not cover who carries them out or where they start. Models, limits, the worker image and the base commit can differ without a new approval. If the requirements text changes, the owner approves again. Merge rules are enforced at the merge gate and the Merge card, not through this approval. Approvals recorded before 31 October 2026 also hashed the base commit and settings. They stay valid while those are unchanged, and a settings change through `coding_job_update` carries them to the new scope.
 
+### When the gateway restarts
+
+A gateway restart should not end a Pi coding attempt. The worker repeats a host request for up to 3 minutes while the host is unreachable or answers 502, 503 or 504, and every worker route is safe to repeat. A clear refusal still ends the attempt. A failed heartbeat cancels the run only if the host refused it. A model request the gateway could not answer is resent under a new identity, because the host never replays a call it may have started, so an interrupted call can be paid for twice. The gateway records a call a restart cut off as `gateway_restart`. If the run still pauses, the automatic retry treats that pause as transient. A lost connection or a database shutting down or deadlocked answers 503, not a refusal, and is logged. After authentication, model calls keep their recorded failure instead. For a model call, a send that ran for over 30 seconds restarts the wait; the worker's model limit and time allocation still bound it. The worker's output is never kept, so its exit code names the failure (10 host unreachable, 11 host refused, 1 unexpected) and the job's summary repeats it. `node_modules` links the repository does not track are left out of artifacts and removed before host checks, and the coder is told to run `kite ci` when dependencies are missing. These changes reach only jobs on a worker image that has them.
+
 ### PRs merged or closed on GitHub
 
 Automation stops watching a job once it parks at `manual_review` or `merge_declined`, and a draft job is never watched. A PR merged or closed on GitHub would leave such a job looking open. Every 15 minutes the host takes the next 20 parked PRs in turn, compares them with GitHub and moves the finished ones to stage `merged_on_github` or `closed_on_github`, with no message. `coding_cancel` makes the same check first. If the PR is gone, the job finishes and the call says so. If it is still open, or GitHub cannot be read, the job behaves as before. These stages no longer count as waiting on the owner.
@@ -41,6 +45,7 @@ The owner approved one host retry on 17 October 2026, after paused jobs from tra
 - the sandbox stopped without a reason or a recorded result (`sandbox_stopped`);
 - the worker heartbeat was lost (`heartbeat_lost`);
 - the worker itself paused, and its last rejected model request was a provider 429, 500, 502, 503 or 504 with no timeout, finish-reason or provider-failure classification, and no model call completed after it. A fault that generation recovery already overcame does not make a later, work-caused pause transient.
+- a gateway restart cut off the worker's last model request (`gateway_restart`), and no model call completed after it. The owner approved this cause on 2 November 2026.
 
 For that job, the controller re-queues the same approved scope as a new revision with request key `auto-retry:<attempt>`. In the same statement, it adds a pending notice, which is delivered to the Coding topic like every coding event. The re-queue needs all of the following:
 

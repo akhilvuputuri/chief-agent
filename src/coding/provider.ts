@@ -8,6 +8,8 @@ export type SandboxRequest = {
   runtime?: "node" | "python" | "pi";
   timeoutMinutes: number;
 };
+/** The host checked this worker and said no, as opposed to failing to check. */
+export class WorkerRefused extends Error {}
 export class SandboxAcknowledgementPending extends Error {
   constructor() {
     super("Sandbox launch acknowledgement is pending");
@@ -23,6 +25,7 @@ export interface SandboxProvider {
   find(attemptId: string, timeoutMinutes?: number): Promise<string | undefined>;
   inspect(id: string): Promise<"running" | "terminal">;
   terminate(id: string): Promise<void>;
+  exitNote?(id: string): Promise<string | undefined>;
   terminalReason?(id: string): Promise<string | undefined>;
   /** Extra time before the first heartbeat is expected from this sandbox. */
   startupGraceMs?(id: string | null | undefined): number;

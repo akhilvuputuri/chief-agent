@@ -278,23 +278,24 @@ for (const scenario of [
     assert.equal(plan.status, "waiting_approval");
     await runtime.approve(task.id, plan.plan!.revision, plan.plan!.hash);
     const result = await runtime.run(task.id);
-    assert.equal(
-      result.status,
-      scenario === "edit-once" ? "completed" : "paused",
-    );
+    // A lost connection is resent under a new identity, so that call may be paid for twice.
+    const recovers = scenario === "edit-once" || scenario === "lost-receipt";
+    assert.equal(result.status, recovers ? "completed" : "paused");
     assert.equal(
       requests.length,
-      scenario === "edit-once" ? 4 : scenario === "second-failure" ? 3 : 2,
+      recovers ? 4 : scenario === "second-failure" ? 3 : 2,
     );
+    if (scenario === "lost-receipt")
+      assert.notEqual(requests[1].runtime_call_id, requests[2].runtime_call_id);
     assert.equal(result.used.models, requests.length);
     assert.equal(
       result.used.tools,
-      scenario === "edit-once" ? 3 : 1,
+      recovers ? 3 : 1,
       "Only the successful generation may execute its tool",
     );
     assert.equal(
       await readFile(join(workspace, "value.js"), "utf8"),
-      `export const value = ${scenario === "edit-once" ? 2 : 1};\n`,
+      `export const value = ${recovers ? 2 : 1};\n`,
     );
     if (scenario === "edit-once")
       assert.deepEqual(
@@ -322,8 +323,8 @@ for (const scenario of [
       );
       assert.equal(
         requests.length,
-        2,
-        "Replacing runtime/store cannot reconstruct an automatic retry",
+        4,
+        "Replacing runtime/store cannot rerun a finished generation",
       );
     }
   });

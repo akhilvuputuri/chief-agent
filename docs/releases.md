@@ -1,3 +1,9 @@
+## Coding jobs survive gateway restarts (1 November 2026)
+
+- **Code.** Workers wait out an unreachable gateway, heartbeats cancel only on a refusal, a restart-cut model call is recorded and retried once, exit codes name the failure, and `node_modules` links stay out of artifacts. No database or Compose change.
+- **Why.** A six-second gateway restart ended job `34493cd9`. See [journal 150](journey/150-coding-through-gateway-restarts.md).
+- **Deployment.** Not yet recorded as live. The worker part also needs a new pinned image; update this entry on release.
+
 ## Not installed — scheduled public browser refresh (2 November 2026)
 
 - **Code.** `scripts/scheduled-refresh-public-browser.py` and three systemd units refresh the public browser when its image is 28 days old, retry refusals daily, prune dangling images and all build cache, and send the owner a Telegram notice on failure, or when still busy on day 35. `refresh-public-browser.py` now tags the previous images `:rollback`, because an untagged previous image was deleted by the next release's prune. See [public browser](public-browser.md#on-a-schedule).

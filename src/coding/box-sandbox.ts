@@ -245,6 +245,19 @@ export class BoxSandbox implements SandboxProvider {
     return undefined;
   }
 
+  /** What the worker's exit code says about why it stopped. Its output is never kept. */
+  async exitNote(id: string) {
+    const { task } = await this.load(id);
+    const code = task?.result?.exitCode;
+    return code === 10
+      ? "the worker could not reach the gateway"
+      : code === 11
+        ? "the host refused a worker request"
+        : code === 1
+          ? "the worker stopped on an unexpected error"
+          : undefined;
+  }
+
   /** The attempt token is only needed while the box runs; drop it from stored payloads. */
   private async scrub(boxId: string) {
     await this.db.query(

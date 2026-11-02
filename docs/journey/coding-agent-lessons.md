@@ -332,3 +332,5 @@ Evidence boundary:
 
 - **Measured:** Opus's cost and call counts on that job.
 - **Not measured:** whether DeepSeek finds as many bugs as Opus when reviewing DeepSeek's own code. Coder and reviewer now share one model, so they can share blind spots, even in separate sessions.
+
+**A restart is normal, so a job must survive one (1 November).** Another agent's rollout restarted the gateway for six seconds and ended a coding job that had been running for hours. One failed request ended the worker, and the retry, on a new box with no dependencies, linked `node_modules` and could never package its work ([journal 150](150-coding-through-gateway-restarts.md)). Lesson: when several agents ship to one host, restarts are routine, and every long-running client needs to treat them that way.

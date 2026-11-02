@@ -3,7 +3,10 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/compat";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { InMemoryCredentialStore, type Model } from "@earendil-works/pi-ai";
 import type { ModelConfig } from "./types.js";
-import { terminalHttpRecoveryFetch } from "./terminal-http-recovery.js";
+import {
+  gatewayOutageFetch,
+  terminalHttpRecoveryFetch,
+} from "./terminal-http-recovery.js";
 
 export type ModelFactory = (admit: () => Promise<void>) => Promise<{
   runtime: ModelRuntime;
@@ -89,7 +92,12 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
                     baseUrl: config.baseUrl,
                     requestIdField: config.requestIdField,
                     admit,
-                    fetch: options?.fetch ?? globalThis.fetch,
+                    fetch: gatewayOutageFetch({
+                      baseUrl: config.baseUrl,
+                      requestIdField: config.requestIdField,
+                      admit,
+                      fetch: options?.fetch ?? globalThis.fetch,
+                    }),
                   }),
                 }
               : {}),

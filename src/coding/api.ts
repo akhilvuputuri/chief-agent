@@ -1,4 +1,5 @@
-import { SandboxAcknowledgementPending } from "./provider.js";
+import { errorFields, opsLog } from "../ops-log.js";
+import { SandboxAcknowledgementPending, WorkerRefused } from "./provider.js";
 import { rejectionReason } from "./rejection-reason.js";
 import { piCompletion } from "./pi-proxy.js";
 import type { FastifyInstance } from "fastify";
@@ -59,6 +60,21 @@ const generation = z
   })
   .strict();
 
+/** A lost connection or a database shutting down says nothing about the worker, so it may try again. */
+const hostFailure = (error: unknown) => {
+  if (error instanceof CodingModelFailure) return false;
+  const code = (error as { code?: unknown })?.code;
+  return (
+    (typeof code === "string" &&
+      /^(ECONN|EPIPE$|ETIMEDOUT$|EAI_AGAIN$|ENOTFOUND$|08|57P0|53300$|40P01$|40001$)/.test(
+        code,
+      )) ||
+    /Connection terminated|pool after calling end/.test(
+      String((error as { message?: unknown })?.message),
+    )
+  );
+};
+
 /** Worker capabilities authorise one attempt, never an owner session or general tools. */
 export async function codingApi(
   app: FastifyInstance,
@@ -97,6 +113,15 @@ export async function codingApi(
           // Authenticate the larger artifact routes before parsing their bodies.
           onRequest: async (req, reply) => {
             if (path !== "checkpoint" && path !== "finish") return;
+            if (
+              !z
+                .string()
+                .uuid()
+                .safeParse((req.params as { id: string }).id).success
+            )
+              return reply
+                .code(401)
+                .send({ error: "Invalid worker capability" });
             try {
               await controller.authenticate(
                 (req.params as { id: string }).id,
@@ -104,10 +129,15 @@ export async function codingApi(
                 path === "finish",
               );
             } catch (error) {
+              if (
+                !(error instanceof WorkerRefused) &&
+                !(error instanceof SandboxAcknowledgementPending)
+              )
+                opsLog("coding.worker_request_unavailable", "warn", {
+                  ...errorFields(error),
+                });
               return reply
-                .code(
-                  error instanceof SandboxAcknowledgementPending ? 503 : 401,
-                )
+                .code(error instanceof WorkerRefused ? 401 : 503)
                 .send({ error: "Worker capability unavailable" });
             }
           },
@@ -148,9 +178,16 @@ export async function codingApi(
                     error: "Sandbox launch acknowledgement is pending",
                   });
                 }
-                return reply
-                  .code(401)
-                  .send({ error: "Invalid worker capability" });
+                if (!(error instanceof WorkerRefused))
+                  opsLog("coding.worker_request_unavailable", "warn", {
+                    taskId: id,
+                    ...errorFields(error),
+                  });
+                return error instanceof WorkerRefused
+                  ? reply.code(401).send({ error: "Invalid worker capability" })
+                  : reply
+                      .code(503)
+                      .send({ error: "Worker capability unavailable" });
               }
             }
             try {
@@ -215,6 +252,19 @@ export async function codingApi(
                 );
               }
             } catch (error) {
+              if (
+                !path.endsWith("chat/completions") &&
+                path !== "model" &&
+                hostFailure(error)
+              ) {
+                opsLog("coding.worker_request_unavailable", "warn", {
+                  taskId: id,
+                  ...errorFields(error),
+                });
+                return reply
+                  .code(503)
+                  .send({ error: "Coding host unavailable" });
+              }
               const code =
                 error instanceof CodingModelFailure
                   ? error.code
