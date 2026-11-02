@@ -2,9 +2,9 @@
 
 agentwatch can now say a metric moved between two windows, on a Drift page and as a monitor. Five monitors watch model errors, tool errors, cost per trace, mean model latency and judged answers on 7-day windows. They are muted: they record what they would send, and nothing reaches Telegram. Simulated error-rate monitors on 7-day windows fired falsely up to about 0.75 times a month each. Cost and latency were not simulated, and the rate on real traffic is unmeasured. Next is a few weeks' trial, then the owner decides whether to unmute. See [tracing](tracing.md#drift) and [journal 147](journey/147-drift-detection.md).
 
-# Public browser agent — tested, not deployed, 1 November 2026
+# Public browser agent — live, no real task yet, 2 November 2026
 
-The owner asked for an open `agent-browser` for Chief. It runs as a separate agent with one tool, no logins and its own container, so a hostile page has little to reach. The confinement probe passes in the real image on arm64 and in x86-64 CI; the production host has not run it. The Compose change needs the [operator rollout](public-browser.md#rollout), which refuses later releases until it runs. See [journal 148](journey/148-public-browser-agent.md).
+The owner asked for an open `agent-browser` for Chief. It runs as a separate agent with one tool, no logins and its own container, so a hostile page has little to reach. The operator rollout and one real refresh passed on the host, including the confinement probe. No real task has run, so no model has received the tool's schema yet. The refresh stays manual, about monthly. See [the release record](releases.md) and [journal 148](journey/148-public-browser-agent.md).
 
 # Mail recall on pgvector — live in `d58a9ca`, 1 November 2026
 

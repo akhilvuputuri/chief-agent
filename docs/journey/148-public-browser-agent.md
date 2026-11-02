@@ -1,7 +1,7 @@
 # 148 — Can Chief use an open browser without exposing the owner's data?
 
 Work dates: 1–2 November 2026. Written: 1 November 2026.
-Status: tested, not deployed. The confinement probe passes in the real image on arm64 and in CI on x86-64. The production host has not run it.
+Status: live since 2 November 2026 (`9e26701`). The confinement probe passes in the real image on arm64, in CI on x86-64 and on the production host. No real task has run yet; see [release closure](#release-closure--2026-11-02).
 
 ## User-visible problem and preceding iteration
 
@@ -84,11 +84,27 @@ A second delta review requested changes on `82decac`: the new HTTPS checks mostl
 
 **Tested (arm64):** with the real proxy, all 32 checks pass and the decoy logs 0 connections. With a proxy that has no destination policy, the probe exits 1, five plain HTTP checks fail, and the decoy logs 12 connections, 10 of them on 443. The HTTPS "did not load" checks still passed in that run, because the decoy closes the connection without TLS. So the decoy's log is what catches a broken HTTPS policy, and only CI has it; the rollout and refresh run the probe without one, on code CI has already checked. Two targets that relied on public DNS (`localtest.me`, `10.0.0.1.nip.io`) passed with no policy too, so they were removed after that run: they added a third-party dependency to every release and detected nothing. That leaves 30 checks, which CI runs on x86-64.
 
+## Release closure — 2026-11-02
+
+**Review.** Before merging, a delta review requested changes on `0d1ead2`: a parallel session had merged [PR 409](https://github.com/akhilvuputuri/chief-agent/pull/409) seconds earlier, which conflicted with this PR and changed the agentwatch pin in Compose. That session's operator update and release were running at that moment, so `BASE` moved to the new live release, `6409f9a`. This journal also moved from 147 to 148. The review approved `500bba7`, and CI passed on it.
+
+**Measured on the host (x86-64, 2 CPUs, 1.9 GB):**
+
+- [PR 406](https://github.com/akhilvuputuri/chief-agent/pull/406) merged as `9e26701`. `scripts/deploy-public-browser.py` reported the probe passed and the gateway healthy, with a browser memory peak of 551 MiB against the 640 MiB limit. The host has no decoy, so it runs 28 of the 30 checks.
+- The refresh passed the same day, with a peak of 538 MiB, and installed Chromium 156.0.8078.73. Until then it had only run against mocks.
+- The automatic release for `9e26701` failed with `[Errno 11]` because the rollout held the release lock. Its rerun stopped because main had moved. The next release, `5fd0e74`, succeeded through the ordinary path (run 41384595876), so the Compose guard no longer refuses releases.
+- Host disk use went from 29 GB to 36 GB of 58 GB across the rollout and refresh. Docker reports 12.4 GB of images and 4.6 GB of build cache as reclaimable.
+
+**Measured on CI (x86-64):** on `540692b`, all checks passed, and the decoy that listens on 443 logged no connections. This is the first x86 result with that decoy.
+
+**Not done:** a real task. Nothing can start one except an owner message, so no provider has accepted this tool's schema yet, and success rates are unknown.
+
 ## Limitations and deferred work
 
 - The brief is not checked for private data. The description and instructions ask for it to stay out, and that is all.
 - The instruction not to post, buy or sign up is guidance, not enforcement. With no account or card, the harm is limited, not zero.
-- One session at a time, sized from a laptop measurement.
+- One session at a time. The host probe peaked at 551 MiB of the 640 MiB limit, so a heavy real page may hit the limit.
+- Each no-cache refresh leaves images and build cache behind: this rollout and refresh together added about 7 GB. A monthly refresh needs a prune with it.
 - The refresh is manual: nothing runs it on a schedule.
 - No model has received this tool's schema, so the first real task after rollout is also that test.
 - A browser process that escapes Chromium's sandbox could reach `gateway:3000` directly, because the gateway shares the network. The invoice browser's network has the same shape.
@@ -99,6 +115,8 @@ A second delta review requested changes on `82decac`: the new HTTPS checks mostl
 Run the third-party tool in the real sandbox before designing around it. Its documented flags did not show that it turns off the sandbox on its own.
 
 A probe that passes needs testing too: the weak `--no-sandbox` check would have passed whatever the browser did. It was found only because another check on the same matching failed.
+
+A release baseline can go stale between review and merge. Re-read the host and main immediately before merging, as the review caught here.
 
 ## Sources
 
