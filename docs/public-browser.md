@@ -68,6 +68,56 @@ This browser's job is to run hostile scripts, so Chromium's security fixes matte
 - **Monthly**, and promptly after a Chromium security advisory.
 - **After merging any change** to `src/public-browser/`, `src/browser/proxy.ts`, `src/browser/policy.ts`, `src/security.ts`, `Dockerfile.browser`, `tools/agent-browser.json`, `scripts/public-browser-probe.mjs` or production dependencies. Until then the gateway and the running service can disagree, and the only symptom is "Invalid browser command".
 
-It rebuilds both images under candidate tags with a fresh base and no layer cache, and proves them in throwaway containers that share nothing with the live browser. Only then does it check for idle work and swap them, restoring the previous images if the swap fails. A failed proof or a busy host leaves the running browser untouched. It holds the release lock throughout, so a release during its builds is refused as busy; retry it afterwards. Run it under `tmux`, though it removes what a killed run left behind. It prints the Chromium version. To see how old the running image is, run `docker image inspect --format '{{.Created}}' chief-public-browser`. Each refresh leaves the previous images and build cache behind, so run `docker image prune` and `docker builder prune` after each one. Nothing runs this on a schedule yet.
+It rebuilds both images under candidate tags with a fresh base and no layer cache, and proves them in throwaway containers that share nothing with the live browser. Only then does it check for idle work, tag the running images `:rollback` and swap, restoring the previous images if the swap fails. A failed proof or a busy host leaves the running browser untouched. It holds the release lock throughout, so a release during its builds is refused as busy; retry it afterwards. Run it under `tmux`, though it removes what a killed run left behind. It prints the Chromium version. To see how old the running image is, run `docker image inspect --format '{{.Created}}' chief-public-browser`.
+
+### On a schedule
+
+`chief-public-browser-refresh.timer` runs `scripts/scheduled-refresh-public-browser.py` daily between 21:00 and 21:30 UTC, the middle of a window with no work in the 30 days measured ([journal 149](journey/149-scheduled-browser-refresh.md)). Nothing happens until the running image is 28 days old, so a manual refresh also resets the clock, and there is no schedule state to drift.
+
+| Situation                                    | What the run does                                                           | Owner told?                 |
+| -------------------------------------------- | --------------------------------------------------------------------------- | --------------------------- |
+| `PUBLIC_BROWSER` is not `on`                 | Nothing, whatever the age                                                   | No                          |
+| Image under 28 days old                      | Nothing                                                                     | No                          |
+| Busy: running work, queued input or the lock | Tries again the next day. Checked before building, so this usually costs nothing | From day 35, as a failure   |
+| Flag on but the browser not running          | Refuses, because a refresh would start a service someone may have stopped   | Yes                         |
+| Under 8 GB free                              | Prunes, then refuses if still short                                         | Yes                         |
+| Build, proof or swap fails                   | Tries again the next day. The swap failure restores the previous images     | Yes                         |
+| Script killed or past its 30-minute limit    | systemd's `OnFailure` still fires                                           | Yes, as "killed"            |
+
+**Notice.** Any non-zero exit starts `chief-public-browser-refresh-notify.service`, which sends the reason to the first ID in `TELEGRAM_ALLOWED_USER_IDS` directly through Telegram's API, so it works with the gateway down. The same reason is sent once a week however often it retries, and a different reason at once. The last failure and notice are in `/var/lib/chief/public-browser-refresh.json`, and every run's outcome is in `journalctl -u chief-public-browser-refresh`. If the timer itself stops, or Telegram cannot be reached, nothing tells the owner; the image age above is the check.
+
+**Prune.** After any run that built, and under the release lock, it runs `docker image prune -f` and `docker builder prune -af`. The first removes untagged images only: tagged ones such as `:rollback`, the old invoice-browser tags and the kept debug image stay, so it does not reclaim most of what `docker system df` calls reclaimable. Digest-pinned images, which show a repository but no tag, are also not in Docker's dangling list. The second removes all build cache, because every refresh is `--no-cache`. The cost is a slower next operator build. An ordinary release also prunes untagged images, which is why the refresh must tag what it keeps.
+
+**After a security advisory**, run this on the host. It ignores the age, keeps every other check, prunes and prints the disk used before the refresh, after it and after the prune:
+
+```bash
+sudo python3 /opt/hermes-companion/scripts/scheduled-refresh-public-browser.py --now
+```
+
+**Installing it**, as root on the host, from a release that includes these files:
+
+```bash
+cd /opt/hermes-companion/deploy/lightsail && install -m 644 chief-public-browser-refresh.service chief-public-browser-refresh-notify.service chief-public-browser-refresh.timer /etc/systemd/system/ && systemctl daemon-reload
+```
+
+```bash
+python3 /opt/hermes-companion/scripts/scheduled-refresh-public-browser.py --test-notice
+```
+
+```bash
+systemctl enable --now chief-public-browser-refresh.timer
+```
+
+**Rolling back a swap that passed its proof but behaves badly**, as root, when idle. The next refresh is 28 days after the build date of the image you restore, which may mean the next day, so stop the timer first if the fresh build is the problem:
+
+```bash
+docker tag chief-public-browser:rollback chief-public-browser && docker tag chief-public-browser-proxy:rollback chief-public-browser-proxy
+```
+
+```bash
+docker compose --project-directory /opt/hermes-companion -p hermes-companion --profile public-browser up -d --no-deps --no-build --force-recreate --wait public-browser-proxy public-browser
+```
+
+The schedule covers age only. A merge that changes what these images hold still needs a manual refresh, as above.
 
 **To turn it off:** set `PUBLIC_BROWSER=off` in `.env`, recreate the gateway and stop the two services.

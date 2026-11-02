@@ -1,0 +1,7 @@
+[Unit]
+Description=Tell the owner the public browser refresh failed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/hermes-companion/scripts/scheduled-refresh-public-browser.py --notify
+UMask=0077

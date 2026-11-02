@@ -24,6 +24,10 @@ TARGETS = {PROXY: 'proxy', BROWSER: 'public-browser'}
 PROBE_SECONDS = 240
 
 
+class Busy(RuntimeError):
+    """Refused for other work, not broken: the scheduled run tries again the next day."""
+
+
 def image_id(tag):
     return deploy.run(['docker', 'image', 'inspect', '--format', '{{.Id}}', tag], text=True).stdout.strip()
 
@@ -90,7 +94,10 @@ def chromium_version():
 
 def refresh():
     with open(deploy.LOCK, 'w') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Busy('A release or rollout holds the lock; retry afterwards') from None
         previous = {tag: image_id(tag) for tag in TARGETS}
         try:
             for tag, target in TARGETS.items():
@@ -104,8 +111,14 @@ def refresh():
             raise RuntimeError('Confinement probe failed: ' + '; '.join(failed)[:400]
                                + '; the running browser is unchanged')
         # A browser task would lose its session in the swap; never cancel user work.
-        deploy.require_idle()
         try:
+            deploy.require_idle()
+        except RuntimeError as error:
+            raise Busy(str(error)) from None
+        try:
+            # Tagged, so a later prune keeps it for the manual rollback in docs/public-browser.md.
+            for tag, image in previous.items():
+                deploy.run(['docker', 'tag', image, tag + ':rollback'])
             for tag in TARGETS:
                 deploy.run(['docker', 'tag', tag + ':candidate', tag])
             recreate()

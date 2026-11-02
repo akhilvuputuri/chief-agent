@@ -1,3 +1,7 @@
+# Scheduled public browser refresh — built, not installed, 2 November 2026
+
+A daily timer refreshes the public browser once its image is 28 days old, retries refused runs the next day, prunes afterwards and sends the owner a Telegram notice on failure. The refresh now keeps a `:rollback` image, which it never did. Installing it and one measured run need the owner's approval. See [journal 149](journey/149-scheduled-browser-refresh.md).
+
 # Drift detection in agentwatch — live and muted in `6409f9a`, 2 November 2026
 
 agentwatch can now say a metric moved between two windows, on a Drift page and as a monitor. Five monitors watch model errors, tool errors, cost per trace, mean model latency and judged answers on 7-day windows. They are muted: they record what they would send, and nothing reaches Telegram. Simulated error-rate monitors on 7-day windows fired falsely up to about 0.75 times a month each. Cost and latency were not simulated, and the rate on real traffic is unmeasured. Next is a few weeks' trial, then the owner decides whether to unmute. See [tracing](tracing.md#drift) and [journal 147](journey/147-drift-detection.md).
