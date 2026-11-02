@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "timeoutMs": 6000,
+  "cardTtlMinutes": 240,
+  "state": {
+    "ownerMessageChars": 600,
+    "pageTitleChars": 200,
+    "pageSiteChars": 80,
+    "pageTopicChars": 80,
+    "pageExcerptChars": 1200
+  },
+  "interests": [
+    "applied AI engineering",
+    "agent platforms",
+    "developer tools",
+    "voice and conversational AI"
+  ],
+  "question": {
+    "instructions": "Where does the link the owner shared belong, judging from `link` (the page's actual title, site, topic and text), `latest_user_message` and `learning_interests`?",
+    "criteria": {
+      "study": "Material the owner would study, learn from or later build with: a tutorial, course, walkthrough, paper, documentation, reference, repository, technical thread or talk, especially in the learning interests.",
+      "reader": "Reading for information or interest rather than study: a news story, blog essay, opinion, interview, long-form general-interest article or book excerpt."
+    }
+  },
+  "cue": {
+    "instructions": "Does `latest_user_message` itself say where the link should go?",
+    "criteria": {
+      "true": "The owner names the destination: for study or reference use, 'for AI learning', 'to study', 'for my study list', 'reference for building'; for reading use, 'for offline reading', 'to read later', 'for the weekend', 'save it to Reader'.",
+      "false": "The message only asks to keep the link ('save this', 'save this link', 'bookmark it'), or says nothing about where it should go."
+    }
+  },
+  "apply": {
+    "study": 0.6,
+    "reader": 0.6,
+    "cue": 0.75
+  }
+}

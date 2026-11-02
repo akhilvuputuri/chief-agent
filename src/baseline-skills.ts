@@ -6,6 +6,7 @@ const keys = [
   "synthesis",
   "task-execution",
   "personal-assistance",
+  "link-saving",
 ];
 export const baselineSkills = [
   ...keys.map((key) => ({

@@ -46,6 +46,14 @@ import {
 } from "./subscription-schema.js";
 import { parcelRecord, parcelList, parcelMatch } from "./parcel-schema.js";
 import {
+  linkSave,
+  studySave,
+  studyList,
+  studyUpdate,
+  studyRemove,
+  studyMove,
+} from "./study-schema.js";
+import {
   responsibilityCreate,
   responsibilityUpdate,
   responsibilityList,
@@ -560,6 +568,12 @@ export const action = z.discriminatedUnion("operation", [
   responsibilityReport,
   parcelList,
   parcelMatch,
+  linkSave,
+  studySave,
+  studyList,
+  studyUpdate,
+  studyRemove,
+  studyMove,
   z.object({ operation: z.literal("sheet_sync") }).strict(),
   z.object({ operation: z.literal("gmail_accounts") }).strict(),
   z

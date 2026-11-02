@@ -13,6 +13,7 @@ import { HistoryStore } from "./history.js";
 import { Canvases } from "./canvases.js";
 import { WorkTools } from "./work.js";
 import { toolError } from "./tool-errors.js";
+import type { Study, StudyAction } from "./study.js";
 import type { DailyTools, DailyAction } from "./daily.js";
 import { SkillTools } from "./skills.js";
 import { PreparationTools } from "./preparation.js";
@@ -38,6 +39,8 @@ import { keywordSearch, type Embedder, type MailIndex } from "./mail-recall.js";
 import { recall } from "./recall.js";
 import { isLearned, MemoryStore } from "./memory.js";
 export class JobTools {
+  /** The study list and shared-link classification; wired when links and Jev exist. */
+  study?: Study;
   constructor(
     private db: Database,
     private web: Pick<WebTools, "call"> &
@@ -61,7 +64,10 @@ export class JobTools {
     readonly mailRecall?: Pick<MailIndex, "recall">,
     private recallEmbedder?: Embedder,
     readonly publicBrowser?: PublicBrowser,
-  ) {}
+    study?: Study,
+  ) {
+    this.study = study;
+  }
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
   }
@@ -386,6 +392,17 @@ export class JobTools {
       a.operation === "parcel_match"
     )
       return new ParcelTools(db).call(user, a, run);
+    if (
+      a.operation === "link_save" ||
+      a.operation === "study_save" ||
+      a.operation === "study_list" ||
+      a.operation === "study_update" ||
+      a.operation === "study_remove" ||
+      a.operation === "study_move"
+    ) {
+      if (!this.study) throw new Error("The study list is not configured");
+      return this.study.call(user, a as StudyAction, run, signal);
+    }
     if (
       a.operation === "gmail_accounts" ||
       a.operation === "gmail_search" ||

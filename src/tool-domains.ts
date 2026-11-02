@@ -42,6 +42,7 @@ export const TOOL_DOMAINS = [
   "library",
   "watchlist",
   "news",
+  "study",
   "singapore",
   "routines",
   "responsibilities",
@@ -51,7 +52,7 @@ export type ToolDomain = (typeof TOOL_DOMAINS)[number];
 
 /** One line per domain for the model's catalogue of loadable tools. */
 export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
-  mcp: "connected remote MCP tools, Reader article/brief saving and submission status",
+  mcp: "connected remote MCP tools, Reader offline-reading saves and submission status",
   gmail: "read-only Gmail search/thread/read across connected accounts",
   calendar: "Calendar lookups and approval-gated event drafts",
   daily: "saved items, reminders, briefings and the daily Sheet",
@@ -70,6 +71,8 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   library: "NLB ebook availability and the linked card's shelf",
   watchlist: "stock price-drop watchlist and read-only IBKR holdings",
   news: "daily news bulletin from followed sites, topics and learning from Reader saves",
+  study:
+    "the study list of saved links: classified study material, status, notes and Reader moves",
   singapore:
     "Singapore weather, haze, flood and lightning alerts, carparks, cameras, holidays, hawker closures, bus arrivals, MRT status and traffic",
   routines: "scheduled independent agent routines",
@@ -85,6 +88,8 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
  * the request instead of changing the cached prefix.
  */
 export const DOMAIN_GUIDANCE: Partial<Record<ToolDomain, string>> = {
+  study:
+    "A shared link is classified before it is saved: link_save reads the page, has Jev judge it as study material or offline reading, then saves to the study list, saves to Reader for offline reading, or asks the owner with buttons when it is unsure. Pass the owner's own words as ownerMessage. Never send a shared link to Reader yourself and never default a save to Reader. When it is confident, say in one line where it went and why, so the owner can correct it; when it answers needsChoice, say you have asked and never claim a save. Titles, topics and tags come from the page or the owner, never invented; the result carries the page excerpt, so set a real topic with study_update when one is visible. study_save is only for an explicit 'put this on my study list'. Corrections: study_move to Reader or into the study list, study_remove to delete. study_list answers what is on the list with title — site · topic · status lines; keep the phone reply short. Reader cannot delete, so a move into the study list leaves its Reader copy.",
   canvas:
     "When canvas tools are available, use saved canvases for rich results worth revisiting (tables of roles, evidence-backed analyses, preparation plans). Choose useful components based on the request; short conversation stays in Telegram. canvas_list finds earlier documents; canvas_read retrieves exact revisions in chunks. Refining the same topic updates that canvas; a new topic creates a separate canvas. Updates must reconcile the latest base revision and preserve block IDs. A saved canvas is a snapshot, not an independently verified finding. Ground content in actual records/sources; do not invent URLs or data. Use finish_turn.canvases with saved IDs and optional exact revisions to attach open buttons. The Mini App never authorizes sensitive actions. Do not promise a canvas or link before a successful save.",
   jobs: "For job fit, interview research and preparation, use the job-alignment skill and job_alignment_start/resume/read. The scope can be selected roles or all saved roles, never force a one-role workflow. Get exact role IDs from the jobs agent (its refs) or allSaved, and select relevant memory keys. For substantial work establish durable work tracking. Automatically resume pending roles within the existing allocation, keeping scopeId in the task checkpoint; do not restart the scope on each pass. Read full reports before synthesis and requested prep/Sheet saves. Combine overlapping preparation while retaining role/evidence links. Scope history is context, not authorization to resume old work. Reports distinguish unknown experience and interview uncertainty; do not upgrade those to gaps or confirmed stages.",
@@ -116,6 +121,8 @@ const PREFIXES: [string, ToolDomain][] = [
   ["portfolio_", "watchlist"],
   ["stock_", "watchlist"],
   ["news_", "news"],
+  ["study_", "study"],
+  ["link_save", "study"],
   ["sg_", "singapore"],
   ["lta_", "singapore"],
   ["routine_", "routines"],
@@ -134,7 +141,11 @@ export function domainOf(operation: string): ToolDomain | undefined {
 const CUES: [ToolDomain, RegExp][] = [
   [
     "mcp",
-    /\b(mcp|reader|offline|read later|save.{0,40}(article|brief|link))\b/i,
+    /\b(mcp|reader|offline|offline reading|save to reader|reader list)\b/i,
+  ],
+  [
+    "study",
+    /\b(study list|reading list|learning list|to study|studying|reference for|for (ai )?learning)\b|\b(save|keep|bookmark|add)\b.{0,40}\b(this|that|it|link|url|thread|post|article|video|tutorial|course|paper|repo)\b|https?:\/\//i,
   ],
   [
     "gathering",

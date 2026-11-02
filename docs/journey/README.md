@@ -157,6 +157,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1 November | [148 — Public browser agent](148-public-browser-agent.md): can Chief use an open browser without exposing the owner's data? | Confinement probe passes on arm64 and in x86-64 CI; not deployed |
 | 2 November | [149 — Scheduled browser refresh](149-scheduled-browser-refresh.md): how does a browser that runs hostile scripts stay patched without anyone remembering? | Live in `444a334`: a daily timer refreshes at 28 days, retries refusals and tells the owner on failure; the refresh now keeps `:rollback`. One measured run added 3.44 GB |
 | 2 November | [150 — Coding through gateway restarts](150-coding-through-gateway-restarts.md): can a coding job survive a gateway restart? | Tested on synthetic jobs; release pending. Workers retry, a restart-cut call is recorded, and exit codes name the failure |
+| 2 November | [151 — Where should a shared link go?](151-link-study-routing.md): can Chief classify a shared link before saving it? | Implemented and tested with mocks; not released. Jev judges study material vs offline reading, the study list is its own Postgres collection, and an unsure save asks with three buttons |
 
 ## Coding-agent learning path
 
