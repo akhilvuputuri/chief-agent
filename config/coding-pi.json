@@ -1,7 +1,7 @@
 {
   "repository": "akhilvuputuri/chief-agent",
   "branch": "main",
-  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:a5bdecece9afc80a2044370191649dcb5c8c56ce2d460fbe2971300bb46ce782",
+  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:e3aa876d2a42d0c953abafb54cdf15f4be48eed9ab9dd2938bab9a829e9d3116",
   "model": "deepseek/deepseek-v4.1-flash-1017",
   "leaderModel": "deepseek/deepseek-v4.1-flash-1017",
   "reviewerModel": "deepseek/deepseek-v4.1-flash-1017",
