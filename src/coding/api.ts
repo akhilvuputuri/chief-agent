@@ -113,6 +113,15 @@ export async function codingApi(
           // Authenticate the larger artifact routes before parsing their bodies.
           onRequest: async (req, reply) => {
             if (path !== "checkpoint" && path !== "finish") return;
+            if (
+              !z
+                .string()
+                .uuid()
+                .safeParse((req.params as { id: string }).id).success
+            )
+              return reply
+                .code(401)
+                .send({ error: "Invalid worker capability" });
             try {
               await controller.authenticate(
                 (req.params as { id: string }).id,

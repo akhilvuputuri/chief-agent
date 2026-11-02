@@ -259,6 +259,15 @@ test("the API tells a refusal from a host failure", async (t) => {
       payload: {},
     });
   assert.equal((await send()).statusCode, 401);
+  for (const route of ["checkpoint", "finish", "heartbeat"]) {
+    const malformed = await app.inject({
+      method: "POST",
+      url: `/coding/worker/not-a-uuid/${route}`,
+      headers: { authorization: `Bearer ${"a".repeat(64)}` },
+      payload: {},
+    });
+    assert.equal(malformed.statusCode, 401, route);
+  }
   const original = f.c.authenticate.bind(f.c);
   for (const error of [
     Object.assign(new Error("reset"), { code: "ECONNRESET" }),

@@ -45,6 +45,7 @@ The owner approved one host retry on 17 October 2026, after paused jobs from tra
 - the sandbox stopped without a reason or a recorded result (`sandbox_stopped`);
 - the worker heartbeat was lost (`heartbeat_lost`);
 - the worker itself paused, and its last rejected model request was a provider 429, 500, 502, 503 or 504 with no timeout, finish-reason or provider-failure classification, and no model call completed after it. A fault that generation recovery already overcame does not make a later, work-caused pause transient.
+- a gateway restart cut off the worker's last model request (`gateway_restart`), and no model call completed after it. The owner approved this cause on 2 November 2026.
 
 For that job, the controller re-queues the same approved scope as a new revision with request key `auto-retry:<attempt>`. In the same statement, it adds a pending notice, which is delivered to the Coding topic like every coding event. The re-queue needs all of the following:
 
