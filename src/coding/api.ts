@@ -1,3 +1,4 @@
+import { errorFields, opsLog } from "../ops-log.js";
 import { SandboxAcknowledgementPending, WorkerRefused } from "./provider.js";
 import { rejectionReason } from "./rejection-reason.js";
 import { piCompletion } from "./pi-proxy.js";
@@ -59,12 +60,18 @@ const generation = z
   })
   .strict();
 
-/** A database or connection failure says nothing about the worker, so it may try again. */
-const hostFailure = (error: unknown) =>
-  typeof (error as { code?: unknown })?.code === "string" ||
-  /Connection terminated|pool after calling end/.test(
-    String((error as { message?: unknown })?.message),
+/** A lost connection or a database shutting down says nothing about the worker, so it may try again. */
+const hostFailure = (error: unknown) => {
+  if (error instanceof CodingModelFailure) return false;
+  const code = (error as { code?: unknown })?.code;
+  return (
+    (typeof code === "string" &&
+      /^(ECONN|EPIPE$|ETIMEDOUT$|EAI_AGAIN$|08|57P0)/.test(code)) ||
+    /Connection terminated|pool after calling end/.test(
+      String((error as { message?: unknown })?.message),
+    )
   );
+};
 
 /** Worker capabilities authorise one attempt, never an owner session or general tools. */
 export async function codingApi(
@@ -222,10 +229,19 @@ export async function codingApi(
                 );
               }
             } catch (error) {
-              if (!path.endsWith("chat/completions") && hostFailure(error))
+              if (
+                !path.endsWith("chat/completions") &&
+                path !== "model" &&
+                hostFailure(error)
+              ) {
+                opsLog("coding.worker_request_unavailable", "warn", {
+                  taskId: id,
+                  ...errorFields(error),
+                });
                 return reply
                   .code(503)
                   .send({ error: "Coding host unavailable" });
+              }
               const code =
                 error instanceof CodingModelFailure
                   ? error.code

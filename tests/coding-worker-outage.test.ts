@@ -10,6 +10,7 @@ import {
 } from "../src/coding/pi-worker.js";
 import { BoxSandbox } from "../src/coding/box-sandbox.js";
 import { codingApi } from "../src/coding/api.js";
+import { CodingModelFailure } from "../src/coding/model-failure.js";
 import { server } from "../src/server.js";
 import { fixture } from "./helpers/coding-fixture.js";
 
@@ -274,6 +275,17 @@ test("the API tells a refusal from a host failure", async (t) => {
     throw Object.assign(new Error("terminating"), { code: "57P01" });
   };
   assert.equal((await send()).statusCode, 503);
+  for (const error of [
+    Object.assign(new Error("duplicate"), { code: "23505" }),
+    new Error("Worker attempt superseded"),
+    new CodingModelFailure("model_timeout", {} as any),
+  ]) {
+    (f.c as any).recordRejection = async () => false;
+    (f.c as any).heartbeat = async () => {
+      throw error;
+    };
+    assert.equal((await send()).statusCode, 409, error.message);
+  }
   (f.c as any).heartbeat = async () => {
     throw new Error("Worker attempt superseded");
   };

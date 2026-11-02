@@ -25,14 +25,15 @@ Blocking releases during coding jobs was rejected. Jobs run for hours and other 
 - `src/coding/pi-worker.ts`: `NativePiWorkerClient` retries for 3 minutes on an unreachable host; heartbeats cancel only on a refusal; exit codes name the failure.
 - `coding_runtime_pi/src/terminal-http-recovery.ts`: `gatewayOutageFetch` resends a model request the gateway could not answer, under a new identity. The host buffers each response, so a cut call normally shows up here, before any response. The 3-minute wait starts at the first failure, because a call may already have run for minutes.
 - `coding_runtime_pi/src/workspace.ts`: snapshots reset `node_modules` links to the base, which drops ones the coder staged or committed and keeps ones the repository tracks. Any other symlink still ends the job. Host checks delete added links first, so they run against the repository's own dependencies.
-- `src/coding/api.ts`: authentication answers 401 only when the host checked and said no. A database or connection failure answers 503, there and on routes other than model calls.
+- `src/coding/api.ts`: authentication answers 401 only when the host checked and said no. A lost connection or a database shutting down answers 503, there and on routes other than model calls, and is logged. Other database errors stay refusals, so a real bug keeps its reason.
 - `src/coding/controller.ts`: `recoverModels` records calls a restart cut off as `gateway_restart`, and `autoRetryOnce` treats that pause as transient. This widens the owner's exception in AGENTS.md.
 - `scripts/cloud-release.py`: warns when a coding job is running. About 25 other deploy scripts do not warn.
 
 Limitations:
 
 - A call the host is still running when its connection breaks (a proxy blip, not a restart) gets "already in flight" on resend, and the run pauses. The first call is still paid for. This fails closed.
-- Each resend counts against the worker's local model budget, about 20 per 3-minute outage against a limit of 1,500.
+- Each resend counts against the worker's local model budget, about 20 per 3-minute outage against a limit of 1,500. A send that hangs for over 30 seconds restarts the wait, so a host that accepts and then hangs is bounded by that budget and the time allocation, not by 3 minutes.
+- A coder that retargets a link the base tracks has the link restored in the artifact, while its checks ran against the changed link.
 - A pause past the 3-minute wait relies on the job-level retry, once.
 - A retried attempt still starts on a new box, so it loses uncommitted tool state and installed dependencies.
 - If the host answers a resent call with a provider failure, the in-run provider retry does not apply, because its receipt names the new identity. The run pauses, which is safe.
