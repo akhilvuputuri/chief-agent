@@ -22,7 +22,7 @@ LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
 # Baseline: the exact-commit release receipt for the live main at merge time (verify before rollout).
 # Reconcile with the live RELEASE immediately before rollout; never rewrite RELEASE to match.
-BASE = '0000000000000000000000000000000000000000'
+BASE = '4a2f4b88ca52b31645ced4ddf656d71803e832fa'
 BASES = {BASE}
 IMAGE = 'hermes-companion-gateway'
 PROFILE = ['--profile', 'public-browser']
