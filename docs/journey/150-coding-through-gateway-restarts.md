@@ -1,4 +1,4 @@
-# 149 — Can a coding job survive a gateway restart?
+# 150 — Can a coding job survive a gateway restart?
 
 Work date: 2026-11-01. Written: 2026-11-01.
 Status: tested on synthetic jobs. Not released: the host part waits for the running job, and the worker part needs a new image.

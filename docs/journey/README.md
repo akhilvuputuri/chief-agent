@@ -156,7 +156,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 2 November | [147 — Drift detection](147-drift-detection.md): can agentwatch say a metric moved, without crying wolf on Chief's traffic? | Live, muted, in `6409f9a`: simulated false firings up to about 0.75 a month per error-rate monitor at 7-day windows, so five drift monitors record what they would send for a trial. |
 | 1 November | [148 — Public browser agent](148-public-browser-agent.md): can Chief use an open browser without exposing the owner's data? | Confinement probe passes on arm64 and in x86-64 CI; not deployed |
 | 2 November | [149 — Scheduled browser refresh](149-scheduled-browser-refresh.md): how does a browser that runs hostile scripts stay patched without anyone remembering? | Tested offline, not installed: a daily timer refreshes at 28 days, retries refusals and tells the owner on failure; the refresh now keeps `:rollback`. The disk a refresh adds is bounded at 3.2 GB, pending a measured run |
-| 1 November | [149 — Coding through gateway restarts](149-coding-through-gateway-restarts.md): can a coding job survive a gateway restart? | Tested on synthetic jobs; release pending. Workers retry, a restart-cut call is recorded, and exit codes name the failure |
+| 2 November | [150 — Coding through gateway restarts](150-coding-through-gateway-restarts.md): can a coding job survive a gateway restart? | Tested on synthetic jobs; release pending. Workers retry, a restart-cut call is recorded, and exit codes name the failure |
 
 ## Coding-agent learning path
 
