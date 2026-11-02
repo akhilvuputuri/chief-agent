@@ -31,6 +31,10 @@ export interface MonitorAlert {
   reason?: string | null;
   /** Unix nanoseconds, as a decimal string. */
   created_ns?: string;
+  /** "drift" compares the window with the one before it, rather than with a limit. */
+  mode?: string;
+  baseline_value?: number | null;
+  baseline_minutes?: number | null;
 }
 
 const RATES = new Set(["model_error_rate", "tool_error_rate"]);
@@ -43,7 +47,9 @@ function amount(metric: string, value: number | null) {
   )
     return `${Math.round(value * 1000) / 10}%`;
   if (metric === "cost_usd") return `$${value.toFixed(2)}`;
-  if (metric === "model_p95_ms") return `${(value / 1000).toFixed(1)} s`;
+  if (metric === "cost_per_trace") return `$${value.toFixed(3)}`;
+  if (metric === "model_p95_ms" || metric === "model_mean_ms")
+    return `${(value / 1000).toFixed(1)} s`;
   return `${Math.round(value * 1000) / 1000}`;
 }
 
@@ -64,6 +70,52 @@ function late(alert: MonitorAlert, now: number) {
     : `, raised ${Math.round(minutes / 60)} hours ago`;
 }
 
+const figures = (value: number) => Number(value.toPrecision(3));
+
+/** Both windows of a drift alert in one unit, and precise enough that a change shows. */
+function driftAmount(alert: MonitorAlert, value: number | null | undefined) {
+  if (typeof value !== "number") return "no data";
+  if (alert.metric === "cost_per_trace") return `$${figures(value)}`;
+  if (alert.metric === "model_p95_ms" || alert.metric === "model_mean_ms")
+    return value < 1000
+      ? `${Math.round(value)} ms`
+      : `${figures(value / 1000)} s`;
+  if (alert.metric === "score_mean") {
+    const unit = (v: unknown) => typeof v === "number" && v >= 0 && v <= 1;
+    if (!unit(alert.value) || !unit(alert.baseline_value))
+      return `${Math.round(value * 1000) / 1000}`;
+  }
+  return amount(alert.metric, value);
+}
+
+/**
+ * A drift alert compares two windows, so its threshold is the smallest change watched, not a
+ * limit. A resolve says only that no clear change of that size is left in the watched direction: a
+ * lasting shift ends up in both windows, and a brief incident in the earlier one, so neither the
+ * level nor the windows need agree. It gives both values rather than say more than that.
+ */
+function driftText(alert: MonitorAlert, name: string, now: number) {
+  const current = driftAmount(alert, alert.value);
+  const baseline = driftAmount(alert, alert.baseline_value);
+  const earlier = span(alert.baseline_minutes || alert.window_minutes);
+  if (alert.kind === "resolved") {
+    if (alert.value === null) return null;
+    const change = alert.comparison === "below" ? "fall" : "rise";
+    const size =
+      alert.threshold > 0
+        ? ` of at least ${driftAmount(alert, alert.threshold)}`
+        : "";
+    return `Drift ended: ${name} no longer shows a clear ${change}${size}. Previous ${earlier} ${baseline}, last ${span(alert.window_minutes)} ${current}. That is not necessarily back to normal.`;
+  }
+  const moved =
+    alert.value !== null &&
+    typeof alert.baseline_value === "number" &&
+    alert.value < alert.baseline_value
+      ? "fell"
+      : "rose";
+  return `Drift: ${name} ${moved} from ${baseline} to ${current} over the last ${span(alert.window_minutes)}, compared with the previous ${earlier}${late(alert, now)}. Details in agentwatch.`;
+}
+
 /** The Telegram text of one alert. Plain text: it is sent without a parse mode. */
 export function alertText(alert: MonitorAlert, now = Date.now()) {
   // Anyone who can reach agentwatch sets this name, so it is reduced to one plain line. Not
@@ -72,6 +124,10 @@ export function alertText(alert: MonitorAlert, now = Date.now()) {
     .replace(/[\p{Cc}\p{Cf}\s]+/gu, " ")
     .trim()
     .slice(0, 200);
+  if (alert.mode === "drift") {
+    const text = driftText(alert, name, now);
+    if (text) return text;
+  }
   const value = amount(alert.metric, alert.value);
   const threshold = amount(alert.metric, alert.threshold);
   if (alert.kind === "resolved" && alert.reason === "removed")
