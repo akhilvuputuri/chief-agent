@@ -210,6 +210,27 @@ class Refresh(unittest.TestCase):
         self.assertEqual(self.swapped(), 0)
         self.assertEqual(self.live_tags(), [])
 
+    def test_the_previous_images_are_tagged_for_rollback_before_the_swap(self):
+        refresh.refresh()
+        tags = [c[2:] for c in self.named('docker', 'tag')]
+        self.assertIn(['sha256:old', 'chief-public-browser:rollback'], tags)
+        self.assertIn(['sha256:old', 'chief-public-browser-proxy:rollback'], tags)
+        self.assertLess(tags.index(['sha256:old', 'chief-public-browser:rollback']),
+                        tags.index(['chief-public-browser:candidate', 'chief-public-browser']))
+
+    def test_a_refused_proof_or_busy_host_moves_no_rollback_tag(self):
+        with patch.object(self.deploy, 'sql', return_value='1'):
+            with self.assertRaises(refresh.Busy):
+                refresh.refresh()
+        self.assertFalse([c for c in self.named('docker', 'tag') if c[-1].endswith(':rollback')])
+
+    def test_a_held_lock_is_busy_not_a_failure(self):
+        with open(self.deploy.LOCK, 'w') as held:
+            refresh.fcntl.flock(held, refresh.fcntl.LOCK_EX)
+            with self.assertRaises(refresh.Busy):
+                refresh.refresh()
+        self.assertEqual(self.named('docker', 'build'), [])
+
     def test_a_failed_swap_puts_the_previous_images_back(self):
         attempts = []
 

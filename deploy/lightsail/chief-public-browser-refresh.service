@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh the public browser images when they are a month old
+Requires=docker.service
+After=docker.service
+OnFailure=chief-public-browser-refresh-notify.service
+
+[Service]
+Type=oneshot
+# The one real refresh took about 5 minutes.
+TimeoutStartSec=30min
+Environment=HOME=/root
+ExecStart=/usr/bin/python3 /opt/hermes-companion/scripts/scheduled-refresh-public-browser.py
+UMask=0077
