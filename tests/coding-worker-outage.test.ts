@@ -9,6 +9,8 @@ import {
   workerExitCode,
 } from "../src/coding/pi-worker.js";
 import { BoxSandbox } from "../src/coding/box-sandbox.js";
+import { codingApi } from "../src/coding/api.js";
+import { server } from "../src/server.js";
 import { fixture } from "./helpers/coding-fixture.js";
 
 const quick = { windowMs: 2000, firstDelayMs: 1, maxDelayMs: 5 };
@@ -222,4 +224,60 @@ test("a later completed call means the restart did not end the run", async (t) =
   );
   await f.c.autoRetryOnce();
   assert.equal((await f.row(id)).state, "paused");
+});
+
+test("a non-JSON success counts as an outage", async (t) => {
+  let sends = 0;
+  const html = createServer((_req, res) => {
+    sends++;
+    res.end(sends === 1 ? "<html>proxy</html>" : '{"ok":true}');
+  });
+  await new Promise<void>((resolve) => html.listen(0, "127.0.0.1", resolve));
+  t.after(() => close(html));
+  const client = new NativePiWorkerClient(
+    `http://127.0.0.1:${(html.address() as AddressInfo).port}`,
+    "job",
+    "token",
+    new AbortController().signal,
+    quick,
+  );
+  assert.deepEqual(await client.request("heartbeat", {}), { ok: true });
+});
+
+test("the API tells a refusal from a host failure", async (t) => {
+  const f = await fixture(t);
+  const job = await f.start("api-outage");
+  const app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const send = () =>
+    app.inject({
+      method: "POST",
+      url: `/coding/worker/${job.id}/heartbeat`,
+      headers: { authorization: `Bearer ${"a".repeat(64)}` },
+      payload: {},
+    });
+  assert.equal((await send()).statusCode, 401);
+  const original = f.c.authenticate.bind(f.c);
+  for (const error of [
+    Object.assign(new Error("reset"), { code: "ECONNRESET" }),
+    new Error("Connection terminated unexpectedly"),
+    new Error("anything else"),
+  ]) {
+    (f.c as any).authenticate = async () => {
+      throw error;
+    };
+    assert.equal((await send()).statusCode, 503, error.message);
+  }
+  (f.c as any).authenticate = async () => ({ id: job.id, settings: {} });
+  (f.c as any).heartbeat = async () => {
+    throw Object.assign(new Error("terminating"), { code: "57P01" });
+  };
+  assert.equal((await send()).statusCode, 503);
+  (f.c as any).heartbeat = async () => {
+    throw new Error("Worker attempt superseded");
+  };
+  (f.c as any).recordRejection = async () => false;
+  assert.equal((await send()).statusCode, 409);
+  (f.c as any).authenticate = original;
 });

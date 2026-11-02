@@ -800,7 +800,12 @@ export class NativePiWorkerClient implements PiWorkerClient {
       throw new WorkerRequestError();
     }
     if (!response.ok) throw new WorkerRequestError(response.status);
-    return JSON.parse(text);
+    try {
+      return JSON.parse(text);
+    } catch {
+      // The host always answers JSON, so this came from something in front of it.
+      throw new WorkerRequestError();
+    }
   }
 }
 if (process.env.CODING_JOB_ID) {

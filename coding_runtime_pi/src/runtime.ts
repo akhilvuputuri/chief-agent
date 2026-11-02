@@ -780,11 +780,11 @@ export class CodingRuntime {
           task.status = "waiting_approval";
         } else if (task.intent === "build") {
           // A link would run the checks against, and let kite ci write to, another tree.
-          if (task.checkCommands.length)
-            await execute!(
-              "find . -name node_modules -type l -not -path './.git/*' -delete",
+          if (task.checkCommands.length && task.base)
+            await workspace.removeDependencyLinks(
+              execute!,
               stop.signal,
-              30000,
+              task.base,
             );
           for (const command of task.checkCommands) {
             if (stop.signal.aborted) throw new Error("Cancelled before checks");

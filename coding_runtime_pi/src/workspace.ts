@@ -207,6 +207,37 @@ export class Workspace {
       }
     }
   }
+  /** Removes dependency links the base does not track, so checks install and use their own. */
+  async removeDependencyLinks(
+    execute: Executor,
+    signal: AbortSignal,
+    base: string,
+  ) {
+    const found = await execute(
+      "find . -name node_modules -type l -not -path './.git/*' -print0",
+      signal,
+      30000,
+      2_000_000,
+    );
+    if (found.exitCode !== 0 || found.truncated)
+      throw new Error("Dependency links could not be listed");
+    const quote = (value: string) =>
+      "'" + value.replaceAll("'", "'\"'\"'") + "'";
+    for (const link of found.output.split("\0").filter(Boolean)) {
+      const path = link.replace(/^\.\//, "");
+      const tracked = await execute(
+        `git --literal-pathspecs ls-tree --name-only ${quote(base)} -- ${quote(path)}`,
+        signal,
+        30000,
+      );
+      if (tracked.exitCode !== 0)
+        throw new Error("Dependency links could not be checked");
+      if (tracked.output.trim()) continue;
+      const removed = await execute(`rm -f -- ${quote(path)}`, signal, 30000);
+      if (removed.exitCode !== 0)
+        throw new Error("A dependency link could not be removed");
+    }
+  }
   /** Diffs the staged tree against the pinned base, so agent commits never hide changes. */
   async snapshot(
     execute: Executor,
@@ -228,16 +259,17 @@ export class Workspace {
         throw new Error("Git artifact operation failed or exceeded its bound");
       return result.output;
     };
-    // `.gitignore`'s `node_modules/` does not match a link, and a link is never an artifact.
-    await run(["add", "-A", "--", ".", ":(exclude,glob)**/node_modules"]);
-    // One the coder staged or committed itself is still in the index.
+    const base = pinned ?? (await run(["rev-parse", "HEAD"])).trim();
+    await run(["add", "-A"]);
+    // `.gitignore`'s `node_modules/` does not match a link, and a dependency link is never
+    // an artifact. Matching the base drops an added one and keeps one the repository tracks.
     const links = (await run(["ls-files", "--stage", "-z"]))
       .split("\0")
       .filter((row) => row.startsWith("120000 "))
       .map((row) => row.slice(row.indexOf("\t") + 1))
       .filter((path) => path.split("/").at(-1) === "node_modules");
-    if (links.length) await run(["rm", "--cached", "-q", "--", ...links]);
-    const base = pinned ?? (await run(["rev-parse", "HEAD"])).trim();
+    if (links.length)
+      await run(["--literal-pathspecs", "reset", "-q", base, "--", ...links]);
     const patch = await run([
       "diff",
       "--cached",

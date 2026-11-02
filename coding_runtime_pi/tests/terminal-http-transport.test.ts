@@ -351,3 +351,25 @@ test("the wait starts at the first failure, however long the call had run", asyn
     Date.now = realNow;
   }
 });
+
+test("a resent call that ran for a long time gets its own wait", async () => {
+  let sends = 0;
+  let now = 1_000_000;
+  const realNow = Date.now;
+  Date.now = () => now;
+  try {
+    const { send } = outage(async () => {
+      sends++;
+      if (sends === 2) now += 300_000;
+      if (sends < 4) throw new TypeError("fetch failed");
+      return new Response("{}", { status: 200 });
+    }, 1000);
+    assert.equal(
+      (await send(`${baseUrl}/chat/completions`, post(payload()))).status,
+      200,
+    );
+    assert.equal(sends, 4);
+  } finally {
+    Date.now = realNow;
+  }
+});

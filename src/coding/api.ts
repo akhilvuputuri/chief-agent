@@ -1,4 +1,4 @@
-import { SandboxAcknowledgementPending } from "./provider.js";
+import { SandboxAcknowledgementPending, WorkerRefused } from "./provider.js";
 import { rejectionReason } from "./rejection-reason.js";
 import { piCompletion } from "./pi-proxy.js";
 import type { FastifyInstance } from "fastify";
@@ -59,9 +59,12 @@ const generation = z
   })
   .strict();
 
-/** Database and connection errors say nothing about the worker, so it may try again. */
-const isRefusal = (error: unknown) =>
-  !(error && typeof (error as { code?: unknown }).code === "string");
+/** A database or connection failure says nothing about the worker, so it may try again. */
+const hostFailure = (error: unknown) =>
+  typeof (error as { code?: unknown })?.code === "string" ||
+  /Connection terminated|pool after calling end/.test(
+    String((error as { message?: unknown })?.message),
+  );
 
 /** Worker capabilities authorise one attempt, never an owner session or general tools. */
 export async function codingApi(
@@ -109,12 +112,7 @@ export async function codingApi(
               );
             } catch (error) {
               return reply
-                .code(
-                  error instanceof SandboxAcknowledgementPending ||
-                    !isRefusal(error)
-                    ? 503
-                    : 401,
-                )
+                .code(error instanceof WorkerRefused ? 401 : 503)
                 .send({ error: "Worker capability unavailable" });
             }
           },
@@ -155,9 +153,11 @@ export async function codingApi(
                     error: "Sandbox launch acknowledgement is pending",
                   });
                 }
-                return reply
-                  .code(isRefusal(error) ? 401 : 503)
-                  .send({ error: "Invalid worker capability" });
+                return error instanceof WorkerRefused
+                  ? reply.code(401).send({ error: "Invalid worker capability" })
+                  : reply
+                      .code(503)
+                      .send({ error: "Worker capability unavailable" });
               }
             }
             try {
@@ -222,6 +222,10 @@ export async function codingApi(
                 );
               }
             } catch (error) {
+              if (!path.endsWith("chat/completions") && hostFailure(error))
+                return reply
+                  .code(503)
+                  .send({ error: "Coding host unavailable" });
               const code =
                 error instanceof CodingModelFailure
                   ? error.code

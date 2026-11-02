@@ -167,7 +167,7 @@ export function gatewayOutageFetch(options: {
     if (first.method !== "POST" || first.url !== target)
       return options.fetch(first);
     const raw = await first.text();
-    // The wait starts at the first failure: a call may have run for minutes before it.
+    // The wait starts at the first failure of a call: it may have run for minutes before it.
     let firstFailure: number | undefined;
     let resend = false;
     for (
@@ -188,7 +188,10 @@ export function gatewayOutageFetch(options: {
             redirect: first.redirect,
           }),
         );
+      const sent = Date.now();
       const late = () => {
+        // A send that ran this long reached the gateway, so the outage had ended.
+        if (Date.now() - sent > 30000) firstFailure = undefined;
         firstFailure ??= Date.now();
         return Date.now() - firstFailure + delayMs > windowMs;
       };

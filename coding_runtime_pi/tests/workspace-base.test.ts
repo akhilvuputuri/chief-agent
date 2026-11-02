@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { lstatSync } from "node:fs";
 import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -143,5 +144,42 @@ test("a real tracked node_modules file stays part of the artifact", async () => 
   assert.deepEqual(
     artifact.files.map((f) => f.path),
     ["fixture/node_modules/f.js"],
+  );
+});
+
+test("a node_modules link the repository tracks is left as it is", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tracked-link-"));
+  const repo = join(root, "repo");
+  await mkdir(join(repo, "fx"), { recursive: true });
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.name", "Synthetic");
+  git("config", "user.email", "synthetic@example.invalid");
+  await symlink("../vendor", join(repo, "fx", "node_modules"));
+  await writeFile(join(repo, "a.txt"), "base\n");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD");
+  await writeFile(join(repo, "a.txt"), "changed\n");
+  await symlink(root, join(repo, "node_modules"));
+  const execute = localExecutor(repo, join(root, "home"), () => {});
+  const signal = new AbortController().signal;
+  const workspace = await new Workspace(repo).initialize();
+  const artifact = await workspace.snapshot(execute, signal, base);
+  assert.deepEqual(
+    artifact.files.map((f) => f.path),
+    ["a.txt"],
+  );
+  await workspace.removeDependencyLinks(execute, signal, base);
+  assert.throws(() => lstatSync(join(repo, "node_modules")));
+  assert.equal(
+    lstatSync(join(repo, "fx", "node_modules")).isSymbolicLink(),
+    true,
+  );
+  const again = await workspace.snapshot(execute, signal, base);
+  assert.deepEqual(
+    again.files.map((f) => f.path),
+    ["a.txt"],
   );
 });

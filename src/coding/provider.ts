@@ -8,6 +8,8 @@ export type SandboxRequest = {
   runtime?: "node" | "python" | "pi";
   timeoutMinutes: number;
 };
+/** The host checked this worker and said no, as opposed to failing to check. */
+export class WorkerRefused extends Error {}
 export class SandboxAcknowledgementPending extends Error {
   constructor() {
     super("Sandbox launch acknowledgement is pending");

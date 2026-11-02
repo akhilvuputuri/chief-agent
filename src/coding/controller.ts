@@ -56,6 +56,7 @@ import {
 } from "./github.js";
 import {
   SandboxAcknowledgementPending,
+  WorkerRefused,
   type SandboxProvider,
   type SandboxRequest,
 } from "./provider.js";
@@ -1066,12 +1067,12 @@ export class CodingController {
     includeFinished = false,
   ): Promise<CodingJob> {
     if (!/^[a-f0-9]{64}$/.test(token))
-      throw new Error("Invalid worker capability");
+      throw new WorkerRefused("Invalid worker capability");
     const job = (
       await this.db.query("SELECT * FROM coding_jobs WHERE id=$1", [id])
     ).rows[0] as CodingJob | undefined;
     if (!job?.attempt_id || !this.allowed(job.user_id))
-      throw new Error("Invalid worker capability");
+      throw new WorkerRefused("Invalid worker capability");
     const expected = this.token(id, job.attempt_id);
     if (
       !timingSafeEqual(Buffer.from(token), Buffer.from(expected)) ||
@@ -1079,13 +1080,13 @@ export class CodingController {
         (!active.includes(job.state) ||
           new Date(job.attempt_deadline).getTime() <= this.clock().getTime()))
     )
-      throw new Error("Invalid worker capability");
+      throw new WorkerRefused("Invalid worker capability");
     if (job.mode === "implement" && !(await this.requirements.approved(job)))
-      throw new Error("Requirements are not approved");
+      throw new WorkerRefused("Requirements are not approved");
     if (!job.sandbox_id && (!includeFinished || active.includes(job.state))) {
       if (job.state === "provisioning")
         throw new SandboxAcknowledgementPending();
-      throw new Error("Invalid worker capability");
+      throw new WorkerRefused("Invalid worker capability");
     }
     return job;
   }

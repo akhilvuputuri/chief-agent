@@ -24,8 +24,8 @@ Blocking releases during coding jobs was rejected. Jobs run for hours and other 
 
 - `src/coding/pi-worker.ts`: `NativePiWorkerClient` retries for 3 minutes on an unreachable host; heartbeats cancel only on a refusal; exit codes name the failure.
 - `coding_runtime_pi/src/terminal-http-recovery.ts`: `gatewayOutageFetch` resends a model request the gateway could not answer, under a new identity. The host buffers each response, so a cut call normally shows up here, before any response. The 3-minute wait starts at the first failure, because a call may already have run for minutes.
-- `coding_runtime_pi/src/workspace.ts`: snapshots leave out `node_modules` links, including ones the coder staged or committed, and keep real tracked files with that name. Any other symlink still ends the job. Host checks delete such links first, so they run against the repository's own dependencies.
-- `src/coding/api.ts`: a database failure during authentication answers 503, not a refusal.
+- `coding_runtime_pi/src/workspace.ts`: snapshots reset `node_modules` links to the base, which drops ones the coder staged or committed and keeps ones the repository tracks. Any other symlink still ends the job. Host checks delete added links first, so they run against the repository's own dependencies.
+- `src/coding/api.ts`: authentication answers 401 only when the host checked and said no. A database or connection failure answers 503, there and on routes other than model calls.
 - `src/coding/controller.ts`: `recoverModels` records calls a restart cut off as `gateway_restart`, and `autoRetryOnce` treats that pause as transient. This widens the owner's exception in AGENTS.md.
 - `scripts/cloud-release.py`: warns when a coding job is running. About 25 other deploy scripts do not warn.
 
@@ -39,5 +39,5 @@ Limitations:
 
 ## Verification and outcome
 
-- **Tested:** `tests/coding-worker-outage.test.ts`, `coding_runtime_pi/tests/terminal-http-transport.test.ts` and `coding_runtime_pi/tests/workspace-base.test.ts`, with local servers and real git.
+- **Tested:** `tests/coding-worker-outage.test.ts`, `coding_runtime_pi/tests/terminal-http-transport.test.ts`, `coding_runtime_pi/tests/terminal-http-recovery.test.ts` and `coding_runtime_pi/tests/workspace-base.test.ts`, with local servers and real git. The recovery test used to assert that a lost connection pauses the run. It now asserts the resend under a new identity, with the tool applied once.
 - **Not tested:** a real gateway restart during a real job.
