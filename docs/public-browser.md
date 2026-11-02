@@ -74,15 +74,15 @@ It rebuilds both images under candidate tags with a fresh base and no layer cach
 
 `chief-public-browser-refresh.timer` runs `scripts/scheduled-refresh-public-browser.py` daily between 21:00 and 21:30 UTC, the middle of a window with no work in the 30 days measured ([journal 149](journey/149-scheduled-browser-refresh.md)). Nothing happens until the running image is 28 days old, so a manual refresh also resets the clock, and there is no schedule state to drift.
 
-| Situation                                    | What the run does                                                           | Owner told?                 |
-| -------------------------------------------- | --------------------------------------------------------------------------- | --------------------------- |
-| `PUBLIC_BROWSER` is not `on`                 | Nothing, whatever the age                                                   | No                          |
-| Image under 28 days old                      | Nothing                                                                     | No                          |
-| Busy: running work, queued input or the lock | Tries again the next day. Checked before building, so this usually costs nothing | From day 35, as a failure   |
-| Flag on but the browser not running          | Refuses, because a refresh would start a service someone may have stopped   | Yes                         |
-| Under 8 GB free                              | Prunes, then refuses if still short                                         | Yes                         |
-| Build, proof or swap fails                   | Tries again the next day. The swap failure restores the previous images     | Yes                         |
-| Script killed or past its 30-minute limit    | systemd's `OnFailure` still fires                                           | Yes, as "killed"            |
+| Situation                                    | What the run does                                                                | Owner told?               |
+| -------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------- |
+| `PUBLIC_BROWSER` is not `on`                 | Nothing, whatever the age                                                        | No                        |
+| Image under 28 days old                      | Nothing                                                                          | No                        |
+| Busy: running work, queued input or the lock | Tries again the next day. Checked before building, so this usually costs nothing | From day 35, as a failure |
+| Flag on but the browser not running          | Refuses, because a refresh would start a service someone may have stopped        | Yes                       |
+| Under 8 GB free                              | Prunes, then refuses if still short                                              | Yes                       |
+| Build, proof or swap fails                   | Tries again the next day. The swap failure restores the previous images          | Yes                       |
+| Script killed or past its 30-minute limit    | systemd's `OnFailure` still fires                                                | Yes, as "killed"          |
 
 **Notice.** Any non-zero exit starts `chief-public-browser-refresh-notify.service`, which sends the reason to the first ID in `TELEGRAM_ALLOWED_USER_IDS` directly through Telegram's API, so it works with the gateway down. The same reason is sent once a week however often it retries, and a different reason at once. The last failure and notice are in `/var/lib/chief/public-browser-refresh.json`, and every run's outcome is in `journalctl -u chief-public-browser-refresh`. If the timer itself stops, or Telegram cannot be reached, nothing tells the owner; the image age above is the check.
 
