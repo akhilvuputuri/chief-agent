@@ -11,7 +11,7 @@ import {
 import { BoxSandbox } from "../src/coding/box-sandbox.js";
 import { fixture } from "./helpers/coding-fixture.js";
 
-const quick = { windowMs: 2000, maxDelayMs: 5 };
+const quick = { windowMs: 2000, firstDelayMs: 1, maxDelayMs: 5 };
 const close = (server: Server) =>
   new Promise((resolve) => server.close(resolve));
 
@@ -57,7 +57,7 @@ test("an unreachable host is reported as such once the wait runs out", async () 
     "job",
     "token",
     new AbortController().signal,
-    { windowMs: 20, maxDelayMs: 5 },
+    { windowMs: 20, firstDelayMs: 1, maxDelayMs: 5 },
   );
   await assert.rejects(refused.request("heartbeat", {}), (e: any) => {
     assert(e instanceof WorkerRequestError);
@@ -65,6 +65,31 @@ test("an unreachable host is reported as such once the wait runs out", async () 
     assert.equal(hostUnreachable(e), true);
     return true;
   });
+});
+
+test("a body cut off mid-response counts as an outage, not a refusal", async (t) => {
+  let sends = 0;
+  const server = createServer((_req, res) => {
+    sends++;
+    if (sends === 1) {
+      res.writeHead(200, { "content-length": "100" });
+      res.write("{");
+      setTimeout(() => res.destroy(), 5);
+      return;
+    }
+    res.end('{"ok":true}');
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => close(server));
+  const client = new NativePiWorkerClient(
+    `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    "job",
+    "token",
+    new AbortController().signal,
+    quick,
+  );
+  assert.deepEqual(await client.request("assignment"), { ok: true });
+  assert.equal(sends, 2);
 });
 
 test("a host refusal ends the request at once", async (t) => {
@@ -97,7 +122,10 @@ test("a stopped worker does not keep waiting for the host", async (t) => {
     stop.signal,
     quick,
   );
-  await assert.rejects(client.request("heartbeat", {}));
+  await assert.rejects(client.request("heartbeat", {}), (e: any) => {
+    assert.equal(hostUnreachable(e), false);
+    return true;
+  });
   assert.equal(seen.length, 0);
 });
 
@@ -175,4 +203,23 @@ test("the exit note reads the box task's recorded exit code", async () => {
   }
   sandbox.load = async () => ({ task: { result: { exitCode: 0 } } });
   assert.equal(await sandbox.exitNote("box:x"), undefined);
+});
+
+test("a later completed call means the restart did not end the run", async (t) => {
+  const { f, id, attempt } = await interrupted(t);
+  await f.c.recoverModels();
+  await f.db.query(
+    `INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input,state,created_at) VALUES('33333333-3333-4333-8333-333333333333',$1,$2,'coder','h2','{}'::jsonb,'complete',now()+interval '1 minute')`,
+    [id, attempt],
+  );
+  await f.db.query(
+    `UPDATE coding_jobs SET state='paused',stage='paused',cleanup='complete',sandbox_id=NULL,result='{"kind":"paused"}'::jsonb,updated_at=now()-interval '3 minutes' WHERE id=$1`,
+    [id],
+  );
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,$2,'{}'::jsonb,'suppressed')",
+    [id, `${attempt}:finished`],
+  );
+  await f.c.autoRetryOnce();
+  assert.equal((await f.row(id)).state, "paused");
 });

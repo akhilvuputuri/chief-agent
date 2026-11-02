@@ -146,7 +146,7 @@ export function terminalHttpRecoveryFetch(options: {
 
 /**
  * Resends a model request while the gateway restarts. Nothing has reached the SDK or the
- * tool loop, and a provider answer never looks like this: the host reports its own failures
+ * tool loop (the host buffers each response), and a provider answer never looks like this: the host reports its own failures
  * as a 409. Each send gets a new identity, because the host refuses to replay a call it may
  * have started, so an interrupted call can be paid for twice.
  */
@@ -156,6 +156,7 @@ export function gatewayOutageFetch(options: {
   admit: () => Promise<void>;
   fetch: typeof globalThis.fetch;
   windowMs?: number;
+  firstDelayMs?: number;
   maxDelayMs?: number;
 }): typeof globalThis.fetch {
   const target = `${options.baseUrl.replace(/\/$/, "")}/chat/completions`;
@@ -166,9 +167,14 @@ export function gatewayOutageFetch(options: {
     if (first.method !== "POST" || first.url !== target)
       return options.fetch(first);
     const raw = await first.text();
-    const started = Date.now();
+    // The wait starts at the first failure: a call may have run for minutes before it.
+    let firstFailure: number | undefined;
     let resend = false;
-    for (let delayMs = 1000; ; delayMs = Math.min(delayMs * 2, maxDelayMs)) {
+    for (
+      let delayMs = options.firstDelayMs ?? 1000;
+      ;
+      delayMs = Math.min(delayMs * 2, maxDelayMs)
+    ) {
       const body = JSON.parse(raw);
       if (resend) body[options.requestIdField] = randomUUID();
       resend = true;
@@ -182,14 +188,18 @@ export function gatewayOutageFetch(options: {
             redirect: first.redirect,
           }),
         );
-      const late = Date.now() - started + delayMs > windowMs;
+      const late = () => {
+        firstFailure ??= Date.now();
+        return Date.now() - firstFailure + delayMs > windowMs;
+      };
       try {
         const response = await send();
-        if (late || ![502, 503, 504].includes(response.status)) return response;
+        if (![502, 503, 504].includes(response.status) || late())
+          return response;
         await response.body?.cancel();
       } catch (error) {
         first.signal.throwIfAborted();
-        if (late) throw error;
+        if (late()) throw error;
       }
       await delay(delayMs, undefined, { signal: first.signal });
       await options.admit();

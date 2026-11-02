@@ -749,23 +749,28 @@ export class NativePiWorkerClient implements PiWorkerClient {
     readonly token: string,
     private signal: AbortSignal,
     // A gateway restart takes seconds. The host declares a heartbeat lost after 3 minutes.
-    private outage = { windowMs: 180000, maxDelayMs: 10000 },
+    private outage = {
+      windowMs: 180000,
+      firstDelayMs: 1000,
+      maxDelayMs: 10000,
+    },
   ) {}
   /** Every worker route is safe to repeat: saves are keyed or replace state, and a repeated finish is recognised. */
   async request(path: string, body?: unknown) {
-    const started = Date.now();
+    let firstFailure: number | undefined;
     for (
-      let delay = 1000;
+      let delay = this.outage.firstDelayMs;
       ;
       delay = Math.min(delay * 2, this.outage.maxDelayMs)
     ) {
       try {
         return await this.once(path, body);
       } catch (error) {
+        firstFailure ??= Date.now();
         if (
           this.signal.aborted ||
           !hostUnreachable(error) ||
-          Date.now() - started + delay > this.outage.windowMs
+          Date.now() - firstFailure + delay > this.outage.windowMs
         )
           throw error;
         await new Promise((resolve) => setTimeout(resolve, delay));
@@ -774,6 +779,7 @@ export class NativePiWorkerClient implements PiWorkerClient {
   }
   private async once(path: string, body?: unknown) {
     let response: Response;
+    let text: string;
     try {
       response = await fetch(
         `${this.origin}/coding/worker/${this.id}/${path}`,
@@ -787,11 +793,14 @@ export class NativePiWorkerClient implements PiWorkerClient {
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         },
       );
-    } catch {
+      // A reset during the body is the same outage as a reset before the headers.
+      text = await response.text();
+    } catch (error) {
+      if (this.signal.aborted) throw error;
       throw new WorkerRequestError();
     }
     if (!response.ok) throw new WorkerRequestError(response.status);
-    return response.json();
+    return JSON.parse(text);
   }
 }
 if (process.env.CODING_JOB_ID) {

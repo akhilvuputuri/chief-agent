@@ -23,14 +23,17 @@ Blocking releases during coding jobs was rejected. Jobs run for hours and other 
 ## Implementation and review
 
 - `src/coding/pi-worker.ts`: `NativePiWorkerClient` retries for 3 minutes on an unreachable host; heartbeats cancel only on a refusal; exit codes name the failure.
-- `coding_runtime_pi/src/terminal-http-recovery.ts`: `gatewayOutageFetch` resends a model request that never reached the gateway, under a new identity.
-- `coding_runtime_pi/src/workspace.ts`: snapshots leave out `node_modules` links. Any other symlink still ends the job.
+- `coding_runtime_pi/src/terminal-http-recovery.ts`: `gatewayOutageFetch` resends a model request the gateway could not answer, under a new identity. The host buffers each response, so a cut call normally shows up here, before any response. The 3-minute wait starts at the first failure, because a call may already have run for minutes.
+- `coding_runtime_pi/src/workspace.ts`: snapshots leave out `node_modules` links, including ones the coder staged or committed, and keep real tracked files with that name. Any other symlink still ends the job. Host checks delete such links first, so they run against the repository's own dependencies.
+- `src/coding/api.ts`: a database failure during authentication answers 503, not a refusal.
 - `src/coding/controller.ts`: `recoverModels` records calls a restart cut off as `gateway_restart`, and `autoRetryOnce` treats that pause as transient. This widens the owner's exception in AGENTS.md.
 - `scripts/cloud-release.py`: warns when a coding job is running. About 25 other deploy scripts do not warn.
 
 Limitations:
 
-- A model call cut off mid-stream still pauses the run; only the job-level retry recovers it, once.
+- A call the host is still running when its connection breaks (a proxy blip, not a restart) gets "already in flight" on resend, and the run pauses. The first call is still paid for. This fails closed.
+- Each resend counts against the worker's local model budget, about 20 per 3-minute outage against a limit of 1,500.
+- A pause past the 3-minute wait relies on the job-level retry, once.
 - A retried attempt still starts on a new box, so it loses uncommitted tool state and installed dependencies.
 - If the host answers a resent call with a provider failure, the in-run provider retry does not apply, because its receipt names the new identity. The run pauses, which is safe.
 

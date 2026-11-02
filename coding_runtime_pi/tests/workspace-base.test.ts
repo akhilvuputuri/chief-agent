@@ -88,6 +88,7 @@ test("a node_modules link never becomes part of the artifact", async () => {
   await writeFile(join(repo, "a.txt"), "base\n");
   git("add", ".");
   git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD");
   await writeFile(join(repo, "a.txt"), "changed\n");
   await symlink(root, join(repo, "node_modules"));
   await symlink(root, join(repo, "pkg", "node_modules"));
@@ -100,9 +101,47 @@ test("a node_modules link never becomes part of the artifact", async () => {
     ["a.txt"],
   );
   assert.doesNotMatch(artifact.patch, /node_modules/);
+  git("add", "-f", "node_modules");
+  assert.deepEqual(
+    (await workspace.snapshot(execute, signal)).files.map((f) => f.path),
+    ["a.txt"],
+  );
+  git("add", "-f", "pkg/node_modules");
+  git("commit", "-qm", "the coder committed a link");
+  const committed = await workspace.snapshot(execute, signal, base);
+  assert.deepEqual(
+    committed.files.map((f) => f.path),
+    ["a.txt"],
+  );
+  assert.doesNotMatch(committed.patch, /node_modules/);
   await symlink(root, join(repo, "other-link"));
   await assert.rejects(
     workspace.snapshot(execute, signal),
     /Symlink|regular files/,
+  );
+});
+
+test("a real tracked node_modules file stays part of the artifact", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-real-"));
+  const repo = join(root, "repo");
+  await mkdir(join(repo, "fixture", "node_modules"), { recursive: true });
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.name", "Synthetic");
+  git("config", "user.email", "synthetic@example.invalid");
+  await writeFile(join(repo, "fixture", "node_modules", "f.js"), "one\n");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  await writeFile(join(repo, "fixture", "node_modules", "f.js"), "two\n");
+  git("add", ".");
+  const workspace = await new Workspace(repo).initialize();
+  const artifact = await workspace.snapshot(
+    localExecutor(repo, join(root, "home"), () => {}),
+    new AbortController().signal,
+  );
+  assert.deepEqual(
+    artifact.files.map((f) => f.path),
+    ["fixture/node_modules/f.js"],
   );
 });

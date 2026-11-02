@@ -230,6 +230,13 @@ export class Workspace {
     };
     // `.gitignore`'s `node_modules/` does not match a link, and a link is never an artifact.
     await run(["add", "-A", "--", ".", ":(exclude,glob)**/node_modules"]);
+    // One the coder staged or committed itself is still in the index.
+    const links = (await run(["ls-files", "--stage", "-z"]))
+      .split("\0")
+      .filter((row) => row.startsWith("120000 "))
+      .map((row) => row.slice(row.indexOf("\t") + 1))
+      .filter((path) => path.split("/").at(-1) === "node_modules");
+    if (links.length) await run(["rm", "--cached", "-q", "--", ...links]);
     const base = pinned ?? (await run(["rev-parse", "HEAD"])).trim();
     const patch = await run([
       "diff",

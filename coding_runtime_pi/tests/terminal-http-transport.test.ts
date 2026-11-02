@@ -229,6 +229,7 @@ const outage = (fetch: typeof globalThis.fetch, windowMs = 2000) => {
       },
       fetch,
       windowMs,
+      firstDelayMs: 1,
       maxDelayMs: 1,
     }),
     admitted: () => admitted,
@@ -327,4 +328,26 @@ test("an outage past the window fails, and a cancelled run stops waiting", async
     }),
   );
   assert.equal(sends, 1);
+});
+
+test("the wait starts at the first failure, however long the call had run", async () => {
+  let sends = 0;
+  let now = 1_000_000;
+  const realNow = Date.now;
+  Date.now = () => now;
+  try {
+    const { send } = outage(async () => {
+      sends++;
+      now += 200_000;
+      if (sends === 1) throw new TypeError("fetch failed");
+      now -= 200_000;
+      if (sends < 4) throw new TypeError("fetch failed");
+      return new Response("{}", { status: 200 });
+    }, 1000);
+    const response = await send(`${baseUrl}/chat/completions`, post(payload()));
+    assert.equal(response.status, 200);
+    assert.equal(sends, 4);
+  } finally {
+    Date.now = realNow;
+  }
 });

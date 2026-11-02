@@ -59,6 +59,10 @@ const generation = z
   })
   .strict();
 
+/** Database and connection errors say nothing about the worker, so it may try again. */
+const isRefusal = (error: unknown) =>
+  !(error && typeof (error as { code?: unknown }).code === "string");
+
 /** Worker capabilities authorise one attempt, never an owner session or general tools. */
 export async function codingApi(
   app: FastifyInstance,
@@ -106,7 +110,10 @@ export async function codingApi(
             } catch (error) {
               return reply
                 .code(
-                  error instanceof SandboxAcknowledgementPending ? 503 : 401,
+                  error instanceof SandboxAcknowledgementPending ||
+                    !isRefusal(error)
+                    ? 503
+                    : 401,
                 )
                 .send({ error: "Worker capability unavailable" });
             }
@@ -149,7 +156,7 @@ export async function codingApi(
                   });
                 }
                 return reply
-                  .code(401)
+                  .code(isRefusal(error) ? 401 : 503)
                   .send({ error: "Invalid worker capability" });
               }
             }
