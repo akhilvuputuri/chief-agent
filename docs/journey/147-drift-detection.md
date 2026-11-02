@@ -1,7 +1,7 @@
 # 147 — Can agentwatch say a metric moved, without crying wolf on Chief's traffic?
 
 Work date: 2026-11-02 (Singapore). Written: 2026-11-02.
-Status: merged, not deployed. agentwatch#18 and #19 are on its main; the host still runs the image from `3bfb6c3`. No drift monitor exists on the host, and every result below is simulated or measured on a laptop, not on real traffic.
+Status: live and muted since 2 November 2026 ([release closure](#release-closure--2026-11-02)). No drift alert has reached the owner, and the results under Evidence are simulated or measured on a laptop, not on real traffic.
 
 ## User-visible problem and preceding iteration
 
@@ -61,5 +61,30 @@ Known and left: threshold monitors still count downtime as good time, as journal
 
 ## Follow-up and next iteration
 
-- With the owner's approval, in this order: snapshot the agentwatch volume, since the update cannot roll back automatically; run the update; release the gateway, which carries the relay text; create drift monitors muted on the host. Unmute only once the new relay is live.
+- Done, as the release closure below records: snapshot the agentwatch volume, since the update cannot roll back automatically; run the update; create drift monitors muted on the host; release the gateway, which carries the relay text. The monitors were created about two minutes before that release finished, not after it as planned. They were muted, so nothing they raised could reach the old relay. Unmute only once the new relay is live.
 - After a few weeks of muted running: compare what they would have sent with what happened, and decide whether to unmute.
+
+### Release closure — 2026-11-02
+
+With the owner's approval, on 2 November from about 03:28 to 03:32 UTC:
+
+- [PR 409](https://github.com/akhilvuputuri/chief-agent/pull/409) merged at the reviewed head `b432451` as `6409f9a`.
+- agentwatch was stopped while its volume was archived on the host, under `/var/backups/agentwatch-pre-schema10/`. The archive is 3.8 MB and holds the 25 MB database. It has been listed, not restored.
+- The operator update ran from an exact archive of `6409f9a`, with hashes matching on both sides and the Compose change a single line. It reported `sha256:cd3fd562…` healthy, its test span included, and the gateway stayed up. The live `compose.yaml` hashes the same as `6409f9a`.
+- The automatic release of `6409f9a` then succeeded (run 41383531512), and `RELEASE` matches.
+
+No `trace.export_dropped` or `trace.alerts_failed` line appears in the gateway's logs from 03:20 to 03:32. That window includes the gateway's restart, so it does not prove that no span was lost.
+
+All five drift monitors were created muted at about 03:29:46 UTC, before that release finished at about 03:32, on 7-day windows, with a 7-day cooldown, and their first evaluation left them OK. That says little, because a drift monitor fires only after six hourly breaches in a row:
+
+| Monitor                      | Bad direction, smallest change | Previous 7 days | Last 7 days         |
+| ---------------------------- | ------------------------------ | --------------- | ------------------- |
+| Model errors                 | rise, 5 points                 | 4.8%            | 4.9%                |
+| Tool errors                  | rise, 5 points                 | 16.4%           | 7.2%                |
+| Cost per trace               | rise, any clear                | $0.252          | $0.214              |
+| Mean model latency           | rise, any clear                | 7.76 s          | 8.08 s              |
+| Judged answers (`answer_ok`) | fall, 10 points                | no data         | 100% (underpowered) |
+
+Not yet observed: a real drift firing, the new relay wording on Telegram, and the real false-firing rate. agentwatch had raised no alert since the release when read at 03:32 UTC, and the gateway's logs show no relay failure line. That line is written at most once an hour, and a successful empty poll logs nothing, so this does not show the relay reading the new image. Judged answers stays underpowered until both windows have enough judged traces. The old image cannot read schema 10, so going back means re-pinning it and restoring that archive by hand, which loses what was written since.
+
+Next: after a few weeks muted, compare what the monitors would have sent with what happened, and the owner decides whether to unmute.
