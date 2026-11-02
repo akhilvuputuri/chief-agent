@@ -2,8 +2,8 @@
 
 - **What merged.** [PR 409](https://github.com/akhilvuputuri/chief-agent/pull/409) merged as `6409f9a`: drift alert wording in the relay, and `compose.yaml` pins the image from agentwatch `d3f4e1c` (agentwatch#18 and #19), which adds drift comparison, drift monitors and `muted`, and upgrades its database to schema 10.
 - **Review.** Independent review (Claude Opus 5.5) requested changes on both repositories and approved the merged heads; hosted CI passed.
-- **Release.** With the owner's approval, the agentwatch volume was archived on the host, then the operator ran `deploy-agentwatch-update.py`, which reported `sha256:cd3fd562…` healthy. The automatic release of `6409f9a` followed (run 41383531512). Five drift monitors were created muted; the first evaluation fired nothing.
-- **Rollback.** The older image refuses schema 10, so there is no automatic rollback. Going back means restoring the archive in `/var/backups/agentwatch-pre-schema10/` by hand, which has not been tried. Chief keeps running either way.
+- **Release.** With the owner's approval, the agentwatch volume was archived on the host, then the operator ran `deploy-agentwatch-update.py`, which reported `sha256:cd3fd562…` healthy. The automatic release of `6409f9a` followed (run 41383531512). Five drift monitors were created muted and read OK at first, as they must, since one fires only after six hourly breaches in a row.
+- **Rollback.** The older image refuses schema 10, so there is no automatic rollback. Going back means re-pinning the old image and restoring the archive in `/var/backups/agentwatch-pre-schema10/` by hand, which loses what was written since and has not been tried. Chief keeps running either way.
 - **Pending:** a real drift firing, the new wording on Telegram, the false-firing rate on real traffic, and the owner's decision on unmuting after a few weeks.
 
 [Journal 147](journey/147-drift-detection.md#release-closure--2026-11-02).

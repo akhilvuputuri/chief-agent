@@ -1,6 +1,6 @@
 # Drift detection in agentwatch — live and muted in `6409f9a`, 2 November 2026
 
-agentwatch can now say a metric moved between two windows, on a Drift page and as a monitor. Five monitors watch model errors, tool errors, cost per trace, mean model latency and judged answers on 7-day windows. They are muted: they record what they would send, and nothing reaches Telegram. Simulated traffic fired falsely up to about 1.8 times a month, and the rate on real traffic is unmeasured. Next is a few weeks' trial, then the owner decides whether to unmute. See [tracing](tracing.md#drift) and [journal 147](journey/147-drift-detection.md).
+agentwatch can now say a metric moved between two windows, on a Drift page and as a monitor. Five monitors watch model errors, tool errors, cost per trace, mean model latency and judged answers on 7-day windows. They are muted: they record what they would send, and nothing reaches Telegram. Simulated error-rate monitors on 7-day windows fired falsely up to about 0.75 times a month each. Cost and latency were not simulated, and the rate on real traffic is unmeasured. Next is a few weeks' trial, then the owner decides whether to unmute. See [tracing](tracing.md#drift) and [journal 147](journey/147-drift-detection.md).
 
 # Mail recall on pgvector — live in `d58a9ca`, 1 November 2026
 

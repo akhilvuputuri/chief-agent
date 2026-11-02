@@ -61,21 +61,21 @@ Known and left: threshold monitors still count downtime as good time, as journal
 
 ## Follow-up and next iteration
 
-- With the owner's approval, in this order: snapshot the agentwatch volume, since the update cannot roll back automatically; run the update; release the gateway, which carries the relay text; create drift monitors muted on the host. Unmute only once the new relay is live.
+- Done in this order, as the release closure below records: snapshot the agentwatch volume, since the update cannot roll back automatically; run the update; release the gateway, which carries the relay text; create drift monitors muted on the host. Unmute only once the new relay is live.
 - After a few weeks of muted running: compare what they would have sent with what happened, and decide whether to unmute.
 
 ### Release closure — 2026-11-02
 
-With the owner's approval, on 2 November at about 03:28 to 03:31 UTC:
+With the owner's approval, on 2 November from about 03:28 to 03:32 UTC:
 
 - [PR 409](https://github.com/akhilvuputuri/chief-agent/pull/409) merged at the reviewed head `b432451` as `6409f9a`.
-- agentwatch was stopped for a few seconds and its volume archived on the host, under `/var/backups/agentwatch-pre-schema10/`. The archive is 3.7 MB and holds the 25 MB database. It has been listed, not restored.
+- agentwatch was stopped while its volume was archived on the host, under `/var/backups/agentwatch-pre-schema10/`. The archive is 3.8 MB and holds the 25 MB database. It has been listed, not restored.
 - The operator update ran from an exact archive of `6409f9a`, with hashes matching on both sides and the Compose change a single line. It reported `sha256:cd3fd562…` healthy, its test span included, and the gateway stayed up. The live `compose.yaml` hashes the same as main.
 - The automatic release of `6409f9a` then succeeded (run 41383531512), and `RELEASE` matches.
 
 No `trace.export_dropped` or `trace.alerts_failed` line appears in the gateway's logs from 03:20 to 03:32. That window includes the gateway's restart, so it does not prove that no span was lost.
 
-All five drift monitors were created muted on 7-day windows, with a 7-day cooldown, and their first evaluation fired nothing:
+All five drift monitors were created muted on 7-day windows, with a 7-day cooldown, and their first evaluation left them OK. That says little, because a drift monitor fires only after six hourly breaches in a row:
 
 | Monitor                      | Bad direction, smallest change | Previous 7 days | Last 7 days         |
 | ---------------------------- | ------------------------------ | --------------- | ------------------- |
@@ -85,6 +85,6 @@ All five drift monitors were created muted on 7-day windows, with a 7-day cooldo
 | Mean model latency           | rise, any clear                | 7.76 s          | 8.08 s              |
 | Judged answers (`answer_ok`) | fall, 10 points                | no data         | 100% (underpowered) |
 
-Not yet observed: a real drift firing, the new relay wording on Telegram, and the real false-firing rate. The relay polled the new image without failing, but no alert has been sent through it since the release. Judged answers stays underpowered until both windows have enough judged traces. The old image cannot read schema 10, so going back means restoring that archive by hand.
+Not yet observed: a real drift firing, the new relay wording on Telegram, and the real false-firing rate. agentwatch had raised no alert since the release when read at 03:32 UTC, and the gateway's logs show no relay failure line. That line is written at most once an hour, and a successful empty poll logs nothing, so this does not show the relay reading the new image. Judged answers stays underpowered until both windows have enough judged traces. The old image cannot read schema 10, so going back means re-pinning it and restoring that archive by hand, which loses what was written since.
 
 Next: after a few weeks muted, compare what the monitors would have sent with what happened, and the owner decides whether to unmute.
