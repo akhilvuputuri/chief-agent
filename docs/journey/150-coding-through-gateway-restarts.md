@@ -26,7 +26,7 @@ Blocking releases during coding jobs was rejected. Jobs run for hours and other 
 - `coding_runtime_pi/src/terminal-http-recovery.ts`: `gatewayOutageFetch` resends a model request the gateway could not answer, under a new identity. The host buffers each response, so a cut call normally shows up here, before any response. The 3-minute wait starts at the first failure, because a call may already have run for minutes.
 - `coding_runtime_pi/src/workspace.ts`: snapshots reset `node_modules` links to the base, which drops ones the coder staged or committed and keeps ones the repository tracks. Any other symlink still ends the job. Host checks delete added links first, so they run against the repository's own dependencies.
 - `src/coding/api.ts`: authentication answers 401 only when the host checked and said no. A lost connection or a database shutting down answers 503, there and on routes other than model calls, and is logged. Other database errors stay refusals, so a real bug keeps its reason.
-- `src/coding/controller.ts`: `recoverModels` records calls a restart cut off as `gateway_restart`, and `autoRetryOnce` treats that pause as transient. This widens the owner's exception in AGENTS.md.
+- `src/coding/controller.ts`: `recoverModels` records calls a restart cut off as `gateway_restart`, and `autoRetryOnce` treats that pause as transient. This widens the exception in AGENTS.md, which the owner approved on 2 November.
 - `scripts/cloud-release.py`: warns when a coding job is running. About 25 other deploy scripts do not warn.
 
 Limitations:
