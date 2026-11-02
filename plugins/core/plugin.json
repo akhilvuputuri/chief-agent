@@ -255,6 +255,21 @@
       "effort": "low"
     },
     {
+      "id": "browser",
+      "description": "Anonymous real browser for public sites web cannot handle (JavaScript, clicks, forms). No logins; keep private details out of the brief.",
+      "instructions": "agents/browser.md",
+      "contract": "findings/v1",
+      "tools": ["public_browser"],
+      "skills": [],
+      "limits": {
+        "ms": 180000,
+        "models": 12,
+        "tools": 40
+      },
+      "model": "fast",
+      "effort": "low"
+    },
+    {
       "id": "media",
       "description": "Read attached images (this turn only) and stored documents, returning facts with page or region references. Name the attachmentIds or sourceIds in the brief.",
       "instructions": "agents/media.md",

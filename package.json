@@ -1,6 +1,6 @@
 {
   "name": "chief-agent",
-  "version": "0.3.109",
+  "version": "0.3.110",
   "private": true,
   "type": "module",
   "description": "Your always-on AI agent, in Telegram. Ask it for anything. If it can't do it yet, it can build it.",

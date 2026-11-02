@@ -398,7 +398,7 @@ export async function runResearchSpecialist(
                FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id AND r.user_id=$2
                JOIN research_sources s
                  ON s.id::text=COALESCE(c.result->'result'->>'sourceId',c.result->>'sourceId') AND s.user_id=$2
-               WHERE c.run_id=$1 AND c.state='success' AND c.operation IN ('web_read','source_read')
+               WHERE c.run_id=$1 AND c.state='success' AND c.operation IN ('web_read','source_read','public_browser')
                ORDER BY s.id,c.started_at DESC LIMIT 30`,
               [childRun, user],
             )
@@ -477,7 +477,7 @@ export async function checkResearchQuote(
   if (!cached) {
     const row = (
       await db.query(
-        `SELECT s.content,s.url FROM research_sources s WHERE s.id=$1 AND s.user_id=$2 AND EXISTS(SELECT 1 FROM runtime_calls c WHERE c.run_id=$3 AND c.state='success' AND c.operation IN ('web_read','source_read') AND COALESCE(c.result->'result'->>'sourceId',c.result->>'sourceId')=$1::text)`,
+        `SELECT s.content,s.url FROM research_sources s WHERE s.id=$1 AND s.user_id=$2 AND EXISTS(SELECT 1 FROM runtime_calls c WHERE c.run_id=$3 AND c.state='success' AND c.operation IN ('web_read','source_read','public_browser') AND COALESCE(c.result->'result'->>'sourceId',c.result->>'sourceId')=$1::text)`,
         [sourceId, user, childRun],
       )
     ).rows[0];

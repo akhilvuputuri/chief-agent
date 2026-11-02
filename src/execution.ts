@@ -105,6 +105,9 @@ export const readOperations = new Set([
   "memory_list",
   "web_search",
   "web_read",
+  // Acts on websites, but only in an anonymous session holding no owner account or record, so
+  // an unknown outcome must not stop the owner's writes (docs/public-browser.md).
+  "public_browser",
 ]);
 // Operation names the host defines. A model-invented tool name is logged as
 // "unknown" so model-chosen text never reaches the operational log.

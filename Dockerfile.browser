@@ -35,3 +35,17 @@ COPY scripts/browser-smoke.mjs ./browser-smoke.mjs
 ENV XDG_CONFIG_HOME=/tmp/chromium-config XDG_CACHE_HOME=/tmp/chromium-cache
 USER node
 CMD ["node", "dist/browser/service.js"]
+
+FROM node:22.23.4-bookworm-slim AS public-browser
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends chromium ca-certificates procps && rm -rf /var/lib/apt/lists/*
+COPY tools/agent-browser.json tools/install-agent-browser.mjs /opt/agent-browser/
+RUN node /opt/agent-browser/install-agent-browser.mjs /opt/agent-browser/agent-browser.json /usr/local/bin/agent-browser
+COPY package.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist/public-browser ./dist/public-browser
+COPY --from=build /app/dist/security.js ./dist/security.js
+COPY scripts/public-browser-probe.mjs ./public-browser-probe.mjs
+USER node
+CMD ["node", "dist/public-browser/service.js"]

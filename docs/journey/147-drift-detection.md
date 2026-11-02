@@ -61,7 +61,7 @@ Known and left: threshold monitors still count downtime as good time, as journal
 
 ## Follow-up and next iteration
 
-- Done in this order, as the release closure below records: snapshot the agentwatch volume, since the update cannot roll back automatically; run the update; release the gateway, which carries the relay text; create drift monitors muted on the host. Unmute only once the new relay is live.
+- Done, as the release closure below records: snapshot the agentwatch volume, since the update cannot roll back automatically; run the update; create drift monitors muted on the host; release the gateway, which carries the relay text. The monitors were created about two minutes before that release finished, not after it as planned. They were muted and cannot fire within six hours, so nothing could reach the old relay. Unmute only once the new relay is live.
 - After a few weeks of muted running: compare what they would have sent with what happened, and decide whether to unmute.
 
 ### Release closure — 2026-11-02

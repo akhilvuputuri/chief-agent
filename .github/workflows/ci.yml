@@ -143,6 +143,19 @@ jobs:
         run: |
           docker build -f Dockerfile.browser --target browser -t chief-browser:test .
           docker run --rm --init --network=none --read-only --tmpfs /tmp:size=192m,mode=1777 --shm-size=192m --cap-drop=ALL --security-opt=no-new-privileges --security-opt=seccomp=deploy/browser/seccomp.json --memory=640m --pids-limit=192 --entrypoint node chief-browser:test /app/browser-smoke.mjs
+      - name: Prove the public browser's confinement on the production architecture
+        run: |
+          docker build -f Dockerfile.browser --target proxy -t chief-public-browser-proxy:test .
+          docker build -f Dockerfile.browser --target public-browser -t chief-public-browser:test .
+          docker network create --internal pb-probe
+          docker network create pb-probe-out
+          trap 'docker rm -f public-browser-proxy pb-decoy >/dev/null; docker network rm pb-probe pb-probe-out >/dev/null' EXIT
+          docker run -d --name public-browser-proxy --network pb-probe --read-only --cap-drop=ALL --security-opt=no-new-privileges --memory=96m --pids-limit=64 chief-public-browser-proxy:test
+          docker network connect pb-probe-out public-browser-proxy
+          docker run -d --name pb-decoy --network pb-probe --network-alias decoy.chief-probe.example --read-only --cap-drop=ALL node:22.23.4-bookworm-slim node -e "const hit=(w)=>console.log('DECOY_HIT',w);require('http').createServer((q,s)=>{hit(q.url);s.end('SENTINEL')}).listen(8080);require('net').createServer((s)=>{hit('tcp 443');s.destroy()}).listen(443)"
+          docker run --rm --init --network pb-probe --read-only --tmpfs /tmp:size=192m,mode=1777 --shm-size=192m --cap-drop=ALL --security-opt=no-new-privileges --security-opt=seccomp=deploy/browser/seccomp.json --memory=640m --memory-swap=640m --cpus=1 --pids-limit=512 --env BROWSER_CONTROL_KEY=synthetic --env BROWSER_PROXY=http://public-browser-proxy:3002 chief-public-browser:test node public-browser-probe.mjs http://pb-decoy:8080/ https://decoy.chief-probe.example/
+          test "$(docker inspect -f '{{.State.Running}}' pb-decoy)" = true
+          test "$(docker logs pb-decoy 2>&1 | grep -c DECOY_HIT)" = 0
       - name: Verify PostgreSQL gathering revocation interleaving and session drops
         run: |
           docker build -f Dockerfile.postgres -t chief-postgres:test .
