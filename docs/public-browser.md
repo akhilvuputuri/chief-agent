@@ -1,6 +1,6 @@
 # Public browser agent
 
-Chief can delegate to `browser`, an agent with a real, anonymous Chromium for public websites that `web_read` cannot handle: pages that need JavaScript, clicks, search forms, filters or several steps. It runs [`agent-browser`](https://github.com/vercel-labs/agent-browser) v0.39.1, pinned by SHA-256 in `tools/agent-browser.json`. The history and test results are in [journal 147](journey/147-public-browser-agent.md).
+Chief can delegate to `browser`, an agent with a real, anonymous Chromium for public websites that `web_read` cannot handle: pages that need JavaScript, clicks, search forms, filters or several steps. It runs [`agent-browser`](https://github.com/vercel-labs/agent-browser) v0.39.1, pinned by SHA-256 in `tools/agent-browser.json`. The history and test results are in [journal 148](journey/148-public-browser-agent.md).
 
 It is off unless `PUBLIC_BROWSER=on` and its services are installed ([rollout](#rollout)). Logged-in browsing is separate work and does not exist here. Invoice browsing keeps its own stricter service ([gathering](gathering.md#browser-boundary)).
 

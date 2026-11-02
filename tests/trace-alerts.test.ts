@@ -247,6 +247,99 @@ test("a retry repeats nothing to whoever already has the alert", async () => {
   }
 });
 
+test("a drift alert says what moved, and a resolve does not claim recovery", () => {
+  const drift = alert({
+    mode: "drift",
+    metric: "tool_error_rate",
+    threshold: 0.05,
+    value: 0.237,
+    bound: 0.1,
+    baseline_value: 0.1,
+    window_minutes: 7 * 1440,
+    baseline_minutes: 7 * 1440,
+  });
+  assert.equal(
+    alertText(drift),
+    "Drift: Tool errors rose from 10% to 23.7% over the last 7 days, compared with the previous 7 days. Details in agentwatch.",
+  );
+  assert.match(
+    alertText({ ...drift, value: 0.05, baseline_value: 0.2 }),
+    /fell from 20% to 5%/,
+  );
+  assert.equal(
+    alertText({
+      ...drift,
+      kind: "resolved",
+      value: 0.402,
+      baseline_value: 0.39,
+    }),
+    "Drift ended: Tool errors no longer shows a clear rise of at least 5%. Previous 7 days 39%, last 7 days 40.2%. That is not necessarily back to normal.",
+  );
+  // A brief incident now in the earlier window: the windows still differ, so it says both.
+  assert.equal(
+    alertText({
+      ...drift,
+      kind: "resolved",
+      comparison: "below",
+      value: 0.101,
+      baseline_value: 0.259,
+    }),
+    "Drift ended: Tool errors no longer shows a clear fall of at least 5%. Previous 7 days 25.9%, last 7 days 10.1%. That is not necessarily back to normal.",
+  );
+  // A monitor edited or deleted while drifting has no reading to report.
+  assert.match(
+    alertText({ ...drift, kind: "resolved", value: null, reason: "removed" }),
+    /no longer applies; the monitor was deleted/,
+  );
+  // Units for the metrics only drift monitors use.
+  assert.match(
+    alertText({
+      ...drift,
+      metric: "cost_per_trace",
+      value: 0.25,
+      baseline_value: 0.125,
+    }),
+    /from \$0\.125 to \$0\.25 /,
+  );
+  // Small values keep their difference, and a 0-5 score does not mix units.
+  assert.match(
+    alertText({
+      ...drift,
+      metric: "cost_per_trace",
+      value: 0.0012,
+      baseline_value: 0.00056,
+    }),
+    /from \$0\.00056 to \$0\.0012 /,
+  );
+  assert.match(
+    alertText({
+      ...drift,
+      metric: "model_mean_ms",
+      value: 39.7,
+      baseline_value: 23.9,
+    }),
+    /from 24 ms to 40 ms /,
+  );
+  assert.match(
+    alertText({
+      ...drift,
+      metric: "score_mean",
+      value: 0.807,
+      baseline_value: 1.37,
+    }),
+    /fell from 1\.37 to 0\.807 /,
+  );
+  assert.match(
+    alertText({
+      ...drift,
+      metric: "model_mean_ms",
+      value: 9000,
+      baseline_value: 5000,
+    }),
+    /from 5 s to 9 s /,
+  );
+});
+
 test("a resolved message cannot overtake its alert", async () => {
   const restore = setOpsSink(() => undefined);
   try {

@@ -1,6 +1,6 @@
 # Public browser agent — tested, not deployed, 1 November 2026
 
-The owner asked for an open `agent-browser` for Chief. It runs as a separate agent with one tool, no logins and its own container, so a hostile page has little to reach. The confinement probe passes in the real image on arm64 and in x86-64 CI; the production host has not run it. The Compose change needs the [operator rollout](public-browser.md#rollout), which refuses later releases until it runs. See [journal 147](journey/147-public-browser-agent.md).
+The owner asked for an open `agent-browser` for Chief. It runs as a separate agent with one tool, no logins and its own container, so a hostile page has little to reach. The confinement probe passes in the real image on arm64 and in x86-64 CI; the production host has not run it. The Compose change needs the [operator rollout](public-browser.md#rollout), which refuses later releases until it runs. See [journal 148](journey/148-public-browser-agent.md).
 
 # Mail recall on pgvector — live in `d58a9ca`, 1 November 2026
 

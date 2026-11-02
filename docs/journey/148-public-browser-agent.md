@@ -1,4 +1,4 @@
-# 147 — Can Chief use an open browser without exposing the owner's data?
+# 148 — Can Chief use an open browser without exposing the owner's data?
 
 Work dates: 1–2 November 2026. Written: 1 November 2026.
 Status: tested, not deployed. The confinement probe passes in the real image on arm64 and in CI on x86-64. The production host has not run it.

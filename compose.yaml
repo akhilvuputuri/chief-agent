@@ -308,7 +308,7 @@ services:
     memswap_limit: 640m
     oom_score_adj: 500
     cpus: 1.0
-    # Chromium, its zygotes and agent-browser's daemon: 192 crashed on the probe (journal 147).
+    # Chromium, its zygotes and agent-browser's daemon: 192 crashed on the probe (journal 148).
     pids_limit: 512
     healthcheck:
       test:
@@ -326,7 +326,7 @@ services:
     # Trace viewer for issue #323 (github.com/akhilvuputuri/agentwatch), pinned by digest.
     # The gateway reaches it as agentwatch:4318; the host publishes it on loopback only, for
     # an SSH tunnel (docs/lightsail.md). The gateway does not depend on it.
-    image: ghcr.io/akhilvuputuri/agentwatch@sha256:c49ddba30e1afc0b32ec5f164e3be53d11d692c1130038a47f4992369db74179
+    image: ghcr.io/akhilvuputuri/agentwatch@sha256:cd3fd562c8ea5480e91d231efcaab1b54e25cbc56e183e833dd237db84be46ef
     # The OpenRouter key for LLM judges (docs/tracing.md#judging-traces): read only when a
     # switched-on judge calls a model; empty, judges pause and say why.
     environment:
