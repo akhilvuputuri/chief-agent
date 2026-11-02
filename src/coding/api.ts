@@ -66,7 +66,9 @@ const hostFailure = (error: unknown) => {
   const code = (error as { code?: unknown })?.code;
   return (
     (typeof code === "string" &&
-      /^(ECONN|EPIPE$|ETIMEDOUT$|EAI_AGAIN$|08|57P0)/.test(code)) ||
+      /^(ECONN|EPIPE$|ETIMEDOUT$|EAI_AGAIN$|ENOTFOUND$|08|57P0|53300$|40P01$|40001$)/.test(
+        code,
+      )) ||
     /Connection terminated|pool after calling end/.test(
       String((error as { message?: unknown })?.message),
     )
@@ -118,6 +120,13 @@ export async function codingApi(
                 path === "finish",
               );
             } catch (error) {
+              if (
+                !(error instanceof WorkerRefused) &&
+                !(error instanceof SandboxAcknowledgementPending)
+              )
+                opsLog("coding.worker_request_unavailable", "warn", {
+                  ...errorFields(error),
+                });
               return reply
                 .code(error instanceof WorkerRefused ? 401 : 503)
                 .send({ error: "Worker capability unavailable" });
@@ -160,6 +169,11 @@ export async function codingApi(
                     error: "Sandbox launch acknowledgement is pending",
                   });
                 }
+                if (!(error instanceof WorkerRefused))
+                  opsLog("coding.worker_request_unavailable", "warn", {
+                    taskId: id,
+                    ...errorFields(error),
+                  });
                 return error instanceof WorkerRefused
                   ? reply.code(401).send({ error: "Invalid worker capability" })
                   : reply
