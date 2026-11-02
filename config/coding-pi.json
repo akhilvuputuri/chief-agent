@@ -4,7 +4,7 @@
   "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:a5bdecece9afc80a2044370191649dcb5c8c56ce2d460fbe2971300bb46ce782",
   "model": "deepseek/deepseek-v4.1-flash-1017",
   "leaderModel": "deepseek/deepseek-v4.1-flash-1017",
-  "reviewerModel": "anthropic/claude-opus-5.5",
+  "reviewerModel": "deepseek/deepseek-v4.1-flash-1017",
   "effort": "high",
   "limits": {
     "ms": 9000000,

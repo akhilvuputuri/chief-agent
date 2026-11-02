@@ -1,3 +1,9 @@
+## Coding reviewer moves to DeepSeek V4.1 Flash 1017 (1 November 2026)
+
+- **Configuration.** `config/coding-pi.json` and `config/coding.json` change the default coding reviewer from `anthropic/claude-opus-5.5` to `deepseek/deepseek-v4.1-flash-1017`, so all coding roles use the same model. The reviewer still runs in its own session with read-only tools. It applies to new jobs; a stopped job changes through `coding_job_update`.
+- **Why.** The owner chose it for cost and speed. On job `34493cd9`, Opus reviews cost $6.56 of the job's $7.19 by 1 November. See the [coding-agent lessons](journey/coding-agent-lessons.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Mail recall on pgvector (1 November 2026)
 
 - **Code.** `gmail_recall` searches with an exact pgvector query in Postgres instead of scanning in gateway memory. Migration 035 adds the column, filled from the stored vectors without re-embedding. The old column stays for rollback. Saves are now required, and excerpts are always Gmail's snippet.
