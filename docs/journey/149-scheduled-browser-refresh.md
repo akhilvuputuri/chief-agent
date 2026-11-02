@@ -1,7 +1,7 @@
 # 149 — How does a browser that runs hostile scripts stay patched without anyone remembering?
 
 Work date: 2 November 2026. Written: 2 November 2026.
-Status: tested with mocks, not installed. Installing it and the first measured run need the owner's approval. See [Pending](#pending).
+Status: live since 2 November 2026 (`444a334`). One measured run passed under systemd. A real timer refresh and a real failure notice have not happened yet. See [release closure](#release-closure--2026-11-02).
 
 ## User-visible problem and preceding iteration
 
@@ -13,14 +13,14 @@ Status: tested with mocks, not installed. Installing it and the first measured r
 
 - **Disk across the real refresh.** `chief.host/1` lines read 56.6% at 03:43:33 UTC and 62.2% at 03:53:39, on a 58 GB disk, so at most about 3.2 GB. It is an upper bound, because release `5fd0e74` landed in the same window. The refresh ran from 03:44:56 and had finished by 03:50:03, so about 5 minutes.
 - **What the images add.** `docker system df -v` gives 1.496 GB and 80 MB unique for the two images, which share 246 MB of base. A build with a new base would share less.
-- **Build cache.** 4.73 GB across 68 records were created on 2 November, by the rollout and the refresh together, so the refresh's own share is not separable. Total cache is 7.47 GB, all of it reclaimable.
+- **Build cache.** 4.73 GB across 68 records were created on 2 November, by the rollout and the refresh together, so the refresh's own share is not separable. Total cache is 7.47 GB. `docker builder du` calls all of it reclaimable, and `docker system df` calls 5.0 GB reclaimable.
 - **The release already prunes.** `prune()` in `cloud-release.py` runs `docker image prune -f` and `docker builder prune -f --filter until=168h`. After release `ba476ed` at about 04:00, disk fell from 62.2% to 59.9%, and no earlier public browser image remained. `hermes-companion-gateway:rollback` survived that prune.
 - **Quiet hours.** Over 30 days, `runtime_runs` shows no activity from 20:00 to 00:59 UTC, and `conversation_inputs` no input from 18:00 to 00:59. Of the last 200 releases, 6 started between 20:00 and 00:59.
-- **What a dangling prune cannot reach.** Docker lists 4 dangling images, all held by 5 exited debug containers from 28 October. Digest-pinned images (4 coding, 3 older agentwatch) and tagged ones (old invoice-browser tags, `chief-kite-debug:browser`) are not dangling. So most of the 12.47 GB that Docker calls reclaimable would survive this prune.
+- **What a dangling prune cannot reach.** Docker lists 4 dangling images, all held by 5 exited debug containers from 28 October. Digest-pinned images (4 coding, 3 older agentwatch) and tagged ones (old invoice-browser tags, `chief-kite-debug:browser`) are not dangling. So most of what Docker calls reclaimable would survive this prune.
 
 **Tested (offline):** `scripts/test-scheduled-refresh-public-browser.py` and additions to `scripts/test-deploy-public-browser.py`, with Docker, Postgres and Telegram mocked. `systemd-analyze verify` passes on the three units on Ubuntu 24.04, in a container with stub files for the script and Docker's unit.
 
-**Not measured:** one refresh on its own, including its cache. Any of this running under systemd, a real Telegram notice, and whether `docker builder prune -af` leaves the images intact on this containerd store. The first `--now` run covers these.
+**Not measured at this point:** one refresh on its own, including its cache, any of this under systemd, and whether `docker builder prune -af` leaves the images intact on this containerd store. The [release closure](#release-closure--2026-11-02) covers these.
 
 ## Diagnosis and alternatives
 
@@ -62,34 +62,34 @@ The delta review approved `3d7ec13`; its remaining items were low severity. The 
 
 ## Verification and outcome
 
-Offline tests pass. Nothing is installed, and no behaviour on the host has changed, apart from `:rollback` tags on the next manual refresh.
+Offline tests pass, and `systemd-analyze verify` passes on the host. See the closure for the real run.
 
-## Pending
+### Release closure — 2026-11-02
 
-Each step needs the owner's approval:
+**Delivery.** [PR 412](https://github.com/akhilvuputuri/chief-agent/pull/412) merged as `444a334` from approved head `444d811`, and release run 41389044231 succeeded. The live scripts and units matched the merged commit by SHA-256.
 
-1. Install the units and send the test notice ([steps](../public-browser.md#on-a-schedule)).
-2. Run one `--now` refresh in the unit's environment, which gives the real disk figures, and proves the build, prune and images under systemd:
+**Install.** With the owner's approval, the units were installed and the timer enabled, with its first tick on 2 November between 21:00 and 21:30 UTC. `list-timers` showed 21:20 at install, and the random delay is re-drawn. A start of the real unit printed `not due`, at 0.1 days old. Telegram accepted `--test-notice`; whether it arrived on the phone was not checked from here.
 
-   ```bash
-   sudo systemd-run --wait --pipe --collect -p Environment=HOME=/root -p UMask=0077 python3 /opt/hermes-companion/scripts/scheduled-refresh-public-browser.py --now
-   ```
+**Measured: one `--now` refresh in the unit's environment (`systemd-run`), 05:06 to 05:12 UTC, with the host idle.**
 
-3. Start both kept images without a network, because `docker image inspect` would not show that the prune left their blobs intact:
+| Stage             | Disk used | Change             |
+| ----------------- | --------- | ------------------ |
+| Before            | 36.72 GB  |                    |
+| After the refresh | 40.15 GB  | +3.44 GB (3.2 GiB) |
+| After the prune   | 31.30 GB  | -8.86 GB           |
 
-   ```bash
-   sudo docker run --rm --network=none --read-only --cap-drop=ALL --entrypoint chromium chief-public-browser:rollback --version
-   ```
+- It took 5 minutes 59 seconds. The probe passed, with a memory peak of 539 MiB. Chromium stayed at 156.0.8078.73, so this run brought no newer browser.
+- **Derived, not measured separately:** the prune's 8.86 GB is about the 7.47 GB of cache present before the run, plus this run's own cache. The images total about 2.07 GB, which leaves about 1.37 GB of the 3.44 GB as cache, and 7.47 + 1.37 = 8.84 GB.
+- `:rollback` holds the previous images. Both started and ran `--version` without a network after the prune, so `docker builder prune -af` did not stop them starting on this containerd store. A full rollback was not exercised. The live browser and proxy showed healthy, and the gateway's health check returned 200.
+- **Docker's reclaimable figure is not a dependable estimate.** It fell from 12.47 GB to 6.02 GB, though every old tagged and digest-pinned image was still listed, and the 4 dangling images remain held by exited containers.
 
-   ```bash
-   sudo docker run --rm --network=none --read-only --cap-drop=ALL --entrypoint node chief-public-browser-proxy:rollback --version
-   ```
+**Hypothesis.** Later refreshes should net to about zero, because each replaces `:rollback` and the prune removes the older image and the cache, which should be smaller now that the backlog is gone. Operator builds will add to it. The next real run, at 28 days, will show that in the journal.
 
-4. Record the figures and this entry's release closure.
+**Not exercised.** A real failure reaching the notice unit under systemd, because that would send the owner a false alarm. A real timer tick that refreshes, first due in about 28 days.
 
 ## Follow-up and next iteration
 
-- About 12 GB of old tagged and digest-pinned images, and 5 exited debug containers, need a separate reviewed cleanup. Disk is at 60%, so it is not urgent.
+- Old tagged and digest-pinned images, and 5 exited debug containers, need a separate reviewed cleanup. Disk is at 52%, so it is not urgent.
 - The invoice browser was last built on 8 October and has no refresh. It handles invoice logins, so whether it needs the same treatment is worth its own decision.
 - A merge that changes what these images hold still needs a manual refresh. The timer goes only by age.
 - If the timer stops or Telegram is unreachable, nothing tells the owner. The host-health line could report the image's age if that ever matters.
