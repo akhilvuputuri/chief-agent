@@ -1,3 +1,7 @@
+# Drift detection in agentwatch — live and muted in `6409f9a`, 2 November 2026
+
+agentwatch can now say a metric moved between two windows, on a Drift page and as a monitor. Five monitors watch model errors, tool errors, cost per trace, mean model latency and judged answers on 7-day windows. They are muted: they record what they would send, and nothing reaches Telegram. Simulated traffic fired falsely up to about 1.8 times a month, and the rate on real traffic is unmeasured. Next is a few weeks' trial, then the owner decides whether to unmute. See [tracing](tracing.md#drift) and [journal 147](journey/147-drift-detection.md).
+
 # Mail recall on pgvector — live in `d58a9ca`, 1 November 2026
 
 `gmail_recall` now searches with an exact pgvector query in Postgres, reusing the stored vectors with no new embedding. On 30 real questions the top 10 matched the old in-memory scan every time; search takes about 57 ms instead of 6. Migration 035 keeps the old column for rollback, and a later migration drops it. Live use is not measured. See [journal 146](journey/146-mail-recall-pgvector.md).

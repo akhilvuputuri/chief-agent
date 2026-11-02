@@ -111,7 +111,7 @@ The monitors on the host are created through agentwatch's Alerts page or API, ov
 
 agentwatch also compares a metric with the window directly before it, on its Drift page and as a drift monitor ([agentwatch's design notes](https://github.com/akhilvuputuri/agentwatch/blob/main/docs/design.md)). It reports a change, not a level: once a shift fills both windows, the monitor resolves whatever the level is, and it also resolves on a move the other way, as when a brief incident enters the earlier window. So the relay words a drift resolve as no clear rise or fall of at least the threshold being left, with both values, and never as recovered.
 
-Simulated traffic with failures shared across sessions fires falsely up to about 1.8 times a month, so a drift monitor on the host starts `muted`: it records what it would have sent, shown on the Alerts page, and the relay never receives it. A resolve follows its firing alert, so toggling mute mid-incident cannot leave the owner on a "firing" that never ends ([journal 147](journey/147-drift-detection.md)).
+Simulated traffic with failures shared across sessions fires falsely up to about 1.8 times a month, so the five drift monitors on the host run `muted`: each records what it would have sent, shown on the Alerts page, and the relay never receives it. A resolve follows its firing alert, so toggling mute mid-incident cannot leave the owner on a "firing" that never ends ([journal 147](journey/147-drift-detection.md)).
 
 ## Backfilling history
 
