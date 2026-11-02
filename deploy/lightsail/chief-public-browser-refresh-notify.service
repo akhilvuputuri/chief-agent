@@ -1,7 +1,12 @@
 [Unit]
 Description=Tell the owner the public browser refresh failed
+# A brief Telegram or network failure must not lose the notice.
+StartLimitIntervalSec=2h
+StartLimitBurst=6
 
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/python3 /opt/hermes-companion/scripts/scheduled-refresh-public-browser.py --notify
 UMask=0077
+Restart=on-failure
+RestartSec=10min

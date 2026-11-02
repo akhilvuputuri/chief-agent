@@ -72,7 +72,7 @@ It rebuilds both images under candidate tags with a fresh base and no layer cach
 
 ### On a schedule
 
-`chief-public-browser-refresh.timer` runs `scripts/scheduled-refresh-public-browser.py` daily between 21:00 and 21:30 UTC, the middle of a window with no work in the 30 days measured ([journal 149](journey/149-scheduled-browser-refresh.md)). Nothing happens until the running image is 28 days old, so a manual refresh also resets the clock, and there is no schedule state to drift.
+`chief-public-browser-refresh.timer` runs `scripts/scheduled-refresh-public-browser.py` daily between 21:00 and 21:30 UTC, the middle of a window with no work in the 30 days measured ([journal 149](journey/149-scheduled-browser-refresh.md)). Nothing happens until the image the browser is running is 28 days old, so a manual refresh also resets the clock, and there is no schedule state to drift.
 
 | Situation                                    | What the run does                                                                | Owner told?               |
 | -------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------- |
@@ -84,9 +84,9 @@ It rebuilds both images under candidate tags with a fresh base and no layer cach
 | Build, proof or swap fails                   | Tries again the next day. The swap failure restores the previous images          | Yes                       |
 | Script killed or past its 30-minute limit    | systemd's `OnFailure` still fires                                                | Yes, as "killed"          |
 
-**Notice.** Any non-zero exit starts `chief-public-browser-refresh-notify.service`, which sends the reason to the first ID in `TELEGRAM_ALLOWED_USER_IDS` directly through Telegram's API, so it works with the gateway down. The same reason is sent once a week however often it retries, and a different reason at once. The last failure and notice are in `/var/lib/chief/public-browser-refresh.json`, and every run's outcome is in `journalctl -u chief-public-browser-refresh`. If the timer itself stops, or Telegram cannot be reached, nothing tells the owner; the image age above is the check.
+**Notice.** Any non-zero exit starts `chief-public-browser-refresh-notify.service`, which sends the reason to the first ID in `TELEGRAM_ALLOWED_USER_IDS` directly through Telegram's API, so it works with the gateway down. A failed send is retried every 10 minutes, up to 6 times. The same reason is sent once a week however often it retries, and a different reason at once. The last failure and notice are in `/var/lib/chief/public-browser-refresh.json`, and every run's outcome is in `journalctl -u chief-public-browser-refresh`. If the timer itself stops, a reboot interrupts the run or the notice, or Telegram stays unreachable, nothing tells the owner; the image age above is the check.
 
-**Prune.** After any run that built, and under the release lock, it runs `docker image prune -f` and `docker builder prune -af`. The first removes untagged images only: tagged ones such as `:rollback`, the old invoice-browser tags and the kept debug image stay, so it does not reclaim most of what `docker system df` calls reclaimable. Digest-pinned images, which show a repository but no tag, are also not in Docker's dangling list. The second removes all build cache, because every refresh is `--no-cache`. The cost is a slower next operator build. An ordinary release also prunes untagged images, which is why the refresh must tag what it keeps.
+**Prune.** After any attempted refresh, and under the release lock, it runs `docker image prune -f` and `docker builder prune -af`. The first removes untagged images only: tagged ones such as `:rollback`, the old invoice-browser tags and the kept debug image stay, so it does not reclaim most of what `docker system df` calls reclaimable. Digest-pinned images, which show a repository but no tag, are also not in Docker's dangling list. The second removes all build cache, because every refresh is `--no-cache`. The cost is a slower next operator build. An ordinary release also prunes untagged images, which is why the refresh must tag what it keeps.
 
 **After a security advisory**, run this on the host. It ignores the age, keeps every other check, prunes and prints the disk used before the refresh, after it and after the prune:
 
@@ -108,7 +108,7 @@ python3 /opt/hermes-companion/scripts/scheduled-refresh-public-browser.py --test
 systemctl enable --now chief-public-browser-refresh.timer
 ```
 
-**Rolling back a swap that passed its proof but behaves badly**, as root, when idle. The next refresh is 28 days after the build date of the image you restore, which may mean the next day, so stop the timer first if the fresh build is the problem:
+**Rolling back a swap that passed its proof but behaves badly**, as root, when idle. `:rollback` exists only after a refresh that includes this change. The restored image is usually already 28 days old, so the next tick would refresh again; if the fresh build is the problem, first run `systemctl disable --now chief-public-browser-refresh.timer`, and enable it again once a new build is safe:
 
 ```bash
 docker tag chief-public-browser:rollback chief-public-browser && docker tag chief-public-browser-proxy:rollback chief-public-browser-proxy

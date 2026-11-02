@@ -48,7 +48,15 @@ Status: tested with mocks, not installed. Installing it and the first measured r
 - `deploy/lightsail/chief-public-browser-refresh{.service,.timer}` and `-notify.service`, also added to `install-host.sh` for a rebuilt host.
 - [Public browser: on a schedule](../public-browser.md#on-a-schedule) holds the behaviour, install and rollback steps.
 
-Review: pending on this PR.
+**Review.** Independent review (Claude Opus 5.5) requested changes on `8f8e0ff`. It found no path for the bot token to leak, and Busy could not hide a real failure. Found and fixed:
+
+- **Damaged state stopped everything.** A state file holding valid JSON that was not an object crashed both the run and its notice, every day and silently. That is the very failure this design exists to prevent. Damaged state now reads as empty.
+- **Daily figures defeated the weekly limit.** Reasons included the day count and free GB, so they differed each day, and a stuck `running` row would have messaged the owner daily for ever. Reasons no longer hold figures.
+- **Stale reasons.** A failed state write or a run that never started could repeat yesterday's reason, or have it withheld. Failures now carry a time, and one over 6 hours old reads as an unfinished run.
+- **Age came from the tag.** A swap killed halfway left a new tag on an old browser, which would then read as not due for 28 days. Age now comes from the running container, and a stopped browser is reported even when not due.
+- **Smaller fixes.** A mistyped flag started a real run. The flag parser was stricter than Compose. A failed notice got one attempt, and now retries.
+
+Accepted, as low risk: after a swap killed halfway, the next refresh tags the never-run image `:rollback`, not the one that was running. A tick landing during a release's copy of `scripts/` can fail and may lose its notice, with the next day recovering; 6 of 200 recent releases started in these hours.
 
 ## Verification and outcome
 
@@ -65,7 +73,13 @@ Each step needs the owner's approval:
    sudo systemd-run --wait --pipe --collect -p Environment=HOME=/root -p UMask=0077 python3 /opt/hermes-companion/scripts/scheduled-refresh-public-browser.py --now
    ```
 
-3. Record the figures and this entry's release closure.
+3. Start the kept image without a network, because `docker image inspect` would not show that the prune left its blobs intact:
+
+   ```bash
+   sudo docker run --rm --network=none --read-only --cap-drop=ALL --entrypoint chromium chief-public-browser:rollback --version
+   ```
+
+4. Record the figures and this entry's release closure.
 
 ## Follow-up and next iteration
 

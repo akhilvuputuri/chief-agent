@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Daily timer target that keeps the public browser about a month old (docs/public-browser.md#keeping-it-current).
 
-It does nothing until the running image is DUE_DAYS old, so a manual refresh also resets the clock.
+It does nothing until the image the browser is running is DUE_DAYS old, so a manual refresh also resets the clock.
 A refresh refused for other work tries again at the next tick; after STALE_DAYS that counts as a
 failure, so a stuck run cannot hide it for ever. Any failure, including this script being killed,
 exits non-zero and systemd's OnFailure runs --notify, which sends the owner one Telegram message.
@@ -26,10 +26,12 @@ STATE = pathlib.Path('/var/lib/chief/public-browser-refresh.json')
 CONTAINER = 'hermes-companion-public-browser-1'
 DUE_DAYS = 28
 STALE_DAYS = 35
-# One refresh measured at most 3.3 GB; the rest keeps room for Postgres and backups.
+# One refresh measured at most 3.2 GB; the rest keeps room for Postgres and backups.
 MIN_FREE_BYTES = 8 * 1024 ** 3
 REPEAT_NOTICE = datetime.timedelta(days=7)
-KILLED = 'The scheduled refresh was killed or timed out; check for leftovers before retrying'
+# A recorded failure older than this cannot belong to the run that just stopped; ticks are a day apart.
+FRESH_FAILURE = datetime.timedelta(hours=6)
+UNFINISHED = 'The scheduled run did not finish: killed, timed out or never started. Check for leftovers'
 
 
 def now():
@@ -37,29 +39,46 @@ def now():
 
 
 def read_state():
+    """Damaged state must never stop a refresh or its notice, so it reads as empty."""
     try:
-        return json.loads(STATE.read_text())
+        state = json.loads(STATE.read_text())
     except (OSError, ValueError):
         return {}
+    return state if isinstance(state, dict) else {}
 
 
 def write_state(state):
-    pending = STATE.with_suffix('.pending')
-    pending.write_text(json.dumps(state))
-    pending.replace(STATE)
+    """Best effort: on a full disk the notice still goes, reporting an unfinished run."""
+    try:
+        pending = STATE.with_suffix('.pending')
+        pending.write_text(json.dumps(state))
+        pending.replace(STATE)
+    except OSError:
+        print('State not saved', file=sys.stderr)
+
+
+def within(record, limit):
+    """Whether a saved {'at': ...} record is recent; anything malformed is not."""
+    try:
+        return now() - datetime.datetime.fromisoformat(record['at']) < limit
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def env_value(name):
     """One named value; never hand .env to anything that could print it."""
     value = None
     for line in (deploy.LIVE / '.env').read_text().splitlines():
+        line = line.removeprefix('export ')
         if line.startswith(name + '='):
-            value = line.split('=', 1)[1].strip().strip('"\'')
+            value = line.split('=', 1)[1].split(' #')[0].strip().strip('"\'')
     return value
 
 
 def age_days():
-    created = deploy.run(['docker', 'image', 'inspect', '--format', '{{.Created}}', refresh.BROWSER],
+    """From the container, not the tag: a swap killed halfway leaves a new tag on an old browser."""
+    image = deploy.run(['docker', 'inspect', '--format', '{{.Image}}', CONTAINER], text=True).stdout.strip()
+    created = deploy.run(['docker', 'image', 'inspect', '--format', '{{.Created}}', image],
                          text=True).stdout.strip()
     return (now() - datetime.datetime.fromisoformat(created)).total_seconds() / 86400
 
@@ -94,7 +113,7 @@ def prune():
 
 def busy(age, reason):
     if age >= STALE_DAYS:
-        raise RuntimeError(f'Not refreshed in {age:.0f} days because the host stays busy: {reason}')
+        raise RuntimeError(f'Over {STALE_DAYS} days old and the host stays busy: {reason}')
     print(json.dumps({'outcome': 'busy', 'ageDays': round(age, 1), 'reason': reason}))
 
 
@@ -102,17 +121,17 @@ def run(force=False):
     if env_value('PUBLIC_BROWSER') != 'on':
         print(json.dumps({'outcome': 'off'}))
         return
+    # The refresh would start a stopped service, which could be an operator's deliberate stop.
+    if not running():
+        raise RuntimeError('The flag is on but the browser is not running; not refreshing it')
     age = age_days()
     if age < DUE_DAYS and not force:
         print(json.dumps({'outcome': 'not due', 'ageDays': round(age, 1)}))
         return
-    # The refresh would start a stopped service, which could be an operator's deliberate stop.
-    if not running():
-        raise RuntimeError('The flag is on but the browser is not running; not refreshing it')
     if free() < MIN_FREE_BYTES:
         prune()
         if free() < MIN_FREE_BYTES:
-            raise RuntimeError(f'Only {free() / 1024 ** 3:.1f} GB free; refused to build')
+            raise RuntimeError(f'Under {MIN_FREE_BYTES // 1024 ** 3} GB free; refused to build')
     # Refused here it costs nothing; the refresh checks again after its builds.
     try:
         deploy.require_idle()
@@ -135,18 +154,14 @@ def run(force=False):
 
 
 def scheduled(force=False):
-    # A failure left in the file means this run's own; none means --notify knows it was killed.
-    state = read_state()
-    state.pop('failure', None)
-    write_state(state)
     try:
         run(force)
     except Exception as error:
         reason = str(error) if isinstance(error, RuntimeError) else f'Refresh stopped on {type(error).__name__}'
-        write_state({**state, 'failure': reason})
+        write_state({**read_state(), 'failure': {'reason': reason, 'at': now().isoformat()}})
         print(reason, file=sys.stderr)
         return 1
-    write_state({k: v for k, v in state.items() if k != 'notified'})
+    write_state({})
     return 0
 
 
@@ -162,15 +177,17 @@ def send(text):
 
 
 def notify():
-    """The same failure is sent once a week, though it retries daily. Sent straight to Telegram,
-    so it still arrives when the gateway is the thing that is down."""
+    """Reasons hold no daily figures, so the same failure is sent once a week though it retries
+    daily. Sent straight to Telegram, so it still arrives when the gateway is the thing that is
+    down. A failed send exits non-zero and the unit retries it."""
     state = read_state()
-    reason = state.get('failure') or KILLED
-    notified = state.get('notified') or {}
-    if notified.get('reason') == reason:
-        if now() - datetime.datetime.fromisoformat(notified['at']) < REPEAT_NOTICE:
-            print(json.dumps({'notice': 'repeat withheld'}))
-            return 0
+    failure = state.get('failure')
+    reason = failure.get('reason') if isinstance(failure, dict) and within(failure, FRESH_FAILURE) else None
+    reason = reason or UNFINISHED
+    notified = state.get('notified')
+    if isinstance(notified, dict) and notified.get('reason') == reason and within(notified, REPEAT_NOTICE):
+        print(json.dumps({'notice': 'repeat withheld'}))
+        return 0
     try:
         send('Public browser refresh failed: ' + reason
              + '\nIt retries daily. Details: journalctl -u chief-public-browser-refresh')
@@ -193,4 +210,6 @@ def test_notice():
 
 if __name__ == '__main__':
     actions = {'--notify': notify, '--test-notice': test_notice, '--now': lambda: scheduled(force=True)}
-    sys.exit(actions.get(sys.argv[1] if len(sys.argv) > 1 else '', scheduled)())
+    if len(sys.argv) > 2 or (len(sys.argv) == 2 and sys.argv[1] not in actions):
+        sys.exit('Usage: scheduled-refresh-public-browser.py [' + ' | '.join(actions) + ']')
+    sys.exit(actions[sys.argv[1]]() if len(sys.argv) == 2 else scheduled())
