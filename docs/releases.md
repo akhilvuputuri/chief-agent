@@ -1,3 +1,8 @@
+## Worker image that survives gateway restarts (2 November 2026)
+
+- **Configuration.** New coding jobs pin worker image `sha256:e3aa876d…`, built from `fd7b16d`, which carries the restart fixes in [journal 150](journey/150-coding-through-gateway-restarts.md). The previous image moves to `previousImages`, so paused jobs can still resume on it. The baked box image still holds the previous digest until its next weekly build, so the first boxes pull this one.
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Coding jobs survive gateway restarts (1 November 2026)
 
 - **Code.** Workers wait out an unreachable gateway, heartbeats cancel only on a refusal, a restart-cut model call is recorded and retried once, exit codes name the failure, and `node_modules` links stay out of artifacts. No database or Compose change.
