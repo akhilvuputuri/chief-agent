@@ -105,7 +105,7 @@ A second delta review requested changes on `82decac`: the new HTTPS checks mostl
 - The instruction not to post, buy or sign up is guidance, not enforcement. With no account or card, the harm is limited, not zero.
 - One session at a time. The host probe peaked at 551 MiB of the 640 MiB limit, so a heavy real page may hit the limit.
 - Each no-cache refresh leaves the previous images and build cache behind. How much one refresh adds alone is unmeasured, so prune after each one.
-- The refresh is manual: nothing runs it on a schedule.
+- The refresh is manual: nothing runs it on a schedule. [Journal 149](149-scheduled-browser-refresh.md) adds one.
 - No model has received this tool's schema, so the first real task after rollout is also that test.
 - A browser process that escapes Chromium's sandbox could reach `gateway:3000` directly, because the gateway shares the network. The invoice browser's network has the same shape.
 - Logged-in browsing and screenshots are deferred.

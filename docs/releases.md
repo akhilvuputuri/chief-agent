@@ -1,3 +1,12 @@
+## Not installed — scheduled public browser refresh (2 November 2026)
+
+- **Code.** `scripts/scheduled-refresh-public-browser.py` and three systemd units refresh the public browser when its image is 28 days old, retry refusals daily, prune dangling images and all build cache, and send the owner a Telegram notice on failure, or when still busy on day 35. `refresh-public-browser.py` now tags the previous images `:rollback`, because an untagged previous image was deleted by the next release's prune. See [public browser](public-browser.md#on-a-schedule).
+- **Measured.** A refresh adds at most about 3.2 GB, an upper bound because a release landed in the same window. Over 30 days there was no work from 20:00 to 00:59 UTC. A dangling prune will not reclaim most of the 12.47 GB Docker calls reclaimable.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `8f8e0ff`, because damaged state stopped both the refresh and its notice and daily figures defeated the weekly limit, then approved `3d7ec13`.
+- **Deployment.** Pending. The scripts arrive by ordinary release and do nothing until the units are installed, which needs the owner's approval, followed by one `--now` run for the real disk figures.
+
+[Journal 149](journey/149-scheduled-browser-refresh.md).
+
 ## Installed `9e26701` by operator rollout — public browser agent (2 November 2026)
 
 - **What merged.** [PR 406](https://github.com/akhilvuputuri/chief-agent/pull/406) merged as `9e26701`. Chief can delegate to `browser`, an agent with an anonymous Chromium for public sites, in its own container, network and proxy, with no logins or private data. See [public browser](public-browser.md).
@@ -5,7 +14,7 @@
 - **Release.** With the owner's approval, the operator ran `deploy-public-browser.py` from the baseline `6409f9a`. It reported the probe passed and the gateway healthy, with a browser memory peak of 551 MiB of 640 MiB. The automatic release for that commit failed on a held lock, most likely the rollout's, and the next one, `5fd0e74`, succeeded (run 41384595876), so ordinary releases work again.
 - **Refresh.** `refresh-public-browser.py` passed for real the same day, with a peak of 538 MiB, on Chromium 156.0.8078.73.
 - **Rollback.** Set `PUBLIC_BROWSER=off` in `.env`, recreate the gateway and stop the two services.
-- **Pending:** a first real task, which is also the first proof that a provider accepts the tool's schema; and a scheduled refresh. Host disk use grew from 29 GB to 36 GB of 58 GB, with 12.4 GB of images and 4.6 GB of build cache reclaimable, so prune them.
+- **Pending:** a first real task, which is also the first proof that a provider accepts the tool's schema; and a scheduled refresh ([journal 149](journey/149-scheduled-browser-refresh.md)). Host disk use grew from 29 GB to 36 GB of 58 GB, with 12.4 GB of images and 4.6 GB of build cache reclaimable, so prune them.
 
 [Journal 148](journey/148-public-browser-agent.md#release-closure--2026-11-02).
 

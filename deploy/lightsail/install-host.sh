@@ -51,10 +51,11 @@ fi
 install -m 755 "$here/chief-log-export.sh" /usr/local/sbin/chief-log-export
 install -m 755 "$here/chief-host-health.py" /usr/local/sbin/chief-host-health
 install -m 644 "$here/chief-log-export.service" "$here/chief-host-health.service" "$here/chief-host-health.timer" /etc/systemd/system/
+install -m 644 "$here/chief-public-browser-refresh.service" "$here/chief-public-browser-refresh-notify.service" "$here/chief-public-browser-refresh.timer" /etc/systemd/system/
 install -m 644 "$here/logrotate-chief" /etc/logrotate.d/chief
 install -d -m 750 /var/log/chief /var/lib/chief
 systemctl daemon-reload
-systemctl enable --now chief-log-export.service chief-host-health.timer
+systemctl enable --now chief-log-export.service chief-host-health.timer chief-public-browser-refresh.timer
 systemctl try-restart chief-log-export.service
 
 # CloudWatch agent: pinned version, AWS signature and key fingerprint verified.
@@ -101,4 +102,4 @@ else
 fi
 
 dpkg-query -W -f='${Package} ${Version}\n' docker.io docker-compose-v2 caddy amazon-cloudwatch-agent
-systemctl is-active docker caddy chief-log-export chief-host-health.timer
+systemctl is-active docker caddy chief-log-export chief-host-health.timer chief-public-browser-refresh.timer

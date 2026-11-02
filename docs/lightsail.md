@@ -32,6 +32,8 @@ The gateway writes sanitized `chief.ops/1` JSON lines to stdout ([contract](oper
    - Each event's `@timestamp` is parsed from the line's `ts`, to the second, so delayed lines land at the time they happened. `ts` keeps milliseconds.
    - `logrotate` rotates daily with `copytruncate` and keeps 7 days locally. If the agent is down across a rotation, lines it had not read remain only in the rotated local file.
 
+`chief-public-browser-refresh.timer` is separate from logging: it keeps the public browser's images current and reports failures on Telegram ([on a schedule](public-browser.md#on-a-schedule)).
+
 Postgres output is never shipped. There is no historical backfill: CloudWatch starts at the first line exported from this host. Logs are telemetry, not the action ledger. For what actually happened, Postgres `events`, `runtime_runs` and `runtime_calls` remain authoritative.
 
 ### Identities
