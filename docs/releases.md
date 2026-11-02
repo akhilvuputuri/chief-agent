@@ -2,10 +2,10 @@
 
 - **What merged.** [PR 406](https://github.com/akhilvuputuri/chief-agent/pull/406) merged as `9e26701`. Chief can delegate to `browser`, an agent with an anonymous Chromium for public sites, in its own container, network and proxy, with no logins or private data. See [public browser](public-browser.md).
 - **Review.** Independent review (Claude Opus 5.5) requested changes on four commits, the last for a conflict with main, and approved the merged head `500bba7`; hosted CI passed.
-- **Release.** With the owner's approval, the operator ran `deploy-public-browser.py` from the baseline `6409f9a`. It reported the probe passed and the gateway healthy, with a browser memory peak of 551 MiB of 640 MiB. The automatic release for that commit lost the lock race, and the next one, `5fd0e74`, succeeded (run 41384595876), so ordinary releases work again.
+- **Release.** With the owner's approval, the operator ran `deploy-public-browser.py` from the baseline `6409f9a`. It reported the probe passed and the gateway healthy, with a browser memory peak of 551 MiB of 640 MiB. The automatic release for that commit failed on a held lock, most likely the rollout's, and the next one, `5fd0e74`, succeeded (run 41384595876), so ordinary releases work again.
 - **Refresh.** `refresh-public-browser.py` passed for real the same day, with a peak of 538 MiB, on Chromium 156.0.8078.73.
 - **Rollback.** Set `PUBLIC_BROWSER=off` in `.env`, recreate the gateway and stop the two services.
-- **Pending:** a first real task, which is also the first proof that a provider accepts the tool's schema; a scheduled refresh; and pruning the roughly 7 GB of images and cache the rollout and refresh added.
+- **Pending:** a first real task, which is also the first proof that a provider accepts the tool's schema; and a scheduled refresh. Host disk use grew from 29 GB to 36 GB of 58 GB, with 12.4 GB of images and 4.6 GB of build cache reclaimable, so prune them.
 
 [Journal 148](journey/148-public-browser-agent.md#release-closure--2026-11-02).
 

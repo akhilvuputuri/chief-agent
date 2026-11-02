@@ -1,6 +1,6 @@
 # 148 — Can Chief use an open browser without exposing the owner's data?
 
-Work dates: 1–2 November 2026. Written: 1 November 2026.
+Work dates: 1–2 November 2026. Written: 1 November 2026; release closure 2 November.
 Status: live since 2 November 2026 (`9e26701`). The confinement probe passes in the real image on arm64, in CI on x86-64 and on the production host. No real task has run yet; see [release closure](#release-closure--2026-11-02).
 
 ## User-visible problem and preceding iteration
@@ -56,7 +56,7 @@ Version 0.39.1 is pinned rather than the latest 0.41.0: it was 19 days old on th
 - `tests/public-browser.test.ts`: command surface, argv safety, Chromium flags, environment, session lifetime, fail-closed cleanup, host authorization and registry refusal.
 - `scripts/test-deploy-public-browser.py`: the Compose diff is exactly the reviewed additions and cannot widen access.
 - The probe, in the real image with a decoy service, on arm64 and in CI on x86-64: all checks pass, 0 decoy requests. Peak memory was 221 MiB in CI on `50dd21c`, for this smaller run.
-- The throwaway proof in `scripts/refresh-public-browser.py` is tested with mocks only; it has not run against real Docker.
+- The throwaway proof in `scripts/refresh-public-browser.py` was tested with mocks only at this point; it first ran against real Docker in the [release closure](#release-closure--2026-11-02).
 
 ## Review
 
@@ -92,19 +92,19 @@ A second delta review requested changes on `82decac`: the new HTTPS checks mostl
 
 - [PR 406](https://github.com/akhilvuputuri/chief-agent/pull/406) merged as `9e26701`. `scripts/deploy-public-browser.py` reported the probe passed and the gateway healthy, with a browser memory peak of 551 MiB against the 640 MiB limit. The host has no decoy, so it runs 28 of the 30 checks.
 - The refresh passed the same day, with a peak of 538 MiB, and installed Chromium 156.0.8078.73. Until then it had only run against mocks.
-- The automatic release for `9e26701` failed with `[Errno 11]` because the rollout held the release lock. Its rerun stopped because main had moved. The next release, `5fd0e74`, succeeded through the ordinary path (run 41384595876), so the Compose guard no longer refuses releases.
-- Host disk use went from 29 GB to 36 GB of 58 GB across the rollout and refresh. Docker reports 12.4 GB of images and 4.6 GB of build cache as reclaimable.
+- The automatic release for `9e26701` failed with `[Errno 11]`, the error for a held lock, most likely the rollout's. Its rerun stopped because main had moved. The next release, `5fd0e74`, succeeded through the ordinary path (run 41384595876), so the Compose guard no longer refuses releases.
+- Host disk use went from 29 GB to 36 GB of 58 GB across the rollout, the `5fd0e74` release and the refresh. That includes the live images. Afterwards Docker reports 12.4 GB of images and 4.6 GB of build cache as reclaimable.
 
 **Measured on CI (x86-64):** on `540692b`, all checks passed, and the decoy that listens on 443 logged no connections. This is the first x86 result with that decoy.
 
-**Not done:** a real task. Nothing can start one except an owner message, so no provider has accepted this tool's schema yet, and success rates are unknown.
+**Not done:** a real task. The host shows 0 `public_browser` calls. No owner message has asked for one, and a scheduled routine could also start one, so the first schema test may happen unattended. No provider has accepted this tool's schema yet, and success rates are unknown.
 
 ## Limitations and deferred work
 
 - The brief is not checked for private data. The description and instructions ask for it to stay out, and that is all.
 - The instruction not to post, buy or sign up is guidance, not enforcement. With no account or card, the harm is limited, not zero.
 - One session at a time. The host probe peaked at 551 MiB of the 640 MiB limit, so a heavy real page may hit the limit.
-- Each no-cache refresh leaves images and build cache behind: this rollout and refresh together added about 7 GB. A monthly refresh needs a prune with it.
+- Each no-cache refresh leaves the previous images and build cache behind. How much one refresh adds alone is unmeasured, so prune after each one.
 - The refresh is manual: nothing runs it on a schedule.
 - No model has received this tool's schema, so the first real task after rollout is also that test.
 - A browser process that escapes Chromium's sandbox could reach `gateway:3000` directly, because the gateway shares the network. The invoice browser's network has the same shape.
