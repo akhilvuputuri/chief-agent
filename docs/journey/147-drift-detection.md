@@ -70,12 +70,12 @@ With the owner's approval, on 2 November from about 03:28 to 03:32 UTC:
 
 - [PR 409](https://github.com/akhilvuputuri/chief-agent/pull/409) merged at the reviewed head `b432451` as `6409f9a`.
 - agentwatch was stopped while its volume was archived on the host, under `/var/backups/agentwatch-pre-schema10/`. The archive is 3.8 MB and holds the 25 MB database. It has been listed, not restored.
-- The operator update ran from an exact archive of `6409f9a`, with hashes matching on both sides and the Compose change a single line. It reported `sha256:cd3fd562…` healthy, its test span included, and the gateway stayed up. The live `compose.yaml` hashes the same as main.
+- The operator update ran from an exact archive of `6409f9a`, with hashes matching on both sides and the Compose change a single line. It reported `sha256:cd3fd562…` healthy, its test span included, and the gateway stayed up. The live `compose.yaml` hashes the same as `6409f9a`.
 - The automatic release of `6409f9a` then succeeded (run 41383531512), and `RELEASE` matches.
 
 No `trace.export_dropped` or `trace.alerts_failed` line appears in the gateway's logs from 03:20 to 03:32. That window includes the gateway's restart, so it does not prove that no span was lost.
 
-All five drift monitors were created muted on 7-day windows, with a 7-day cooldown, and their first evaluation left them OK. That says little, because a drift monitor fires only after six hourly breaches in a row:
+All five drift monitors were created muted at about 03:29:46 UTC, before that release finished at about 03:32, on 7-day windows, with a 7-day cooldown, and their first evaluation left them OK. That says little, because a drift monitor fires only after six hourly breaches in a row:
 
 | Monitor                      | Bad direction, smallest change | Previous 7 days | Last 7 days         |
 | ---------------------------- | ------------------------------ | --------------- | ------------------- |
