@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "f3a4a7afac5649bcec8a7cbd86389ff676303538df4fb9e246e50dbf8efc91c7",
+      "sha256": "0d84b461ad46bf901187d8f5228138c3c299dee6fbcc85b374a9524b9f89d919",
       "agents": [
         "email",
         "parcels",
@@ -18,6 +18,7 @@
         "news",
         "library",
         "web",
+        "browser",
         "media",
         "gathering",
         "bills"
@@ -94,7 +95,8 @@
         "watchlist_settings",
         "watchlist_update",
         "web_read",
-        "web_search"
+        "web_search",
+        "public_browser"
       ]
     },
     {
@@ -134,6 +136,7 @@
     "news": "core/news",
     "library": "core/library",
     "web": "core/web",
+    "browser": "core/browser",
     "media": "core/media",
     "subscriptions": "core/subscriptions",
     "portfolio": "core/portfolio",
@@ -143,6 +146,7 @@
     "merlion": "singapore/merlion"
   },
   "delegated": [
+    "public_browser",
     "calendar_draft",
     "calendar_list",
     "daily_sync",

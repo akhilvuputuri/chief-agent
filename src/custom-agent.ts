@@ -37,6 +37,8 @@ const REPEAT_LIMIT = 3;
 function callForm(op: string, raw: string) {
   try {
     const args = JSON.parse(raw);
+    // One tool with many commands: a failing open must not use up snapshot's attempts.
+    if (op === "public_browser") return `${op}(${args?.command?.kind ?? "?"})`;
     const target =
       !readOperations.has(op) &&
       args &&
@@ -748,6 +750,8 @@ export class CustomAgent implements Agent {
                   if (
                     !readOperations.has(op) ||
                     op === "agent_run" ||
+                    // Its error text is page-controlled, and the call may be a click.
+                    op === "public_browser" ||
                     op.startsWith("job_alignment_") ||
                     attempt >= 2 ||
                     !(
@@ -774,7 +778,13 @@ export class CustomAgent implements Agent {
             // (such as an id from parcel_match), so every count starts again.
             failures.clear();
             // Reads change nothing, so an identical refused call would be refused again.
-            if (!readOperations.has(op) || op === "agent_run") refusals.clear();
+            // The browser is the exception: its pages change, so the same call can now work.
+            if (
+              !readOperations.has(op) ||
+              op === "agent_run" ||
+              op === "public_browser"
+            )
+              refusals.clear();
             if (candidate) {
               finish = candidate;
               finishObservation = op === "finish_turn" ? journal : undefined;

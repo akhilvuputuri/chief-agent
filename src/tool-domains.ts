@@ -105,6 +105,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["coding_", "coding"],
   ["research_", "research"],
   ["agent_", "research"],
+  ["public_browser", "research"],
   ["media_", "media"],
   ["canvas_", "canvas"],
   ["subscription_", "subscriptions"],

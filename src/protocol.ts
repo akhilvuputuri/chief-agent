@@ -16,6 +16,7 @@ import {
   browser as gatherBrowser,
 } from "./gathering/schema.js";
 import { TOOL_DOMAINS } from "./tool-domains.js";
+import { publicBrowserCommand } from "./public-browser/commands.js";
 import { IBKR_QUERY_TOOLS } from "./ibkr/catalogue.js";
 import {
   canvasCreate,
@@ -632,6 +633,12 @@ export const action = z.discriminatedUnion("operation", [
     .strict(),
   z
     .object({
+      operation: z.literal("public_browser"),
+      command: publicBrowserCommand,
+    })
+    .strict(),
+  z
+    .object({
       operation: z.literal("tools_load"),
       domains: z.array(z.enum(TOOL_DOMAINS)).min(1).max(TOOL_DOMAINS.length),
     })
@@ -712,6 +719,8 @@ export interface AgentRequest {
   executeResearch?: (run: string, input: unknown) => Promise<unknown>;
   /** Dispatches a domain agent's call under its child run, after the host checks that run's granted tools. */
   executeAgent?: (run: string, input: unknown) => Promise<unknown>;
+  /** Frees what a finished domain agent's run held on the host, such as its browser session. */
+  releaseAgent?: (run: string) => Promise<void>;
   /** Current host state a domain agent needs (for example pending Calendar approvals), by agent ID. */
   agentState?: (agentId: string) => Promise<unknown>;
   refreshContext?: () => Promise<void>;

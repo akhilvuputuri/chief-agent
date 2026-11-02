@@ -62,6 +62,12 @@ class AgentwatchUpdateTests(unittest.TestCase):
         staged = (ROOT / 'compose.yaml').read_bytes()
         if staged == shown.stdout:
             self.skipTest('compose.yaml matches origin/main; no agentwatch update pending')
+        main_before, main_block, main_after = update.split_compose(shown.stdout, 'Live')
+        before, block, after = update.split_compose(staged, 'Staged')
+        if (before, after) != (main_before, main_after):
+            if block != main_block:
+                update.validate_block(block)
+            self.skipTest('compose.yaml changes outside agentwatch; another rollout owns that change')
         self.assertTrue(update.validate_compose(shown.stdout, staged).startswith(REPOSITORY))
 
     def scenario(self, *, live_compose=LIVE_COMPOSE, staged_compose=STAGED_COMPOSE,

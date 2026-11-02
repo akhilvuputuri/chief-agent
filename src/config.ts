@@ -13,6 +13,11 @@ const schema = z.object({
   GATHERING_BROWSER_KEY: z
     .union([z.literal(""), z.string().regex(/^[0-9a-f]{64}$/i)])
     .default(""),
+  // The anonymous browser agent (docs/public-browser.md). Its own key, never the invoice one.
+  PUBLIC_BROWSER: z.enum(["on", "off"]).default("off"),
+  PUBLIC_BROWSER_KEY: z
+    .union([z.literal(""), z.string().regex(/^[0-9a-f]{64}$/)])
+    .default(""),
   // Boxed sub-agents (docs/boxes.md). Off unless the AWS stack, migration 032 and the
   // /boxes route are installed.
   BOXES_RUNTIME: z.enum(["on", "off"]).default("off"),

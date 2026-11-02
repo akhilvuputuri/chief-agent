@@ -4,6 +4,7 @@ import { resolve, sep } from "node:path";
 import { z } from "zod";
 import { MODEL_TIERS } from "./model-policy.js";
 import { action } from "./protocol.js";
+import { BROWSER_AGENT } from "./public-browser/commands.js";
 import { REASONING_EFFORTS } from "./model.js";
 
 const id = z
@@ -356,6 +357,17 @@ export class PluginRegistry {
             "Plugin compatibility: media/v1 agents may only read stored sources",
           );
         const agentId = `${m.id}/${a.id}`;
+        // The open browser is safe because its agent can reach nothing private. Registry edits
+        // must not be able to combine it with other tools or skills.
+        if (
+          a.tools.includes("public_browser") &&
+          (agentId !== BROWSER_AGENT ||
+            a.tools.length !== 1 ||
+            a.skills?.length)
+        )
+          throw new Error(
+            `Plugin compatibility: ${agentId} cannot hold public_browser; only ${BROWSER_AGENT} may, with no other tool or skill`,
+          );
         this.agents.set(agentId, {
           ...a,
           agentId,
