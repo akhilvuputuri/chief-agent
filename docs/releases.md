@@ -4,12 +4,14 @@
 - **Why.** A six-second gateway restart ended job `34493cd9`. See [journal 150](journey/150-coding-through-gateway-restarts.md).
 - **Deployment.** Not yet recorded as live. The worker part also needs a new pinned image; update this entry on release.
 
-## Not installed — scheduled public browser refresh (2 November 2026)
+## Installed `444a334` — scheduled public browser refresh (2 November 2026)
 
 - **Code.** `scripts/scheduled-refresh-public-browser.py` and three systemd units refresh the public browser when its image is 28 days old, retry refusals daily, prune dangling images and all build cache, and send the owner a Telegram notice on failure, or when still busy on day 35. `refresh-public-browser.py` now tags the previous images `:rollback`, because an untagged previous image was deleted by the next release's prune. See [public browser](public-browser.md#on-a-schedule).
-- **Measured.** A refresh adds at most about 3.2 GB, an upper bound because a release landed in the same window. Over 30 days there was no work from 20:00 to 00:59 UTC. A dangling prune will not reclaim most of the 12.47 GB Docker calls reclaimable.
+- **Measured.** One refresh added 3.44 GB in 5 minutes 59 seconds. The prune then freed 8.86 GB, leaving 31.30 GB used, and most of that was 7.47 GB of cache that had built up. Over 30 days there was no work from 20:00 to 00:59 UTC. A dangling prune does not reach the old tagged and digest-pinned images.
 - **Review.** Independent review (Claude Opus 5.5) requested changes on `8f8e0ff`, because damaged state stopped both the refresh and its notice and daily figures defeated the weekly limit, then approved `3d7ec13`.
-- **Deployment.** Pending. The scripts arrive by ordinary release and do nothing until the units are installed, which needs the owner's approval, followed by one `--now` run for the real disk figures.
+- **Release.** [PR 412](https://github.com/akhilvuputuri/chief-agent/pull/412) merged as `444a334`, and release run 41389044231 succeeded. With the owner's approval, the units were installed and the timer enabled, and one `--now` run passed under systemd. Both `:rollback` images started after the prune, and the services were healthy.
+- **Rollback.** See [rolling back a swap](public-browser.md#on-a-schedule). To stop the schedule, run `systemctl disable --now chief-public-browser-refresh.timer`.
+- **Pending:** a real timer refresh, in about 28 days, and a real failure notice. Telegram accepted the test notice, but its arrival was not checked from here.
 
 [Journal 149](journey/149-scheduled-browser-refresh.md).
 

@@ -1,6 +1,6 @@
-# Scheduled public browser refresh — built, not installed, 2 November 2026
+# Scheduled public browser refresh — live in `444a334`, 2 November 2026
 
-A daily timer refreshes the public browser once its image is 28 days old, retries refused runs the next day, prunes afterwards and sends the owner a Telegram notice on failure. The refresh now keeps a `:rollback` image, which it never did. Installing it and one measured run need the owner's approval. See [journal 149](journey/149-scheduled-browser-refresh.md).
+A daily timer refreshes the public browser once its image is 28 days old, retries refused runs the next day, prunes afterwards and sends the owner a Telegram notice on failure. The refresh now keeps a `:rollback` image, which it never did. One measured run added 3.44 GB, and its prune freed 8.86 GB. A real timer refresh and a real failure notice have not happened yet. See [journal 149](journey/149-scheduled-browser-refresh.md).
 
 # Drift detection in agentwatch — live and muted in `6409f9a`, 2 November 2026
 
