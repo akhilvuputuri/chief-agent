@@ -56,7 +56,9 @@ Status: tested with mocks, not installed. Installing it and the first measured r
 - **Age came from the tag.** A swap killed halfway left a new tag on an old browser, which would then read as not due for 28 days. Age now comes from the running container, and a stopped browser is reported even when not due.
 - **Smaller fixes.** A mistyped flag started a real run. The flag parser was stricter than Compose. A failed notice got one attempt, and now retries.
 
-Accepted, as low risk: after a swap killed halfway, the next refresh tags the never-run image `:rollback`, not the one that was running. A tick landing during a release's copy of `scripts/` can fail and may lose its notice, with the next day recovering; 6 of 200 recent releases started in these hours.
+Accepted, as low risk: after a swap killed halfway, the next refresh tags the never-run image `:rollback`, not the one that was running. A tick landing during a release's copy of `scripts/` can fail, and its notice retries once the script is back; 6 of 200 recent releases started in these hours. Alternating failures past day 35 can send a notice daily, since only the last reason is remembered.
+
+The delta review approved `3d7ec13`; its remaining items were low severity. The only later change corrects these docs.
 
 ## Verification and outcome
 
@@ -73,10 +75,14 @@ Each step needs the owner's approval:
    sudo systemd-run --wait --pipe --collect -p Environment=HOME=/root -p UMask=0077 python3 /opt/hermes-companion/scripts/scheduled-refresh-public-browser.py --now
    ```
 
-3. Start the kept image without a network, because `docker image inspect` would not show that the prune left its blobs intact:
+3. Start both kept images without a network, because `docker image inspect` would not show that the prune left their blobs intact:
 
    ```bash
    sudo docker run --rm --network=none --read-only --cap-drop=ALL --entrypoint chromium chief-public-browser:rollback --version
+   ```
+
+   ```bash
+   sudo docker run --rm --network=none --read-only --cap-drop=ALL --entrypoint node chief-public-browser-proxy:rollback --version
    ```
 
 4. Record the figures and this entry's release closure.

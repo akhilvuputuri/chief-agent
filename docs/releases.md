@@ -2,7 +2,8 @@
 
 - **Code.** `scripts/scheduled-refresh-public-browser.py` and three systemd units refresh the public browser when its image is 28 days old, retry refusals daily, prune dangling images and all build cache, and send the owner a Telegram notice on failure, or when still busy on day 35. `refresh-public-browser.py` now tags the previous images `:rollback`, because an untagged previous image was deleted by the next release's prune. See [public browser](public-browser.md#on-a-schedule).
 - **Measured.** A refresh adds at most about 3.2 GB, an upper bound because a release landed in the same window. Over 30 days there was no work from 20:00 to 00:59 UTC. A dangling prune will not reclaim most of the 12.47 GB Docker calls reclaimable.
-- **Review and deployment.** Pending. The scripts arrive by ordinary release and do nothing until the units are installed, which needs the owner's approval, followed by one `--now` run for the real disk figures.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `8f8e0ff`, because damaged state stopped both the refresh and its notice and daily figures defeated the weekly limit, then approved `3d7ec13`.
+- **Deployment.** Pending. The scripts arrive by ordinary release and do nothing until the units are installed, which needs the owner's approval, followed by one `--now` run for the real disk figures.
 
 [Journal 149](journey/149-scheduled-browser-refresh.md).
 
