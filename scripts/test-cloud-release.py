@@ -125,7 +125,7 @@ class ReleaseGuardTests(unittest.TestCase):
                     self.assertTrue(built)
                     self.assertEqual(pulled, [])
             if not running:
-                self.assertEqual(len(queries), 2)
+                self.assertEqual(len(queries), 3)
 
     def test_preparation_blocks_restart_even_without_a_runtime_run(self):
         self.scenario(pending=1)
