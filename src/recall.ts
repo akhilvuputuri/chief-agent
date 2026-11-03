@@ -10,6 +10,7 @@ import { isLearned } from "./memory.js";
 import { literal } from "./mail-index-store.js";
 import { EMBEDDING_MODEL, type Embedder } from "./mail-recall.js";
 import { errorFields, opsLog } from "./ops-log.js";
+import { memorySearched, type MemoryItemInput } from "./otel.js";
 
 const CHUNK_CHARS = 1500;
 const CHUNK_OVERLAP = 200;
@@ -243,6 +244,7 @@ export async function recall(
   limit = RECALL_RESULTS,
   signal?: AbortSignal,
 ) {
+  const startNs = BigInt(Date.now()) * 1_000_000n;
   // Postgres refuses NUL in a query parameter.
   const query = text.replaceAll("\0", "");
   let vector: Float32Array | undefined;
@@ -296,6 +298,8 @@ export async function recall(
   ).rows as Array<{ type: Hit["type"]; id: string }>;
   const hits = fuse(meaning, keywordMemories, keywordMessages);
   const results: Array<Record<string, unknown>> = [];
+  // The memory items found, for trace export: they reach the run's later model calls.
+  const found: MemoryItemInput[] = [];
   for (const hit of hits) {
     if (results.length >= limit) break;
     const ranks = {
@@ -310,15 +314,27 @@ export async function recall(
           [user, hit.id],
         )
       ).rows[0];
-      if (row)
-        results.push({
+      if (row) {
+        const result = {
           source: "memory",
           key: row.key,
           kind: row.kind,
           value: row.value,
           learned: isLearned(row),
           ...ranks,
+        };
+        results.push(result);
+        found.push({
+          key: row.key,
+          revisionId: hit.id,
+          kind: row.kind,
+          learned: result.learned,
+          characters: JSON.stringify(result).length,
+          value: row.value,
+          meaningRank: hit.meaningRank,
+          keywordRank: hit.keywordRank,
         });
+      }
       continue;
     }
     const row = (
@@ -340,6 +356,7 @@ export async function recall(
       });
   }
   const mode = vector ? "hybrid" : "keyword_only";
+  if (found.length) memorySearched(run, user, found, query, startNs);
   await event(db, user, run, "recall.searched", {
     mode,
     meaningCount: meaning.length,

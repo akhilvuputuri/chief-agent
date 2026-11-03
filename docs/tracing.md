@@ -36,7 +36,20 @@ A turn that fails before `Execution.finish` (for example while loading context) 
 
 A model span ends when `model.completed` or `model.failed` is recorded and starts `latencyMs` earlier, so its duration equals the journal's `latencyMs` exactly. Token counts and cost are copied from the OpenRouter `usage` object that `model.completed` records. The GenAI conventions define no cost attribute; `agentwatch.usage.cost_usd` is agentwatch's. Cache writes use `gen_ai.usage.cache_write.input_tokens`, the name after the conventions renamed `cache_creation` (semantic-conventions-genai changelog 440). Successful spans leave the status unset, as the conventions ask of instrumentation; failed ones set it to error.
 
-Not traced yet: Jev decisions and other direct model calls (`effort.ts`, `tool-picker.ts`, `shadow.ts`), embeddings, coding jobs and the learner. Spans of runs that are still open when the process stops are lost; their children then show as orphans.
+A run's span ID is derived from its run ID (as the backfill derives it), so a span in another trace can link to it.
+
+Not traced yet: Jev decisions and other direct model calls (`effort.ts`, `tool-picker.ts`, `shadow.ts`), embeddings and coding jobs. Spans of runs that are still open when the process stops are lost; their children then show as orphans.
+
+## Memory
+
+What Chief remembers and what each prompt held, as GenAI memory spans that agentwatch shows on its Memory page and on each model call ([agentwatch's design notes](https://github.com/akhilvuputuri/agentwatch/blob/main/docs/design.md#memory)):
+
+- **In context.** Once a run's request is final, a `search_memory` span on the run lists every item `MemoryStore.select` put in the prompt: owner facts, then learned facts and lessons within the budget. Each record carries its revision, kind, whether it was learned, and its size in characters as the selection measures it. `chief.memory.omitted` counts the learned items the budget left out. A responsibility investigation gets an empty one, as it gets no memories. Child agents get none.
+- **Found.** `memory_recall` adds a `search_memory` span for the memory items it returned, with their meaning and keyword ranks. Its results reach the run's later model calls through the tool result.
+- **Changed.** Every committed revision becomes `create_memory` (the first revision), `update_memory` (a later one, a rollback restore included) or `delete_memory` (a retirement), with `chief.memory.origin`, `chief.memory.trust` and `chief.memory.flags`. It joins the run that made it when this process traces that run: an owner's `memory_set`, or a learner run. Otherwise, as with a rollback or the legacy import, it is a trace of its own. A learner's change links to the root spans of the turns and runs it learned from (`turnRunIds` and `runIds`, at most 20).
+- **Learner runs** are traces of their own, `invoke_agent learner` or `invoke_agent procedures`, with a `chat` span for each model call (tokens, cost and, with content captured, the prompt it read) and the changes it applied.
+
+An item is the owner's store (`chief.memory.<hash of the owner>`) and the key. With content captured, the key and value go out as they are, scrubbed and capped like other content. Without it, the key goes out as a hash and the content as `null`, so agentwatch still knows what was in each prompt and how big it was, without the text. The hashes keep items apart and stable; they are not secret, since short keys can be guessed. Turning content capture on or off therefore changes an item's ID, and agentwatch shows the two as different items.
 
 ## Implicit feedback
 

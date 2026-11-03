@@ -1293,6 +1293,12 @@ export class Assistant {
       // Recorded once the request is final: a responsibility investigation gets none.
       const inContext = responsibility ? emptySelection : selection;
       await memoryStore.recordContext(user, run, inContext);
+      otel.memoryContext(
+        run,
+        user,
+        inContext.context,
+        inContext.omitted.length,
+      );
       await event(this.db, user, run, "memory.selected", {
         explicit: inContext.explicit.length,
         learned: inContext.learned.length,

@@ -176,6 +176,8 @@ Each run also keeps a private record in the Postgres `events` table, under the r
 - `learner.retry`: a response that finished with refusals, and how many, when it earned another turn.
 - `learner.applied`: what finally happened to each accepted item (`written` with its revision ID, `unchanged`, `absorbed`, `retired`, `skipped_owner_fact`, `skipped_not_learned`, `failed`).
 
+With trace export on, each run is also a trace in agentwatch, on the same host: its model calls with tokens and cost, and the memory changes it applied, linked to the turns they came from. With message content captured (on in production), the trace also holds the prompts the learner read and its replies. See [tracing](tracing.md#memory).
+
 A pre-empted run keeps its record, so a deferred attempt can be read too. The record is best effort: the memory tables are the ledger, so a failed insert logs `learner.trace_failed` and learning carries on. A model call that throws leaves no `learner.model_call`, only the failed run and its error class. Runs before this record existed left counts only. To read the latest run's proposals on the host:
 
 ```sql
