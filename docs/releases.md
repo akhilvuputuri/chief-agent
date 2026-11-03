@@ -2,7 +2,7 @@
 
 - **Code.** A procedure may run to 2,000 characters, and learned items get 30,000 characters of a turn's context. A refused malformed call says which field failed. A fact's word checks now flag instead of refusing; a value of framing words only, or one sharing no word with its quote, is still refused. An added number, negation, address, link or payment word is a warning flag. No prompt version, database or Compose change.
 - **Why.** On the first two nights, all 15 procedure refusals were over the 800-character limit, and 13 facts were refused by the word checks, most of them well worded. See [journal 130](journey/130-nightly-learner.md#first-two-nights-of-procedures-and-refusals-become-flags--2026-11-03).
-- **Review.** Independent review (Claude Opus 5.5) requested changes on `4492e8b`: long procedures were cut to 1,000 characters when shown for revision, invented recipients saved with routine flags only, and the exfiltration pattern missed "shared". All fixed.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `4492e8b`: long procedures were cut to 1,000 characters when shown for revision, invented recipients saved with routine flags only, and the exfiltration pattern missed "shared". All fixed, and it approved `a739ab6` and `67a5d90`. Its remaining low notes: file names also raise the contact warning, and a few phrasings ("the PIN on the card", a spaced-out " . ") are not caught.
 - **Deployment.** Not yet recorded as live; update this entry on release.
 
 ## Coding reviewer back to Claude Opus 5.5 (3 November 2026)
