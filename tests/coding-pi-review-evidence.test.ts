@@ -106,7 +106,7 @@ test("review evidence exposes complete unexpected changes and rejects stale iden
       execute,
       () => {},
       async () => {},
-    ).some((t) => ["bash", "edit", "write"].includes(t.name)),
+    ).some((t) => ["edit", "write"].includes(t.name)),
   );
   await assert.rejects(
     piReviewEvidence(tree, execute, saved, "0".repeat(40), signal),

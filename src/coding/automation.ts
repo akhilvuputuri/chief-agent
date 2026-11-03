@@ -9,6 +9,7 @@ import {
   MergeRefused,
   approvedArtifact,
   hardStopMergePath,
+  operatorSteps,
   protectedMergePath,
   type MergeTarget,
   type PrAutomationRepository,
@@ -258,6 +259,18 @@ export class CodingAutomation {
     );
     if (!changed.rows.length) throw new StageChanged();
   }
+  /** Fix requests the owner sent through Chief for this PR, handled like review feedback. */
+  private async ownerRequests(j: CodingJob) {
+    return (
+      await this.db.query(
+        "SELECT id,payload->>'text' AS text FROM coding_events WHERE job_id=$1 AND event_key LIKE 'owner-feedback:%' AND NOT payload ? 'deliveredRound' ORDER BY created_at,id",
+        [j.id],
+      )
+    ).rows.map((r: { id: string; text: string }) => ({
+      id: `owner:${r.id}`,
+      text: `Owner request: ${r.text}`,
+    }));
+  }
   /** Keeps one answerable card for the current revision/head; lost or expired answers are re-offered. */
   private async offerMergeCard(j: CodingJob, d: Record) {
     const cards = (
@@ -292,7 +305,10 @@ export class CodingAutomation {
     const guarded = paths.filter(
       (p) => protectedMergePath(p) && !shipped.includes(p),
     );
+    const steps = operatorSteps(paths);
     const warning = `${
+      steps.length ? `\n\n**Before merging:** ${steps.join("; ")}.` : ""
+    }${
       guarded.length
         ? `\n\n**Protected files changed** (Chief's own controls; review them before approving): ${list(guarded)}.`
         : ""
@@ -452,14 +468,6 @@ export class CodingAutomation {
         return;
       }
       const paths = j.result.checkpoint.files.map((f) => f.path);
-      if (paths.some(hardStopMergePath)) {
-        await this.manual(
-          j,
-          d,
-          "This PR changes database migrations, Compose, environment files or CI workflows; those need an operator rollout or review on GitHub.",
-        );
-        return;
-      }
       // Protected paths merge only through the owner's Merge card, which names them.
       if (!ownerMerge && paths.some(protectedMergePath)) {
         await this.manual(
@@ -502,7 +510,10 @@ export class CodingAutomation {
         );
         return;
       }
-      const feedback = i.feedback.filter((f) => !d.handled.includes(f.id));
+      const owner = await this.ownerRequests(j);
+      const feedback = [...owner, ...i.feedback].filter(
+        (f) => !d.handled.includes(f.id),
+      );
       if (feedback.length) {
         // Owner-approved: each Pi owner-merge round gets its own active window; totals stay shared.
         const freshRound = j.settings.prWorkflow === "owner_merge";
@@ -569,11 +580,17 @@ export class CodingAutomation {
             mrFeedback: { round, text },
           };
         const handled = [...d.handled, ...batch.map((f) => f.id)];
+        // An owner request is sent once: a retried or resumed round starts with no handled
+        // list, and the request must not be fixed (and charged) again. It is marked in the
+        // requeue's own statement, so a round that never starts leaves it undelivered.
+        const sent = batch
+          .filter((f) => f.id.startsWith("owner:"))
+          .map((f) => f.id.slice("owner:".length));
         const fingerprint = createHash("sha256")
           .update(JSON.stringify(handled))
           .digest("hex");
         await this.db.query(
-          `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='MR feedback returned to leader/coder; fresh independent review is required',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision), budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$5::jsonb,'remainingMs',$6::bigint),'suppressed' FROM changed RETURNING job_id), revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$7,$8,'implement' FROM changed RETURNING job_id) INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$7,jsonb_build_object('summary','MR feedback returned to coder; candidate approval is invalidated until fresh checks and review.') FROM changed ON CONFLICT DO NOTHING`,
+          `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='MR feedback returned to leader/coder; fresh independent review is required',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision), budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$5::jsonb,'remainingMs',$6::bigint),'suppressed' FROM changed RETURNING job_id), revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$7,$8,'implement' FROM changed RETURNING job_id), delivered AS (UPDATE coding_events SET payload=payload || jsonb_build_object('deliveredRound',$10::int) WHERE job_id IN (SELECT id FROM changed) AND id=ANY($11::uuid[]) RETURNING job_id) INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$7,jsonb_build_object('summary','MR feedback returned to coder; candidate approval is invalidated until fresh checks and review.') FROM changed ON CONFLICT DO NOTHING`,
           [
             j.id,
             j.lease,
@@ -584,6 +601,8 @@ export class CodingAutomation {
             `mr-feedback:${fingerprint}`,
             text,
             j.stage,
+            round,
+            sent,
           ],
         );
         return;
@@ -616,6 +635,16 @@ export class CodingAutomation {
               ? "Waiting for the reviewer to resolve outstanding GitHub threads; merge remains blocked."
               : "Waiting for exact-head CI, Devin and mergeability.",
           );
+        return;
+      }
+      // A stop for operator work comes last, after review feedback and CI, so the owner's
+      // fixes and Devin's still reach the coder first.
+      if (paths.some(hardStopMergePath)) {
+        await this.manual(
+          j,
+          d,
+          `Review, CI and feedback are done. Chief does not merge this change; a person needs to ${operatorSteps(paths).join("; ") || "review the database, Compose, environment or workflow change and merge it on GitHub"}.`,
+        );
         return;
       }
       if (
@@ -679,7 +708,9 @@ export class CodingAutomation {
         return;
       }
       if (
-        final.feedback.some((f) => !d.handled.includes(f.id)) ||
+        [...(await this.ownerRequests(j)), ...final.feedback].some(
+          (f) => !d.handled.includes(f.id),
+        ) ||
         final.checks !== "passed" ||
         final.mergeable !== true ||
         (final.unresolvedThreads ?? 0) > 0

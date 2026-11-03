@@ -131,6 +131,20 @@ export const checkpoint = z
           .regex(/^[a-f0-9]{64}$/)
           .optional(),
         findings: z.string().max(reportLimits.document).optional(),
+        /** What the reviewer's check of the plan against the owner's request found. */
+        planCheck: z
+          .object({
+            status: z.enum([
+              "passed",
+              "revised",
+              "revised_unchecked",
+              "gaps",
+              "unavailable",
+            ]),
+            gaps: z.string().max(reportLimits.document).optional(),
+          })
+          .strict()
+          .optional(),
         /** Untrusted merge-request feedback for one owner-merge repair round. */
         mrFeedback: z
           .object({
@@ -264,6 +278,8 @@ export const codingSettings = z
     agentGit: z.boolean().optional(),
     /** Host-only operator switch (default on): re-queue a job once after a classified transient pause. */
     autoRetryTransientOnce: z.boolean().optional(),
+    /** Pi: the reviewer checks the plan against the owner's request before the Start card. */
+    planCheck: z.boolean().optional(),
     limits: z
       .object({
         ms: z.number().int().positive().max(14_400_000),
