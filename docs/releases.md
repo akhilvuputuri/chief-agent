@@ -1,3 +1,9 @@
+## Fixes reach an open coding PR (4 November 2026)
+
+- **Code.** The owner's fix requests on an open owner-merge PR go to its next feedback round. Database, Compose, environment and workflow changes stop only after review feedback and CI, and the stop names what is left for a person. A test fails migrations without their Compose line and rollout script. No database or Compose change.
+- **Why.** Nobody could fix PR 416 through Chief. See [journal 152](journey/152-fixes-reach-an-open-pr.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Coding reviewer back to Claude Opus 5.5 (3 November 2026)
 
 - **Configuration.** `config/coding-pi.json` and `config/coding.json` return the coding reviewer to `anthropic/claude-opus-5.5`. DeepSeek V4.1 Flash 1017 stays the planner and coder. New jobs only.

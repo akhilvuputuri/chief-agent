@@ -195,7 +195,7 @@ test("tokens for attempts that stopped without finishing are revoked by the swee
   assert.deepEqual(tokens.revoked, [issued.token]);
 });
 
-test("replying to an owner-merge job that already has a PR is a validation error with guidance, and status shows its flow", async (t) => {
+test("replying to an owner-merge job that already has a PR asks for changes on that PR, and status shows its flow", async (t) => {
   const f = await fixture(t);
   const { c } = controller(f);
   const job = await runningJob(f, c, "agent-pr-ready");
@@ -203,42 +203,35 @@ test("replying to an owner-merge job that already has a PR is a validation error
     "UPDATE coding_jobs SET state='pr_ready',stage='awaiting_ci',cleanup='complete' WHERE id=$1",
     [job.id],
   );
-  await assert.rejects(
+  const request = async (requestKey: string) =>
     c.call("a", f.run, {
       operation: "coding_reply",
       id: job.id,
       baseRevision: job.revision,
-      requestKey: "rebase-please",
-      message: "Rebase it",
-    }),
-    (error: Error) => {
-      assert(error instanceof ToolValidationError);
-      assert.match(error.message, /continues on its own/);
-      return true;
-    },
+      requestKey,
+      message: "Rename the heading",
+    });
+  await request("rename-please");
+  const saved = await f.db.query(
+    "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='owner-feedback:rename-please'",
+    [job.id],
   );
+  assert.equal(saved.rows[0].payload.text, "Rename the heading");
+  assert.equal((await f.row(job.id)).stage, "awaiting_ci");
   await f.db.query(
     "UPDATE coding_jobs SET stage='manual_review',summary='Main moved again after two automatic rebases; inspect before merging.' WHERE id=$1",
     [job.id],
   );
-  await assert.rejects(
-    c.call("a", f.run, {
-      operation: "coding_reply",
-      id: job.id,
-      baseRevision: job.revision,
-      requestKey: "rebase-please-2",
-      message: "Rebase it",
-    }),
-    (error: Error) => {
-      assert(error instanceof ToolValidationError);
-      assert.match(
-        error.message,
-        /stopped for owner attention \(Main moved again/,
-      );
-      assert.match(error.message, /use coding_resume on this job/);
-      return true;
-    },
-  );
+  await request("rename-please-2");
+  assert.equal((await f.row(job.id)).stage, "awaiting_ci");
+  await f.db.query("UPDATE coding_jobs SET stage='deployed' WHERE id=$1", [
+    job.id,
+  ]);
+  await assert.rejects(request("rename-please-3"), (error: Error) => {
+    assert(error instanceof ToolValidationError);
+    assert.match(error.message, /can no longer change/);
+    return true;
+  });
   const status: any = await c.call("a", f.run, {
     operation: "coding_status",
     id: job.id,
