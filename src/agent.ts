@@ -1293,12 +1293,24 @@ export class Assistant {
       // Recorded once the request is final: a responsibility investigation gets none.
       const inContext = responsibility ? emptySelection : selection;
       await memoryStore.recordContext(user, run, inContext);
-      otel.memoryContext(
-        run,
-        user,
-        inContext.context,
-        inContext.omitted.length,
-      );
+      if (otel.tracingEnabled())
+        try {
+          const ids = await memoryStore.traceIdentities(
+            user,
+            inContext.context.map((c) => c.key),
+          );
+          otel.memoryContext(
+            run,
+            ids.store,
+            inContext.context.map((c) => ({
+              ...c,
+              itemId: ids.items.get(c.key) ?? c.revisionId,
+            })),
+            inContext.omitted.length,
+          );
+        } catch {
+          /* Tracing is not the action ledger. */
+        }
       await event(this.db, user, run, "memory.selected", {
         explicit: inContext.explicit.length,
         learned: inContext.learned.length,

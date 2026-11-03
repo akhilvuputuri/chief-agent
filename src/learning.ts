@@ -669,9 +669,11 @@ export class Learner {
     await event(this.db, user, run, "learner.started", { learnerRun: id });
     // Its own trace in agentwatch: model calls, cost and the memory it wrote.
     otel.runStarted(run);
+    // Its own service, so its calls stay out of the turns' cost, error and latency monitors.
     otel.runAgent(
       run,
       version === PROCEDURE_PROMPT_VERSION ? "procedures" : "learner",
+      "chief-learner",
     );
     const finish = async (
       state: "completed" | "failed" | "deferred",

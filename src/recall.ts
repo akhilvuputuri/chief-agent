@@ -6,11 +6,10 @@
 import { event, type Database } from "./db.js";
 import { transaction } from "./db-transaction.js";
 import { conversational } from "./history.js";
-import { isLearned } from "./memory.js";
+import { isLearned, MemoryStore, type DescribedItem } from "./memory.js";
 import { literal } from "./mail-index-store.js";
 import { EMBEDDING_MODEL, type Embedder } from "./mail-recall.js";
 import { errorFields, opsLog } from "./ops-log.js";
-import { memorySearched, type MemoryItemInput } from "./otel.js";
 
 const CHUNK_CHARS = 1500;
 const CHUNK_OVERLAP = 200;
@@ -299,7 +298,7 @@ export async function recall(
   const hits = fuse(meaning, keywordMemories, keywordMessages);
   const results: Array<Record<string, unknown>> = [];
   // The memory items found, for trace export: they reach the run's later model calls.
-  const found: MemoryItemInput[] = [];
+  const found: DescribedItem[] = [];
   for (const hit of hits) {
     if (results.length >= limit) break;
     const ranks = {
@@ -356,7 +355,7 @@ export async function recall(
       });
   }
   const mode = vector ? "hybrid" : "keyword_only";
-  if (found.length) memorySearched(run, user, found, query, startNs);
+  await new MemoryStore(db).traceRead(user, run, found, startNs, query);
   await event(db, user, run, "recall.searched", {
     mode,
     meaningCount: meaning.length,

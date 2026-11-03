@@ -2481,6 +2481,15 @@ test("with trace export on, a learner run is its own trace: model calls and the 
   } finally {
     await otel.stopTracing(1000);
   }
+  // The learner is its own service, so turns' monitors do not count its calls.
+  const services = bodies.flatMap((body) =>
+    JSON.parse(body).resourceSpans.map(
+      (r: any) =>
+        r.resource.attributes.find((a: any) => a.key === "service.name").value
+          .stringValue,
+    ),
+  );
+  assert.deepEqual([...new Set(services)], ["chief-learner"]);
   const spans = bodies.flatMap(
     (body) => JSON.parse(body).resourceSpans[0].scopeSpans[0].spans,
   ) as Array<{
@@ -2511,4 +2520,44 @@ test("with trace export on, a learner run is its own trace: model calls and the 
   assert.deepEqual(created.links, [
     { traceId: taskRun.replaceAll("-", ""), spanId: otel.runSpanId(taskRun) },
   ]);
+});
+
+test("a learner model call that fails ends its span and the run's with an error", async (t) => {
+  const db = await setup(t);
+  await task(db, {
+    ownerSays: ["I always prefer aisle seats on long flights, please."],
+  });
+  const adapter: ModelAdapter = {
+    generate: async () => {
+      throw new Error("provider down");
+    },
+  };
+  const bodies: string[] = [];
+  otel.startTracing({
+    endpoint: "http://collector/v1/traces",
+    fetch: (async (_url: unknown, init?: RequestInit) => {
+      bodies.push(String(init?.body));
+      return new Response("{}");
+    }) as typeof fetch,
+    intervalMs: 60_000,
+  });
+  try {
+    await learner(db, adapter).tick("owner");
+  } finally {
+    await otel.stopTracing(1000);
+  }
+  const spans = bodies.flatMap(
+    (body) => JSON.parse(body).resourceSpans[0].scopeSpans[0].spans,
+  ) as Array<{ name: string; status?: { code: number }; attributes: any[] }>;
+  const errorType = (s: { attributes: any[] }) =>
+    s.attributes.find((a) => a.key === "error.type")?.value.stringValue;
+  assert.deepEqual(
+    spans.map((s) => [s.name.split(" ")[0], s.status?.code, errorType(s)]),
+    [
+      ["chat", 2, "Error"],
+      ["invoke_agent", 2, "failed"],
+    ],
+  );
+  // The error's message is not exported.
+  assert.ok(!bodies.join("").includes("provider down"));
 });

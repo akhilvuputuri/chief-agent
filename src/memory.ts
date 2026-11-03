@@ -9,6 +9,8 @@ import type { Database } from "./db.js";
 import { transaction } from "./db-transaction.js";
 import {
   memoryChanged,
+  memorySearched,
+  tracingEnabled,
   type MemoryChange,
   type MemoryItemInput,
 } from "./otel.js";
@@ -73,8 +75,15 @@ export interface MemorySelection {
   flagged: number;
   chars: number;
   /** Each item in context, with its revision and size, for trace export. */
-  context: MemoryItemInput[];
+  context: DescribedItem[];
 }
+
+/** An item as trace export describes it, before its opaque ID is looked up. */
+export type DescribedItem = Omit<MemoryItemInput, "itemId">;
+
+/** Owners' store tokens by database: an owner's first revision never changes. */
+const storeTokens = new WeakMap<Database, Map<string, string>>();
+const MAX_STORE_TOKENS = 100;
 
 export interface RollbackFilter {
   learnerRun?: string;
@@ -186,7 +195,7 @@ export class MemoryStore {
         flags,
       });
     });
-    exported(user, saved.change);
+    await this.exported(user, [saved.change]);
     return saved;
   }
 
@@ -224,7 +233,7 @@ export class MemoryStore {
         flags: [],
       });
     });
-    if (retired) exported(user, retired.change);
+    if (retired) await this.exported(user, [retired.change]);
     return retired;
   }
 
@@ -245,7 +254,7 @@ export class MemoryStore {
       !filter.kind
     )
       throw new ToolValidationError("A rollback needs at least one filter");
-    const changes: MemoryChange[] = [];
+    const changes: Omit<MemoryChange, "itemId">[] = [];
     // Only the learner's own revisions match. Restored copies resolve to their original.
     const matches = (r: MemoryRevision) =>
       r.origin === "learned" &&
@@ -339,7 +348,7 @@ export class MemoryStore {
       }
       return { undone: matched, restored, retired };
     });
-    for (const change of changes) exported(user, change);
+    await this.exported(user, changes);
     return result;
   }
 
@@ -408,7 +417,7 @@ export class MemoryStore {
     const items = await this.active(user);
     const explicit: MemorySelection["explicit"] = [];
     const candidates: MemoryRevision[] = [];
-    const context: MemoryItemInput[] = [];
+    const context: DescribedItem[] = [];
     const described = (r: MemoryRevision, characters: number) => ({
       key: r.key,
       revisionId: r.id,
@@ -561,7 +570,7 @@ export class MemoryStore {
         imported++;
         return saved;
       });
-      if (appended) exported(row.user_id, appended.change);
+      if (appended) await this.exported(row.user_id, [appended.change]);
     }
     const missing = await this.db.query(
       `INSERT INTO memories(user_id,key,value)
@@ -696,16 +705,94 @@ export class MemoryStore {
         flags,
         learned: isLearned(r),
         source: r.source,
-      } satisfies MemoryChange,
+      } satisfies Omit<MemoryChange, "itemId">,
     };
   }
-}
 
-/** Sends a committed change to trace export; never fails the write it reports. */
-function exported(user: string, change: MemoryChange) {
-  try {
-    memoryChanged(user, change);
-  } catch {
-    /* Tracing is not the action ledger. */
+  /**
+   * Opaque IDs for trace export, taken from the data rather than derived from text, so a
+   * key cannot be recovered from them: the owner's first revision ID names their store, and
+   * each key's first revision ID names its item. Both are random UUIDs.
+   */
+  async traceIdentities(user: string, keys: string[]) {
+    const tokens = storeTokens.get(this.db) ?? new Map<string, string>();
+    storeTokens.set(this.db, tokens);
+    let store = tokens.get(user);
+    if (store === undefined) {
+      const first = (
+        await this.db.query(
+          "SELECT id FROM memory_revisions WHERE user_id=$1 ORDER BY created_at,id LIMIT 1",
+          [user],
+        )
+      ).rows[0]?.id as string | undefined;
+      store = first ? first.replaceAll("-", "").slice(0, 16) : "none";
+      if (first) {
+        if (tokens.size >= MAX_STORE_TOKENS) tokens.clear();
+        tokens.set(user, store);
+      }
+    }
+    const items = new Map<string, string>();
+    if (keys.length)
+      for (const row of (
+        await this.db.query(
+          "SELECT key,id FROM memory_revisions WHERE user_id=$1 AND revision=1 AND key=ANY($2::text[])",
+          [user, [...new Set(keys)]],
+        )
+      ).rows)
+        items.set(row.key, row.id);
+    return { store, items };
+  }
+
+  /**
+   * Reports items a tool returned to a run (memory_recall, memory_list) as a search_memory
+   * span: they reach the run's later model calls. Never fails the tool.
+   */
+  async traceRead(
+    user: string,
+    run: string,
+    items: DescribedItem[],
+    startNs: bigint,
+    query?: string,
+  ) {
+    if (!items.length || !tracingEnabled()) return;
+    try {
+      const ids = await this.traceIdentities(
+        user,
+        items.map((i) => i.key),
+      );
+      memorySearched(
+        run,
+        ids.store,
+        items.map((i) => ({
+          ...i,
+          itemId: ids.items.get(i.key) ?? i.revisionId,
+        })),
+        startNs,
+        query,
+      );
+    } catch {
+      /* Tracing is not the action ledger. */
+    }
+  }
+
+  /** Sends committed changes to trace export; never fails the write it reports. */
+  private async exported(
+    user: string,
+    changes: Omit<MemoryChange, "itemId">[],
+  ) {
+    if (!changes.length || !tracingEnabled()) return;
+    try {
+      const ids = await this.traceIdentities(
+        user,
+        changes.map((c) => c.key),
+      );
+      for (const change of changes)
+        memoryChanged(ids.store, {
+          ...change,
+          itemId: ids.items.get(change.key) ?? change.revisionId,
+        });
+    } catch {
+      /* Tracing is not the action ledger. */
+    }
   }
 }
