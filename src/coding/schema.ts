@@ -131,6 +131,14 @@ export const checkpoint = z
           .regex(/^[a-f0-9]{64}$/)
           .optional(),
         findings: z.string().max(reportLimits.document).optional(),
+        /** What the reviewer's check of the plan against the owner's request found. */
+        planCheck: z
+          .object({
+            status: z.enum(["passed", "revised", "gaps", "unavailable"]),
+            gaps: z.string().max(reportLimits.document).optional(),
+          })
+          .strict()
+          .optional(),
         /** Untrusted merge-request feedback for one owner-merge repair round. */
         mrFeedback: z
           .object({

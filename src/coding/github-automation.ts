@@ -277,7 +277,7 @@ export class GitHubAutomation implements PrAutomationRepository {
       )
     )
       await this.api(`issues/${this.number(t)}/comments`, "POST", {
-        body: `${marker}\n\nIndependent squad reviewer: ${model}. APPROVE of artifact ${artifact}; Chief verified the published Git tree ${t.tree} matches the reviewed candidate. The coder and reviewer used separate contexts and read-only review tools. Required GitHub checks remain a separate merge gate. Private findings and source context are not copied here.${handledFeedback.length ? `\n\nChief feedback response: the squad rechecked this candidate against ${handledFeedback.length} collected MR feedback item(s). Reviewer approval is recorded above; external reviewers may still require their own recheck.` : ""}`,
+        body: `${marker}\n\nIndependent squad reviewer: ${model}. APPROVE of artifact ${artifact}; Chief verified the published Git tree ${t.tree} matches the reviewed candidate. The coder and reviewer used separate contexts, and the reviewer could not change the candidate. Required GitHub checks remain a separate merge gate. Private findings and source context are not copied here.${handledFeedback.length ? `\n\nChief feedback response: the squad rechecked this candidate against ${handledFeedback.length} collected MR feedback item(s). Reviewer approval is recorded above; external reviewers may still require their own recheck.` : ""}`,
       });
   }
   async merge(t: MergeTarget) {

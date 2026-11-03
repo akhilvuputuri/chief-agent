@@ -368,6 +368,7 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
         input.messages.find((m: any) => m.role === "system")?.content ?? "";
       // The longer review contract can push this small fixture window into compaction.
       if (
+        selected === settings.reviewerModel &&
         String(system).startsWith("You are a context summarization assistant")
       )
         return {
