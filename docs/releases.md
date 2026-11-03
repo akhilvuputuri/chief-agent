@@ -1,3 +1,9 @@
+## Worker image with failure-hunting review, and the plan check on (4 November 2026)
+
+- **Configuration.** New coding jobs pin worker image `sha256:c7cec104…`, built from `f70dade` (PRs 419 and 420), and `config/coding-pi.json` turns on `planCheck`. The previous image moves to `previousImages`.
+- **Effect.** The reviewer hunts for failures and may test in its own checkout; the plan is checked against the request before a one-tap Start card. See [journal 151](journey/151-review-that-looks-for-failures.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Fixes reach an open coding PR (4 November 2026)
 
 - **Code.** The owner's fix requests on an open owner-merge PR go to its next feedback round. Database, Compose, environment and workflow changes stop only after review feedback and CI, and the stop names what is left for a person. A test fails migrations without their Compose line and rollout script. No database or Compose change.
