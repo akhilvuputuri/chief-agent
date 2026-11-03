@@ -157,7 +157,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1 November | [148 — Public browser agent](148-public-browser-agent.md): can Chief use an open browser without exposing the owner's data? | Confinement probe passes on arm64 and in x86-64 CI; not deployed |
 | 2 November | [149 — Scheduled browser refresh](149-scheduled-browser-refresh.md): how does a browser that runs hostile scripts stay patched without anyone remembering? | Live in `444a334`: a daily timer refreshes at 28 days, retries refusals and tells the owner on failure; the refresh now keeps `:rollback`. One measured run added 3.44 GB |
 | 2 November | [150 — Coding through gateway restarts](150-coding-through-gateway-restarts.md): can a coding job survive a gateway restart? | Tested on synthetic jobs; release pending. Workers retry, a restart-cut call is recorded, and exit codes name the failure |
-| 4 November | [151 — Memory transparency](151-memory-transparency.md): can the owner see what Chief remembers, where each item came from, and what each prompt held? | In progress: agentwatch#20 and the Chief export under review. |
+| 4 November | [153 — Memory transparency](153-memory-transparency.md): can the owner see what Chief remembers, where each item came from, and what each prompt held? | In progress: agentwatch#20 and the Chief export under review. |
 
 ## Coding-agent learning path
 
