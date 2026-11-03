@@ -1,3 +1,9 @@
+## Coding reviewer back to Claude Opus 5.5 (3 November 2026)
+
+- **Configuration.** `config/coding-pi.json` and `config/coding.json` return the coding reviewer to `anthropic/claude-opus-5.5`. DeepSeek V4.1 Flash 1017 stays the planner and coder. New jobs only.
+- **Why.** DeepSeek approved its own study-links change (PR 416) in one round. An independent Opus review then found five blocking bugs and a missing migration rollout. See the [coding-agent lessons](journey/coding-agent-lessons.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Worker image that survives gateway restarts (2 November 2026)
 
 - **Configuration.** New coding jobs pin worker image `sha256:e3aa876d…`, built from `fd7b16d`, which carries the restart fixes in [journal 150](journey/150-coding-through-gateway-restarts.md). The previous image moves to `previousImages`, so paused jobs can still resume on it. The baked box image still holds the previous digest until its next weekly build, so the first boxes pull this one.
