@@ -12,6 +12,14 @@ Only the allowed owner can confirm the exact delivered brief using its **Start**
 
 An approval covers what the owner read: the objective, context and plan, for that job. It does not cover who carries them out or where they start. Models, limits, the worker image and the base commit can differ without a new approval. If the requirements text changes, the owner approves again. Merge rules are enforced at the merge gate and the Merge card, not through this approval. Approvals recorded before 31 October 2026 also hashed the base commit and settings. They stay valid while those are unchanged, and a settings change through `coding_job_update` carries them to the new scope.
 
+### Changes to an open PR, and what is left for a person
+
+Since 4 November 2026 ([journal 152](journey/152-fixes-reach-an-open-pr.md)):
+
+- The owner can ask Chief for fixes on an owner-merge job whose PR is open: `coding_reply` adds the request to the PR's next review-feedback round. The coder fixes it on the same PR within the approved scope, then checks, review and the Merge card run again. A stopped PR returns to automatic checks; a PR still in checks takes the request in its next round. A request is refused up front when a round could not deliver it: after three rounds, past the job's allowance, past 200 handled items, or when it and the requests already waiting exceed 7,000 characters. A request is marked delivered in the same statement that starts its round, so a round that never starts leaves it for the next one. A PR stopped for over a day needs the owner's explicit say-so. A merged or finished PR cannot change.
+- A PR that changes database migrations, Compose, environment files or workflows no longer stops before review feedback. It is marked ready, Devin and CI run, feedback is fixed, and only then does it stop. The stop says Chief will not merge it and names what is left for a person, such as "merge it on GitHub and right away run the database rollout for 036_x.sql". The Merge card names the same steps for other changes, such as running `kite run eval:picker` after a tool-picker change.
+- `tests/migration-rollout.test.ts` fails any migration without its `compose.yaml` line. From 032 it also fails one without a `scripts/deploy-*.py` rollout script that names it as `MIGRATION`, and that script's test. Coding jobs run it in `kite run check`, so a coder has to add the rollout pieces before review.
+
 ### Planning, review and the Start card
 
 The owner taps **Start** on a short card and does not read the plan, so the pipeline checks it instead. Introduced 4 November 2026 after PR 416 ([journal 151](journey/151-review-that-looks-for-failures.md)):

@@ -702,6 +702,12 @@ export class CodingController {
       )
     ).rows[0];
     if (!job) throw new Error("Coding job unavailable");
+    if (
+      a.operation === "coding_reply" &&
+      job.state === "pr_ready" &&
+      job.settings.prWorkflow === "owner_merge"
+    )
+      return this.requestPrChanges(user, job, a);
     if (a.operation === "coding_reply" && a.mode === "implement")
       throw new ToolValidationError(
         "Implementation requires confirmed requirements. Use coding_resume to request the confirmation card, or coding_reply in plan mode to revise requirements.",
@@ -1033,6 +1039,119 @@ export class CodingController {
       );
     opsLog("coding.settings_changed", "info", { ref: job.id });
     return this.status(user, a.id);
+  }
+  /**
+   * The owner asks for changes to an open owner-merge PR. The request joins the PR's next
+   * review-feedback round, so the coder fixes it on the same PR within the approved scope,
+   * and the PR returns to checks, review and the Merge card. A merged or finished PR
+   * cannot change.
+   */
+  private async requestPrChanges(
+    user: string,
+    job: CodingJob,
+    a: Extract<CodingAction, { operation: "coding_reply" }>,
+  ) {
+    const key = `owner-feedback:${a.requestKey}`;
+    const prior = (
+      await this.db.query(
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
+        [job.id, key],
+      )
+    ).rows[0];
+    if (prior) {
+      if (prior.payload.text !== a.message)
+        throw new ToolValidationError("Coding revision request key conflict");
+      return this.status(user, job.id);
+    }
+    const parked = [
+      "awaiting_merge_approval",
+      "merge_approved",
+      "manual_review",
+      "merge_declined",
+    ];
+    const open = ["pr_ready", "readying", "awaiting_ci", ...parked];
+    if (!open.includes(job.stage))
+      throw new ToolValidationError(
+        `This job's PR is ${job.stage.replaceAll("_", " ")} and can no longer change. Start a new coding job for further changes.`,
+      );
+    if (job.revision !== a.baseRevision)
+      throw new ToolValidationError(
+        "Coding revision changed; read coding_status and retry with the current revision",
+      );
+    // Refuse now what the feedback round could never deliver, rather than park the PR on it.
+    const handled =
+      (
+        await this.db.query(
+          "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
+          [job.id, `automation:${job.revision}`],
+        )
+      ).rows[0]?.payload?.handled?.length ?? 0;
+    // Requests already waiting share the next round with this one.
+    const waiting = (
+      await this.db.query(
+        "SELECT payload->>'text' AS text FROM coding_events WHERE job_id=$1 AND event_key LIKE 'owner-feedback:%' AND NOT payload ? 'deliveredRound'",
+        [job.id],
+      )
+    ).rows.map((r: { text: string }) => r.text);
+    const queuedLength = waiting.reduce((n, text) => n + text.length + 20, 0);
+    const refusal =
+      a.message.length > 7000
+        ? "The request is too long for one feedback round; shorten it to under 7,000 characters"
+        : queuedLength + a.message.length > 7000
+          ? "Earlier requests already fill the next round of fixes; send this after that round, or shorten it"
+          : (job.checkpoint.piState?.mrFeedback?.round ?? 0) >= 3
+            ? "This PR has already had three rounds of fixes, so it cannot take another; start a new coding job for further changes"
+            : job.used_models >= job.settings.limits.models ||
+                (job.checkpoint.piState?.toolsUsed ?? 0) >=
+                  job.settings.limits.tools
+              ? "This job has used its model or tool allowance, so it cannot take another round of fixes; start a new coding job"
+              : handled + waiting.length >= 200
+                ? "This PR has handled too much feedback to take more; start a new coding job"
+                : undefined;
+    if (refusal) throw new ToolValidationError(`Nothing changed: ${refusal}.`);
+    if (parked.includes(job.stage))
+      await this.assertFreshOrConfirmed(
+        job,
+        a,
+        `state='pr_ready' AND stage=ANY(ARRAY['${parked.join("','")}'])`,
+      );
+    const merged = (
+      await this.db.query(
+        "SELECT 1 FROM coding_events WHERE job_id=$1 AND event_key LIKE 'automation:%' AND payload ? 'mergeSha' LIMIT 1",
+        [job.id],
+      )
+    ).rows.length;
+    if (merged)
+      throw new ToolValidationError(
+        "This job's PR already merged, so it cannot change. Start a new coding job for further changes.",
+      );
+    const recorded = await this.db.query(
+      `WITH changed AS (
+        UPDATE coding_jobs SET stage=CASE WHEN stage=ANY($5::text[]) THEN 'awaiting_ci' ELSE stage END,
+          summary=CASE WHEN stage=ANY($5::text[]) THEN 'The owner asked for changes; the coder will fix them on this PR, then checks and review run again' ELSE summary END,
+          updated_at=now()
+        WHERE id=$1 AND user_id=$2 AND state='pr_ready' AND revision=$3 AND stage=$4 AND (lease IS NULL OR lease_until<now()) RETURNING id
+      ), waits AS (
+        UPDATE coding_events SET payload=jsonb_set(payload,'{waitingSince}',to_jsonb($8::text))
+        WHERE job_id IN (SELECT id FROM changed) AND event_key='automation:'||$3::int AND $4=ANY($5::text[]) RETURNING job_id
+      ) INSERT INTO coding_events(job_id,event_key,payload,delivery)
+        SELECT id,$6,jsonb_build_object('kind','owner_feedback','text',$7::text,'revision',$3::int),'suppressed' FROM changed RETURNING job_id`,
+      [
+        job.id,
+        user,
+        job.revision,
+        job.stage,
+        parked,
+        key,
+        a.message,
+        this.clock().toISOString(),
+      ],
+    );
+    if (!recorded.rows.length)
+      throw new ToolValidationError(
+        "The job changed or is being processed right now; read coding_status and retry",
+      );
+    return this.status(user, job.id);
   }
   /**
    * Work that has waited more than a day restarts only on the owner's explicit request in
