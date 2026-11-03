@@ -88,6 +88,8 @@ import { JobTools } from "./tools.js";
 import { WebTools } from "./providers.js";
 import { Assistant } from "./agent.js";
 import { ToolPicker } from "./tool-picker.js";
+import { LinkClassifier } from "./link-router.js";
+import { Study } from "./study.js";
 import { ShadowDecisions } from "./shadow.js";
 import { EffortPicker } from "./effort.js";
 import { closeServer, server } from "./server.js";
@@ -794,6 +796,23 @@ if (mcpMigrated) {
     links,
   );
 }
+// A shared link is classified on Jev before it is saved. An unreadable routing config or a
+// missing key leaves the classifier off, and every link save then asks the owner instead of
+// guessing; Reader is never the fallback.
+const study =
+  links && c.OPENROUTER_API_KEY
+    ? (() => {
+        try {
+          return new Study(db, {
+            classifier: new LinkClassifier(c.OPENROUTER_API_KEY),
+            reader: () => (mcp?.configured ? mcpReaderLink(mcp) : undefined),
+          });
+        } catch (error) {
+          opsLog("study.config_failed", "error", errorFields(error));
+          return undefined;
+        }
+      })()
+    : undefined;
 const assistant = new Assistant(
   db,
   new CustomAgent(
@@ -850,6 +869,7 @@ const assistant = new Assistant(
     mailIndex,
     recallEmbedder,
     publicBrowser,
+    study,
   ),
   {
     links: !!links,
@@ -862,6 +882,7 @@ const assistant = new Assistant(
     calendar: !!c.CALENDAR_REFRESH_TOKEN,
     subscriptions: true,
     parcels: true,
+    study: !!study,
     library: true,
     libraryAccount: !!libraryIdentity,
     preparationSheet: !!(c.SHEETS_REFRESH_TOKEN && c.SHEETS_SPREADSHEET_ID),

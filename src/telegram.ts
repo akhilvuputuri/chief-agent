@@ -10,6 +10,7 @@ import {
   saveItem,
 } from "./news.js";
 import { errorFields, opsLog } from "./ops-log.js";
+import type { Study } from "./study.js";
 import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
@@ -480,6 +481,43 @@ export function telegram(
       })
       .catch((error) =>
         opsLog("news.save_reply_failed", "warn", errorFields(error)),
+      );
+  });
+  // Where an unsure link goes: the owner's tap decides, and Reader work finishes away
+  // from the handler. A resolved or expired ask answers without changing anything.
+  bot.callbackQuery(/^ls:(st|rd|bo):([0-9a-f-]{36})$/, async (ctx) => {
+    if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+    const user = String(ctx.from.id);
+    const study = assistant.tools?.study;
+    if (!study) {
+      await ctx.answerCallbackQuery({
+        text: "Saving links is not enabled on this server.",
+      });
+      return;
+    }
+    const resolution =
+      ctx.match[1] === "st"
+        ? "study"
+        : ctx.match[1] === "rd"
+          ? "reader"
+          : "both";
+    await ctx.answerCallbackQuery({ text: "Saving…" });
+    await ctx
+      .editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
+      .catch(() => {});
+    const thread = ctx.callbackQuery.message?.message_thread_id;
+    void study
+      .resolvePrompt(user, ctx.match[2]!, resolution)
+      .then(async (outcome) => {
+        await ctx
+          .reply(outcome.text, {
+            ...(thread ? { message_thread_id: thread } : {}),
+            link_preview_options: { is_disabled: true },
+          })
+          .catch(() => {});
+      })
+      .catch((error) =>
+        opsLog("study.choice_reply_failed", "warn", errorFields(error)),
       );
   });
   // Buttons on bulletins sent before votes were replaced by Save.
@@ -1251,6 +1289,14 @@ export function telegram(
                   );
               },
             );
+          if (assistant.tools?.study)
+            await sendLinkChoices(
+              bot,
+              assistant.tools.study,
+              user,
+              deliveryGuard,
+              replyThread,
+            );
           if (reply.reply && reply.runId)
             await sendSlowPointer(
               bot,
@@ -1721,6 +1767,49 @@ async function sendCalendarApprovalsOnce(
         ) ?? null,
       ],
     );
+  }
+}
+
+/**
+ * The quick answer for a link Chief could not classify: one card with three taps, sent
+ * after the reply so the choice never interrupts it. A card is announced once.
+ */
+async function sendLinkChoices(
+  bot: Bot,
+  study: Study,
+  user: string,
+  guard?: () => Promise<boolean>,
+  thread?: number,
+) {
+  const pending = await study.pending(user);
+  for (const row of pending) {
+    if (guard && !(await guard())) return;
+    const title = String(row.title ?? row.url);
+    const clipped = title.length > 120 ? title.slice(0, 120) + "…" : title;
+    try {
+      await bot.api.sendMessage(
+        user,
+        `Where should "${clipped}" go?\n\nNot saved yet: tap one.`,
+        {
+          ...inThread(thread),
+          link_preview_options: { is_disabled: true },
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "Study list", callback_data: `ls:st:${row.id}` },
+                { text: "Reader", callback_data: `ls:rd:${row.id}` },
+                { text: "Both", callback_data: `ls:bo:${row.id}` },
+              ],
+            ],
+          },
+        },
+      );
+      await study.announced(user, row.id);
+    } catch (error) {
+      // Delivered later rather than lost: the claim stays open for the next turn.
+      opsLog("study.choice_card_failed", "warn", errorFields(error));
+      return;
+    }
   }
 }
 

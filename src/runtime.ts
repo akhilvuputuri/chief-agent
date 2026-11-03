@@ -117,6 +117,7 @@ export function runtimeContext(
     (op === "library_shelf" && !availability.libraryAccount) ||
     (op.startsWith("subscription_") && !availability.subscriptions) ||
     (op.startsWith("parcel_") && !availability.parcels) ||
+    ((op === "link_save" || op.startsWith("study_")) && !availability.study) ||
     (op.startsWith("gmail_") && !availability.gmail) ||
     (op === "gmail_recall" && !availability.mailIndex) ||
     (["calendar_list", "calendar_draft"].includes(op) &&
@@ -285,7 +286,7 @@ export function runtimeContext(
               mcp_read:
                 "Call a granted remote read tool using its discovered arguments. A read operation cannot call a write tool. Reader get_save_status reports server preparation, never phone offline availability.",
               mcp_write:
-                "Only for an owner-requested save using a granted idempotent remote write tool. Reader save_link resolves verified publisher articles automatically; readerTarget discussion explicitly preserves the Reddit post. The chosen URL is frozen for retries. Discover its schema with mcp_tools first. Create one UUID requestKey for the intent; the host supplies the server idempotency argument. Reuse that exact key on retries, omitting arguments to replay the persisted payload. Never retry a rejected input unchanged or invent a new key after uncertainty. Reader bookmark means extraction failed; report its explanation. Already saved with null submissionId needs no polling. Pending imports can be checked later through existing explicitly authorized durable work; do not resume paused work automatically.",
+                "Only for an owner-requested save using a granted idempotent remote write tool, and Reader save_link is for offline reading only: a link the owner shares to keep goes through link_save first, which classifies it. Reader save_link resolves verified publisher articles automatically; readerTarget discussion explicitly preserves the Reddit post. The chosen URL is frozen for retries. Discover its schema with mcp_tools first. Create one UUID requestKey for the intent; the host supplies the server idempotency argument. Reuse that exact key on retries, omitting arguments to replay the persisted payload. Never retry a rejected input unchanged or invent a new key after uncertainty. Reader bookmark means extraction failed; report its explanation. Already saved with null submissionId needs no polling. Pending imports can be checked later through existing explicitly authorized durable work; do not resume paused work automatically.",
               mcp_operation:
                 "Inspect the persisted owner-scoped MCP write by connection and requestKey, including accepted, pending or rejected result. This does not query the phone or undo a save.",
               work_status:
@@ -400,6 +401,18 @@ export function runtimeContext(
                 "Save a parcel the owner awaits, or with id append an observation to one: status, date, correction, delivered or archive. Record only what the source states; an absent delivery date stays absent and unmappable carrier wording goes in rawStatus with status unknown. History is append-only, and an observation describing an earlier moment than the recorded one is kept without changing the status. For an email from a non-primary mailbox pass its account as gmail_search named it.",
               parcel_match:
                 "Find which parcel a reference belongs to. A tracking reference decides alone, an order reference with merchant decides, a merchant or label never does. Returns candidates, ambiguous and resolvedId; when ambiguous, ask the owner.",
+              link_save:
+                "Save a link the owner shared, classified first: read the page's own title, site, topic and text, then let Jev judge study material versus offline reading from that, the owner's words and the owner's learning interests. Study material goes to the study list, reading goes to Reader. Pass the owner's own words as ownerMessage; an explicit cue there always wins. needsChoice means Chief asked with buttons: report that, never a save. Never choose Reader yourself and never default a link save to Reader. A duplicate URL returns the existing item.",
+              study_save:
+                "Add a link to the study list when the owner explicitly asked for that ('save this for my study list'). Use link_save when the destination is the owner's open question. Titles come from the page; pass a topic, tags or notes only when the page or the owner actually states them.",
+              study_list:
+                "List the owner's study list newest first, optionally filtered by topic, tag or status (to_study, in_progress, done). Ten items at most, each with id, title, site, topic, tags, status and the recorded classification reason. Counts cover the whole list. Use the returned lines for a short phone reply.",
+              study_update:
+                "Change one study item's status, notes, tags or topic by its exact id. An empty notes string clears the note. Does not move between Reader and the study list.",
+              study_remove:
+                "Delete one study item by id after the owner asks to drop it. Removes the saved record only; a Reader copy is untouched.",
+              study_move:
+                "Owner corrections: to reader saves the exact study item's link to Reader and removes it from the study list; to study adds the link to the study list and leaves any Reader copy in place, because Reader has no delete grant.",
               parcel_list:
                 "List awaited parcels, newest first, or pass one id for that parcel and its paged history including observations recorded but not applied. Statuses are last known from email or the owner, never carrier-checked; asOf is when the current status was last known to hold, from the owner or a confirming email.",
               tools_load:
