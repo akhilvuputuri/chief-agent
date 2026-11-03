@@ -149,6 +149,31 @@ Of the 7 most valuable clusters, 5 appeared in both designs and each design alon
 
 **Review.** Independent review (Claude Opus 5.5) requested changes on `8111a1a`, and reproduced four defects in throwaway tests. Revisions dropped earlier untrusted tags, so a rollback by source missed carried-forward text. Older windows could retire lessons from newer work. A procedure outside the `current` limit could be overwritten unseen. A cut-off response advanced the window as if it had been read. It also estimated from the code that input size had no hard limit. All are fixed, with tests. Its next review, of `c04c301`, reproduced a regression from that fix: a complete response ending in plain text failed the window and could stall procedures on a quiet window. Such a response now gets one reminder, and its proposals stand.
 
+## First two nights of procedures, and refusals become flags — 2026-11-03
+
+**Measured in production (counts only; what was saved stays private).** Both nights' passes completed with no failed batch or window.
+
+| Night (03:30 Singapore)       | 2 November | 3 November |
+| ----------------------------- | ---------- | ---------- |
+| Item pass: items reviewed     | 109        | 91         |
+| Facts saved (flagged)         | 7 (6)      | 9 (8)      |
+| Fact proposals refused        | 9          | 5          |
+| Procedure pass: items read    | 48         | 162        |
+| Procedure writes (absorbed)   | 7 (0)      | 11 (2)     |
+| Procedure proposals refused   | 4          | 11         |
+| Read up to                    | 28 Sep     | 26 Oct     |
+| Reported charges, both passes | $0.79      | $1.28      |
+
+After them, 16 learned facts and 10 lessons were active, 9 of them procedures. The charges are what OpenRouter reported. The host's estimates were $9.14 and $12.12, because it reserves before each call.
+
+**What the refusals were.** All 15 refused procedure proposals were over the 800-character limit (809 to 1,231 characters), and the model was told only "Invalid arguments", so it could not tell what to fix. Several saved procedures sit at the limit, cut off mid-sentence. The 13 fact refusals came from the word checks: 8 had under half their words from the quote, 4 had a number the quote lacked (mostly a month and year the model added) and 1 added a negation. Read by me (Claude Opus 5.5), most of the refused facts were better worded than ones that were saved, and every one shared words with its quote. One judge, not blind.
+
+**Change, no prompt or migration change.** A procedure may run to 2,000 characters, and the learned part of each turn's context grows from 12,000 to 30,000 characters so that the longer procedures still fit. A malformed call's refusal now names the failing field and the length sent. A fact still needs the owner's exact words in a cited item and must share at least one content word with them. Everything the word checks refused is now saved and flagged instead. An added number or negation counts as a warning; looser wording does not. All 18 word-check refusals in the private record would now be saved, 6 of them with a warning flag. The threat scan's exfiltration pattern now matches any form of the verb ("sends", "sent"), because with one shared word enough, it is the remaining check on a value like "Sends OTP and PIN to Tan". See [host checks](../learning.md#host-checks).
+
+**Hypotheses, not measured.** Longer procedures may hold more of what matters, or may drift and need more pruning. A full context of learned items adds about 4,500 tokens a turn, mostly cached. Facts from before this change that were refused are not reviewed again, because the prompt versions are unchanged.
+
+**Deployment.** Not yet released; update on release.
+
 ## Follow-up and next iteration
 
 After the phase 1 rollout and this release: check the first night's `learner.finished` counts and charges, and read what it wrote (`memory_revisions` with `origin='learned'`). Phase 3 adds the weekly digest with undo and skills drafted from two independent successes. The owner decided on 29 October not to use reactions or any other manual labelling, so outcomes come only from task proof and corrections in the owner's next message.

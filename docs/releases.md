@@ -1,3 +1,9 @@
+## Procedures run to 2,000 characters; fact refusals become flags (3 November 2026)
+
+- **Code.** A procedure may run to 2,000 characters, and learned items get 30,000 characters of a turn's context. A refused malformed call says which field failed. A fact's word checks now flag instead of refusing, except a quote sharing no word with the value. No prompt version, database or Compose change.
+- **Why.** On the first two nights, all 15 procedure refusals were over the 800-character limit, and 13 facts were refused by the word checks, most of them well worded. See [journal 130](journey/130-nightly-learner.md#first-two-nights-of-procedures-and-refusals-become-flags--2026-11-03).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Worker image that survives gateway restarts (2 November 2026)
 
 - **Configuration.** New coding jobs pin worker image `sha256:e3aa876d…`, built from `fd7b16d`, which carries the restart fixes in [journal 150](journey/150-coding-through-gateway-restarts.md). The previous image moves to `previousImages`, so paused jobs can still resume on it. The baked box image still holds the previous digest until its next weekly build, so the first boxes pull this one.

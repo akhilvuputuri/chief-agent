@@ -87,8 +87,23 @@ export const emptySelection: MemorySelection = {
   chars: 0,
 };
 
-/** Characters of learned facts and lessons offered to one run. Owner facts are not capped. */
-export const LEARNED_BUDGET_CHARS = 12000;
+/**
+ * Characters of learned facts and lessons offered to one run. Owner facts are not capped.
+ * Raised from 12,000 with procedures' limit (3 November): ten lessons near 800 characters
+ * already used most of it, and procedures may now reach 2,000.
+ */
+export const LEARNED_BUDGET_CHARS = 30000;
+
+/**
+ * Host flags normal under "save, prune later": a fact reworded beyond its quote, a
+ * shortened procedure. Findable when pruning, but not counted as flagged or warned about.
+ * A fact's added negation or unquoted number can change its meaning, so those do count.
+ */
+export const ROUTINE_FLAGS = new Set([
+  "paraphrased",
+  "loosely_quoted",
+  "shrunk",
+]);
 
 // Flag, never block: a flagged item is applied and listed first in the digest.
 const THREATS: Array<[string, RegExp]> = [
@@ -100,9 +115,10 @@ const THREATS: Array<[string, RegExp]> = [
     "injection",
     /\b(system prompt|developer message|you are now|new instructions?|act as (an?|the) )\b/i,
   ],
+  // Any form of the verb, since a learned fact is declarative: "Sends OTP and PIN to Tan".
   [
     "exfiltration",
-    /\b(send|forward|post|upload|email|share)\b.{0,60}\b(passwords?|tokens?|api[ _-]?keys?|secrets?|credentials?|otp|pin)\b/i,
+    /\b(sen[dt]|forward|post|upload|e-?mail|share)(s|ed|ing)?\b.{0,60}\b(passwords?|tokens?|api[ _-]?keys?|secrets?|credentials?|otps?|pins?)\b/i,
   ],
   ["exfiltration", /https?:\/\/\S*[?&][^=\s&]+=\S/i],
   ["invisible_text", /[​-‏‪-‮⁠-⁤﻿]/],
@@ -450,7 +466,7 @@ export class MemoryStore {
       flagged: candidates.filter(
         (r) =>
           selected.has(r.id) &&
-          (r.flags.some((f) => f !== "paraphrased" && f !== "shrunk") ||
+          (r.flags.some((f) => !ROUTINE_FLAGS.has(f)) ||
             scanThreats(r.value!).length > 0),
       ).length,
       chars: JSON.stringify(explicit).length + chars,

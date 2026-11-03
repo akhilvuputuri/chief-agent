@@ -16,7 +16,7 @@ The owner asked for an open `agent-browser` for Chief. It runs as a separate age
 
 # Procedures replace one-item lessons — live in `385e0d7`, 1 November 2026
 
-An offline comparison over 14 days found one-item lessons were clearly useful 1 time in 33, against 8 in 11 for procedures written by reading across days, while quoted facts were far better supported than inferred ones (one judge, simulated). The owner chose to replace the lessons. Prompt `learner-v5` saves facts only, and `procedures-v1` reads two weeks at a time and revises one procedure per kind of work. No migration. First run due from 03:30 Singapore on 2 November, not yet observed. See [procedures](learning.md#procedures) and [journal 130](journey/130-nightly-learner.md#procedures-replace-one-item-lessons--2026-11-01).
+An offline comparison over 14 days found one-item lessons were clearly useful 1 time in 33, against 8 in 11 for procedures written by reading across days, while quoted facts were far better supported than inferred ones (one judge, simulated). The owner chose to replace the lessons. Prompt `learner-v5` saves facts only, and `procedures-v1` reads two weeks at a time and revises one procedure per kind of work. No migration. The first two nights completed: 16 facts and 9 procedures active, $2.07 reported. On 3 November procedures were allowed 2,000 characters and fact word checks became flags, not yet released. See [procedures](learning.md#procedures) and [journal 130](journey/130-nightly-learner.md#procedures-replace-one-item-lessons--2026-11-01).
 
 # Baked coding box image — configuration live, not yet measured, 1 November 2026
 

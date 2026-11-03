@@ -10,12 +10,17 @@ import {
   LEARNING_LIMITS,
   ownerWords,
   PROCEDURE_PROMPT_VERSION,
+  quoteFlags,
   quoteRefusal,
   quoteSupports,
   untrustedSources,
 } from "../src/learning.js";
 import { documentMessage, forwardedMessage } from "../src/attachments.js";
-import { MemoryStore } from "../src/memory.js";
+import {
+  LEARNED_BUDGET_CHARS,
+  MemoryStore,
+  scanThreats,
+} from "../src/memory.js";
 import { projectEventRecord } from "../src/ops-log.js";
 import type { Generation, ModelAdapter } from "../src/model.js";
 import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
@@ -378,7 +383,11 @@ test("a run writes checked facts with provenance and trust, refuses the rest, an
       { accepted: true },
       { refused: "The quote must be the owner's exact words in a cited task" },
       { refused: "Unknown tool" },
-      { refused: "Invalid arguments" },
+      {
+        refused: "Invalid arguments",
+        detail:
+          "value: Required; quote: Required; taskIds: Required; reason: Required",
+      },
       { refused: "Unknown tool" },
     ]);
     return [["learn_finish", { summary: "Saved one item" }]];
@@ -669,7 +678,7 @@ test("a fact must be stated by the quote, never by attached text, and the owner'
           refused: "The quote must be the owner's exact words in a cited task",
         },
         {
-          refused: "Every number in the value must come from the quote",
+          refused: "At least one of the value's words must come from the quote",
         },
         { refused: "The owner saved this key themselves; leave it" },
         { accepted: true },
@@ -1085,7 +1094,11 @@ test("every run records what it read, what the model said and each proposal's ve
     [
       { accepted: true },
       { refused: "The quote must be the owner's exact words in a cited task" },
-      { refused: "Invalid arguments" },
+      {
+        refused: "Invalid arguments",
+        detail:
+          "value: Required; quote: Required; taskIds: Required; reason: Required",
+      },
       { accepted: true },
       { ok: true },
       // The retry turn that the refusals earned.
@@ -1218,51 +1231,65 @@ test("a failed record never affects learning: the item is written and the run co
   );
 });
 
-test("a reworded fact is accepted and flagged, but it cannot add a number or negation or sit on an unrelated quote", async (t) => {
+test("a reworded fact is accepted and flagged, but it cannot sit on an unrelated quote", async (t) => {
   assert.equal(
     quoteRefusal("I prefer aisle seats", "Prefers aisle seats"),
     undefined,
   );
-  // Half its content from the quote: accepted, and quoteSupports says it is reworded.
-  assert.equal(
-    quoteRefusal(
-      "I usually sit by the aisle on planes",
-      "Likes aisle seats on flights",
-    ),
-    "At least half of the value's words must come from the quote",
+  assert.deepEqual(
+    quoteFlags("I prefer aisle seats", "Prefers aisle seats"),
+    [],
   );
+  // Under half its content from the quote: accepted since 3 November, and flagged.
+  const loose = [
+    "I usually sit by the aisle on planes",
+    "Likes aisle seats on flights",
+  ];
+  assert.equal(quoteRefusal(loose[0]!, loose[1]!), undefined);
+  assert.deepEqual(quoteFlags(loose[0]!, loose[1]!), [
+    "paraphrased",
+    "loosely_quoted",
+  ]);
+  assert.deepEqual(quoteFlags("I sit by the aisle", "Sits on aisle seats"), [
+    "paraphrased",
+  ]);
+  // An added number or negation is saved, flagged so it counts as a warning.
   assert.equal(
-    quoteRefusal("I sit by the aisle", "Sits on aisle seats"),
+    quoteRefusal("My flat is unit 12", "Lives in unit 13"),
     undefined,
   );
-  assert.ok(!quoteSupports("I sit by the aisle", "Sits on aisle seats"));
+  assert.deepEqual(quoteFlags("My flat is unit 12", "Lives in unit 13"), [
+    "paraphrased",
+    "unquoted_number",
+  ]);
+  assert.deepEqual(
+    quoteFlags("I want aisle seats", "Does not want aisle seats"),
+    ["paraphrased", "added_negation"],
+  );
+  // An unrelated quote still refuses: no word of the value comes from it.
   assert.match(
     quoteRefusal("Book my flight", "Pays invoices to account 999-000")!,
-    /number/,
-  );
-  assert.match(
-    quoteRefusal("My flat is unit 12", "Lives in unit 13")!,
-    /number/,
-  );
-  assert.match(
-    quoteRefusal("I want aisle seats", "Does not want aisle seats")!,
-    /negation/,
+    /one of the value's words/,
   );
   // A "not" elsewhere in the quote does not block the fact, as it did on 1 November. A
   // dropped negation is accepted and flagged as reworded.
   const study =
     "No not to reader, this is for ai learning not for offline, store this separately";
   assert.equal(quoteRefusal(study, "Stores ai learning separately"), undefined);
-  assert.ok(!quoteSupports(study, "Stores ai learning separately"));
+  assert.deepEqual(quoteFlags(study, "Stores ai learning separately"), [
+    "paraphrased",
+  ]);
   assert.equal(quoteRefusal("I don't eat beef", "Eats beef"), undefined);
-  assert.ok(!quoteSupports("I don't eat beef", "Eats beef"));
-  assert.match(
-    quoteRefusal(
-      "Please send the report to my boss",
-      "Sends OTP and PIN to Tan",
-    )!,
-    /half/,
-  );
+  assert.deepEqual(quoteFlags("I don't eat beef", "Eats beef"), [
+    "paraphrased",
+  ]);
+  // One shared word is enough to save, so the threat scan has to catch the rest.
+  const exfil = [
+    "Please send the report to my boss",
+    "Sends OTP and PIN to Tan",
+  ];
+  assert.equal(quoteRefusal(exfil[0]!, exfil[1]!), undefined);
+  assert.deepEqual(scanThreats(exfil[1]!), ["exfiltration"]);
   assert.match(
     quoteRefusal("I usually prefer that", "Usually prefers that")!,
     /framing/,
@@ -1290,6 +1317,17 @@ test("a reworded fact is accepted and flagged, but it cannot add a number or neg
   assert.deepEqual(saved!.flags, ["paraphrased"]);
   // Normal under "save, prune later": it does not turn every owner turn into a warning.
   assert.equal((await new MemoryStore(db).select("owner")).flagged, 0);
+  // A number the owner did not say can change the fact, so that one does.
+  await new MemoryStore(db).write("owner", {
+    key: "flat",
+    value: "Lives in unit 13",
+    kind: "fact",
+    origin: "learned",
+    reason: "Stated",
+    source: {},
+    flags: quoteFlags("My flat is unit 12", "Lives in unit 13"),
+  });
+  assert.equal((await new MemoryStore(db).select("owner")).flagged, 1);
 });
 
 test("items reviewed under a superseded prompt are mined again, once", async (t) => {
@@ -1337,8 +1375,8 @@ test("refused proposals get one more turn even when the model already finished",
   const bad = [
     "learn_fact",
     {
-      key: "seat_preference",
-      value: "Prefers window seats in row 12",
+      key: "home_city",
+      value: "Lives in Penang",
       quote: "I prefer window seats",
       taskIds: [id],
       reason: "Stated",
@@ -1844,6 +1882,58 @@ test("a procedure pass reads reviewed work together, revises one key per kind of
     (await store.active("owner")).map((r) => r.key),
     ["lesson:news:short"],
   );
+});
+
+test("a procedure may run to 2,000 characters, and a longer one is refused with its length", async (t) => {
+  const db = await setup(t);
+  const [news, markets] = await twoTurns(db);
+  const long = "Keep news summaries short for the phone. ".repeat(46).trim();
+  assert.ok(long.length > 1800 && long.length <= 2000);
+  const { adapter } = model((input) => {
+    if (!isProcedurePass(input)) return [["learn_finish", {}]];
+    const results = input.messages.filter((m: any) => m.role === "tool");
+    if (!results.length)
+      return [
+        procedure([news!, markets!], {
+          value: long + " ".repeat(10) + "x".repeat(200),
+        }),
+        ["learn_finish", {}],
+      ];
+    // The refusal says which field failed and by how much, so the retry fits.
+    assert.deepEqual(JSON.parse(results[0].content), {
+      refused: "Invalid arguments",
+      detail: `value: String must contain at most 2000 character(s) (sent ${long.length + 210})`,
+    });
+    return [
+      procedure([news!, markets!], { value: long }),
+      ["learn_finish", {}],
+    ];
+  });
+  const result = await procedurePass(db, adapter);
+  assert.deepEqual(
+    [result.state, result.procedures, result.refused],
+    ["completed", 1, 1],
+  );
+  const store = new MemoryStore(db);
+  assert.equal(
+    (await store.history("owner", "lesson:procedure:news"))[0]!.value,
+    long,
+  );
+  // Nine procedures at the limit still fit in a run's context beside twenty facts.
+  for (let i = 1; i < 9; i++)
+    await seedLesson(db, `lesson:procedure:d${i}`, long);
+  for (let i = 0; i < 20; i++)
+    await store.write("owner", {
+      key: `fact_${i}`,
+      value: "Likes things done a particular way. ".repeat(6),
+      kind: "fact",
+      origin: "learned",
+      reason: "seed",
+      source: {},
+    });
+  const selection = await store.select("owner");
+  assert.deepEqual([selection.learned.length, selection.omitted], [29, []]);
+  assert.ok(selection.chars < LEARNED_BUDGET_CHARS);
 });
 
 test("a procedure pass untrusted tag covers items it did not cite", async (t) => {

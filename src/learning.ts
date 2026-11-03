@@ -85,6 +85,11 @@ export const LEARNING_LIMITS = {
   procedureMessageFloor: 300,
   /** A revision shorter than this share of the last one may have lost detail, so it is flagged. */
   procedureShrink: 0.6,
+  /**
+   * Characters of one procedure. 800 refused all 15 revisions that grew past it on the first
+   * two nights (809–1,231 characters), and kept procedures cut short (3 November).
+   */
+  procedureValueChars: 2000,
 } as const;
 
 /** 03:30 in Singapore, which has no daylight saving (UTC+8). */
@@ -282,32 +287,48 @@ export function quoteSupports(quote: string, value: string) {
 }
 
 /**
- * Why a quote cannot back a fact, or nothing when it can. The owner prefers saving and
- * pruning later, so a reworded fact is accepted (and flagged, see quoteSupports). It still
- * cannot add a number or a negation, and at least half of its content must come from the
- * quote, so a fact cannot be pinned on an unrelated sentence of the owner's.
+ * Why a quote cannot back a fact, or nothing when it can. The word checks refused 13 facts
+ * on the first two nights, most of them better worded than those saved (3 November), so how
+ * far a value strays from its quote is now flagged (quoteFlags). Two refusals stay: a value
+ * of framing words only, and one sharing no word with its quote, so a fact still cannot be
+ * pinned on an unrelated sentence of the owner's.
  */
 export function quoteRefusal(quote: string, value: string): string | undefined {
   const quoted = words(quote);
+  const stated = words(value).filter(
+    (w) => !FRAMING.has(w) && !NEGATION.has(w),
+  );
+  if (!stated.length) return "The value states nothing beyond framing words";
+  const said = new Set(quoted.map(stem));
+  if (!stated.some((w) => said.has(stem(w))))
+    return "At least one of the value's words must come from the quote";
+  return undefined;
+}
+
+/**
+ * How a fact departs from its quote, so it is easy to find when pruning: `paraphrased` for
+ * any rewording (quoteSupports fails), plus `added_negation` for a negation the quote lacks
+ * (a dropped one is only paraphrased), `unquoted_number` for a number the quote lacks and
+ * `loosely_quoted` when under half its content words come from the quote. An added negation
+ * or number can change what the owner said, so those two are warnings (memory.ts).
+ */
+export function quoteFlags(quote: string, value: string): string[] {
+  if (quoteSupports(quote, value)) return [];
+  const quoted = words(quote);
   const stated = words(value);
   const negated = (list: string[]) => list.some((w) => NEGATION.has(w));
-  // Only an added negation refuses: a quote's "not" is often unrelated to the fact. A
-  // dropped one is flagged paraphrased, because quoteSupports requires both to agree.
-  if (negated(stated) && !negated(quoted))
-    return "The value must not add a negation the quote does not have";
+  const flags = ["paraphrased"];
+  if (negated(stated) && !negated(quoted)) flags.push("added_negation");
   const digits = new Set(quoted.filter((w) => /\d/.test(w)));
   if (stated.some((w) => /\d/.test(w) && !digits.has(w)))
-    return "Every number in the value must come from the quote";
+    flags.push("unquoted_number");
   const said = new Set(quoted.map(stem));
   const content = stated.filter(
     (w) => !FRAMING.has(w) && !NEGATION.has(w) && !/\d/.test(w),
   );
-  if (!content.length && !stated.some((w) => /\d/.test(w)))
-    return "The value states nothing beyond framing words";
   const found = content.filter((w) => said.has(stem(w))).length;
-  if (found * 2 < content.length)
-    return "At least half of the value's words must come from the quote";
-  return undefined;
+  if (found * 2 < content.length) flags.push("loosely_quoted");
+  return flags;
 }
 
 export interface Evidence {
@@ -405,9 +426,9 @@ const procedureTools = {
       value: z
         .string()
         .min(10)
-        .max(800)
+        .max(LEARNING_LIMITS.procedureValueChars)
         .describe(
-          "The whole procedure in a few sentences: what the owner wants from this work, what went wrong, what they corrected. It replaces any earlier text.",
+          `The whole procedure, at most ${LEARNING_LIMITS.procedureValueChars} characters: what the owner wants from this work, what went wrong, what they corrected. It replaces any earlier text.`,
         ),
       taskIds: z.array(z.string().uuid()).min(1).max(40),
       absorbs: z
@@ -424,6 +445,38 @@ const procedureTools = {
   learn_finish: finishTool,
 } as const;
 type ToolName = keyof typeof learnTools | keyof typeof procedureTools;
+
+/**
+ * A tool call's arguments, or what was wrong with them. The model is told which field failed
+ * and how, with a too-long text's length, so it can send a corrected call: a bare "Invalid
+ * arguments" left it resending procedures over the limit (2–3 November).
+ */
+export function parseArguments(
+  schema: z.ZodTypeAny,
+  raw: string,
+): { args: unknown } | { problem: string } {
+  let input: unknown;
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return { problem: "The arguments are not valid JSON" };
+  }
+  const parsed = schema.safeParse(input);
+  if (parsed.success) return { args: parsed.data };
+  return {
+    problem: parsed.error.issues
+      .slice(0, 5)
+      .map((issue) => {
+        const sent = issue.path.reduce<any>((v, k) => v?.[k], input);
+        const size =
+          issue.code === "too_big" && typeof sent === "string"
+            ? ` (sent ${sent.length})`
+            : "";
+        return `${issue.path.join(".") || "arguments"}: ${issue.message}${size}`;
+      })
+      .join("; "),
+  };
+}
 const PROCEDURE_PREFIX = "lesson:procedure:";
 const procedureKey = (domain: string) => PROCEDURE_PREFIX + domain;
 const isProcedure = (key: string) => key.startsWith(PROCEDURE_PREFIX);
@@ -1361,13 +1414,10 @@ export class Learner {
         const schema = pass.tools[name];
         if (!schema) result = { refused: "Unknown tool" };
         else {
-          let args: unknown;
-          try {
-            args = schema.parse(JSON.parse(call.function.arguments));
-          } catch {
-            args = undefined;
-          }
-          if (args === undefined) result = { refused: "Invalid arguments" };
+          const parsed = parseArguments(schema, call.function.arguments);
+          const args = "args" in parsed ? parsed.args : undefined;
+          if (!("args" in parsed))
+            result = { refused: "Invalid arguments", detail: parsed.problem };
           else if (name === "learn_finish") {
             finished = true;
             result = { ok: true };
@@ -1622,9 +1672,7 @@ export class Learner {
           learnerRun,
           untrustedSources: untrusted,
           // Reworded beyond the owner's words: applied, and easy to find when pruning.
-          ...(!quoteSupports(args.quote, args.value)
-            ? { flags: ["paraphrased"] }
-            : {}),
+          flags: quoteFlags(args.quote, args.value),
         });
         if (saved.flags.length) written.flagged++;
         written.facts++;
