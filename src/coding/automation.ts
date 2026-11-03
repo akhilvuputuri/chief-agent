@@ -581,7 +581,8 @@ export class CodingAutomation {
           };
         const handled = [...d.handled, ...batch.map((f) => f.id)];
         // An owner request is sent once: a retried or resumed round starts with no handled
-        // list, and the request must not be fixed (and charged) again.
+        // list, and the request must not be fixed (and charged) again. It is marked in the
+        // requeue's own statement, so a round that never starts leaves it undelivered.
         const sent = batch
           .filter((f) => f.id.startsWith("owner:"))
           .map((f) => f.id.slice("owner:".length));
@@ -589,7 +590,7 @@ export class CodingAutomation {
           .update(JSON.stringify(handled))
           .digest("hex");
         await this.db.query(
-          `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='MR feedback returned to leader/coder; fresh independent review is required',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision), budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$5::jsonb,'remainingMs',$6::bigint),'suppressed' FROM changed RETURNING job_id), revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$7,$8,'implement' FROM changed RETURNING job_id) INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$7,jsonb_build_object('summary','MR feedback returned to coder; candidate approval is invalidated until fresh checks and review.') FROM changed ON CONFLICT DO NOTHING`,
+          `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='MR feedback returned to leader/coder; fresh independent review is required',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision), budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$5::jsonb,'remainingMs',$6::bigint),'suppressed' FROM changed RETURNING job_id), revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$7,$8,'implement' FROM changed RETURNING job_id), delivered AS (UPDATE coding_events SET payload=payload || jsonb_build_object('deliveredRound',$10::int) WHERE job_id IN (SELECT id FROM changed) AND id=ANY($11::uuid[]) RETURNING job_id) INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$7,jsonb_build_object('summary','MR feedback returned to coder; candidate approval is invalidated until fresh checks and review.') FROM changed ON CONFLICT DO NOTHING`,
           [
             j.id,
             j.lease,
@@ -600,13 +601,10 @@ export class CodingAutomation {
             `mr-feedback:${fingerprint}`,
             text,
             j.stage,
+            round,
+            sent,
           ],
         );
-        if (sent.length)
-          await this.db.query(
-            "UPDATE coding_events SET payload=payload || jsonb_build_object('deliveredRound',$2::int) WHERE job_id=$1 AND id=ANY($3::uuid[])",
-            [j.id, round, sent],
-          );
         return;
       }
       if (i.checks === "failed") {
@@ -645,7 +643,7 @@ export class CodingAutomation {
         await this.manual(
           j,
           d,
-          `Review, CI and feedback are done. Chief does not merge this change; a person needs to ${operatorSteps(paths).join("; ")}.`,
+          `Review, CI and feedback are done. Chief does not merge this change; a person needs to ${operatorSteps(paths).join("; ") || "review the database, Compose, environment or workflow change and merge it on GitHub"}.`,
         );
         return;
       }

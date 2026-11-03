@@ -1086,18 +1086,28 @@ export class CodingController {
           [job.id, `automation:${job.revision}`],
         )
       ).rows[0]?.payload?.handled?.length ?? 0;
+    // Requests already waiting share the next round with this one.
+    const waiting = (
+      await this.db.query(
+        "SELECT payload->>'text' AS text FROM coding_events WHERE job_id=$1 AND event_key LIKE 'owner-feedback:%' AND NOT payload ? 'deliveredRound'",
+        [job.id],
+      )
+    ).rows.map((r: { text: string }) => r.text);
+    const queuedLength = waiting.reduce((n, text) => n + text.length + 20, 0);
     const refusal =
       a.message.length > 7000
         ? "The request is too long for one feedback round; shorten it to under 7,000 characters"
-        : (job.checkpoint.piState?.mrFeedback?.round ?? 0) >= 3
-          ? "This PR has already had three rounds of fixes, so it cannot take another; start a new coding job for further changes"
-          : job.used_models >= job.settings.limits.models ||
-              (job.checkpoint.piState?.toolsUsed ?? 0) >=
-                job.settings.limits.tools
-            ? "This job has used its model or tool allowance, so it cannot take another round of fixes; start a new coding job"
-            : handled >= 200
-              ? "This PR has handled too much feedback to take more; start a new coding job"
-              : undefined;
+        : queuedLength + a.message.length > 7000
+          ? "Earlier requests already fill the next round of fixes; send this after that round, or shorten it"
+          : (job.checkpoint.piState?.mrFeedback?.round ?? 0) >= 3
+            ? "This PR has already had three rounds of fixes, so it cannot take another; start a new coding job for further changes"
+            : job.used_models >= job.settings.limits.models ||
+                (job.checkpoint.piState?.toolsUsed ?? 0) >=
+                  job.settings.limits.tools
+              ? "This job has used its model or tool allowance, so it cannot take another round of fixes; start a new coding job"
+              : handled + waiting.length >= 200
+                ? "This PR has handled too much feedback to take more; start a new coding job"
+                : undefined;
     if (refusal) throw new ToolValidationError(`Nothing changed: ${refusal}.`);
     if (parked.includes(job.stage))
       await this.assertFreshOrConfirmed(

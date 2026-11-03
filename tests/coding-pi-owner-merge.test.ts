@@ -252,7 +252,7 @@ test("a tool-picker change tells the owner to run the picker eval before merging
       [f.id],
     )
   ).rows[0].payload;
-  assert.match(card.summary, /Before merging:\*\* run kite run eval:picker/);
+  assert.match(card.summary, /Before merging:\*\* run `kite run eval:picker`/);
 });
 test("dependency and image changes are called out separately on the Merge card", async (t) => {
   const f = await fixture(t, undefined, [
@@ -1076,6 +1076,7 @@ test("an owner request is sent once, even if a later round starts without its ha
   const f = await fixture(t);
   await f.auto.tick();
   await replyAsOwner(f, "fix-8", "Rename the heading.");
+  const before = await f.job();
   await f.auto.tick();
   assert.equal((await f.job()).state, "queued");
   const delivered = (
@@ -1085,16 +1086,51 @@ test("an owner request is sent once, even if a later round starts without its ha
     )
   ).rows[0].payload;
   assert.equal(delivered.deliveredRound, 1);
-  // As after an automatic retry: the PR is back with an empty handled list.
+  // As after an automatic retry: a new revision is published with no handled list.
   await f.db.query(
-    "UPDATE coding_jobs SET state='pr_ready',stage='awaiting_ci' WHERE id=$1",
-    [f.id],
+    "UPDATE coding_jobs SET state='pr_ready',stage='pr_ready',revision=revision+1,attempt_id=$2,result=$3::jsonb,checkpoint=$4::jsonb WHERE id=$1",
+    [
+      f.id,
+      before.attempt_id,
+      JSON.stringify(before.result),
+      JSON.stringify(before.checkpoint),
+    ],
   );
-  await f.db.query(
-    "UPDATE coding_events SET payload=jsonb_set(payload,'{handled}','[]'::jsonb) WHERE job_id=$1 AND event_key LIKE 'automation:%'",
-    [f.id],
-  );
+  await f.auto.start(await f.job(), "c".repeat(40));
   f.setInspection({ draft: false, checks: "passed" });
   await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_merge_approval");
+});
+
+test("a round that loses its lease leaves the owner's request for the next one", async (t) => {
+  const f = await fixture(t);
+  await f.auto.tick();
+  await replyAsOwner(f, "fix-9", "Rename the heading.");
+  f.onNextInspect(async () => {
+    await f.db.query(
+      "UPDATE coding_jobs SET lease_until=now()-interval '1 minute' WHERE id=$1",
+      [f.id],
+    );
+  });
+  await f.auto.tick();
   assert.notEqual((await f.job()).state, "queued");
+  const pending = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='owner-feedback:fix-9'",
+      [f.id],
+    )
+  ).rows[0].payload;
+  assert.equal(pending.deliveredRound, undefined);
+  await f.auto.tick();
+  assert.equal((await f.job()).state, "queued");
+});
+
+test("requests that would not fit one round together are refused", async (t) => {
+  const f = await fixture(t);
+  await f.auto.tick();
+  await replyAsOwner(f, "fix-10", "a".repeat(5000));
+  await assert.rejects(
+    replyAsOwner(f, "fix-11", "b".repeat(5000)),
+    /already fill the next round/,
+  );
 });

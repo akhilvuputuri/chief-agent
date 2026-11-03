@@ -25,7 +25,7 @@ Rejected: dropping the hard stop for migrations. Merging is still unsafe until t
 ## Implementation and review
 
 - `src/coding/automation.ts`: the hard stop moves after feedback and CI; owner requests join feedback; `operatorSteps` names what is left, in the stop and on the Merge card.
-- `src/coding/controller.ts`: `requestPrChanges` records the request and returns a stopped PR to checks. Independent review found that it accepted requests a round could never deliver (after three rounds, past the allowance or too long), which left the PR parked for good; those are now refused up front. It also skipped the 24-hour staleness check and was invisible to crash recovery; both are fixed. An owner request is marked delivered, so a retried round does not send it again.
+- `src/coding/controller.ts`: `requestPrChanges` records the request and returns a stopped PR to checks. Independent review found that it accepted requests a round could never deliver (after three rounds, past the allowance or too long), which left the PR parked for good; those are now refused up front. It also skipped the 24-hour staleness check and was invisible to crash recovery; both are fixed. An owner request is marked delivered in the statement that starts its round, so a retried round does not send it again, and a round that loses its lease does not lose it. A second review found the first version marked it even when the round never started, which could put the Merge card on code without the fix.
 - `src/coding/merge-policy.ts`: `operatorSteps`.
 - `tests/migration-rollout.test.ts`: the rollout check.
 

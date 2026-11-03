@@ -111,7 +111,7 @@ export function operatorSteps(paths: string[]) {
     );
   if (paths.some((p) => /^\.github(?:\/|$)/.test(p)))
     steps.push(
-      "merge on GitHub yourself, because Chief's app cannot merge workflow changes",
+      "merge the workflow change on GitHub, because Chief's app cannot merge it",
     );
   if (
     paths.some((p) =>
@@ -124,6 +124,6 @@ export function operatorSteps(paths: string[]) {
       "merge it on GitHub and update the production environment file on the host",
     );
   if (paths.includes("config/tool-picker.json"))
-    steps.push("run kite run eval:picker and record its result before merging");
+    steps.push("run `kite run eval:picker` and record its result");
   return steps;
 }
