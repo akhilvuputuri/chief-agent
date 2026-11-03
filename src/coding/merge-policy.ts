@@ -93,3 +93,32 @@ export interface PrAutomationRepository {
 
 /** A definite GitHub refusal is distinct from an unknown merge outcome. */
 export class MergeRefused extends Error {}
+
+/**
+ * What a person still has to do after review, named from the changed paths, so a stop says
+ * exactly what is left instead of "explicit review is needed".
+ */
+export function operatorSteps(paths: string[]) {
+  const steps: string[] = [];
+  for (const path of paths.filter((p) => /^db\/\d+_[^/]+\.sql$/.test(p)))
+    steps.push(
+      `run the database rollout for ${path.slice(3)} right after merging (its scripts/deploy-*.py)`,
+    );
+  if (paths.some((p) => /^compose(?:\..+)?\.ya?ml$/.test(p)))
+    steps.push("apply the Compose change through its rollout script");
+  if (paths.some((p) => /^\.github(?:\/|$)/.test(p)))
+    steps.push(
+      "merge on GitHub yourself, because Chief's app cannot merge workflow changes",
+    );
+  if (
+    paths.some((p) =>
+      p
+        .split("/")
+        .some((part) => part.startsWith(".env") && part !== ".env.example"),
+    )
+  )
+    steps.push("update the production environment file on the host");
+  if (paths.includes("config/tool-picker.json"))
+    steps.push("run kite run eval:picker and record its result before merging");
+  return steps;
+}

@@ -212,9 +212,47 @@ test("protected files reach the owner's Merge card, which names them; hard stops
     await g.auto.tick();
     const stopped = await g.job();
     assert.equal(stopped.stage, "manual_review", path);
-    assert.match(stopped.summary, /operator rollout or review on GitHub/);
+    assert.match(stopped.summary, /What is left needs a person/);
     assert.equal(g.counts().merges, 0);
+    if (path.startsWith("db/"))
+      assert.match(
+        stopped.summary,
+        /run the database rollout for 033_example\.sql/,
+      );
   }
+});
+
+test("a PR that needs operator work still gets its review feedback fixed first", async (t) => {
+  const f = await fixture(t, undefined, [
+    "docs/fixture.md",
+    "db/036_example.sql",
+  ]);
+  f.setInspection({
+    draft: false,
+    feedback: [{ id: "devin-1", text: "Devin: the index is missing" }],
+  });
+  await f.auto.tick();
+  const queued = await f.job();
+  assert.equal(queued.state, "queued");
+  assert.match(
+    queued.checkpoint.piState!.mrFeedback!.text,
+    /the index is missing/,
+  );
+});
+
+test("a tool-picker change tells the owner to run the picker eval before merging", async (t) => {
+  const f = await fixture(t, undefined, ["config/tool-picker.json"]);
+  await f.auto.tick();
+  f.setInspection({ checks: "passed" });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_merge_approval");
+  const card = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND payload ? 'merge'",
+      [f.id],
+    )
+  ).rows[0].payload;
+  assert.match(card.summary, /Before merging:\*\* run kite run eval:picker/);
 });
 test("dependency and image changes are called out separately on the Merge card", async (t) => {
   const f = await fixture(t, undefined, [
@@ -874,4 +912,106 @@ test("a PR that already merged cannot be continued back through the gates", asyn
     },
   );
   assert.equal((await f.job()).stage, "manual_review");
+});
+
+/** The owner's fix request through Chief, as coding_reply on the job with an open PR. */
+async function replyAsOwner(
+  f: Awaited<ReturnType<typeof fixture>>,
+  requestKey: string,
+  message: string,
+) {
+  const run = randomUUID();
+  await f.db.query(
+    "INSERT INTO work_turns(run_id,user_id,request) VALUES($1,'owner','fix the coding PR')",
+    [run],
+  );
+  const c = new CodingController(
+    f.db,
+    settings,
+    {} as any,
+    {} as any,
+    "c".repeat(64),
+    "https://coding.example.com",
+    () => true,
+    () => ({
+      generate: async () => ({ message: { role: "assistant", content: "" } }),
+    }),
+    () => new Date(),
+  );
+  return c.call("owner", run, {
+    operation: "coding_reply",
+    id: f.id,
+    baseRevision: (await f.job()).revision,
+    requestKey,
+    message,
+  });
+}
+
+test("the owner's fix request on a stopped PR goes to the coder on the same PR", async (t) => {
+  const f = await fixture(t, undefined, [
+    "docs/fixture.md",
+    "db/036_example.sql",
+  ]);
+  await f.auto.tick();
+  f.setInspection({ checks: "passed" });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "manual_review");
+  await replyAsOwner(f, "fix-1", "Keep the buttons when a tap fails.");
+  const waiting = await f.job();
+  assert.equal(waiting.stage, "awaiting_ci");
+  assert.match(waiting.summary, /The owner asked for changes/);
+  await replyAsOwner(f, "fix-1", "Keep the buttons when a tap fails.");
+  await assert.rejects(
+    replyAsOwner(f, "fix-1", "Something else"),
+    /request key conflict/,
+  );
+  await f.auto.tick();
+  const queued = await f.job();
+  assert.equal(queued.state, "queued");
+  assert.match(
+    queued.checkpoint.piState!.mrFeedback!.text,
+    /Owner request: Keep the buttons when a tap fails\./,
+  );
+  const handled = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
+      [f.id],
+    )
+  ).rows[0].payload.handled;
+  assert.equal(handled.length, 1);
+  assert.match(handled[0], /^owner:/);
+});
+
+test("a fix request waits for the next round on a PR still in checks", async (t) => {
+  const f = await fixture(t);
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_ci");
+  await replyAsOwner(f, "fix-2", "Rename the heading.");
+  assert.equal((await f.job()).stage, "awaiting_ci");
+  await f.auto.tick();
+  assert.equal((await f.job()).state, "queued");
+});
+
+test("a merged or finished PR cannot take a fix request", async (t) => {
+  const f = await fixture(t);
+  await f.db.query(
+    "UPDATE coding_jobs SET stage='merged_on_github' WHERE id=$1",
+    [f.id],
+  );
+  await assert.rejects(
+    replyAsOwner(f, "fix-3", "Rename the heading."),
+    /can no longer change/,
+  );
+  const g = await fixture(t);
+  await g.db.query("UPDATE coding_jobs SET stage='manual_review' WHERE id=$1", [
+    g.id,
+  ]);
+  await g.db.query(
+    "UPDATE coding_events SET payload=payload || jsonb_build_object('mergeSha',$2::text) WHERE job_id=$1 AND event_key='automation:1'",
+    [g.id, "d".repeat(40)],
+  );
+  await assert.rejects(
+    replyAsOwner(g, "fix-4", "Rename the heading."),
+    /already merged/,
+  );
 });
