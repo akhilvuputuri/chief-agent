@@ -423,7 +423,8 @@ export async function settleUncertainDrafts(db: Database, user: string) {
 /** Each settled coding operation and the record its write would leave, keyed by its request key. */
 const codingTraces: Record<string, string> = {
   coding_start: `EXISTS(SELECT 1 FROM coding_jobs j WHERE j.user_id=$2 AND j.request_key=$3)`,
-  coding_reply: `EXISTS(SELECT 1 FROM coding_revisions v WHERE v.job_id::text=$4 AND v.request_key=$3)`,
+  coding_reply: `(EXISTS(SELECT 1 FROM coding_revisions v WHERE v.job_id::text=$4 AND v.request_key=$3)
+    OR EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id::text=$4 AND e.event_key='owner-feedback:'||$3))`,
   coding_job_update: `EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id::text=$4 AND e.event_key='settings:'||$3)`,
   coding_resume: `(EXISTS(SELECT 1 FROM coding_revisions v WHERE v.job_id::text=$4 AND v.request_key=$3)
     OR EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id::text=$4

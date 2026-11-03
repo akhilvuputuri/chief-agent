@@ -1063,14 +1063,13 @@ export class CodingController {
         throw new ToolValidationError("Coding revision request key conflict");
       return this.status(user, job.id);
     }
-    const open = [
-      "pr_ready",
-      "readying",
-      "awaiting_ci",
+    const parked = [
       "awaiting_merge_approval",
+      "merge_approved",
       "manual_review",
       "merge_declined",
     ];
+    const open = ["pr_ready", "readying", "awaiting_ci", ...parked];
     if (!open.includes(job.stage))
       throw new ToolValidationError(
         `This job's PR is ${job.stage.replaceAll("_", " ")} and can no longer change. Start a new coding job for further changes.`,
@@ -1078,6 +1077,33 @@ export class CodingController {
     if (job.revision !== a.baseRevision)
       throw new ToolValidationError(
         "Coding revision changed; read coding_status and retry with the current revision",
+      );
+    // Refuse now what the feedback round could never deliver, rather than park the PR on it.
+    const handled =
+      (
+        await this.db.query(
+          "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
+          [job.id, `automation:${job.revision}`],
+        )
+      ).rows[0]?.payload?.handled?.length ?? 0;
+    const refusal =
+      a.message.length > 7000
+        ? "The request is too long for one feedback round; shorten it to under 7,000 characters"
+        : (job.checkpoint.piState?.mrFeedback?.round ?? 0) >= 3
+          ? "This PR has already had three rounds of fixes, so it cannot take another; start a new coding job for further changes"
+          : job.used_models >= job.settings.limits.models ||
+              (job.checkpoint.piState?.toolsUsed ?? 0) >=
+                job.settings.limits.tools
+            ? "This job has used its model or tool allowance, so it cannot take another round of fixes; start a new coding job"
+            : handled >= 200
+              ? "This PR has handled too much feedback to take more; start a new coding job"
+              : undefined;
+    if (refusal) throw new ToolValidationError(`Nothing changed: ${refusal}.`);
+    if (parked.includes(job.stage))
+      await this.assertFreshOrConfirmed(
+        job,
+        a,
+        `state='pr_ready' AND stage=ANY(ARRAY['${parked.join("','")}'])`,
       );
     const merged = (
       await this.db.query(
@@ -1089,11 +1115,6 @@ export class CodingController {
       throw new ToolValidationError(
         "This job's PR already merged, so it cannot change. Start a new coding job for further changes.",
       );
-    const parked = [
-      "awaiting_merge_approval",
-      "manual_review",
-      "merge_declined",
-    ];
     const recorded = await this.db.query(
       `WITH changed AS (
         UPDATE coding_jobs SET stage=CASE WHEN stage=ANY($5::text[]) THEN 'awaiting_ci' ELSE stage END,

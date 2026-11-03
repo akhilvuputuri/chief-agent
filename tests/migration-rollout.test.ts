@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 /**
  * A migration merged without its Compose line and rollout script makes every later release
  * refuse to run (scripts/cloud-release.py compares db/ and compose.yaml with the live host).
- * Migrations before 031 predate rollout scripts.
+ * Rollout scripts name their migration as MIGRATION = '<file>' from 032 on; 031 has none.
  */
 test("every migration has its Compose line, and new ones a rollout script with a test", () => {
   const compose = readFileSync("compose.yaml", "utf8");
@@ -25,9 +25,12 @@ test("every migration has its Compose line, and new ones a rollout script with a
       compose.includes(`/migrations/${file}`),
       `${file} has no line in compose.yaml`,
     );
-    if (Number(file.split("_")[0]) < 31 || file === "030_mcp.sql") continue;
+    if (Number(file.split("_")[0]) < 32) continue;
+    // A script names the previous migration too, as its Compose anchor; only MIGRATION counts.
     const deploy = deploys.find((d) =>
-      readFileSync(`scripts/${d}`, "utf8").includes(file),
+      new RegExp(`^MIGRATION = '${file.replace(".", "\\.")}'$`, "m").test(
+        readFileSync(`scripts/${d}`, "utf8"),
+      ),
     );
     assert(deploy, `${file} has no scripts/deploy-*.py rollout script`);
     assert(

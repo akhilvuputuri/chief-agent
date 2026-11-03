@@ -212,12 +212,12 @@ test("protected files reach the owner's Merge card, which names them; hard stops
     await g.auto.tick();
     const stopped = await g.job();
     assert.equal(stopped.stage, "manual_review", path);
-    assert.match(stopped.summary, /What is left needs a person/);
+    assert.match(stopped.summary, /Chief does not merge this change/);
     assert.equal(g.counts().merges, 0);
     if (path.startsWith("db/"))
       assert.match(
         stopped.summary,
-        /run the database rollout for 033_example\.sql/,
+        /merge it on GitHub and right away run the database rollout for 033_example\.sql/,
       );
   }
 });
@@ -1014,4 +1014,87 @@ test("a merged or finished PR cannot take a fix request", async (t) => {
     replyAsOwner(g, "fix-4", "Rename the heading."),
     /already merged/,
   );
+});
+
+test("a hard-stop PR never merges, even with an owner approval already recorded", async (t) => {
+  const f = await fixture(t, undefined, [
+    "docs/fixture.md",
+    "db/036_example.sql",
+  ]);
+  await f.auto.tick();
+  f.setInspection({ checks: "passed" });
+  await f.db.query(
+    "UPDATE coding_jobs SET stage='merge_approved' WHERE id=$1",
+    [f.id],
+  );
+  await f.auto.tick();
+  const job = await f.job();
+  assert.equal(job.stage, "manual_review");
+  assert.equal(f.counts().merges, 0);
+  const cards = await f.db.query(
+    "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload ? 'merge'",
+    [f.id],
+  );
+  assert.equal(cards.rows.length, 0);
+});
+
+test("a fix request that a feedback round could not deliver is refused up front", async (t) => {
+  const f = await fixture(t, {
+    version: 1,
+    toolsUsed: 20,
+    mrFeedback: { round: 3, text: "Earlier feedback" },
+  });
+  await f.db.query("UPDATE coding_jobs SET stage='manual_review' WHERE id=$1", [
+    f.id,
+  ]);
+  await assert.rejects(
+    replyAsOwner(f, "fix-5", "One more fix."),
+    /three rounds of fixes/,
+  );
+  assert.equal((await f.job()).stage, "manual_review");
+  const g = await fixture(t);
+  await g.db.query("UPDATE coding_jobs SET stage='manual_review' WHERE id=$1", [
+    g.id,
+  ]);
+  await assert.rejects(replyAsOwner(g, "fix-6", "x".repeat(7001)), /too long/);
+});
+
+test("a fix request on a PR stopped for over a day needs the owner's explicit say-so", async (t) => {
+  const f = await fixture(t);
+  await f.db.query(
+    "UPDATE coding_jobs SET stage='manual_review',updated_at=now()-interval '3 days' WHERE id=$1",
+    [f.id],
+  );
+  await assert.rejects(
+    replyAsOwner(f, "fix-7", "Rename the heading."),
+    /waiting since/,
+  );
+  assert.equal((await f.job()).stage, "manual_review");
+});
+
+test("an owner request is sent once, even if a later round starts without its handled list", async (t) => {
+  const f = await fixture(t);
+  await f.auto.tick();
+  await replyAsOwner(f, "fix-8", "Rename the heading.");
+  await f.auto.tick();
+  assert.equal((await f.job()).state, "queued");
+  const delivered = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='owner-feedback:fix-8'",
+      [f.id],
+    )
+  ).rows[0].payload;
+  assert.equal(delivered.deliveredRound, 1);
+  // As after an automatic retry: the PR is back with an empty handled list.
+  await f.db.query(
+    "UPDATE coding_jobs SET state='pr_ready',stage='awaiting_ci' WHERE id=$1",
+    [f.id],
+  );
+  await f.db.query(
+    "UPDATE coding_events SET payload=jsonb_set(payload,'{handled}','[]'::jsonb) WHERE job_id=$1 AND event_key LIKE 'automation:%'",
+    [f.id],
+  );
+  f.setInspection({ draft: false, checks: "passed" });
+  await f.auto.tick();
+  assert.notEqual((await f.job()).state, "queued");
 });

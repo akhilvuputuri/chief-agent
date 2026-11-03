@@ -263,7 +263,7 @@ export class CodingAutomation {
   private async ownerRequests(j: CodingJob) {
     return (
       await this.db.query(
-        "SELECT id,payload->>'text' AS text FROM coding_events WHERE job_id=$1 AND event_key LIKE 'owner-feedback:%' ORDER BY created_at,id",
+        "SELECT id,payload->>'text' AS text FROM coding_events WHERE job_id=$1 AND event_key LIKE 'owner-feedback:%' AND NOT payload ? 'deliveredRound' ORDER BY created_at,id",
         [j.id],
       )
     ).rows.map((r: { id: string; text: string }) => ({
@@ -580,6 +580,11 @@ export class CodingAutomation {
             mrFeedback: { round, text },
           };
         const handled = [...d.handled, ...batch.map((f) => f.id)];
+        // An owner request is sent once: a retried or resumed round starts with no handled
+        // list, and the request must not be fixed (and charged) again.
+        const sent = batch
+          .filter((f) => f.id.startsWith("owner:"))
+          .map((f) => f.id.slice("owner:".length));
         const fingerprint = createHash("sha256")
           .update(JSON.stringify(handled))
           .digest("hex");
@@ -597,6 +602,11 @@ export class CodingAutomation {
             j.stage,
           ],
         );
+        if (sent.length)
+          await this.db.query(
+            "UPDATE coding_events SET payload=payload || jsonb_build_object('deliveredRound',$2::int) WHERE job_id=$1 AND id=ANY($3::uuid[])",
+            [j.id, round, sent],
+          );
         return;
       }
       if (i.checks === "failed") {
@@ -635,7 +645,7 @@ export class CodingAutomation {
         await this.manual(
           j,
           d,
-          `Review, CI and feedback are done. What is left needs a person: ${operatorSteps(paths).join("; ") || "review the changed database, Compose, environment or workflow files"}.`,
+          `Review, CI and feedback are done. Chief does not merge this change; a person needs to ${operatorSteps(paths).join("; ")}.`,
         );
         return;
       }

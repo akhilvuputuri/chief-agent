@@ -100,12 +100,15 @@ export class MergeRefused extends Error {}
  */
 export function operatorSteps(paths: string[]) {
   const steps: string[] = [];
-  for (const path of paths.filter((p) => /^db\/\d+_[^/]+\.sql$/.test(p)))
+  const db = paths.filter((p) => /^db(?:\/|$)/.test(p));
+  if (db.length)
     steps.push(
-      `run the database rollout for ${path.slice(3)} right after merging (its scripts/deploy-*.py)`,
+      `merge it on GitHub and right away run the database rollout for ${db.map((p) => p.replace(/^db\//, "")).join(", ")} (its scripts/deploy-*.py)`,
     );
   if (paths.some((p) => /^compose(?:\..+)?\.ya?ml$/.test(p)))
-    steps.push("apply the Compose change through its rollout script");
+    steps.push(
+      "merge it on GitHub and apply the Compose change through its rollout script",
+    );
   if (paths.some((p) => /^\.github(?:\/|$)/.test(p)))
     steps.push(
       "merge on GitHub yourself, because Chief's app cannot merge workflow changes",
@@ -117,7 +120,9 @@ export function operatorSteps(paths: string[]) {
         .some((part) => part.startsWith(".env") && part !== ".env.example"),
     )
   )
-    steps.push("update the production environment file on the host");
+    steps.push(
+      "merge it on GitHub and update the production environment file on the host",
+    );
   if (paths.includes("config/tool-picker.json"))
     steps.push("run kite run eval:picker and record its result before merging");
   return steps;

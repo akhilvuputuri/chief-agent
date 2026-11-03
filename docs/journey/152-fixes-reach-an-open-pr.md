@@ -11,8 +11,8 @@ PR 416 needed fixes, and the owner wanted to tell Chief what to fix. Chief had n
 
 - **Code:** in `src/coding/automation.ts` the hard-stop check ran before marking the PR ready, so Devin never reviewed it and feedback was never read.
 - **Code:** `coding_reply` only revised restartable jobs, and `pr_ready` is not restartable.
-- **History:** the hard stops were kept by an AI session on 21 October (PR 308), when the owner asked to remove the protected-path block. Their effect on feedback was not checked then.
-- **Measured:** migrations 031 to 035 all have a Compose line and a deploy script; 030 does not.
+- **History:** PR 308 (21 October) sent protected paths to the owner's Merge card and kept four kinds of path as stops for an operator, with reasons. Its record does not discuss what those stops did to feedback.
+- **Measured:** migrations 032 to 035 each have a deploy script that names them as `MIGRATION`; 030 and 031 do not.
 
 ## Diagnosis and alternatives
 
@@ -25,7 +25,7 @@ Rejected: dropping the hard stop for migrations. Merging is still unsafe until t
 ## Implementation and review
 
 - `src/coding/automation.ts`: the hard stop moves after feedback and CI; owner requests join feedback; `operatorSteps` names what is left, in the stop and on the Merge card.
-- `src/coding/controller.ts`: `requestPrChanges` records the request, and returns a stopped PR to checks.
+- `src/coding/controller.ts`: `requestPrChanges` records the request and returns a stopped PR to checks. Independent review found that it accepted requests a round could never deliver (after three rounds, past the allowance or too long), which left the PR parked for good; those are now refused up front. It also skipped the 24-hour staleness check and was invisible to crash recovery; both are fixed. An owner request is marked delivered, so a retried round does not send it again.
 - `src/coding/merge-policy.ts`: `operatorSteps`.
 - `tests/migration-rollout.test.ts`: the rollout check.
 
@@ -36,5 +36,5 @@ Limitations:
 
 ## Verification and outcome
 
-- **Tested:** `tests/coding-pi-owner-merge.test.ts` covers a stopped PR taking a request, the next round, idempotent retries, key conflicts, refusal after a merge, feedback before the stop, and the eval note. The migration check passes on `main` and fails a migration without its Compose line.
+- **Tested:** `tests/coding-pi-owner-merge.test.ts` covers a stopped PR taking a request, the next round, idempotent retries, key conflicts, refusal after a merge, refusals a round could not deliver, the staleness check, a request sent once, feedback before the stop, a hard-stop PR with a recorded approval, and the eval note. The migration check passes on `main` and fails a migration without its Compose line.
 - **Not yet measured:** a live request on a real PR.
