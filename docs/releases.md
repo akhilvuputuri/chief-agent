@@ -4,6 +4,12 @@
 - **Why.** Nobody could fix PR 416 through Chief. See [journal 152](journey/152-fixes-reach-an-open-pr.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
 
+## Reviews that look for failures, and a one-tap Start card (4 November 2026)
+
+- **Code.** The coding reviewer follows REVIEW.md and [docs/coding-checklist.md](coding-checklist.md), checks the owner's request requirement by requirement, and may test the candidate in its disposable checkout. The planner leads with the request's requirements, and `planCheck` has the reviewer check the plan before a short Start card. No database or Compose change.
+- **Why.** A self-review approved PR 416 with five blocking bugs. See [journal 151](journey/151-review-that-looks-for-failures.md).
+- **Deployment.** Not yet recorded as live. The worker part needs a new pinned image, and `planCheck` is switched on with that pin.
+
 ## Coding reviewer back to Claude Opus 5.5 (3 November 2026)
 
 - **Configuration.** `config/coding-pi.json` and `config/coding.json` return the coding reviewer to `anthropic/claude-opus-5.5`. DeepSeek V4.1 Flash 1017 stays the planner and coder. New jobs only.

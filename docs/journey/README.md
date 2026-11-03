@@ -157,6 +157,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1 November | [148 — Public browser agent](148-public-browser-agent.md): can Chief use an open browser without exposing the owner's data? | Confinement probe passes on arm64 and in x86-64 CI; not deployed |
 | 2 November | [149 — Scheduled browser refresh](149-scheduled-browser-refresh.md): how does a browser that runs hostile scripts stay patched without anyone remembering? | Live in `444a334`: a daily timer refreshes at 28 days, retries refusals and tells the owner on failure; the refresh now keeps `:rollback`. One measured run added 3.44 GB |
 | 2 November | [150 — Coding through gateway restarts](150-coding-through-gateway-restarts.md): can a coding job survive a gateway restart? | Tested on synthetic jobs; release pending. Workers retry, a restart-cut call is recorded, and exit codes name the failure |
+| 4 November | [151 — Review that looks for failures](151-review-that-looks-for-failures.md): why did a passing review miss five bugs? | Tested on synthetic jobs; release pending. The reviewer hunts for failures and checks the request, and the plan is checked before a one-tap Start card |
 | 4 November | [152 — Fixes reach an open PR](152-fixes-reach-an-open-pr.md): why could nobody fix PR 416 through Chief? | Tested on synthetic jobs; release pending. Owner fix requests join the PR's feedback round, and the operator stop moves after review |
 
 ## Coding-agent learning path

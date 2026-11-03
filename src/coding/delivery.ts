@@ -28,11 +28,11 @@ export async function sendCodingDelivery(
           inline_keyboard: [
             [
               {
-                text: "Approve requirements",
+                text: "Start",
                 callback_data: `cod:yes:${approval.id}`,
               },
               {
-                text: "Request changes",
+                text: "Change",
                 callback_data: `cod:no:${approval.id}`,
               },
             ],
