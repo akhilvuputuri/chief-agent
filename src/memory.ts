@@ -118,7 +118,7 @@ const THREATS: Array<[string, RegExp]> = [
   // Any form of the verb, since a learned fact is declarative: "Sends OTP and PIN to Tan".
   [
     "exfiltration",
-    /\b(send|sends|sending|sent|(forward|post|upload|e-?mail)(s|ed|ing)?|shar(e|es|ed|ing))\b.{0,60}\b(passwords?|tokens?(?! of\b)|api[ _-]?keys?|secrets?|credentials?|otps?|pin(?! of\b))\b/i,
+    /\b(send|sends|sending|sent|(forward|post|upload|e-?mail)(s|ed|ing)?|shar(e|es|ed|ing))\b.{0,60}\b(passwords?|tokens?(?! of\b)|api[ _-]?keys?|secrets?|credentials?|otps?|pins?(?! (of|on)\b))\b/i,
   ],
   ["exfiltration", /https?:\/\/\S*[?&][^=\s&]+=\S/i],
   ["invisible_text", /[​-‏‪-‮⁠-⁤﻿]/],

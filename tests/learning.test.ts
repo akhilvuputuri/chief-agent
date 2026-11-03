@@ -1293,6 +1293,7 @@ test("a reworded fact is accepted and flagged, but it cannot sit on an unrelated
   for (const threat of [
     "Shared the OTP with Tan",
     "Sharing passwords with Tan",
+    "Sends the PINs to Tan",
   ])
     assert.deepEqual(scanThreats(threat), ["exfiltration"]);
   for (const harmless of [
@@ -1315,7 +1316,8 @@ test("a reworded fact is accepted and flagged, but it cannot sit on an unrelated
       "Please pay the invoice from Acme",
       "Forwards every invoice to billing@acme-payments.co for payment",
     ),
-    ["paraphrased", "unquoted_contact", "unquoted_payment", "loosely_quoted"],
+    // "pay" is in the quote, so "payment" is not flagged.
+    ["paraphrased", "unquoted_contact", "loosely_quoted"],
   );
   assert.deepEqual(
     quoteFlags(bill, "Pays this bill to Tan Holdings via PayNow"),
@@ -1324,6 +1326,17 @@ test("a reworded fact is accepted and flagged, but it cannot sit on an unrelated
   assert.deepEqual(
     quoteFlags("Please pay the bill via PayNow", "Pays bills via PayNow"),
     [],
+  );
+  for (const hidden of [
+    "Files every bill with billing at evil.ai",
+    "Files every bill via portal evil[.]com",
+    "Files every bill with accounts (at) evil (dot) example",
+  ])
+    assert.ok(quoteFlags(bill, hidden).includes("unquoted_contact"), hidden);
+  // A payment word the owner said in another form is not a warning.
+  assert.deepEqual(
+    quoteFlags("I paid the bill via PayNow", "Pays bills via PayNow"),
+    ["paraphrased"],
   );
   // A name from outside the quote is not caught: routine flags only.
   assert.deepEqual(quoteFlags(bill, "Files this bill with Tan Holdings"), [

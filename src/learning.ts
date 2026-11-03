@@ -305,13 +305,26 @@ export function quoteRefusal(quote: string, value: string): string | undefined {
   return undefined;
 }
 
-// Where something could be sent: an email address, a link or domain, or one spelled out.
+// Where something could be sent: an email address, a link or domain (any ending of two or
+// more letters, so "Node.js" counts too), or one spelled out ("at evil dot example").
 const CONTACT =
-  /[\w.+-]+@[\w-]+\.\w|\bhttps?:\/\/|\bwww\.|\b[\w-]+\.(com|co|net|org|io|app|me|sg|my|uk|example)\b|\bat\s+\S+\s+dot\s+\S+/gi;
-// Words that move money, which a fact should only carry when the owner said them.
-const PAYMENT = new Set(
-  "pay pays paid paying payee payment payments paynow paylah transfer transfers transferred bank iban swift wire remit remits".split(
-    " ",
+  /[\w.+-]+(@|\s*[[(]at[\])]\s*)[\w-]+|\bhttps?:\/\/|\bwww\.|\b[\w-]+(\.|\s*\[\.\]\s*|\s*\(dot\)\s*)[a-z]{2,24}\b|\bat\s+\S+\s+dot\s+\S+/gi;
+// Words that move money, by root, which a fact should only carry when the owner said one
+// with the same root: "paid" in the quote covers "pays". "transfer" also moves files, so it
+// can warn on a harmless fact.
+const PAYMENT = new Map(
+  Object.entries({
+    pay: "pay pays paid paying payee payment payments",
+    paynow: "paynow",
+    paylah: "paylah",
+    transfer: "transfer transfers transferred transferring",
+    bank: "bank banks",
+    iban: "iban",
+    swift: "swift",
+    wire: "wire wired",
+    remit: "remit remits remitted",
+  }).flatMap(([root, forms]) =>
+    forms.split(" ").map((f) => [f, root] as const),
   ),
 );
 
@@ -340,7 +353,8 @@ export function quoteFlags(quote: string, value: string): string[] {
     [...value.matchAll(CONTACT)].some((m) => !quotedText.includes(norm(m[0])))
   )
     flags.push("unquoted_contact");
-  if (stated.some((w) => PAYMENT.has(w) && !quoted.includes(w)))
+  const paid = new Set(quoted.map((w) => PAYMENT.get(w)));
+  if (stated.some((w) => PAYMENT.has(w) && !paid.has(PAYMENT.get(w))))
     flags.push("unquoted_payment");
   const said = new Set(quoted.map(stem));
   const content = stated.filter(
