@@ -130,6 +130,9 @@ export function tools(
       },
     }),
   ];
+  // A candidate reviewer works in a disposable copy, so it may run commands to test the
+  // candidate. Its edits never reach the artifact, which comes from the coder's workspace.
+  if (intent === "review" && execute) list.push(bash(cwd, execute));
   if (intent === "build") {
     if (!execute)
       throw new Error(
@@ -154,22 +157,7 @@ export function tools(
         },
       }),
     );
-    list.push(
-      createBashToolDefinition(cwd, {
-        exposeSessionEnvironment: false,
-        operations: {
-          exec: async (command, _cwd, { signal, onData, timeout }) => {
-            const result = await execute(
-              command,
-              signal ?? new AbortController().signal,
-              Math.min((timeout ?? 120) * 1000, 120_000),
-            );
-            onData(Buffer.from(result.output));
-            return { exitCode: result.exitCode };
-          },
-        },
-      }),
-    );
+    list.push(bash(cwd, execute));
   }
   const reportKinds =
     intent === "learn"
@@ -221,4 +209,21 @@ export function tools(
       return tool.execute(...args);
     },
   }));
+}
+
+function bash(cwd: string, execute: Executor) {
+  return createBashToolDefinition(cwd, {
+    exposeSessionEnvironment: false,
+    operations: {
+      exec: async (command, _cwd, { signal, onData, timeout }) => {
+        const result = await execute(
+          command,
+          signal ?? new AbortController().signal,
+          Math.min((timeout ?? 120) * 1000, 120_000),
+        );
+        onData(Buffer.from(result.output));
+        return { exitCode: result.exitCode };
+      },
+    },
+  });
 }

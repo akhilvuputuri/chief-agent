@@ -264,6 +264,8 @@ export const codingSettings = z
     agentGit: z.boolean().optional(),
     /** Host-only operator switch (default on): re-queue a job once after a classified transient pause. */
     autoRetryTransientOnce: z.boolean().optional(),
+    /** Pi: the reviewer checks the plan against the owner's request before the Start card. */
+    planCheck: z.boolean().optional(),
     limits: z
       .object({
         ms: z.number().int().positive().max(14_400_000),

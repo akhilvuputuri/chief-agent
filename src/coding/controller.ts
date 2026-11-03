@@ -2331,8 +2331,15 @@ export class CodingController {
         const summaryPreview = Array.from(String(j.summary ?? ""))
           .slice(0, 180)
           .join("");
+        // The owner taps Start without reading the plan; the reviewer checked it first.
         const caption = attachment
-          ? `**Coding plan — revision ${req.revision}**\n\n${summaryPreview}\n\nThe complete plan and original request are attached. Review the document, then approve the requirements or request changes. You can also reply yes directly to this message. Confirmation stays valid for 24 hours.\n\nJob: ${e.job_id}`
+          ? `**Ready to start coding**\n\n${Array.from(
+              String(j.objective).split("\n")[0] ?? "",
+            )
+              .slice(0, 160)
+              .join(
+                "",
+              )}\n\n${summaryPreview}\n\nPlanner and coder: ${j.settings.model}. Reviewer: ${j.settings.reviewerModel}. Tap Start to begin, or Change to adjust it. The full plan is attached if you want it; this card stays valid for 24 hours.\n\nJob: ${e.job_id}`
           : undefined;
         // Without the owner-merge workflow no Merge card repeats the coder's summary, so the
         // first PR notice carries it (bounded like the Merge card).

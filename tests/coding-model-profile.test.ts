@@ -366,6 +366,17 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
     f.setGeneration((selected, input) => {
       const system =
         input.messages.find((m: any) => m.role === "system")?.content ?? "";
+      // The longer review contract can push this small fixture window into compaction.
+      if (
+        String(system).startsWith("You are a context summarization assistant")
+      )
+        return {
+          message: {
+            role: "assistant",
+            content:
+              "## Goal\nReview the candidate.\n## Progress\nEvidence read so far is retained.",
+          },
+        };
       const phase =
         selected === settings.reviewerModel
           ? "review"

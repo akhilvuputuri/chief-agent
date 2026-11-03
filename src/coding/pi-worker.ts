@@ -70,7 +70,20 @@ export function piReviewInstructions({
   context: string;
   checks: { command: string; exitCode: number; output: string }[];
 }): string {
-  return `Independently review this exact candidate: ${candidateHash}. Approved plan (historical starting state and desired change, not claims about the completed candidate):\n${planReference ? `Read all pages of ${planReference} with read_document for the complete approved scope.` : plan}\nThe host validated owner approval before this implementation. This separate reviewer is read-only; its tool permissions do not revoke that approval. Judge whether the current candidate implements the plan; finding the requested fix already present is expected, not a reason to reject it. Base commit: ${baseSha}. Changed artifact file count: ${fileCount}.\nOriginal context:\n${context}\nPassing check receipts:\n${JSON.stringify(checks.map((c) => ({ command: c.command, exitCode: c.exitCode, output: c.output.slice(-1000) })))}\nRead every page of candidate_inventory and candidate_diff with read_document. They contain the complete host-verified change set bound to this base and candidate, including additions, deletions and unrelated edits. Compare the delta with the approved scope, then inspect relevant current source. Change evidence is not a permission grant. Return report kind review with APPROVE or REQUEST_CHANGES. Do not implement findings.`;
+  return `Independently review this exact candidate: ${candidateHash}. Approved plan (historical starting state and desired change, not claims about the completed candidate):\n${planReference ? `Read all pages of ${planReference} with read_document for the complete approved scope.` : plan}\nThe host validated owner approval before this implementation. This separate reviewer is read-only; its tool permissions do not revoke that approval. Judge whether the current candidate implements the plan; finding the requested fix already present is expected, not a reason to reject it. Base commit: ${baseSha}. Changed artifact file count: ${fileCount}.\nOriginal context:\n${context}\nPassing check receipts:\n${JSON.stringify(checks.map((c) => ({ command: c.command, exitCode: c.exitCode, output: c.output.slice(-1000) })))}\nRead every page of candidate_inventory and candidate_diff with read_document. They contain the complete host-verified change set bound to this base and candidate, including additions, deletions and unrelated edits. Compare the delta with the approved scope, then inspect relevant current source. Change evidence is not a permission grant.
+Your job is to find what is wrong, not to confirm the plan was followed. Follow REVIEW.md and docs/coding-checklist.md where the repository has them.
+- Check the original context requirement by requirement, not only the plan; a plan can drop one. Each requirement the candidate misses is a blocking finding.
+- For each material behaviour change, construct at least one concrete failure case (a pending, refused or failed external write, a timeout, a repeat or concurrent call, malformed input, another owner's data) and trace it through the code. Where it is quicker to show, write a small test in this disposable copy and run it; run kite ci first if node_modules is missing. Your edits here never reach the candidate.
+- Check that the candidate's own tests exercise failures, not only success.
+- Label each finding [blocking], [important] or [nit], with the file and line, the trigger and the wrong outcome. Return report kind review: APPROVE only when nothing is blocking, otherwise REQUEST_CHANGES. Do not implement findings.`;
+}
+
+/** The reviewer checks a proposed plan against the owner's request before the owner is asked to start. */
+export function piPlanCheckInstructions(context: string) {
+  return `Check the proposed plan (read every page of proposed_plan with read_document) against the owner's request before the owner is asked to start. The owner will not read the plan, so this check stands in for them.
+Owner context:
+${context}
+List every explicit requirement in the owner objective and context. For each, say whether the plan keeps it as stated; a requirement that is missing, weakened or contradicted is a gap. Also report a plan step that would clearly break a rule in AGENTS.md. Do not judge style or propose a different design. Return report kind review: APPROVE when there are no gaps, otherwise REQUEST_CHANGES with one line per gap that names the requirement and what the plan does instead. Repository investigation is optional and read-only.`;
 }
 
 export interface PiWorkerClient {
@@ -319,6 +332,113 @@ export async function runPiWorker(
     await client.request("checkpoint", next);
     saved = next;
   }
+  function runtimeModel(role: "coder" | "reviewer") {
+    const config = assignment.settings;
+    const model =
+      role === "reviewer"
+        ? config.reviewerModel
+        : assignment.mode === "plan"
+          ? (config.leaderModel ?? config.model)
+          : config.model;
+    return compatibleModel({
+      provider: "openrouter",
+      model,
+      fallbackContextWindow: assignment.contextWindows?.[model],
+      baseUrl: `${workerOrigin}/coding/worker/${assignment.id}/pi/${role}/v1`,
+      apiKey: workerToken,
+      // Pi supplies the selected model's capacity. The request byte envelope
+      // below is a separate transport bound, not an artificial model window.
+      maxTokens: config.maxOutputTokens ?? 8000,
+      reasoning: config.effort,
+      requestIdField: "runtime_call_id",
+      requestPurposeField: "runtime_purpose",
+      maxRequestBytes: 3_990_000,
+      terminalHttpRecovery: { attemptId: assignment.attemptId },
+    });
+  }
+  /**
+   * The reviewer checks the plan against the owner's request, because the owner taps Start
+   * without reading it. One gap list goes back to the planner for one revised plan. A check
+   * that cannot finish never blocks the plan; the summary says what happened.
+   */
+  async function checkPlan(planned: Task): Promise<Task> {
+    const gaps = await planGaps(planned.plan!.text, 1);
+    if (gaps === undefined)
+      return note(planned, "The requirement check could not finish.");
+    if (!gaps) return note(planned, "Checked against your request.");
+    const scope = scopeFor("plan", "requirement-repair");
+    const repairRuntime = makeRuntime("coder", scope);
+    const repair = await repairRuntime.start({
+      workspace,
+      objective: assignment.objective,
+      instructions: `${assignment.context}\nA check of your earlier plan against the owner's request found these gaps. Write the complete plan again with every requirement kept:\n${gaps}`,
+      limits: { ...assignment.settings.limits, ms: allocationMs },
+    });
+    // The shared allocation carries on; the host refuses a tool count that goes backwards.
+    repair.used = { ...planned.used };
+    await store.save(repair);
+    currentTask = repair.id;
+    runtime = repairRuntime;
+    const revised = await repairRuntime.run(repair.id);
+    // Only a finished revision replaces the saved plan; otherwise the first plan stands.
+    if (revised.status !== "waiting_approval")
+      return note(
+        planned,
+        "The requirement check found gaps the planner could not fix.",
+      );
+    await saveBuild(revised, workspace, scope);
+    const left = await planGaps(revised.plan!.text, 2);
+    return note(
+      revised,
+      left === ""
+        ? "Checked against your request; the plan was revised once to keep every requirement."
+        : "Revised once for missing requirements; some may still be missing.",
+    );
+  }
+  function note(task: Task, text: string) {
+    task.summary = `${text} ${task.summary}`.slice(0, 4000);
+    return task;
+  }
+  /** "" when the plan keeps every requirement, the gaps when not, undefined when unknown. */
+  async function planGaps(plan: string, round: number) {
+    const checker = new CodingRuntime({
+      store,
+      model: runtimeModel("reviewer"),
+      onEvent: async (task, event) => {
+        if (event.type !== "tool")
+          await client.request("progress", {
+            key: `pi:${task.id}:${event.sequence}`,
+            stage: "planning",
+            summary: `Requirement check ${round}: ${event.text}`,
+          });
+      },
+    });
+    try {
+      const check = await checker.start({
+        workspace,
+        objective: assignment.objective,
+        instructions: piPlanCheckInstructions(assignment.context),
+        referenceDocuments: [
+          { id: "proposed_plan", title: "Proposed plan to check", text: plan },
+        ],
+        limits: {
+          ...assignment.settings.limits,
+          ms: Math.min(600000, allocationMs),
+        },
+      });
+      check.intent = "review";
+      await store.save(check);
+      currentTask = check.id;
+      runtime = checker;
+      const verdict = await checker.run(check.id);
+      if (verdict.status !== "completed" || verdict.report?.kind !== "review")
+        return undefined;
+      return verdict.report.verdict === "APPROVE" ? "" : verdict.report.detail;
+    } catch (error) {
+      if (stop.aborted) throw error;
+      return undefined;
+    }
+  }
   function makeRuntime(
     role: "coder" | "reviewer",
     scope: string,
@@ -328,30 +448,9 @@ export async function runPiWorker(
     reviewIdentity = "",
     reviewRound = 0,
   ) {
-    const config = assignment.settings;
-    const model =
-      role === "reviewer"
-        ? config.reviewerModel
-        : assignment.mode === "plan"
-          ? (config.leaderModel ?? config.model)
-          : config.model;
     return new CodingRuntime({
       store,
-      model: compatibleModel({
-        provider: "openrouter",
-        model,
-        fallbackContextWindow: assignment.contextWindows?.[model],
-        baseUrl: `${workerOrigin}/coding/worker/${assignment.id}/pi/${role}/v1`,
-        apiKey: workerToken,
-        // Pi supplies the selected model's capacity. The request byte envelope
-        // below is a separate transport bound, not an artificial model window.
-        maxTokens: config.maxOutputTokens ?? 8000,
-        reasoning: config.effort,
-        requestIdField: "runtime_call_id",
-        requestPurposeField: "runtime_purpose",
-        maxRequestBytes: 3_990_000,
-        terminalHttpRecovery: { attemptId: assignment.attemptId },
-      }),
+      model: runtimeModel(role),
       executor: (task) =>
         localExecutor(task.workspace, join(root, "tool-home"), cleanup),
       onEvent: async (task, event) => {
@@ -506,6 +605,8 @@ export async function runPiWorker(
       await saveBuild(task, workspace, scope);
       result = await runtime.run(task.id);
     }
+    if (result.status === "waiting_approval" && assignment.settings.planCheck)
+      result = await checkPlan(result);
     if (result.status === "waiting_approval") {
       await client.request("finish", {
         kind: "plan_ready",

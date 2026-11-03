@@ -12,6 +12,16 @@ Only the allowed owner can confirm the exact delivered brief using its **Approve
 
 An approval covers what the owner read: the objective, context and plan, for that job. It does not cover who carries them out or where they start. Models, limits, the worker image and the base commit can differ without a new approval. If the requirements text changes, the owner approves again. Merge rules are enforced at the merge gate and the Merge card, not through this approval. Approvals recorded before 31 October 2026 also hashed the base commit and settings. They stay valid while those are unchanged, and a settings change through `coding_job_update` carries them to the new scope.
 
+### Planning, review and the Start card
+
+The owner taps **Start** on a short card and does not read the plan, so the pipeline checks it instead. Introduced 4 November 2026 after PR 416 ([journal 151](journey/151-review-that-looks-for-failures.md)):
+
+- The planner starts every plan with a Requirements section: each explicit requirement from the request, one per line, kept as written.
+- With `planCheck` in the coding profile, the reviewer model checks the plan against the request before the card. A gap list goes back to the planner once for a revised plan. A check that cannot finish never blocks the plan, and the card's summary says what happened.
+- The coder follows [docs/coding-checklist.md](coding-checklist.md) and tests the failure paths of every write to another service, not only success.
+- The candidate reviewer is asked to find what is wrong, not to confirm the plan: it follows REVIEW.md and the checklist, checks the original request requirement by requirement, constructs a failure case for each material change, and may run tests in its disposable checkout. It approves only when nothing is blocking.
+- The card shows the objective, the check result and the models, with **Start** and **Change**. The full plan stays attached.
+
 ### When the gateway restarts
 
 A gateway restart should not end a Pi coding attempt. The worker repeats a host request for up to 3 minutes while the host is unreachable or answers 502, 503 or 504, and every worker route is safe to repeat. A clear refusal still ends the attempt. A failed heartbeat cancels the run only if the host refused it. A model request the gateway could not answer is resent under a new identity, because the host never replays a call it may have started, so an interrupted call can be paid for twice. The gateway records a call a restart cut off as `gateway_restart`. If the run still pauses, the automatic retry treats that pause as transient. A lost connection or a database shutting down or deadlocked answers 503, not a refusal, and is logged. After authentication, model calls keep their recorded failure instead. For a model call, a send that ran for over 30 seconds restarts the wait; the worker's model limit and time allocation still bound it. The worker's output is never kept, so its exit code names the failure (10 host unreachable, 11 host refused, 1 unexpected) and the job's summary repeats it. `node_modules` links the repository does not track are left out of artifacts and removed before host checks, and the coder is told to run `kite ci` when dependencies are missing. These changes reach only jobs on a worker image that has them.
