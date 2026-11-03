@@ -213,3 +213,26 @@ test("a reviewer that plants a git hook in the coder's checkout stops the attemp
   );
   await assert.rejects(run(), /workspace changed during review/);
 });
+
+for (const [label, command] of [
+  [
+    "adds a git ignore rule",
+    "printf 'src/\\n' >> ../workspace/.git/info/exclude",
+  ],
+  [
+    "plants a package in the coder's cache",
+    "mkdir -p ../tool-home/kite-store && printf poison > ../tool-home/kite-store/planted",
+  ],
+  [
+    "plants a session for the coder",
+    "mkdir -p ../state/planted && printf x > ../state/planted/a.jsonl",
+  ],
+  [
+    "plants a FIFO as a git hook",
+    "mkfifo ../workspace/.git/hooks/post-checkout",
+  ],
+] as const)
+  test(`a reviewer that ${label} stops the attempt`, async (t) => {
+    const { run } = await reviewWith(t, command);
+    await assert.rejects(run(), /workspace changed during review/);
+  });

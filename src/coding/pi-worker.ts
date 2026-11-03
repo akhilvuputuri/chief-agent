@@ -1,6 +1,13 @@
 import { createHash, createHmac } from "node:crypto";
-import { mkdir, mkdtemp, readFile, writeFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  writeFile,
+  readdir,
+} from "node:fs/promises";
+import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { z } from "zod";
@@ -414,26 +421,56 @@ export async function runPiWorker(
         check:
           left === ""
             ? { status: "revised" }
-            : { status: "gaps", gaps: left ?? gaps },
+            : left === undefined
+              ? { status: "revised_unchecked" }
+              : { status: "gaps", gaps: left },
       };
     } catch (error) {
       if (stop.aborted) throw error;
       return { task: planned, check: { status: "unavailable" } };
     }
   }
-  /** The coder's checkout as the next round would see it: tracked work, git config and hooks. */
-  async function workspaceSeal() {
+  /**
+   * Everything a later round could pick up, outside the reviewer's own checkout and home:
+   * the coder's tracked work by content, and every other entry under the attempt's root by
+   * identity and change time, which a same-user process cannot set back. Nothing is read
+   * except through git, so a planted FIFO cannot hang the worker.
+   */
+  async function workspaceSeal(reviewTask: string) {
     const snap = await new PiWorkspace(workspace)
       .initialize()
       .then((w) => w.snapshot(initial, stop, assignment.baseSha));
-    const git = join(workspace, ".git");
-    const hooks = (await readdir(join(git, "hooks")).catch(() => [])).sort();
     const seal = createHash("sha256").update(snap.hash);
-    seal.update(await readFile(join(git, "config")).catch(() => ""));
-    for (const hook of hooks)
-      seal
-        .update(`\0${hook}\0`)
-        .update(await readFile(join(git, "hooks", hook)).catch(() => ""));
+    const own = new Set([
+      relative(root, store.path(reviewTask)),
+      "review-home",
+    ]);
+    const skip = (path: string) =>
+      own.has(path) ||
+      /^review-[^/]+$/.test(path) ||
+      // Lock files, and git's index and objects, change without a reviewer.
+      /^workspace\/\.git\/(?:index|objects)(?:\/|$)/.test(path) ||
+      path.endsWith(".lock");
+    const walk = async (dir: string): Promise<void> => {
+      const entries = (await readdir(join(root, dir), { withFileTypes: true }))
+        .map((e) => e.name)
+        .sort();
+      for (const name of entries) {
+        const path = dir ? `${dir}/${name}` : name;
+        if (skip(path)) continue;
+        const info = await lstat(join(root, path)).catch(() => undefined);
+        if (!info) continue;
+        // A directory's own times move with lock files; its listing is what matters.
+        if (info.isDirectory()) {
+          seal.update(`${path}\0dir\n`);
+          await walk(path);
+        } else
+          seal.update(
+            `${path}\0${info.ino}\0${info.mode}\0${info.size}\0${info.ctimeMs}\n`,
+          );
+      }
+    };
+    await walk("");
     return seal.digest("hex");
   }
   /** "" when the plan keeps every requirement, the gaps when not, undefined when unknown. */
@@ -488,7 +525,7 @@ export async function runPiWorker(
     return new CodingRuntime({
       store,
       model: runtimeModel(role),
-      // A reviewer's shell gets its own home, so nothing it caches reaches the coder or checks.
+      // A reviewer's shell gets its own home; the seal around review catches anything it writes elsewhere.
       executor: (task) =>
         localExecutor(
           task.workspace,
@@ -790,11 +827,11 @@ export async function runPiWorker(
         checkedCandidate,
         round,
       );
-      // The reviewer's shell can reach the coder's checkout next door. Any change there,
-      // including git hooks or config, ends the attempt rather than reaching the next round.
-      const sealed = await workspaceSeal();
+      // The reviewer's shell can reach the rest of the attempt's root. Any change outside its
+      // own checkout and home ends the attempt rather than reaching the next round.
+      const sealed = await workspaceSeal(review.id);
       const verdict = await runtime.run(review.id);
-      if ((await workspaceSeal()) !== sealed)
+      if ((await workspaceSeal(review.id)) !== sealed)
         throw new Error("The coder's workspace changed during review");
       await uploadSession(verdict, reviewScope);
       if (verdict.status !== "completed" || verdict.report?.kind !== "review") {

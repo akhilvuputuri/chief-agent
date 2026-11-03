@@ -2334,11 +2334,19 @@ export class CodingController {
         // The owner taps Start without reading the plan; the reviewer checked it first.
         const check = j.checkpoint.piState?.planCheck;
         const id = (model: string) => Array.from(model).slice(0, 60).join("");
-        const objectiveLine = Array.from(
+        // Telegram counts UTF-16 units, so emoji-heavy text is cut by units, not characters.
+        const units = (text: string, max: number) => {
+          let out = "";
+          for (const ch of Array.from(text)) {
+            if (out.length + ch.length > max) break;
+            out += ch;
+          }
+          return out;
+        };
+        const objectiveLine = units(
           String(j.objective).split("\n")[0] ?? "",
-        )
-          .slice(0, 160)
-          .join("");
+          160,
+        );
         const checkLine =
           check?.status === "passed"
             ? "The reviewer checked the plan against your request. "
@@ -2346,11 +2354,14 @@ export class CodingController {
               ? "The reviewer checked the plan against your request, and it was revised once to keep every requirement. "
               : check?.status === "gaps"
                 ? "Some of your requirements may be missing; they are listed in the attached plan. Tap Change to fix them first. "
-                : check?.status === "unavailable"
-                  ? "The requirement check could not finish. "
-                  : "";
+                : check?.status === "revised_unchecked"
+                  ? "The plan was revised once for missing requirements, but the recheck could not finish. "
+                  : check?.status === "unavailable"
+                    ? "The requirement check could not finish. "
+                    : "";
+        const preview = units(summaryPreview, 180);
         const caption = attachment
-          ? `${check?.status === "gaps" ? "**Ready to start, but the requirement check found gaps**" : "**Ready to start coding**"}\n\n${objectiveLine}\n\n${summaryPreview}\n\n${checkLine}Planner: ${id(j.settings.leaderModel ?? j.settings.model)}. Coder: ${id(j.settings.model)}. Reviewer: ${id(j.settings.reviewerModel)}. Tap Start to begin, or Change to adjust it. The full plan is attached; this card stays valid for 24 hours.\n\nJob: ${e.job_id}`
+          ? `${check?.status === "gaps" ? "**Ready to start, but the requirement check found gaps**" : "**Ready to start coding**"}\n\n${objectiveLine}\n\n${preview}\n\n${checkLine}Planner: ${id(j.settings.leaderModel ?? j.settings.model)}. Coder: ${id(j.settings.model)}. Reviewer: ${id(j.settings.reviewerModel)}. Tap Start to begin, or Change to adjust it. The full plan is attached; this card stays valid for 24 hours.\n\nJob: ${e.job_id}`
           : undefined;
         // Without the owner-merge workflow no Merge card repeats the coder's summary, so the
         // first PR notice carries it (bounded like the Merge card).

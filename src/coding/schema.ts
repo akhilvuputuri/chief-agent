@@ -134,7 +134,13 @@ export const checkpoint = z
         /** What the reviewer's check of the plan against the owner's request found. */
         planCheck: z
           .object({
-            status: z.enum(["passed", "revised", "gaps", "unavailable"]),
+            status: z.enum([
+              "passed",
+              "revised",
+              "revised_unchecked",
+              "gaps",
+              "unavailable",
+            ]),
             gaps: z.string().max(reportLimits.document).optional(),
           })
           .strict()
