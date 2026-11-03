@@ -305,12 +305,25 @@ export function quoteRefusal(quote: string, value: string): string | undefined {
   return undefined;
 }
 
+// Where something could be sent: an email address, a link or domain, or one spelled out.
+const CONTACT =
+  /[\w.+-]+@[\w-]+\.\w|\bhttps?:\/\/|\bwww\.|\b[\w-]+\.(com|co|net|org|io|app|me|sg|my|uk|example)\b|\bat\s+\S+\s+dot\s+\S+/gi;
+// Words that move money, which a fact should only carry when the owner said them.
+const PAYMENT = new Set(
+  "pay pays paid paying payee payment payments paynow paylah transfer transfers transferred bank iban swift wire remit remits".split(
+    " ",
+  ),
+);
+
 /**
  * How a fact departs from its quote, so it is easy to find when pruning: `paraphrased` for
  * any rewording (quoteSupports fails), plus `added_negation` for a negation the quote lacks
- * (a dropped one is only paraphrased), `unquoted_number` for a number the quote lacks and
- * `loosely_quoted` when under half its content words come from the quote. An added negation
- * or number can change what the owner said, so those two are warnings (memory.ts).
+ * (a dropped one is only paraphrased), `unquoted_number` for a number the quote lacks,
+ * `unquoted_contact` for an address or link it lacks, `unquoted_payment` for a payment word
+ * it lacks, and `loosely_quoted` when under half its content words come from the quote. All
+ * but `paraphrased` and `loosely_quoted` can change what the owner said or send something
+ * somewhere, so they are warnings (memory.ts). A name or payee from outside the quote is not
+ * caught: one shared word is enough to save.
  */
 export function quoteFlags(quote: string, value: string): string[] {
   if (quoteSupports(quote, value)) return [];
@@ -322,6 +335,13 @@ export function quoteFlags(quote: string, value: string): string[] {
   const digits = new Set(quoted.filter((w) => /\d/.test(w)));
   if (stated.some((w) => /\d/.test(w) && !digits.has(w)))
     flags.push("unquoted_number");
+  const quotedText = norm(quote);
+  if (
+    [...value.matchAll(CONTACT)].some((m) => !quotedText.includes(norm(m[0])))
+  )
+    flags.push("unquoted_contact");
+  if (stated.some((w) => PAYMENT.has(w) && !quoted.includes(w)))
+    flags.push("unquoted_payment");
   const said = new Set(quoted.map(stem));
   const content = stated.filter(
     (w) => !FRAMING.has(w) && !NEGATION.has(w) && !/\d/.test(w),
@@ -472,7 +492,7 @@ export function parseArguments(
           issue.code === "too_big" && typeof sent === "string"
             ? ` (sent ${sent.length})`
             : "";
-        return `${issue.path.join(".") || "arguments"}: ${issue.message}${size}`;
+        return `${issue.path.join(".") || "arguments"}: ${clip(issue.message, 200)}${size}`;
       })
       .join("; "),
   };
@@ -1321,7 +1341,7 @@ export class Learner {
       key: r.key,
       kind: r.kind,
       // Whole for a procedure, which a revision has to carry forward.
-      value: clip(r.value!, 1000),
+      value: isProcedure(r.key) ? r.value! : clip(r.value!, 1000),
       ...(isLearned(r) ? { learned: true } : {}),
     });
     const current: Array<Record<string, unknown>> = always.map(entryOf);

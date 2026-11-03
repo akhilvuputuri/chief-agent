@@ -1,7 +1,8 @@
 ## Procedures run to 2,000 characters; fact refusals become flags (3 November 2026)
 
-- **Code.** A procedure may run to 2,000 characters, and learned items get 30,000 characters of a turn's context. A refused malformed call says which field failed. A fact's word checks now flag instead of refusing, except a quote sharing no word with the value. No prompt version, database or Compose change.
+- **Code.** A procedure may run to 2,000 characters, and learned items get 30,000 characters of a turn's context. A refused malformed call says which field failed. A fact's word checks now flag instead of refusing; a value of framing words only, or one sharing no word with its quote, is still refused. An added number, negation, address, link or payment word is a warning flag. No prompt version, database or Compose change.
 - **Why.** On the first two nights, all 15 procedure refusals were over the 800-character limit, and 13 facts were refused by the word checks, most of them well worded. See [journal 130](journey/130-nightly-learner.md#first-two-nights-of-procedures-and-refusals-become-flags--2026-11-03).
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `4492e8b`: long procedures were cut to 1,000 characters when shown for revision, invented recipients saved with routine flags only, and the exfiltration pattern missed "shared". All fixed.
 - **Deployment.** Not yet recorded as live; update this entry on release.
 
 ## Worker image that survives gateway restarts (2 November 2026)
