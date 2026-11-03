@@ -441,6 +441,16 @@ export async function runPiWorker(
       .initialize()
       .then((w) => w.snapshot(initial, stop, assignment.baseSha));
     const seal = createHash("sha256").update(snap.hash);
+    // Index flags such as skip-worktree hide a later edit from git, so they are sealed too.
+    const flags = await initial(
+      "git -c core.hooksPath=/dev/null ls-files -v -z",
+      stop,
+      120000,
+      20_000_000,
+    );
+    if (flags.exitCode !== 0 || flags.truncated)
+      throw new Error("The coder's workspace could not be sealed");
+    seal.update(flags.output);
     const own = new Set([
       relative(root, store.path(reviewTask)),
       "review-home",

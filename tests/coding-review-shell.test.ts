@@ -231,6 +231,10 @@ for (const [label, command] of [
     "plants a FIFO as a git hook",
     "mkfifo ../workspace/.git/hooks/post-checkout",
   ],
+  [
+    "hides a file from git in the coder's index",
+    "git -C ../workspace update-index --skip-worktree sum.js",
+  ],
 ] as const)
   test(`a reviewer that ${label} stops the attempt`, async (t) => {
     const { run } = await reviewWith(t, command);
