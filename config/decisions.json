@@ -22,5 +22,44 @@
     "threshold": 0.97,
     "instructions": "Which single agent can handle all of `latest_user_message` (read with `previous_turns`)? Choose chief when none can on its own.",
     "chief": "None of these alone: small talk, general knowledge the assistant can answer itself, remembering a preference, earlier conversations, several of these areas at once, canvases, background tasks, skills, or job fit and interview preparation."
+  },
+  "links": {
+    "instructions": "Decide where the owner's shared link belongs, from the page metadata, the owner's message and their saved learning interests.",
+    "route": {
+      "instructions": "Where does this shared link belong for the owner? An explicit owner cue in owner_message always wins: 'for AI learning', 'to study' or 'for the study list' means study; 'for offline reading' or 'read later' means reader.",
+      "criteria": {
+        "study": "Learning material in the owner's interests: a tutorial, course, paper, repository, or a technical thread, post or talk on applied AI engineering, agent platforms, developer tools, or voice and conversational AI. Something to work through or learn from, not to read once.",
+        "reader": "Offline reading: a news story, essay, opinion, newsletter or long-form general-interest article, including a technology story read for information rather than studied.",
+        "both": "Genuinely both: substantial learning material that the owner also wants saved to read offline without a connection."
+      }
+    },
+    "topic": {
+      "instructions": "Which of the owner's learning areas is the link's main subject? Use other when it is none of them.",
+      "criteria": {
+        "applied-ai-engineering": "Building with AI models: prompting, retrieval, evaluation, fine-tuning, agents in production, AI application architecture.",
+        "agent-platforms": "Agent frameworks and platforms, orchestration, tool use, MCP, multi-agent systems, agent infrastructure.",
+        "developer-tools": "Developer tooling, languages, editors, CLIs, testing, infrastructure and software engineering practice.",
+        "voice-conversational-ai": "Speech, voice assistants, real-time audio, conversational interfaces and dialogue systems.",
+        "other": "Anything else, including general news, essays and non-technical reading."
+      }
+    },
+    "unsure": {
+      "instructions": "Is the link genuinely hard to place between study material and offline reading, even after reading the page, the owner's message and their interests?",
+      "criteria": {
+        "true": "The evidence is thin or contradictory: a blocked or empty page with no useful title, a message giving no clue, or content fitting both routes about equally.",
+        "false": "One route clearly fits: the page is plainly a tutorial, course, paper, repository or technical thread, or plainly a news story, essay or general-interest article, and the owner's message does not point elsewhere."
+      }
+    },
+    "apply": {
+      "confidence": 0.7,
+      "unsure": 0.5
+    },
+    "interests": [
+      "applied AI engineering",
+      "agent platforms",
+      "developer tools",
+      "voice and conversational AI"
+    ],
+    "explicitCues": "An explicit owner cue in owner_message always wins, even over what the page looks like."
   }
 }

@@ -13,6 +13,8 @@ import { errorFields, opsLog } from "./ops-log.js";
 import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
+import type { Study } from "./study.js";
+import type { LinkRoute } from "./link-router.js";
 import { formatTelegram } from "./telegram-format.js";
 import { telegramChunks, type Portfolio } from "./portfolio.js";
 import { slowReply } from "./delivery-routing.js";
@@ -224,6 +226,44 @@ export function telegram(
     );
     if (notice) await ctx.reply(notice);
   });
+  if (assistant.tools?.study) {
+    const study = assistant.tools.study;
+    bot.callbackQuery(
+      /^lnk:(study|reader|both):([0-9a-f-]{36})$/,
+      async (ctx) => {
+        if (
+          !allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids) ||
+          !ctx.callbackQuery.message
+        )
+          return;
+        const message = ctx.callbackQuery.message;
+        await ctx.answerCallbackQuery();
+        let result: Awaited<ReturnType<Study["choose"]>>;
+        try {
+          result = await study.choose(
+            String(ctx.from.id),
+            ctx.match[2]!,
+            ctx.match[1] as LinkRoute,
+            message.message_id,
+          );
+        } catch {
+          await ctx.reply(
+            "I couldn't save that, and nothing was written. Tap again, or ask me to save the link again.",
+            inThread(threadOf(message)),
+          );
+          return;
+        }
+        await ctx.reply(result.text, inThread(threadOf(message)));
+        // A finished choice clears its buttons; a failed write keeps them for a retry.
+        if (result.status === "saved")
+          await ctx.api
+            .editMessageReplyMarkup(message.chat.id, message.message_id, {
+              reply_markup: { inline_keyboard: [] },
+            })
+            .catch(() => {});
+      },
+    );
+  }
   bot.callbackQuery(/^cal:(yes|no):([0-9a-f-]{36})$/, async (ctx) => {
     if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
     const user = String(ctx.from.id);
@@ -1189,6 +1229,16 @@ export function telegram(
               replyThread,
               reply.runId,
             );
+          // An unsure link save wrote nothing; its three tap options are host-owned, so no
+          // model answer or view callback can authorize the write.
+          await sendLinkChoices(
+            bot,
+            assistant.tools?.study,
+            user,
+            deliveryGuard,
+            replyThread,
+            reply.runId,
+          );
           if (
             assistant.tools.gathering &&
             c.MINIAPP_ORIGIN &&
@@ -1382,6 +1432,69 @@ export function sendResponsibilityApprovals(
           "UPDATE approvals SET payload=payload || jsonb_build_object('telegramMessageId',$3::bigint,'telegramDeliveryState','sent','telegramThreadId',$4::bigint) WHERE id=$1 AND user_id=$2",
           [row.id, user, sent.message_id, sentThread(sent, thread) ?? null],
         );
+    }
+  });
+}
+const linkPromptSends = new SerialQueue();
+/**
+ * Delivers an unsure link save's three tap options as a host-owned card. The row is claimed
+ * before sending and bound to this message, so a tap can only write once and only from here.
+ */
+export function sendLinkChoices(
+  bot: Bot,
+  study: Study | undefined,
+  user: string,
+  guard?: () => Promise<boolean>,
+  thread?: number,
+  run?: string,
+) {
+  if (!study || !run) return Promise.resolve();
+  return linkPromptSends.run(user, async () => {
+    let rows: Awaited<ReturnType<Study["pending"]>>;
+    try {
+      rows = await study.pending(user, run);
+    } catch {
+      // A pending migration or read failure must not affect the turn's reply.
+      return;
+    }
+    for (const row of rows) {
+      if (guard && !(await guard())) return;
+      const claimed = await study
+        .claimDelivery(user, row.id)
+        .catch(() => undefined);
+      if (!claimed) continue;
+      let sent: { message_id: number };
+      try {
+        sent = await withTelegramSendGuard(guard, () =>
+          bot.api.sendMessage(
+            user,
+            `Where should I save this?\n${claimed.title} — ${claimed.site}\n\nStudy list for learning material; Reader for offline reading.`,
+            {
+              ...inThread(thread),
+              link_preview_options: { is_disabled: true },
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    {
+                      text: "Study list",
+                      callback_data: `lnk:study:${claimed.id}`,
+                    },
+                    {
+                      text: "Reader",
+                      callback_data: `lnk:reader:${claimed.id}`,
+                    },
+                    { text: "Both", callback_data: `lnk:both:${claimed.id}` },
+                  ],
+                ],
+              },
+            },
+          ),
+        );
+      } catch {
+        await study.releaseDelivery(user, claimed.id).catch(() => {});
+        continue;
+      }
+      await study.delivered(user, claimed.id, sent.message_id);
     }
   });
 }

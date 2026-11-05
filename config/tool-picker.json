@@ -20,8 +20,8 @@
   "alwaysAvailable": "Web search, reading web pages, memory, conversation-history search and skill reading are always available and are not part of these groups.",
   "domains": {
     "mcp": {
-      "description": "Use reviewed remote MCP connections, including saving articles and sourced briefs to Reader or checking submission status.",
-      "examples": "save this article to Reader, save the brief for offline reading, check that Reader save, list MCP tools"
+      "description": "Use reviewed remote MCP connections. Reader is the owner's offline-reading library: its saved articles, library and submission status.",
+      "examples": "check that Reader save, what's in my Reader library, list MCP tools"
     },
     "gmail": {
       "description": "Search or read the user's Gmail (two connected accounts).",
@@ -82,6 +82,10 @@
     "news": {
       "description": "The user's daily news bulletin: following news sites or blogs, delivery time, topics, sending one now, and what their thumbs up/down taught.",
       "examples": "follow theverge.com, send my news at 8am, add AI as a topic, send me a bulletin now, stop following that blog"
+    },
+    "study": {
+      "description": "The owner's study list: a shared link is classified before saving, learning material is kept here with topics, tags and status, and corrections move it to or from Reader.",
+      "examples": "save this link, save this link for AI learning, save this article to Reader for offline reading, what's on my study list, mark that paper as in progress, move that link to Reader, remove this from my study list"
     },
     "singapore": {
       "description": "Live Singapore government data: NEA weather forecasts, rain, haze/PSI, UV and heat, flood and lightning alerts, carpark lots, speed cameras, public holidays, hawker centre closures, LTA bus arrivals, MRT service status and traffic incidents.",
