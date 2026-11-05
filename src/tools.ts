@@ -442,13 +442,33 @@ export class JobTools {
           [user, a.status ?? null],
         )
       ).rows;
-    if (a.operation === "memory_list")
-      return (await new MemoryStore(db).active(user)).map((m) => ({
+    if (a.operation === "memory_list") {
+      const startNs = BigInt(Date.now()) * 1_000_000n;
+      const store = new MemoryStore(db);
+      const active = await store.active(user);
+      const listed = active.map((m) => ({
         key: m.key,
         value: m.value,
         ...(m.kind === "fact" ? {} : { kind: m.kind }),
         ...(isLearned(m) ? { learned: true } : {}),
       }));
+      // Every active item reaches the run's later prompts, the budget's omissions included.
+      await store.traceRead(
+        user,
+        run,
+        active.map((m, i) => ({
+          key: m.key,
+          revisionId: m.id,
+          revision: m.revision,
+          kind: m.kind,
+          learned: isLearned(m),
+          characters: JSON.stringify(listed[i]).length,
+          value: m.value,
+        })),
+        startNs,
+      );
+      return listed;
+    }
     if (a.operation === "memory_set") {
       const saved = await new MemoryStore(db).write(user, {
         key: a.key,

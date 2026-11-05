@@ -326,7 +326,7 @@ services:
     # Trace viewer for issue #323 (github.com/akhilvuputuri/agentwatch), pinned by digest.
     # The gateway reaches it as agentwatch:4318; the host publishes it on loopback only, for
     # an SSH tunnel (docs/lightsail.md). The gateway does not depend on it.
-    image: ghcr.io/akhilvuputuri/agentwatch@sha256:cd3fd562c8ea5480e91d231efcaab1b54e25cbc56e183e833dd237db84be46ef
+    image: ghcr.io/akhilvuputuri/agentwatch@sha256:45d4c67c1cba5637c3e31432e3bdbafaa09040e0a63ba88325d87143121a27d1
     # The OpenRouter key for LLM judges (docs/tracing.md#judging-traces): read only when a
     # switched-on judge calls a model; empty, judges pause and say why.
     environment:

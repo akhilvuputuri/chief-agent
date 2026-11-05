@@ -11,7 +11,14 @@ import { z } from "zod";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { isLearned, MemoryStore } from "./memory.js";
-import type { Message, ModelAdapter, ToolDefinition } from "./model.js";
+import * as otel from "./otel.js";
+import {
+  ModelError,
+  type Generation,
+  type Message,
+  type ModelAdapter,
+  type ToolDefinition,
+} from "./model.js";
 import { opsLog, errorFields } from "./ops-log.js";
 import { normalizeForQuote } from "./quote-match.js";
 import { runFamily } from "./run-family.js";
@@ -602,6 +609,50 @@ export class Learner {
     );
   }
 
+  /**
+   * One model call, as the turn loop reports its own to trace export: a chat span on the
+   * learner's run, with the prompt it read when content is captured.
+   */
+  private async traced(
+    run: string,
+    messages: Message[],
+    call: () => Promise<Generation>,
+  ) {
+    const invocationId = randomUUID();
+    const start = Date.now();
+    const requestedModel = this.options.model.model ?? this.options.modelName;
+    otel.runEvent(run, "model.started", { invocationId });
+    try {
+      const generation = await call();
+      otel.modelContent(
+        invocationId,
+        messages,
+        generation.message,
+        generation.finishReason,
+      );
+      otel.runEvent(run, "model.completed", {
+        invocationId,
+        model: generation.model ?? requestedModel,
+        requestedModel,
+        provider: generation.provider,
+        usage: generation.usage ?? null,
+        finishReason: generation.finishReason ?? null,
+        latencyMs: Date.now() - start,
+      });
+      return generation;
+    } catch (error) {
+      otel.runEvent(run, "model.failed", {
+        invocationId,
+        model: requestedModel,
+        ...(error instanceof ModelError
+          ? { diagnostics: error.diagnostics }
+          : { error: error instanceof Error ? error.name : "unknown" }),
+        latencyMs: Date.now() - start,
+      });
+      throw error;
+    }
+  }
+
   /** Open a run's ledger rows, and return how to close them. */
   private async open(user: string, now: Date, version: string) {
     const id = randomUUID();
@@ -616,6 +667,14 @@ export class Learner {
       [id, user, run, this.options.modelName, version, now],
     );
     await event(this.db, user, run, "learner.started", { learnerRun: id });
+    // Its own trace in agentwatch: model calls, cost and the memory it wrote.
+    otel.runStarted(run);
+    // Its own service, so its calls stay out of the turns' cost, error and latency monitors.
+    otel.runAgent(
+      run,
+      version === PROCEDURE_PROMPT_VERSION ? "procedures" : "learner",
+      "chief-learner",
+    );
     const finish = async (
       state: "completed" | "failed" | "deferred",
       summary: Record<string, unknown>,
@@ -639,6 +698,14 @@ export class Learner {
         learnerRun: id,
         state,
         ...summary,
+      });
+      otel.runEvent(run, "runtime.stopped", {
+        stopReason:
+          state === "completed"
+            ? "answer"
+            : state === "deferred"
+              ? "interrupted"
+              : "failed",
       });
       return { state, learnerRun: id, ...summary };
     };
@@ -1321,14 +1388,16 @@ export class Learner {
     for (let i = 0; i < LEARNING_LIMITS.modelCalls; i++) {
       // Pre-empted when the owner starts a turn; nothing is applied.
       if (await this.ownerActive(user)) return { deferred: true, accepted };
-      const generation = await this.options.model.generate({
-        messages,
-        tools,
-        reasoning: "medium",
-        signal: AbortSignal.timeout(LEARNING_LIMITS.callMs),
-        cacheKey: `learner:${user}`,
-        ...pass.request,
-      });
+      const generation = await this.traced(run, messages, () =>
+        this.options.model.generate({
+          messages,
+          tools,
+          reasoning: "medium",
+          signal: AbortSignal.timeout(LEARNING_LIMITS.callMs),
+          cacheKey: `learner:${user}`,
+          ...pass.request,
+        }),
+      );
       modelCalls++;
       progress.modelCalls++;
       messages.push(generation.message);

@@ -16,6 +16,7 @@ import {
 } from "../src/learning.js";
 import { documentMessage, forwardedMessage } from "../src/attachments.js";
 import { MemoryStore } from "../src/memory.js";
+import * as otel from "../src/otel.js";
 import { projectEventRecord } from "../src/ops-log.js";
 import type { Generation, ModelAdapter } from "../src/model.js";
 import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
@@ -2443,4 +2444,120 @@ test("a window's input has a hard limit, and what is left unread is counted", ()
     JSON.stringify(heavy.items).length <
       LEARNING_LIMITS.procedureMaxChars * 1.5,
   );
+});
+
+test("with trace export on, a learner run is its own trace: model calls and the memory it wrote", async (t) => {
+  const db = await setup(t);
+  const success = await task(db, {
+    ownerSays: ["I always prefer aisle seats on long flights, please."],
+  });
+  const { adapter } = model((_input, n) =>
+    n === 1
+      ? [
+          [
+            "learn_fact",
+            {
+              key: "seat_preference",
+              value: "Prefers aisle seats on long flights",
+              quote: "prefer aisle seats on long flights",
+              taskIds: [success],
+              reason: "Stated by the owner",
+            },
+          ],
+        ]
+      : [["learn_finish", { summary: "Saved one item" }]],
+  );
+  const bodies: string[] = [];
+  otel.startTracing({
+    endpoint: "http://collector/v1/traces",
+    fetch: (async (_url: unknown, init?: RequestInit) => {
+      bodies.push(String(init?.body));
+      return new Response("{}");
+    }) as typeof fetch,
+    intervalMs: 60_000,
+  });
+  try {
+    await learner(db, adapter).tick("owner");
+  } finally {
+    await otel.stopTracing(1000);
+  }
+  // The learner is its own service, so turns' monitors do not count its calls.
+  const services = bodies.flatMap((body) =>
+    JSON.parse(body).resourceSpans.map(
+      (r: any) =>
+        r.resource.attributes.find((a: any) => a.key === "service.name").value
+          .stringValue,
+    ),
+  );
+  assert.deepEqual([...new Set(services)], ["chief-learner"]);
+  const spans = bodies.flatMap(
+    (body) => JSON.parse(body).resourceSpans[0].scopeSpans[0].spans,
+  ) as Array<{
+    traceId: string;
+    spanId: string;
+    parentSpanId?: string;
+    name: string;
+    links?: Array<{ traceId: string; spanId: string }>;
+  }>;
+  const root = spans.find((s) => s.name === "invoke_agent learner")!;
+  assert.ok(root);
+  assert.deepEqual(
+    spans
+      .filter((s) => s.traceId === root.traceId && s !== root)
+      .map((s) => [s.name.split(" ")[0], s.parentSpanId === root.spanId]),
+    // Proposals are applied once the model has finished.
+    [
+      ["chat", true],
+      ["chat", true],
+      ["create_memory", true],
+    ],
+  );
+  // The learned fact links to the run of the task it came from.
+  const [{ id: taskRun }] = (
+    await db.query("SELECT id FROM runtime_runs WHERE task_id=$1", [success])
+  ).rows;
+  const created = spans.find((s) => s.name.startsWith("create_memory"))!;
+  assert.deepEqual(created.links, [
+    { traceId: taskRun.replaceAll("-", ""), spanId: otel.runSpanId(taskRun) },
+  ]);
+});
+
+test("a learner model call that fails ends its span and the run's with an error", async (t) => {
+  const db = await setup(t);
+  await task(db, {
+    ownerSays: ["I always prefer aisle seats on long flights, please."],
+  });
+  const adapter: ModelAdapter = {
+    generate: async () => {
+      throw new Error("provider down");
+    },
+  };
+  const bodies: string[] = [];
+  otel.startTracing({
+    endpoint: "http://collector/v1/traces",
+    fetch: (async (_url: unknown, init?: RequestInit) => {
+      bodies.push(String(init?.body));
+      return new Response("{}");
+    }) as typeof fetch,
+    intervalMs: 60_000,
+  });
+  try {
+    await learner(db, adapter).tick("owner");
+  } finally {
+    await otel.stopTracing(1000);
+  }
+  const spans = bodies.flatMap(
+    (body) => JSON.parse(body).resourceSpans[0].scopeSpans[0].spans,
+  ) as Array<{ name: string; status?: { code: number }; attributes: any[] }>;
+  const errorType = (s: { attributes: any[] }) =>
+    s.attributes.find((a) => a.key === "error.type")?.value.stringValue;
+  assert.deepEqual(
+    spans.map((s) => [s.name.split(" ")[0], s.status?.code, errorType(s)]),
+    [
+      ["chat", 2, "Error"],
+      ["invoke_agent", 2, "failed"],
+    ],
+  );
+  // The error's message is not exported.
+  assert.ok(!bodies.join("").includes("provider down"));
 });
