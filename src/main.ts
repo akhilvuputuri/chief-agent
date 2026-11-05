@@ -6,6 +6,8 @@ import { parseQuietHours } from "./coding/notices.js";
 import { selectCodingBackend } from "./coding/backend.js";
 import { randomUUID } from "node:crypto";
 import { LinkResolver, postEvidenceSchema } from "./link-resolution.js";
+import { LinkRouter } from "./link-router.js";
+import { Study } from "./study.js";
 import { PublicBrowser } from "./public-browser/client.js";
 import { McpTools, loadMcpRegistry, parseMcpCredentials } from "./mcp.js";
 import { Gathering } from "./gathering/controller.js";
@@ -107,6 +109,7 @@ import {
   telegram,
   sendCalendarApprovals,
   sendLibraryApprovals,
+  sendLinkChoices,
   sendPortfolioApprovals,
   sendResponsibilityApprovals,
 } from "./telegram.js";
@@ -794,6 +797,28 @@ if (mcpMigrated) {
     links,
   );
 }
+// Study list (docs/study-resources.md): Postgres-backed, owner-scoped, and offered only once
+// migration 036 is installed so an ordinary turn cannot fail while it is pending. Jev is the
+// classification model the picker and effort picker already use; no second provider.
+const studyMigrated = !!(
+  await db.query("SELECT 1 FROM runtime_migrations WHERE version=36")
+).rows.length;
+const linkRouter = (() => {
+  if (!c.OPENROUTER_API_KEY) return undefined;
+  try {
+    return new LinkRouter(c.OPENROUTER_API_KEY);
+  } catch (error) {
+    opsLog("links.config_failed", "error", errorFields(error));
+    return undefined;
+  }
+})();
+const study = studyMigrated
+  ? new Study(db, {
+      router: linkRouter,
+      links,
+      reader: mcp?.configured ? mcpReaderLink(mcp) : undefined,
+    })
+  : undefined;
 const assistant = new Assistant(
   db,
   new CustomAgent(
@@ -850,9 +875,11 @@ const assistant = new Assistant(
     mailIndex,
     recallEmbedder,
     publicBrowser,
+    study,
   ),
   {
     links: !!links,
+    study: !!study,
     publicBrowser: !!publicBrowser,
     mcp: !!mcp?.configured,
     canvases: !!c.MINIAPP_ORIGIN,
@@ -1084,6 +1111,16 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
           kind: "work",
         });
       }
+      // An unsure link save in a background job wrote nothing; its three tap options are
+      // delivered here too, so the owner is never told to tap buttons that never arrived.
+      await sendLinkChoices(
+        bot,
+        study,
+        user,
+        undefined,
+        extra.message_thread_id,
+        delivery.runId,
+      );
       await sendCalendarApprovals(
         bot,
         db,

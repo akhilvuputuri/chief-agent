@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "0d84b461ad46bf901187d8f5228138c3c299dee6fbcc85b374a9524b9f89d919",
+      "sha256": "f9f08e9fcf5900bbcdc0e59310214b33f0cf0458106553f7fdc33525a4e3cfa9",
       "agents": [
         "email",
         "parcels",
@@ -21,7 +21,8 @@
         "browser",
         "media",
         "gathering",
-        "bills"
+        "bills",
+        "links"
       ],
       "allowTools": [
         "calendar_draft",
@@ -96,7 +97,13 @@
         "watchlist_update",
         "web_read",
         "web_search",
-        "public_browser"
+        "public_browser",
+        "link_save",
+        "link_move",
+        "study_list",
+        "study_update",
+        "study_remove",
+        "link_resolve"
       ]
     },
     {
@@ -143,7 +150,8 @@
     "brokerage": "core/brokerage",
     "gathering": "core/gathering",
     "bills": "core/bills",
-    "merlion": "singapore/merlion"
+    "merlion": "singapore/merlion",
+    "links": "core/links"
   },
   "delegated": [
     "public_browser",

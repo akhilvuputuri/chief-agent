@@ -55,7 +55,7 @@ export const pluginManifest = z
       .regex(/^\d+\.\d+\.\d+$/)
       .max(32),
     description: z.string().min(1).max(1000),
-    agents: z.array(agent).max(16),
+    agents: z.array(agent).max(20),
     skills: z.array(z.object({ id, path: file }).strict()).max(16),
   })
   .strict();
@@ -97,7 +97,7 @@ const registrySchema = z
           .object({
             path: id,
             sha256: z.string().regex(/^[a-f0-9]{64}$/),
-            agents: z.array(id).max(16),
+            agents: z.array(id).max(20),
             allowTools: z.array(operation).max(120),
             // Host configuration only; never taken from package instructions/model arguments.
             model: z
@@ -383,7 +383,7 @@ export class PluginRegistry {
       }
     }
     if (
-      JSON.stringify(this.catalogue()).length > 12000 ||
+      JSON.stringify(this.catalogue()).length > 16000 ||
       this.skillMap.size > 32
     )
       throw new Error(

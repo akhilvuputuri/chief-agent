@@ -53,7 +53,7 @@ function toolGroup(name: string, result: unknown, id = name): Message[] {
 function request(
   message: string,
   history: Message[],
-  fixedSize = 54264,
+  fixedSize = 54600,
 ): AgentRequest {
   const runtime = runtimeContext(
     {
@@ -117,7 +117,7 @@ test("54k fixed context preserves the actual invitation question and source when
   const req = request(message, history);
   req.historyOmitted = 469;
   const input = context(req, [...history, user(message)]);
-  assert.equal(input.fixedSize, 54264);
+  assert.equal(input.fixedSize, 54600);
   assert.equal(input.overBudget, true);
   // The history floor keeps a few older messages even with a full fixed envelope.
   assert.equal(input.omitted, 469);

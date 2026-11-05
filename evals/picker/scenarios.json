@@ -1299,5 +1299,17 @@
     "message": "is Old Airport Road food centre closed this week?",
     "gold": ["singapore"],
     "split": "held-out"
+  },
+  {
+    "id": "study-1",
+    "message": "save this link, it's a great thread on agent architectures",
+    "gold": ["study"],
+    "split": "tuning"
+  },
+  {
+    "id": "study-2",
+    "message": "save this article to Reader for offline reading",
+    "gold": ["study"],
+    "split": "tuning"
   }
 ]

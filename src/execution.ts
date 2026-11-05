@@ -24,6 +24,7 @@ export class Stop extends Error {
 }
 export const readOperations = new Set([
   "link_resolve",
+  "study_list",
   "mcp_tools",
   "mcp_read",
   "mcp_operation",

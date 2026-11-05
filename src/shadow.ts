@@ -5,48 +5,14 @@
 //
 // The questions and thresholds come from config/decisions.json, which the offline eval
 // (evals/decisions) reads too, so shadow data is comparable with the measured results.
-import { readFileSync } from "node:fs";
-import { z } from "zod";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
 import type { Spending } from "./spending.js";
 import type { PickerTurn } from "./tool-picker.js";
 import { plugins } from "./plugin-registry.js";
+import { readDecisionConfig, type DecisionConfig } from "./decision-config.js";
 
-const config = z
-  .object({
-    schemaVersion: z.literal(1),
-    model: z.string().min(1),
-    timeoutMs: z.number().int().positive(),
-    shadow: z
-      .object({
-        continuity: z.boolean(),
-        routing: z.boolean(),
-        picker: z.boolean(),
-      })
-      .strict(),
-    continuity: z
-      .object({
-        threshold: z.number().min(0).max(1),
-        question: z.object({ type: z.literal("noul") }).passthrough(),
-      })
-      .strict(),
-    routing: z
-      .object({
-        threshold: z.number().min(0).max(1),
-        instructions: z.string().min(1),
-        chief: z.string().min(1),
-      })
-      .strict(),
-  })
-  .strict();
-export type DecisionConfig = z.infer<typeof config>;
-
-export function readDecisionConfig(
-  url: URL = new URL("../config/decisions.json", import.meta.url),
-): DecisionConfig {
-  return config.parse(JSON.parse(readFileSync(url, "utf8")));
-}
+export { readDecisionConfig, type DecisionConfig } from "./decision-config.js";
 
 export type ShadowInput = {
   message: string;

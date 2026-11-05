@@ -161,6 +161,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 4 November | [152 — Fixes reach an open PR](152-fixes-reach-an-open-pr.md): why could nobody fix PR 416 through Chief? | Tested on synthetic jobs; release pending. Owner fix requests join the PR's feedback round, and the operator stop moves after review |
 | 4 November | [153 — Memory transparency](153-memory-transparency.md): can the owner see what Chief remembers, where each item came from, and what each prompt held? | Released 5 November and earlier memory backfilled: 41 items, 58 changes, 37 runs' context. Not yet seen on a live turn. |
 | 5 November | [154 — Failed checks go back to the coder](154-failed-checks-go-back-to-the-coder.md): why did a job stop at the first failed check instead of fixing it? | Tested on synthetic jobs; release pending. Failed checks get up to two repair rounds, stored output names the failures, and a stopped job can move to the current worker |
+| 5 November | [155 — Classifying a shared link before saving it](155-study-resources.md): where does a shared link belong, and where should study material live? | Tested locally; release pending. Jev classifies study material versus offline reading, study material has its own Postgres collection, and unsure saves ask with three tap options |
 
 ## Coding-agent learning path
 
@@ -190,6 +191,8 @@ Start with [coding-agent engineering: changes, failures and evidence](coding-age
 Brokerage: [25 — Stock watchlist](25-stock-watchlist.md) → [59 — IBKR holdings](59-ibkr-portfolio.md) → [60 — Stock rules](60-stock-rules.md) → [110 — IBKR order drafts](110-ibkr-order-drafts.md).
 
 Recurring payments: [33 — Delivery provenance](33-delivery-tracker.md) → [24 — Scheduled work](24-scheduled-routines.md) → [49 — Domain agents](49-coordinator-agents.md) → [54 — Subscriptions](54-subscriptions.md) → [62 — Durable gathering](62-gathering-harness.md) → [93 — Invoice-backed tracker](93-invoice-backed-tracker.md) → [97 — Price-change alerts](97-price-change-alerts.md) → [98 — Monthly subscription summary](98-monthly-subscription-summary.md).
+
+Learning and reading: [37 — Picking tool domains with Jev](37-jev-tool-picker.md) → [42 — News bulletin](42-news-bulletin.md) → [155 — Classifying a shared link before saving it](155-study-resources.md).
 
 Preparation continuity: [09 — Job alignment](09-job-alignment.md) → [21 — Preserving preparation evidence](21-preparation-chain.md).
 

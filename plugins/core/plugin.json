@@ -225,6 +225,29 @@
       "effort": "low"
     },
     {
+      "id": "links",
+      "description": "Save a link the owner shared into the right place: study material in the durable study list, general-interest reading in Reader for offline reading. Also list, update, move and remove study entries.",
+      "instructions": "agents/links.md",
+      "contract": "findings/v1",
+      "tools": [
+        "link_save",
+        "link_move",
+        "study_list",
+        "study_update",
+        "study_remove",
+        "link_resolve",
+        "web_read"
+      ],
+      "skills": ["link-saving"],
+      "limits": {
+        "ms": 120000,
+        "models": 8,
+        "tools": 16
+      },
+      "model": "fast",
+      "effort": "medium"
+    },
+    {
       "id": "library",
       "description": "Check NLB ebook availability and read the linked library card's shelf.",
       "instructions": "agents/library.md",
@@ -353,6 +376,10 @@
     {
       "id": "invoice-ledger",
       "path": "skills/invoice-ledger/SKILL.md"
+    },
+    {
+      "id": "link-saving",
+      "path": "skills/link-saving/SKILL.md"
     }
   ]
 }

@@ -296,6 +296,36 @@ test("loading a domain appends its tools after the existing ones", () => {
   assert.ok(after.slice(before.length).every((n) => domainOf(n) === "jobs"));
 });
 
+test("study tools form their own domain and a shared link loads it", () => {
+  assert.equal(domainOf("link_save"), "study");
+  assert.equal(domainOf("link_move"), "study");
+  assert.equal(domainOf("study_list"), "study");
+  assert.equal(domainOf("study_update"), "study");
+  assert.equal(domainOf("study_remove"), "study");
+  // link_resolve stays core: it is a read used by other domains too.
+  assert.equal(domainOf("link_resolve"), undefined);
+  const pick = (message: string) => [...selectDomains({ message })].sort();
+  assert.ok(pick("save this link for AI learning").includes("study"));
+  assert.ok(pick("what's on my study list?").includes("study"));
+  // A plain shared link loads the study tools too; the cue never decides the route.
+  assert.ok(pick("save this https://example.com/thread").includes("study"));
+  // An explicit offline-reading cue still goes through link_save, which records the route.
+  assert.ok(
+    pick("save this article to Reader for offline reading").includes("study"),
+  );
+  const enabled = { ...allOn, study: true };
+  const study = runtimeContext(enabled, null, undefined, new Set(["study"]));
+  assert.ok(study.tools.some((t) => t.name === "link_save"));
+  assert.ok(study.tools.some((t) => t.name === "study_list"));
+  assert.match(
+    JSON.parse(study.context).domainGuidance.study,
+    /classifies it first/,
+  );
+  // Without the migration the tools are neither offered nor loadable.
+  const off = runtimeContext(allOn, null, undefined, new Set(["study"]));
+  assert.ok(!off.tools.some((t) => t.name === "link_save"));
+});
+
 test("coding tools form their own domain, so ordinary work turns do not carry them", () => {
   assert.equal(domainOf("coding_start"), "coding");
   assert.equal(domainOf("work_start"), "work");

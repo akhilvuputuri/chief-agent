@@ -1,4 +1,17 @@
 import type { LinkResolver } from "./link-resolution.js";
+import type { Study } from "./study.js";
+
+const STUDY_OPERATIONS = [
+  "link_save",
+  "link_move",
+  "study_list",
+  "study_update",
+  "study_remove",
+] as const;
+const isStudyOperation = (
+  operation: string,
+): operation is (typeof STUDY_OPERATIONS)[number] =>
+  (STUDY_OPERATIONS as readonly string[]).includes(operation);
 import type { PublicBrowser } from "./public-browser/client.js";
 import type { McpTools } from "./mcp.js";
 import type { Gathering } from "./gathering/controller.js";
@@ -61,6 +74,7 @@ export class JobTools {
     readonly mailRecall?: Pick<MailIndex, "recall">,
     private recallEmbedder?: Embedder,
     readonly publicBrowser?: PublicBrowser,
+    readonly study?: Study,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -147,6 +161,10 @@ export class JobTools {
     if (a.operation === "link_resolve") {
       if (!this.links) throw new Error("Link resolution is not configured");
       return this.links.resolve(user, a.url, a.target, signal);
+    }
+    if (isStudyOperation(a.operation)) {
+      if (!this.study) throw new Error("The study list is not configured");
+      return this.study.call(user, run, a, signal);
     }
     const db = this.db;
     if (
@@ -502,7 +520,7 @@ export class JobTools {
     }
     const job = (
       await db.query("SELECT * FROM jobs WHERE id=$1 AND user_id=$2", [
-        a.id,
+        "id" in a ? a.id : undefined,
         user,
       ])
     ).rows[0];
