@@ -106,7 +106,11 @@ export async function piCompletion(
   )
     throw new Error("Conflicting native output limits");
   const requestedOutput = input.max_tokens ?? input.max_completion_tokens;
-  if (role === "reviewer" && job.mode !== "implement")
+  if (
+    role === "reviewer" &&
+    job.mode !== "implement" &&
+    !(job.mode === "plan" && job.settings.planCheck)
+  )
     throw new Error("Reviewer model requires approved implementation");
   const effectiveRole =
     role === "coder" && job.mode === "plan" ? "leader" : role;

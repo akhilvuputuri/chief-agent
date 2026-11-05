@@ -1,0 +1,40 @@
+# 152 — Why could nobody fix PR 416 through Chief?
+
+Work date: 2026-11-04. Written: 2026-11-04.
+Status: tested on synthetic jobs; release pending.
+
+## User-visible problem and preceding iteration
+
+PR 416 needed fixes, and the owner wanted to tell Chief what to fix. Chief had no route for it. The job had stopped at manual review because it added a migration, and that stop came before the step that reads review feedback. `coding_reply` refused jobs with a PR. The only options were a new job or an operator editing the branch. The PR also lacked its migration's Compose line and rollout script, which nothing checked before review.
+
+## Evidence
+
+- **Code:** in `src/coding/automation.ts` the hard-stop check ran before marking the PR ready, so Devin never reviewed it and feedback was never read.
+- **Code:** `coding_reply` only revised restartable jobs, and `pr_ready` is not restartable.
+- **History:** PR 308 (21 October) sent protected paths to the owner's Merge card and kept four kinds of path as stops for an operator, with reasons. Its record does not discuss what those stops did to feedback.
+- **Measured:** migrations 032 to 035 each have a deploy script that names them as `MIGRATION`; 030 and 031 do not.
+
+## Diagnosis and alternatives
+
+The stop protects something real: a migration merged without its rollout makes every later release refuse to run. But the stop belongs at the merge, not before review. Moving it to the end keeps the protection and lets feedback, CI and Devin run.
+
+Owner requests use the existing feedback round instead of a new mechanism. It already carries a bounded text to the coder on the same PR, with three rounds at most, and re-runs review.
+
+Rejected: dropping the hard stop for migrations. Merging is still unsafe until the rollout runs, so a person stays in that step.
+
+## Implementation and review
+
+- `src/coding/automation.ts`: the hard stop moves after feedback and CI; owner requests join feedback; `operatorSteps` names what is left, in the stop and on the Merge card.
+- `src/coding/controller.ts`: `requestPrChanges` records the request and returns a stopped PR to checks. Independent review found that it accepted requests a round could never deliver (after three rounds, past the allowance or too long), which left the PR parked for good; those are now refused up front. It also skipped the 24-hour staleness check and was invisible to crash recovery; both are fixed. An owner request is marked delivered in the statement that starts its round, so a retried round does not send it again, and a round that loses its lease does not lose it. A second review found the first version marked it even when the round never started, which could put the Merge card on code without the fix.
+- `src/coding/merge-policy.ts`: `operatorSteps`.
+- `tests/migration-rollout.test.ts`: the rollout check.
+
+Limitations:
+
+- An owner request outside the approved scope is still treated as review feedback, which the coder only applies within scope.
+- The rollout check finds the deploy script by file name and cannot tell whether it works; the script's own test does that.
+
+## Verification and outcome
+
+- **Tested:** `tests/coding-pi-owner-merge.test.ts` covers a stopped PR taking a request, the next round, idempotent retries, key conflicts, refusal after a merge, refusals a round could not deliver, the staleness check, a request sent once, feedback before the stop, a hard-stop PR with a recorded approval, and the eval note. The migration check passes on `main` and fails a migration without its Compose line.
+- **Not yet measured:** a live request on a real PR.

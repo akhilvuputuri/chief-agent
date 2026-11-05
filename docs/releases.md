@@ -2,8 +2,26 @@
 
 - **Code.** A procedure may run to 2,000 characters, and learned items get 30,000 characters of a turn's context. A refused malformed call says which field failed. A fact's word checks now flag instead of refusing; a value of framing words only, or one sharing no word with its quote, is still refused. An added number, negation, address, link or payment word is a warning flag. No prompt version, database or Compose change.
 - **Why.** On the first two nights, all 15 procedure refusals were over the 800-character limit, and 13 facts were refused by the word checks, most of them well worded. See [journal 130](journey/130-nightly-learner.md#first-two-nights-of-procedures-and-refusals-become-flags--2026-11-03).
-- **Review.** Independent review (Claude Opus 5.5) requested changes on `4492e8b`: long procedures were cut to 1,000 characters when shown for revision, invented recipients saved with routine flags only, and the exfiltration pattern missed "shared". All fixed, and it approved `a739ab6` and `67a5d90`. Its remaining low notes: file names also raise the contact warning, and a few phrasings ("the PIN on the card", a spaced-out " . ") are not caught.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `4492e8b`: long procedures were cut to 1,000 characters when shown for revision, invented recipients saved with routine flags only, and the exfiltration pattern missed "shared". All fixed, and it approved `a739ab6`, `67a5d90` and the final head, which merges main and adds doc edits only. Its remaining low notes: file names also raise the contact warning, and a few phrasings ("the PIN on the card", a spaced-out " . ") are not caught.
 - **Deployment.** Not yet recorded as live; update this entry on release.
+
+## Worker image with failure-hunting review, and the plan check on (4 November 2026)
+
+- **Configuration.** New coding jobs pin worker image `sha256:c7cec104…`, built from `f70dade` (PRs 419 and 420), and `config/coding-pi.json` turns on `planCheck`. The previous image moves to `previousImages`.
+- **Effect.** The reviewer hunts for failures and may test in its own checkout; the plan is checked against the request before a one-tap Start card. See [journal 151](journey/151-review-that-looks-for-failures.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
+## Fixes reach an open coding PR (4 November 2026)
+
+- **Code.** The owner's fix requests on an open owner-merge PR go to its next feedback round. Database, Compose, environment and workflow changes stop only after review feedback and CI, and the stop names what is left for a person. A test fails migrations without their Compose line and rollout script. No database or Compose change.
+- **Why.** Nobody could fix PR 416 through Chief. See [journal 152](journey/152-fixes-reach-an-open-pr.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
+## Reviews that look for failures, and a one-tap Start card (4 November 2026)
+
+- **Code.** The coding reviewer follows REVIEW.md and [docs/coding-checklist.md](coding-checklist.md), checks the owner's request requirement by requirement, and may test the candidate in its disposable checkout. The planner leads with the request's requirements, and `planCheck` has the reviewer check the plan before a short Start card. No database or Compose change.
+- **Why.** A self-review approved PR 416 with five blocking bugs. See [journal 151](journey/151-review-that-looks-for-failures.md).
+- **Deployment.** Not yet recorded as live. The worker part needs a new pinned image, and `planCheck` is switched on with that pin.
 
 ## Coding reviewer back to Claude Opus 5.5 (3 November 2026)
 
