@@ -194,6 +194,52 @@ test("changing the reviewer during review restarts its session and keeps the wor
   assert.match(notice.payload.summary, /stays stopped/);
 });
 
+test("a stopped job moves to the current worker image and keeps its work and session", async (t) => {
+  const { f, row, update, id } = await setup(t, "build");
+  const old = `ghcr.io/example/worker@sha256:${"9".repeat(64)}`;
+  await f.db.query(
+    "UPDATE coding_jobs SET settings=jsonb_set(settings,'{image}',to_jsonb($2::text)) WHERE id=$1",
+    [id, old],
+  );
+  const before = await row();
+  await approve(f.db, id, requirementScope(before));
+  await update({ upgradeWorker: true });
+  const after = await row();
+  assert.equal(after.settings.image, settings.image);
+  assert.equal(after.state, "paused");
+  assert.equal(after.checkpoint.piState.sessionScope, session);
+  assert.deepEqual(after.checkpoint.files, before.checkpoint.files);
+  const notice = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='settings:change'",
+      [id],
+    )
+  ).rows[0];
+  assert.deepEqual(notice.payload.changes, [
+    {
+      field: "Worker image",
+      from: old.slice(-12),
+      to: settings.image.slice(-12),
+    },
+  ]);
+  assert.match(
+    notice.payload.summary,
+    /approval of the requirements still stands/,
+  );
+  await assert.rejects(update({ upgradeWorker: true }, "again"), /already has/);
+});
+
+test("only a Pi job can change worker", async (t) => {
+  const { f, row, update, id } = await setup(t, "build");
+  const before = await row();
+  await f.db.query(
+    "UPDATE coding_jobs SET settings=jsonb_set(settings,'{runtime}','\"node\"') WHERE id=$1",
+    [id],
+  );
+  await assert.rejects(update({ upgradeWorker: true }), /Only a Pi coding job/);
+  assert.equal((await row()).settings.image, before.settings.image);
+});
+
 test("the session restarts only when the model of the current step changes", async (t) => {
   const building = await setup(t, "build");
   await building.update({ reviewerModel: opus, limits: { ms: 60000 } });

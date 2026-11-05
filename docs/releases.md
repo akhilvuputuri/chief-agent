@@ -1,3 +1,9 @@
+## Failed checks go back to the coder (5 November 2026)
+
+- **Code.** When the host's configured checks fail on a Pi build, the coder gets the failures as a `check_failures` document and up to two repair rounds per worker run before the job pauses. A failed check's stored output starts with a digest of its failure lines. `coding_job_update` gains `upgradeWorker`, which moves a stopped Pi job to the current worker image. No database or Compose change.
+- **Why.** Job `c43f2113` paused on 12 failing tests that nobody could see or send back. See [journal 154](journey/154-failed-checks-go-back-to-the-coder.md).
+- **Deployment.** Not yet recorded as live. The worker part needs a new pinned image; update this entry on release.
+
 ## Procedures run to 2,000 characters; fact refusals become flags (3 November 2026)
 
 - **Code.** A procedure may run to 2,000 characters, and learned items get 30,000 characters of a turn's context. A refused malformed call says which field failed. A fact's word checks now flag instead of refusing; a value of framing words only, or one sharing no word with its quote, is still refused. An added number, negation, address, link or payment word is a warning flag. No prompt version, database or Compose change.

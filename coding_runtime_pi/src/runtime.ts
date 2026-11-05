@@ -806,10 +806,7 @@ export class CodingRuntime {
             task.checks.push({
               command,
               exitCode: check.exitCode,
-              output:
-                (check.truncated || check.output.length > 8000
-                  ? "[Output truncated]\n"
-                  : "") + check.output.slice(-7800),
+              output: checkOutput(check),
             });
             await this.event(
               task,
@@ -859,4 +856,40 @@ export class CodingRuntime {
       }
     }
   }
+}
+
+/**
+ * A failing check keeps the lines that say what failed, which a long test run prints far
+ * from its end, followed by the tail; a passing check keeps the tail. Bounded to 7,800.
+ */
+export function checkOutput(check: {
+  exitCode: number;
+  output: string;
+  truncated?: boolean;
+}) {
+  const marker =
+    check.truncated || check.output.length > 8000 ? "[Output truncated]\n" : "";
+  // Cuts keep whole characters: a lone surrogate makes the output an invalid document.
+  const whole = (text: string) =>
+    text.replace(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/g, "");
+  if (check.exitCode === 0) return marker + whole(check.output.slice(-7800));
+  const failing =
+    /^\s*not ok \b|^\s*(?:error|expected|actual|location|failureType|message|operator):|error TS\d+|^\[warn\]|^\s*(?:AssertionError|TypeError|ReferenceError|SyntaxError|Error)\b|^\s*✖|\bFAIL\b/;
+  const lines = check.output.split("\n");
+  const picked: string[] = [];
+  let size = 0;
+  for (let i = 0; i < lines.length && size < 4800; i++) {
+    if (!failing.test(lines[i]!)) continue;
+    // A failure line and a little of what follows it, such as an assertion diff.
+    for (const line of lines.slice(i, i + 4)) {
+      const cut = whole(line.slice(0, 400));
+      if (size + cut.length + 1 > 4800) break;
+      picked.push(cut);
+      size += cut.length + 1;
+    }
+    i += 3;
+  }
+  if (!picked.length) return marker + whole(check.output.slice(-7800));
+  const digest = `[Failures]\n${picked.join("\n")}\n[Last output]\n`;
+  return marker + digest + whole(check.output.slice(-(7800 - digest.length)));
 }

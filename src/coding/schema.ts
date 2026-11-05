@@ -66,6 +66,8 @@ export const codingJobUpdate = z
     leaderModel: z.string().min(1).max(120).optional(),
     coderModel: z.string().min(1).max(120).optional(),
     reviewerModel: z.string().min(1).max(120).optional(),
+    /** Move a stopped Pi job to the worker image new jobs use, keeping its work. */
+    upgradeWorker: z.literal(true).optional(),
     limits: z
       .object({
         ms: z.number().int().positive().max(14_400_000).optional(),

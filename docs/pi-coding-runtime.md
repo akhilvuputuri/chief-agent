@@ -18,7 +18,7 @@ Planning convergence candidate 0.1.2 bounds investigation at a settled Pi turn b
 
 Learn and plan have read-only tool sets. A candidate review cannot change the candidate; it may run commands in its own disposable checkout and home. Build needs an exact approved plan and configured checks. Approval hashes bind task, revision, repository base, workspace, objective, owner instructions, check commands and plan text. Signed task records prevent repository commands from forging approval/completion on disk. Client mutations use an exclusive lock. Restart exposes interrupted work as paused; explicit resume preserves consumed allocations and does not replay a saved tool.
 
-Git artifact capture uses the same bounded/isolated command executor as build commands, including repository-controlled Git filters. It exports exact indexed regular UTF-8 content and validates blob identity rather than decoding invalid bytes into replacement text. Artifacts and check receipts remain inspectable when work pauses or checks fail.
+Git artifact capture uses the same bounded/isolated command executor as build commands, including repository-controlled Git filters. It exports exact indexed regular UTF-8 content and validates blob identity rather than decoding invalid bytes into replacement text. Artifacts and check receipts remain inspectable when work pauses or checks fail. A failed check's stored output leads with a digest of its failure lines, then the tail, so a long run keeps which tests failed. The bridge sends failed checks back to the coder for up to two repair rounds as a `check_failures` document before the build pauses ([journal 154](journey/154-failed-checks-go-back-to-the-coder.md)).
 
 ## Chief boundary
 

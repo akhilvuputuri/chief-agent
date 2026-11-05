@@ -925,11 +925,20 @@ export class CodingController {
       );
     if (a.leaderModel && !job.settings.squad && job.settings.runtime !== "pi")
       throw new ToolValidationError("This job has no leader model to change");
+    if (
+      a.upgradeWorker &&
+      (job.settings.runtime !== "pi" ||
+        this.settings.runtime !== "pi" ||
+        !this.settings.image)
+    )
+      throw new ToolValidationError("Only a Pi coding job can change worker");
     const next = {
       ...job.settings,
       ...(a.leaderModel ? { leaderModel: a.leaderModel } : {}),
       ...(a.coderModel ? { model: a.coderModel } : {}),
       ...(a.reviewerModel ? { reviewerModel: a.reviewerModel } : {}),
+      // Only to the image new jobs use: the boxes accept it, and it is the reviewed one.
+      ...(a.upgradeWorker ? { image: this.settings.image } : {}),
       limits: { ...job.settings.limits, ...a.limits },
     };
     if (job.settings.runtime === "pi" && (a.limits?.ms ?? 0) > PI_ATTEMPT_MS)
@@ -952,6 +961,7 @@ export class CodingController {
       ["Time limit (ms)", job.settings.limits.ms, next.limits.ms],
       ["Model calls", job.settings.limits.models, next.limits.models],
       ["Tool calls", job.settings.limits.tools, next.limits.tools],
+      ["Worker image", job.settings.image.slice(-12), next.image.slice(-12)],
     ].filter(([, from, to]) => from !== to);
     if (!changes.length)
       throw new ToolValidationError("The job already has these settings");
