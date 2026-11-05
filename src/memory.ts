@@ -7,6 +7,13 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { transaction } from "./db-transaction.js";
+import {
+  memoryChanged,
+  memorySearched,
+  tracingEnabled,
+  type MemoryChange,
+  type MemoryItemInput,
+} from "./otel.js";
 import { ToolValidationError } from "./tool-errors.js";
 
 export type MemoryKind = "fact" | "lesson";
@@ -67,7 +74,16 @@ export interface MemorySelection {
   omitted: string[];
   flagged: number;
   chars: number;
+  /** Each item in context, with its revision and size, for trace export. */
+  context: DescribedItem[];
 }
+
+/** An item as trace export describes it, before its opaque ID is looked up. */
+export type DescribedItem = Omit<MemoryItemInput, "itemId">;
+
+/** Owners' store tokens by database: an owner's first revision never changes. */
+const storeTokens = new WeakMap<Database, Map<string, string>>();
+const MAX_STORE_TOKENS = 100;
 
 export interface RollbackFilter {
   learnerRun?: string;
@@ -85,6 +101,7 @@ export const emptySelection: MemorySelection = {
   omitted: [],
   flagged: 0,
   chars: 0,
+  context: [],
 };
 
 /**
@@ -161,7 +178,7 @@ export class MemoryStore {
       throw new ToolValidationError(
         "Lesson keys, and only lesson keys, start with lesson:",
       );
-    return transaction(this.db, async (client) => {
+    const saved = await transaction(this.db, async (client) => {
       const head = await this.lockHead(client, user, w.key);
       if (head && head.kind !== w.kind)
         throw new ToolValidationError(
@@ -194,6 +211,8 @@ export class MemoryStore {
         flags,
       });
     });
+    await this.exported(user, [saved.change]);
+    return saved;
   }
 
   /**
@@ -213,7 +232,7 @@ export class MemoryStore {
     source: Record<string, unknown> = {},
   ) {
     const untrusted = [...new Set(by.untrustedSources ?? [])].sort();
-    return transaction(this.db, async (client) => {
+    const retired = await transaction(this.db, async (client) => {
       const head = await this.lockHead(client, user, key);
       if (!head || head.status !== "active") return null;
       return this.append(client, user, {
@@ -230,6 +249,8 @@ export class MemoryStore {
         flags: [],
       });
     });
+    if (retired) await this.exported(user, [retired.change]);
+    return retired;
   }
 
   /**
@@ -249,6 +270,7 @@ export class MemoryStore {
       !filter.kind
     )
       throw new ToolValidationError("A rollback needs at least one filter");
+    const changes: Omit<MemoryChange, "itemId">[] = [];
     // Only the learner's own revisions match. Restored copies resolve to their original.
     const matches = (r: MemoryRevision) =>
       r.origin === "learned" &&
@@ -258,7 +280,7 @@ export class MemoryStore {
       (!filter.untrustedSource ||
         r.untrusted_sources.includes(filter.untrustedSource)) &&
       (!filter.kind || r.kind === filter.kind);
-    return transaction(this.db, async (client) => {
+    const result = await transaction(this.db, async (client) => {
       await this.lockOwner(client, user);
       const revisions = (
         await client.query(
@@ -310,7 +332,7 @@ export class MemoryStore {
             : {}),
         };
         if (keep?.status === "active") {
-          await this.append(client, user, {
+          const appended = await this.append(client, user, {
             ...this.carry(keep),
             key,
             revision: head.revision + 1,
@@ -322,9 +344,10 @@ export class MemoryStore {
             learnerRun: null,
             flags: keep.flags,
           });
+          changes.push(appended.change);
           restored++;
         } else if (head.status === "active") {
-          await this.append(client, user, {
+          const appended = await this.append(client, user, {
             ...this.carry(head),
             revision: head.revision + 1,
             status: "retired",
@@ -335,11 +358,14 @@ export class MemoryStore {
             learnerRun: null,
             flags: [],
           });
+          changes.push(appended.change);
           retired++;
         }
       }
       return { undone: matched, restored, retired };
     });
+    await this.exported(user, changes);
+    return result;
   }
 
   /** Active items, owner facts first. */
@@ -407,10 +433,27 @@ export class MemoryStore {
     const items = await this.active(user);
     const explicit: MemorySelection["explicit"] = [];
     const candidates: MemoryRevision[] = [];
+    const context: DescribedItem[] = [];
+    const described = (r: MemoryRevision, characters: number) => ({
+      key: r.key,
+      revisionId: r.id,
+      revision: r.revision,
+      kind: r.kind,
+      learned: isLearned(r),
+      characters,
+      value: r.value,
+    });
     for (const r of items) {
       if (isLearned(r)) candidates.push(r);
-      else if (r.kind === "fact")
+      else if (r.kind === "fact") {
         explicit.push({ key: r.key, value: r.value! });
+        context.push(
+          described(
+            r,
+            JSON.stringify({ key: r.key, value: r.value }).length + 1,
+          ),
+        );
+      }
     }
     candidates.sort(
       (a, b) =>
@@ -433,6 +476,7 @@ export class MemoryStore {
       learned.push({ ...entry(r), id: r.id });
       taken.add(r.id);
       chars += sizeOf(r);
+      context.push(described(r, sizeOf(r)));
     };
     // Each kind has half the budget to itself, so a run of new lessons cannot push out what
     // Chief knows about the owner, or the reverse. Whatever one leaves goes to either.
@@ -470,6 +514,7 @@ export class MemoryStore {
             scanThreats(r.value!).length > 0),
       ).length,
       chars: JSON.stringify(explicit).length + chars,
+      context: context.sort((a, b) => a.key.localeCompare(b.key)),
     };
   }
 
@@ -504,8 +549,8 @@ export class MemoryStore {
       value: string;
       updated_at: string;
     }>;
-    for (const row of rows)
-      await transaction(this.db, async (client) => {
+    for (const row of rows) {
+      const appended = await transaction(this.db, async (client) => {
         const head = await this.lockHead(client, row.user_id, row.key);
         const current = (
           await client.query(
@@ -513,16 +558,16 @@ export class MemoryStore {
             [row.user_id, row.key],
           )
         ).rows[0]?.value as string | undefined;
-        if (current === undefined) return;
+        if (current === undefined) return null;
         if (
           head?.status === "active" &&
           head.kind === "fact" &&
           !isLearned(head) &&
           head.value === current
         )
-          return;
-        if (head && head.kind !== "fact") return; // a lesson key is never projected
-        await this.append(client, row.user_id, {
+          return null;
+        if (head && head.kind !== "fact") return null; // a lesson key is never projected
+        const saved = await this.append(client, row.user_id, {
           key: row.key,
           revision: (head?.revision ?? 0) + 1,
           kind: "fact",
@@ -539,7 +584,10 @@ export class MemoryStore {
           flags: scanThreats(current),
         });
         imported++;
+        return saved;
       });
+      if (appended) await this.exported(row.user_id, [appended.change]);
+    }
     const missing = await this.db.query(
       `INSERT INTO memories(user_id,key,value)
        SELECT r.user_id,r.key,r.value FROM memory_heads h JOIN memory_revisions r
@@ -653,12 +701,114 @@ export class MemoryStore {
           r.key,
         ]);
     }
+    const flags = [...new Set(r.flags)].sort();
     return {
       id,
       key: r.key,
       revision: r.revision,
       status: r.status,
-      flags: [...new Set(r.flags)].sort(),
+      flags,
+      /** For trace export once the transaction commits. */
+      change: {
+        revisionId: id,
+        key: r.key,
+        revision: r.revision,
+        kind: r.kind,
+        status: r.status,
+        value: r.value,
+        origin: r.origin,
+        trust: r.trust,
+        flags,
+        learned: isLearned(r),
+        source: r.source,
+      } satisfies Omit<MemoryChange, "itemId">,
     };
+  }
+
+  /**
+   * Opaque IDs for trace export, taken from the data rather than derived from text, so a
+   * key cannot be recovered from them: the owner's first revision ID names their store, and
+   * each key's first revision ID names its item. Both are random UUIDs.
+   */
+  async traceIdentities(user: string, keys: string[]) {
+    const tokens = storeTokens.get(this.db) ?? new Map<string, string>();
+    storeTokens.set(this.db, tokens);
+    let store = tokens.get(user);
+    if (store === undefined) {
+      const first = (
+        await this.db.query(
+          "SELECT id FROM memory_revisions WHERE user_id=$1 ORDER BY created_at,id LIMIT 1",
+          [user],
+        )
+      ).rows[0]?.id as string | undefined;
+      store = first ? first.replaceAll("-", "").slice(0, 16) : "none";
+      if (first) {
+        if (tokens.size >= MAX_STORE_TOKENS) tokens.clear();
+        tokens.set(user, store);
+      }
+    }
+    const items = new Map<string, string>();
+    if (keys.length)
+      for (const row of (
+        await this.db.query(
+          "SELECT key,id FROM memory_revisions WHERE user_id=$1 AND revision=1 AND key=ANY($2::text[])",
+          [user, [...new Set(keys)]],
+        )
+      ).rows)
+        items.set(row.key, row.id);
+    return { store, items };
+  }
+
+  /**
+   * Reports items a tool returned to a run (memory_recall, memory_list) as a search_memory
+   * span: they reach the run's later model calls. Never fails the tool.
+   */
+  async traceRead(
+    user: string,
+    run: string,
+    items: DescribedItem[],
+    startNs: bigint,
+    query?: string,
+  ) {
+    if (!items.length || !tracingEnabled()) return;
+    try {
+      const ids = await this.traceIdentities(
+        user,
+        items.map((i) => i.key),
+      );
+      memorySearched(
+        run,
+        ids.store,
+        items.map((i) => ({
+          ...i,
+          itemId: ids.items.get(i.key) ?? i.revisionId,
+        })),
+        startNs,
+        query,
+      );
+    } catch {
+      /* Tracing is not the action ledger. */
+    }
+  }
+
+  /** Sends committed changes to trace export; never fails the write it reports. */
+  private async exported(
+    user: string,
+    changes: Omit<MemoryChange, "itemId">[],
+  ) {
+    if (!changes.length || !tracingEnabled()) return;
+    try {
+      const ids = await this.traceIdentities(
+        user,
+        changes.map((c) => c.key),
+      );
+      for (const change of changes)
+        memoryChanged(ids.store, {
+          ...change,
+          itemId: ids.items.get(change.key) ?? change.revisionId,
+        });
+    } catch {
+      /* Tracing is not the action ledger. */
+    }
   }
 }

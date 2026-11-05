@@ -14,7 +14,7 @@
 // queue is bounded (overflow is dropped and counted), and sending happens on a timer
 // with a timeout. A collector that is down costs a log line a minute, nothing else.
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { ModelMessage } from "./model.js";
 import { finishName, opsLog, providerName } from "./ops-log.js";
 import {
@@ -38,6 +38,15 @@ export interface ExportSpan {
   endNs: bigint;
   attributes: Attributes;
   error?: boolean;
+  /** Spans in other traces this one follows from, such as the turns a learner read. */
+  links?: SpanLink[];
+  /** The service, when not `chief`: the learner's spans are `chief-learner`. */
+  service?: string;
+}
+
+export interface SpanLink {
+  traceId: string;
+  spanId: string;
 }
 
 // OTLP span kinds and status codes.
@@ -261,34 +270,45 @@ export function nextBatch(
 
 /** OTLP/JSON: hex IDs, integer enums, 64-bit integers as decimal strings. */
 export function encode(spans: ExportSpan[], serviceVersion?: string) {
+  const services = new Map<string, ExportSpan[]>();
+  for (const span of spans) {
+    const service = span.service ?? "chief";
+    services.set(service, [...(services.get(service) ?? []), span]);
+  }
   return {
-    resourceSpans: [
-      {
-        resource: {
-          attributes: keyValues({
-            "service.name": "chief",
-            "service.version": serviceVersion,
-          }),
-        },
-        scopeSpans: [
-          {
-            scope: { name: "chief" },
-            spans: spans.map((span) => ({
-              traceId: span.traceId,
-              spanId: span.spanId,
-              ...(span.parentSpanId ? { parentSpanId: span.parentSpanId } : {}),
-              name: span.name,
-              kind: span.kind,
-              startTimeUnixNano: String(span.startNs),
-              endTimeUnixNano: String(span.endNs),
-              attributes: keyValues(span.attributes),
-              // Unset unless the span failed, as instrumentation should leave it.
-              ...(span.error ? { status: { code: STATUS_ERROR } } : {}),
-            })),
-          },
-        ],
+    resourceSpans: [...services].map(([service, members]) => ({
+      resource: {
+        attributes: keyValues({
+          "service.name": service,
+          "service.version": serviceVersion,
+        }),
       },
-    ],
+      scopeSpans: [
+        {
+          scope: { name: "chief" },
+          spans: members.map((span) => ({
+            traceId: span.traceId,
+            spanId: span.spanId,
+            ...(span.parentSpanId ? { parentSpanId: span.parentSpanId } : {}),
+            name: span.name,
+            kind: span.kind,
+            startTimeUnixNano: String(span.startNs),
+            endTimeUnixNano: String(span.endNs),
+            attributes: keyValues(span.attributes),
+            ...(span.links?.length
+              ? {
+                  links: span.links.map((link) => ({
+                    traceId: link.traceId,
+                    spanId: link.spanId,
+                  })),
+                }
+              : {}),
+            // Unset unless the span failed, as instrumentation should leave it.
+            ...(span.error ? { status: { code: STATUS_ERROR } } : {}),
+          })),
+        },
+      ],
+    })),
   };
 }
 
@@ -388,6 +408,8 @@ interface RunState {
   startNs: bigint;
   agent: string;
   conversation?: string;
+  /** Set for runs outside the turn loop, so they stay out of the turns' monitors. */
+  service?: string;
 }
 interface FinishedTurn {
   traceId: string;
@@ -508,7 +530,7 @@ function startRun(run: string, parentRun?: string) {
   const parent = parentRun ? runs.get(parentRun) : undefined;
   remember(runs, run, {
     traceId: parent?.traceId ?? traceIdFor(parentRun ?? run),
-    spanId: spanId(),
+    spanId: runSpanId(run),
     // A child whose parent span is unknown (process restarted) still joins the parent's trace.
     ...(parent ? { parentSpanId: parent.spanId } : {}),
     startNs: nowNs(),
@@ -577,7 +599,8 @@ function modelFinished(
   const output = invocation ? take(`model-out:${invocation}`) : undefined;
   // The run's span shows its latest successful model output.
   if (output) hold(`run-out:${run}`, output);
-  exporter.enqueue(
+  send(
+    state,
     modelSpan({
       traceId: state.traceId,
       spanId: spanId(),
@@ -606,7 +629,8 @@ function runStopped(run: string, reason: string, taskId?: string) {
       { traceId: state.traceId, spanId: state.spanId, endNs },
       MAX_FINISHED,
     );
-  exporter.enqueue(
+  send(
+    state,
     runSpan({
       traceId: state.traceId,
       spanId: state.spanId,
@@ -622,6 +646,27 @@ function runStopped(run: string, reason: string, taskId?: string) {
       output: take(`run-out:${run}`),
     }),
   );
+}
+
+/** A run's span, under the run's service when it has its own. */
+function send(state: RunState, span: ExportSpan) {
+  exporter?.enqueue(state.service ? { ...span, service: state.service } : span);
+}
+
+/**
+ * Names the agent of a run outside the turn loop, such as the nightly learner, and its own
+ * service, so its calls stay out of monitors and limits set for turns.
+ */
+export function runAgent(run: string, agent: string, service?: string) {
+  if (!exporter) return;
+  try {
+    const state = runs.get(run);
+    if (!state) return;
+    state.agent = agentName(agent);
+    if (service && AGENT.test(service)) state.service = service;
+  } catch {
+    /* Tracing is not the action ledger. */
+  }
 }
 
 /** Names the conversation a run belongs to, such as a Telegram thread. */
@@ -759,7 +804,8 @@ function finishCall(
   calls.delete(callId);
   const run = call ? runs.get(call.run) : undefined;
   if (!call || !run) return;
-  exporter.enqueue(
+  send(
+    run,
     toolSpan({
       traceId: run.traceId,
       spanId: spanId(),
@@ -936,6 +982,267 @@ export function toolSpan(s: ToolSpanInput): ExportSpan {
         : undefined,
       "gen_ai.tool.call.arguments": s.args,
       "gen_ai.tool.call.result": s.result,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Memory (issue #323 phase 6): GenAI memory spans for what a run had in its prompt
+// (search_memory on the run, before its first model call), what memory_recall found
+// (search_memory during the tool call), and every change to an item (create_memory,
+// update_memory, delete_memory). A key is text the owner or Chief chose, so the IDs come from
+// the data instead (src/memory.ts): the owner's first revision ID names the store, and a key's
+// first revision ID names the item. With content captured, the item is named by its key.
+
+const sha256 = (text: string) =>
+  createHash("sha256").update(text).digest("hex");
+
+/** A run's span ID, derived from the run ID so other traces can link to it, as the backfill does. */
+export const runSpanId = (run: string) => sha256(`run:${run}`).slice(0, 16);
+
+export interface MemoryItemInput {
+  key: string;
+  /** The key's first revision ID: the item's ID without content capture. */
+  itemId: string;
+  revisionId: string;
+  revision?: number;
+  kind: string;
+  learned: boolean;
+  /** Characters the item adds to the prompt, where it is in one. */
+  characters?: number;
+  value?: string | null;
+  meaningRank?: number | null;
+  keywordRank?: number | null;
+}
+
+export interface MemoryChange {
+  itemId: string;
+  revisionId: string;
+  key: string;
+  revision: number;
+  kind: string;
+  status: "active" | "retired";
+  value: string | null;
+  origin: string;
+  trust: string;
+  flags: string[];
+  learned: boolean;
+  /** The revision's provenance: runId, learnerRunId, turnRunIds and runIds link it. */
+  source: Record<string, unknown>;
+}
+
+const MAX_MEMORY_LINKS = 20;
+const RUN_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** One owner's memory store, from an opaque token (src/memory.ts `traceIdentities`). */
+export const memoryStoreId = (token: string) =>
+  `chief.memory.${codeValue(token) ?? "unknown"}`;
+
+/** An item's ID: its key with content captured, else its first revision ID. */
+export const memoryRecordId = (
+  key: string,
+  itemId: string,
+  content: boolean,
+) => (content ? key : (codeValue(itemId) ?? "unknown"));
+
+/** The memory a run's prompt holds, recorded once the request is final. */
+export function memoryContext(
+  run: string,
+  store: string,
+  items: MemoryItemInput[],
+  omitted: number,
+) {
+  if (!exporter) return;
+  try {
+    const state = runs.get(run);
+    if (!state) return;
+    const now = nowNs();
+    exporter.enqueue(
+      memorySpan({
+        traceId: state.traceId,
+        spanId: spanId(),
+        parentSpanId: state.spanId,
+        operation: "search_memory",
+        store,
+        service: state.service,
+        items,
+        content: capture,
+        startNs: now,
+        endNs: now,
+        attributes: {
+          "chief.memory.selection": true,
+          "chief.memory.omitted": omitted,
+        },
+      }),
+    );
+  } catch {
+    /* Tracing is not the action ledger. */
+  }
+}
+
+/** What a tool returned from memory to a run (memory_recall, memory_list); its later model calls see it. */
+export function memorySearched(
+  run: string,
+  store: string,
+  items: MemoryItemInput[],
+  startNs: bigint,
+  query?: string,
+) {
+  if (!exporter) return;
+  try {
+    const state = runs.get(run);
+    if (!state) return;
+    exporter.enqueue(
+      memorySpan({
+        traceId: state.traceId,
+        spanId: spanId(),
+        parentSpanId: state.spanId,
+        operation: "search_memory",
+        store,
+        service: state.service,
+        items,
+        content: capture,
+        startNs,
+        endNs: nowNs(),
+        attributes: {
+          "gen_ai.memory.query.text":
+            capture && query !== undefined
+              ? contentText(query, 2000)
+              : undefined,
+        },
+      }),
+    );
+  } catch {
+    /* Tracing is not the action ledger. */
+  }
+}
+
+/**
+ * A committed change to one item. It joins the run that made it when this process traces
+ * that run (an owner's memory_set, a learner run), else it is a trace of its own (a
+ * rollback, an import). A learner's change links to the turns and runs it learned from.
+ */
+export function memoryChanged(store: string, change: MemoryChange) {
+  if (!exporter) return;
+  try {
+    const source = change.source;
+    const by =
+      typeof source.learnerRunId === "string"
+        ? source.learnerRunId
+        : typeof source.runId === "string"
+          ? source.runId
+          : undefined;
+    const parent = by ? runs.get(by) : undefined;
+    const now = nowNs();
+    exporter.enqueue(
+      memorySpan({
+        traceId: parent?.traceId ?? randomBytes(16).toString("hex"),
+        spanId: spanId(),
+        ...(parent ? { parentSpanId: parent.spanId } : {}),
+        operation:
+          change.status === "retired"
+            ? "delete_memory"
+            : change.revision === 1
+              ? "create_memory"
+              : "update_memory",
+        store,
+        service: parent?.service,
+        items: [
+          {
+            key: change.key,
+            itemId: change.itemId,
+            revisionId: change.revisionId,
+            revision: change.revision,
+            kind: change.kind,
+            learned: change.learned,
+            value: change.value,
+          },
+        ],
+        content: capture,
+        startNs: now,
+        endNs: now,
+        links: memoryLinks(source),
+        attributes: {
+          "gen_ai.memory.record.id": memoryRecordId(
+            change.key,
+            change.itemId,
+            capture,
+          ),
+          "chief.memory.origin": nameValue(change.origin),
+          "chief.memory.trust": nameValue(change.trust),
+          "chief.memory.flags": change.flags.filter((f) => NAME.test(f)),
+        },
+      }),
+    );
+  } catch {
+    /* Tracing is not the action ledger. */
+  }
+}
+
+/** Links to the root spans of the turns and runs a change came from. */
+function memoryLinks(source: Record<string, unknown>) {
+  const ids = [source.turnRunIds, source.runIds]
+    .flatMap((v) => (Array.isArray(v) ? v : []))
+    .filter((v): v is string => typeof v === "string" && RUN_ID.test(v));
+  return [...new Set(ids)]
+    .slice(0, MAX_MEMORY_LINKS)
+    .map((id) => ({ traceId: traceIdFor(id), spanId: runSpanId(id) }));
+}
+
+export interface MemorySpanInput {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  operation: string;
+  /** The opaque store token. */
+  store: string;
+  service?: string;
+  items: MemoryItemInput[];
+  /** Whether item keys and values go out as they are. */
+  content: boolean;
+  startNs: bigint;
+  endNs: bigint;
+  links?: SpanLink[];
+  attributes?: Attributes;
+}
+
+/** A memory operation's span, in the GenAI conventions' memory shape. */
+export function memorySpan(s: MemorySpanInput): ExportSpan {
+  const store = memoryStoreId(s.store);
+  const records = s.items.map((item) => ({
+    id: memoryRecordId(item.key, item.itemId, s.content),
+    // Present but null without capture, so what was in context is known without the text.
+    content:
+      s.content && typeof item.value === "string"
+        ? contentText(item.value)
+        : null,
+    metadata: {
+      kind: nameValue(item.kind),
+      revision: item.revision,
+      revision_id: codeValue(item.revisionId),
+      learned: item.learned,
+      characters: item.characters,
+      meaning_rank: item.meaningRank ?? undefined,
+      keyword_rank: item.keywordRank ?? undefined,
+    },
+  }));
+  return {
+    traceId: s.traceId,
+    spanId: s.spanId,
+    ...(s.parentSpanId ? { parentSpanId: s.parentSpanId } : {}),
+    name: `${s.operation} ${store}`,
+    kind: SpanKind.internal,
+    startNs: s.startNs,
+    endNs: s.endNs,
+    ...(s.links?.length ? { links: s.links } : {}),
+    ...(s.service ? { service: s.service } : {}),
+    attributes: {
+      "gen_ai.operation.name": s.operation,
+      "gen_ai.memory.store.id": store,
+      "gen_ai.memory.record.count": records.length,
+      "gen_ai.memory.records": JSON.stringify(records),
+      ...s.attributes,
     },
   };
 }

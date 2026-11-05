@@ -23,6 +23,7 @@ import {
   modelSpan,
   nextBatch,
   runSpan,
+  runSpanId,
   toolSpan,
   type ExportEvaluation,
   type ExportSpan,
@@ -103,7 +104,8 @@ export interface Backfill {
 const sha256 = (text: string) =>
   createHash("sha256").update(text).digest("hex");
 const spanIdOf = (key: string) => sha256(key).slice(0, 16);
-export const runSpanId = (run: string) => spanIdOf(`run:${run}`);
+// The same run span IDs as live export, so a live trace and its backfill agree.
+export { runSpanId };
 export const modelSpanId = (invocation: string) =>
   spanIdOf(`model:${invocation}`);
 export const callSpanId = (call: string) => spanIdOf(`call:${call}`);
