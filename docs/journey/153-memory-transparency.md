@@ -1,7 +1,7 @@
 # 153 — Can the owner see what Chief remembers, where each item came from, and what each prompt held?
 
 Work dates: 2026-11-03 to 2026-11-04 (Singapore). Written: 2026-11-04.
-Status: merged in agentwatch (`ce79f96`, image `sha256:45d4c67c…`); the Chief export is under review with that image pinned. Nothing is deployed.
+Status: released on 5 November 2026 (Chief `4e8f886`, agentwatch `ce79f96`); not yet seen on a real turn. A backfill of earlier memory is under review.
 
 ## User-visible problem and preceding iteration
 
@@ -33,6 +33,16 @@ Chief keeps revisioned memory ([journal 129](129-revisioned-memory.md)), and a n
 ## Verification and outcome
 
 Pending: review of both pull requests, the agentwatch update (schema 11 cannot be read by the older image), the Chief release, and a first look at real traces.
+
+### Release — 2026-11-05
+
+With the owner's approval: [PR 421](https://github.com/akhilvuputuri/chief-agent/pull/421) merged at the approved head `ea1ac32` as `4e8f886`. The agentwatch volume was archived on the host (`/var/backups/agentwatch-pre-schema11/`, 3.9 MB, listed, not restored). The operator update ran from an exact archive of `4e8f886`, with hashes matching on both sides and the Compose change a single line, and reported the image `sha256:45d4c67c…` healthy with the gateway untouched. agentwatch logged its re-read of stored memory spans, which found none. The automatic release of `4e8f886` succeeded (run 42037539378), and the gateway logged `trace.export_enabled` at 13:39:11 UTC. All monitors on the host were filtered to service `chief`.
+
+Not yet seen: no turn had run by 13:44 UTC, so no memory span had arrived, and the Memory page was empty.
+
+### Backfill
+
+The owner asked why the Memory page was empty after weeks of use. Live export only covers memory from its start; earlier traces hold memory only as prompt text. Postgres keeps every revision and each run's context, so [src/memory-backfill.ts](../../src/memory-backfill.ts) rebuilds them with the live builder. Runs exported live before 5 November have random span IDs, so the CLI finds a run's span in agentwatch by its `chief.run_id`. A test checks that the rebuilt spans equal the live ones for the same writes and context. Running it needs the owner's approval.
 
 ## Follow-up and next iteration
 

@@ -81,6 +81,32 @@ export interface MemorySelection {
 /** An item as trace export describes it, before its opaque ID is looked up. */
 export type DescribedItem = Omit<MemoryItemInput, "itemId">;
 
+/** A learned item as the prompt shows it. */
+const learnedEntry = (
+  r: Pick<MemoryRevision, "key" | "kind" | "value" | "outcome" | "domain">,
+): LearnedItem => ({
+  key: r.key,
+  kind: r.kind,
+  value: r.value!,
+  ...(r.outcome ? { outcome: r.outcome } : {}),
+  ...(r.domain ? { domain: r.domain } : {}),
+});
+
+/**
+ * Characters an active item adds to the prompt: an owner's fact as `{key,value}`, a learned
+ * item as its prompt entry, each with its separator. The selection's budget counts the same.
+ */
+export function contextSize(
+  r: Pick<
+    MemoryRevision,
+    "key" | "kind" | "value" | "outcome" | "domain" | "origin" | "source"
+  >,
+) {
+  return isLearned(r)
+    ? JSON.stringify(learnedEntry(r)).length + 1
+    : JSON.stringify({ key: r.key, value: r.value }).length + 1;
+}
+
 /** Owners' store tokens by database: an owner's first revision never changes. */
 const storeTokens = new WeakMap<Database, Map<string, string>>();
 const MAX_STORE_TOKENS = 100;
@@ -447,12 +473,7 @@ export class MemoryStore {
       if (isLearned(r)) candidates.push(r);
       else if (r.kind === "fact") {
         explicit.push({ key: r.key, value: r.value! });
-        context.push(
-          described(
-            r,
-            JSON.stringify({ key: r.key, value: r.value }).length + 1,
-          ),
-        );
+        context.push(described(r, contextSize(r)));
       }
     }
     candidates.sort(
@@ -462,14 +483,8 @@ export class MemoryStore {
         a.key.localeCompare(b.key),
     );
     const learned: Array<LearnedItem & { id: string }> = [];
-    const entry = (r: MemoryRevision): LearnedItem => ({
-      key: r.key,
-      kind: r.kind,
-      value: r.value!,
-      ...(r.outcome ? { outcome: r.outcome } : {}),
-      ...(r.domain ? { domain: r.domain } : {}),
-    });
-    const sizeOf = (r: MemoryRevision) => JSON.stringify(entry(r)).length + 1;
+    const entry = learnedEntry;
+    const sizeOf = contextSize;
     const taken = new Set<string>();
     let chars = 0;
     const take = (r: MemoryRevision) => {
