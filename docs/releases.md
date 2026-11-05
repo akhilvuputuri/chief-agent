@@ -1,3 +1,12 @@
+## Memory in agentwatch: live in `4e8f886`, backfilled by `c8f00dc` (5 November 2026)
+
+- **What merged.** agentwatch#20 (`ce79f96`): a Memory page, each item's history linked to its source, and the items in each model call's context, from GenAI memory spans; schema 11. [PR 421](https://github.com/akhilvuputuri/chief-agent/pull/421) (`4e8f886`): Chief exports its memory selection, `memory_recall` and `memory_list` reads, and every committed revision, and traces learner runs under the service `chief-learner`. [PR 423](https://github.com/akhilvuputuri/chief-agent/pull/423) (`c8f00dc`): a backfill of memory from before the export.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on every one of them (the reads labelled as context, a deletion that did not stick, reversible key hashes, the learner feeding the turns' monitors, an orphan parent in the backfill), and approved each merged head; hosted CI passed.
+- **Release.** With the owner's approval: the agentwatch volume was archived (`/var/backups/agentwatch-pre-schema11/`), the operator update installed `sha256:45d4c67c…`, and the automatic release of `4e8f886` followed (run 42037539378). The backfill then sent 58 revisions and 37 runs' context. The older image cannot read schema 11, so going back means re-pinning it and restoring that archive by hand, which has not been tried.
+- **Pending:** a live turn's memory spans, and a traced learner run.
+
+[Journal 153](journey/153-memory-transparency.md).
+
 ## Worker image that repairs failed checks (5 November 2026)
 
 - **Configuration.** New coding jobs pin worker image `sha256:7d931493…`, built from `2ce1fd6` (PR 424), which sends failed checks back to the coder. The previous image `sha256:c7cec104…` moves to `previousImages`, so paused jobs on it still resume, and `coding_job_update` with `upgradeWorker` can move one to this image.

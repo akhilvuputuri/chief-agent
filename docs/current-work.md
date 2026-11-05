@@ -1,3 +1,7 @@
+# Memory in agentwatch — live in `4e8f886`, 5 November 2026
+
+agentwatch shows what Chief remembers: each item's history, linked to the turns it came from, and the items each model call had in its prompt, labelled "in context", never "used". Earlier memory was backfilled from Postgres: 41 items, 58 changes and 37 runs' context, from 28 October; the backfilled changes are traces of their own, since the learner runs that made most of them were not traced. The release traces learner runs under their own service. Not yet seen: a live turn's memory spans, and a traced learner run. See [tracing](tracing.md#memory) and [journal 153](journey/153-memory-transparency.md).
+
 # Scheduled public browser refresh — live in `444a334`, 2 November 2026
 
 A daily timer refreshes the public browser once its image is 28 days old, retries refused runs the next day, prunes afterwards and sends the owner a Telegram notice on failure. The refresh now keeps a `:rollback` image, which it never did. One measured run added 3.44 GB, and its prune freed 8.86 GB. A real timer refresh and a real failure notice have not happened yet. See [journal 149](journey/149-scheduled-browser-refresh.md).
