@@ -1,7 +1,7 @@
 # 153 — Can the owner see what Chief remembers, where each item came from, and what each prompt held?
 
 Work dates: 2026-11-03 to 2026-11-04 (Singapore). Written: 2026-11-04.
-Status: released on 5 November 2026 (Chief `4e8f886`, agentwatch `ce79f96`); not yet seen on a real turn. A backfill of earlier memory is under review.
+Status: released on 5 November 2026 (Chief `4e8f886`, agentwatch `ce79f96`), and earlier memory backfilled (`c8f00dc`). Live export has not yet been seen on a real turn.
 
 ## User-visible problem and preceding iteration
 
@@ -42,7 +42,15 @@ Not yet seen: no turn had run by 13:44 UTC, so no memory span had arrived, and t
 
 ### Backfill
 
-The owner asked why the Memory page was empty after weeks of use. Live export only covers memory from its start; earlier traces hold memory only as prompt text. Postgres keeps every revision and each run's context, so [src/memory-backfill.ts](../../src/memory-backfill.ts) rebuilds them with the live builder. Runs exported live before 5 November have random span IDs, so the CLI finds a run's span in agentwatch by its `chief.run_id`. A test checks that the rebuilt spans equal the live ones for the same writes and context. Running it needs the owner's approval.
+The owner asked why the Memory page was empty after weeks of use. Live export only covers memory from its start; earlier traces hold memory only as prompt text. Postgres keeps every revision and each run's context, so [src/memory-backfill.ts](../../src/memory-backfill.ts) rebuilds them with the live builder. Runs exported live before 5 November have random span IDs, so the CLI finds a run's span in agentwatch by its `chief.run_id`. A test checks that the rebuilt spans equal the live ones for the same writes and context. Review of `324e3d5` requested one change: for a run its trace did not show (cut short by a restart), the lookup named a derived parent that did not exist, which agentwatch would have read as another run's. Such a run now gets no context, and its changes become traces of their own. Review of `c2aa53b` approved, and [PR 423](https://github.com/akhilvuputuri/chief-agent/pull/423) merged as `c8f00dc`.
+
+### Backfill run — 2026-11-05
+
+With the owner's approval, the operator read the rows through the weekly review's read-only path, from 6 September to 13:39:11 UTC on 5 November, into a private file (mode 600), ran the CLI from a clean checkout of `c8f00dc` through an SSH tunnel with `--content`, and deleted the file. Dry run and run reported the same counts: 58 revisions and 37 contexts, 95 spans in one request, no context skipped. All 58 revisions went to traces of their own: 46 learned ones came from learner runs since 1 November, which were not traced, and 12 (legacy imports, and owner facts added through the learner) name no run. Their links to the turns they came from are kept.
+
+agentwatch then listed 41 items in one store (27 facts, 14 lessons, 4 deleted), with 58 changes and 488 reads, from 28 October (the revisioned memory's import) to 3 November, the last turn before the release. A sampled backfilled turn showed memory in context on all 4 of its model calls, 36 items in the first.
+
+Not yet seen: a live turn's memory spans, and a traced learner run. The owner had sent no message since the release when this was written.
 
 ## Follow-up and next iteration
 
