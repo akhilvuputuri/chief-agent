@@ -159,7 +159,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 2 November | [150 — Coding through gateway restarts](150-coding-through-gateway-restarts.md): can a coding job survive a gateway restart? | Tested on synthetic jobs; release pending. Workers retry, a restart-cut call is recorded, and exit codes name the failure |
 | 4 November | [151 — Review that looks for failures](151-review-that-looks-for-failures.md): why did a passing review miss five bugs? | Tested on synthetic jobs; release pending. The reviewer hunts for failures and checks the request, and the plan is checked before a one-tap Start card |
 | 4 November | [152 — Fixes reach an open PR](152-fixes-reach-an-open-pr.md): why could nobody fix PR 416 through Chief? | Tested on synthetic jobs; release pending. Owner fix requests join the PR's feedback round, and the operator stop moves after review |
-| 4 November | [153 — Memory transparency](153-memory-transparency.md): can the owner see what Chief remembers, where each item came from, and what each prompt held? | In progress: agentwatch#20 and the Chief export under review. |
+| 4 November | [153 — Memory transparency](153-memory-transparency.md): can the owner see what Chief remembers, where each item came from, and what each prompt held? | Released 5 November; not yet seen on a real turn. A backfill of earlier memory is under review. |
 
 ## Coding-agent learning path
 

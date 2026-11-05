@@ -1181,7 +1181,7 @@ export function memoryChanged(store: string, change: MemoryChange) {
 }
 
 /** Links to the root spans of the turns and runs a change came from. */
-function memoryLinks(source: Record<string, unknown>) {
+export function memoryLinks(source: Record<string, unknown>) {
   const ids = [source.turnRunIds, source.runIds]
     .flatMap((v) => (Array.isArray(v) ? v : []))
     .filter((v): v is string => typeof v === "string" && RUN_ID.test(v));

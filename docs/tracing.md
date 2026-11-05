@@ -177,6 +177,28 @@ Live export to the host's agentwatch started on 29 October 2026 at 15:00:16 UTC 
 
 **Retention.** agentwatch ages traces from when they last arrived (`received_ns`), not from when they ran, so backfilled traces are kept for 90 days from the backfill, not from the original runs.
 
+### Backfilling memory
+
+Memory export ([memory](#memory)) started on 5 November 2026 at 13:39:11 UTC (the gateway's `trace.export_enabled` line after the release of `4e8f886`). Memory from before then can be rebuilt from Postgres, which keeps every revision with its provenance (`memory_revisions`) and the revisions each run had in context (`memory_context`). Code: [scripts/memory-backfill.sql](../scripts/memory-backfill.sql) reads the rows, [src/memory-backfill.ts](../src/memory-backfill.ts) builds the spans with the live builder and posts them. [tests/memory-backfill.test.ts](../tests/memory-backfill.test.ts) writes memory and records a run's context with live export on, runs the query over the same database, and checks that the rebuilt spans equal the live ones.
+
+- **Revisions.** One `create_memory`, `update_memory` or `delete_memory` per revision, at its `created_at`, with the same records, attributes and links as live. It joins the run that made it (`source.runId`, or `source.learnerRunId` under the service `chief-learner`) when agentwatch holds that run's trace, else it is a trace of its own.
+- **Context.** One `search_memory` per `memory_context` row, at its `created_at`, listing the selected revisions with their sizes (`contextSize`, the selection's own rule), under the run's span. Runs exported live before the memory export have random span IDs, so the CLI reads the run's trace from agentwatch (`GET /api/traces/<id>`) and uses the span whose `chief.run_id` is that run. Context for a run whose trace agentwatch no longer holds is skipped, since nothing in agentwatch could show it.
+- **IDs** are derived from Chief's own (`sha256("memory:" + revision ID)` and `sha256("memory-context:" + run ID)`), so posting again replaces. Pass `--content` when live export captures content, as production does, so items get the same IDs as live ones (their keys); without it they are named by revision IDs.
+
+**Procedure.** As for traces: the operator reads the rows through the weekly review's read-only path, with `until` at the memory export's start, then runs a dry run (which reads traces from agentwatch but posts nothing) and the real run through the SSH tunnel:
+
+```bash
+umask 077
+{ printf '%s\n' "\\set since '2026-09-06T00:00:00Z'" "\\set until '2026-11-05T13:39:11Z'"; cat scripts/memory-backfill.sql; } \
+  | ~/Dev/hermes-companion-ops/weekly-review/q.sh > ~/memory-rows.jsonl
+chmod 600 ~/memory-rows.jsonl
+npx tsx src/memory-backfill.ts ~/memory-rows.jsonl --endpoint http://localhost:14318 --content --dry-run
+npx tsx src/memory-backfill.ts ~/memory-rows.jsonl --endpoint http://localhost:14318 --content
+rm ~/memory-rows.jsonl
+```
+
+The file holds the owner's memories: keep it private. The CLI prints only counts (revisions, contexts, those sent as traces of their own or skipped, spans, requests, bytes).
+
 ## What leaves the process
 
 Spans carry the same kind of values as the [operational log](operational-logs.md): IDs, model names that pass the model-name shape, fixed provider slugs (`providerName` in `ops-log.ts`), token counts, cost, durations, fixed finish reasons, host-defined tool names (`logOperation`, so a model-invented tool name becomes `unknown`), stop reasons and error codes that pass the code shape. Feedback evaluations carry only a fixed name, a boolean and a fixed label. Memory spans carry revision IDs, kinds, sizes and host flags, with keys and values only under content capture ([memory](#memory)). Unless message content is switched on (above), never prompts, replies, tool arguments or results, error messages or OpenRouter's provider display text. The integration test checks the exported bytes for planted private strings.
