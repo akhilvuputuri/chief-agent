@@ -336,3 +336,11 @@ Evidence boundary:
 **A restart is normal, so a job must survive one (1 November).** Another agent's rollout restarted the gateway for six seconds and ended a coding job that had been running for hours. One failed request ended the worker, and the retry, on a new box with no dependencies, linked `node_modules` and could never package its work ([journal 150](150-coding-through-gateway-restarts.md)). Lesson: when several agents ship to one host, restarts are routine, and every long-running client needs to treat them that way.
 
 **A model reviewing its own work missed what another model found (3 November).** With DeepSeek as both coder and reviewer, the study-links job cost $0.41 and passed every check, and its reviewer approved in one round. An independent Opus review of PR 416 then confirmed five blocking bugs with its own tests: unconfirmed Reader saves reported as saved, a request key that collides on tracking variants, the owner's stated destination ignored, buttons lost on a failed tap, and unclaimed taps running twice. The migration also lacked its rollout. Three of those had been found by Opus on the previous attempt and listed in the job's own request. The owner moved review back to Opus. Lesson: a cheap reviewer from the same model as the coder can share its blind spots, so a review that passes on the first round is a weak signal on a large change.
+
+**A failed check is work, not a stop (5 November).** Job `c43f2113` planned, passed the plan check, built, and then paused because 12 tests failed in the host's full check. Nothing sent those failures back to the coder, and the stored output was the last 8,000 characters, which held the counts but not the test names. Failed checks now go back to the coder for up to two repair rounds, with a digest of the failure lines at the top of the output ([journal 154](154-failed-checks-go-back-to-the-coder.md)). Lesson: a pipeline that stops at the first red check makes a person do the coder's job; give the coder the same evidence a person would read.
+
+Evidence boundary:
+
+- **Measured:** one paused job and its stored output.
+- **Tested:** synthetic jobs that fail, repair and pass, or fail three times and pause.
+- **Not yet measured:** how often a real repair round fixes the failures.

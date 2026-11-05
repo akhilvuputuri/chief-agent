@@ -160,6 +160,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 4 November | [151 — Review that looks for failures](151-review-that-looks-for-failures.md): why did a passing review miss five bugs? | Tested on synthetic jobs; release pending. The reviewer hunts for failures and checks the request, and the plan is checked before a one-tap Start card |
 | 4 November | [152 — Fixes reach an open PR](152-fixes-reach-an-open-pr.md): why could nobody fix PR 416 through Chief? | Tested on synthetic jobs; release pending. Owner fix requests join the PR's feedback round, and the operator stop moves after review |
 | 4 November | [153 — Memory transparency](153-memory-transparency.md): can the owner see what Chief remembers, where each item came from, and what each prompt held? | Released 5 November; not yet seen on a real turn. A backfill of earlier memory is under review. |
+| 5 November | [154 — Failed checks go back to the coder](154-failed-checks-go-back-to-the-coder.md): why did a job stop at the first failed check instead of fixing it? | Tested on synthetic jobs; release pending. Failed checks get up to two repair rounds, stored output names the failures, and a stopped job can move to the current worker |
 
 ## Coding-agent learning path
 
