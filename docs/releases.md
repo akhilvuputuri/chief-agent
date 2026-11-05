@@ -1,3 +1,8 @@
+## Worker image that repairs failed checks (5 November 2026)
+
+- **Configuration.** New coding jobs pin worker image `sha256:7d931493…`, built from `2ce1fd6` (PR 424), which sends failed checks back to the coder. The previous image `sha256:c7cec104…` moves to `previousImages`, so paused jobs on it still resume, and `coding_job_update` with `upgradeWorker` can move one to this image.
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Failed checks go back to the coder (5 November 2026)
 
 - **Code.** When the host's configured checks fail on a Pi build, the coder gets the failures as a `check_failures` document and up to two repair rounds per worker run before the job pauses. A failed check's stored output starts with a digest of its failure lines. `coding_job_update` gains `upgradeWorker`, which moves a stopped Pi job to the current worker image. No database or Compose change.
