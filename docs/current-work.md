@@ -1,6 +1,6 @@
 # Memory in agentwatch — live in `4e8f886`, 5 November 2026
 
-agentwatch shows what Chief remembers: each item's history linked to the turn or learner run it came from, and the items each model call had in its prompt, labelled "in context", never "used". Earlier memory was backfilled from Postgres: 41 items, 58 changes, 37 turns' context since 28 October. Learner runs are traced under their own service. A live turn's spans have not been seen yet. See [tracing](tracing.md#memory) and [journal 153](journey/153-memory-transparency.md).
+agentwatch shows what Chief remembers: each item's history, linked to the turns it came from, and the items each model call had in its prompt, labelled "in context", never "used". Earlier memory was backfilled from Postgres: 41 items, 58 changes and 37 runs' context, from 28 October; the backfilled changes are traces of their own, since the learner runs that made most of them were not traced. The release traces learner runs under their own service. Not yet seen: a live turn's memory spans, and a traced learner run. See [tracing](tracing.md#memory) and [journal 153](journey/153-memory-transparency.md).
 
 # Scheduled public browser refresh — live in `444a334`, 2 November 2026
 
