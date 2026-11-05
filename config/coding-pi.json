@@ -1,7 +1,7 @@
 {
   "repository": "akhilvuputuri/chief-agent",
   "branch": "main",
-  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:c7cec10473cf23ce7a38e1fdd2e01abe5731361b265f5c360b133a1e908d954d",
+  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:7d93149310950db6ad4ff7d378cd624c61b59161f481c36291834b77494b7c46",
   "model": "deepseek/deepseek-v4.1-flash-1017",
   "leaderModel": "deepseek/deepseek-v4.1-flash-1017",
   "reviewerModel": "anthropic/claude-opus-5.5",
