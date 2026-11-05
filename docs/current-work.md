@@ -36,7 +36,7 @@ Only 55 of 183 conversation turns were within the learner's 14-day limit, and it
 
 # The learner saves more — live in `c54ddcb`, 1 November 2026
 
-The owner wants memory to accumulate and will prune it later. Prompt `learner-v3` errs toward saving, a reworded fact is flagged rather than refused (it still needs the owner's quoted words, with no added number or negation), learned items get 12,000 characters of the prompt, and items reviewed under earlier prompts are mined again once. Pruning goes through a coding session for now. See [learning](learning.md#host-checks) and [journal 130](journey/130-nightly-learner.md#saving-more--2026-11-01).
+The owner wants memory to accumulate and will prune it later. Prompt `learner-v3` errs toward saving, a reworded fact is flagged rather than refused (it still needs the owner's quoted words and one shared word; an added number, negation, address or payment word is a warning flag), procedures run to 2,000 characters, learned items get 30,000 characters of the prompt (live 5 November), and items reviewed under earlier prompts are mined again once. Pruning goes through a coding session for now. See [learning](learning.md#host-checks) and [journal 130](journey/130-nightly-learner.md#saving-more--2026-11-01).
 
 # A private record of what the learner decides — live in `ea9943c`, 31 October 2026
 
