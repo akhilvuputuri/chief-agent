@@ -174,7 +174,7 @@ After them, 16 learned facts and 10 lessons were active, 9 of them procedures. T
 
 **Review.** Independent review (Claude Opus 5.5) requested changes on `4492e8b`, and reproduced three defects in throwaway tests. The procedure pass was shown only the first 1,000 characters of each procedure, so revising a long one would silently drop the rest; it is now shown whole. One shared word let an invented recipient, address or payment destination save with routine flags only, and the docs no longer said so. Addresses, links and payment words now get warning flags, and the remaining gap for names is documented. The exfiltration pattern missed "shared" and "sharing" and newly flagged harmless text such as "a pin of the restaurant". It also corrected the token estimate and two record wordings. It then approved `a739ab6`, and `67a5d90`, which widened domains to any ending, compared payment words by root and restored plural PINs. File names such as "notes.md" now also raise the contact warning, which is accepted as noise to prune.
 
-**Deployment.** Not yet released; update on release.
+**Deployment.** Merged as `d3f1234` (PR 418) and live in `c8f00dc` from 22:05 SGT on 5 November, after an independent review approved the final merge of main (`6db5285`). Its own release run stopped at the current-main check because PR 423 had already landed, and the release of `c8f00dc` carried it. The first night under these limits is 6 November; nothing about it is measured yet.
 
 ## Follow-up and next iteration
 
