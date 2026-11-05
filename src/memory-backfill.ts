@@ -19,7 +19,6 @@ import {
   memoryLinks,
   memoryRecordId,
   memorySpan,
-  runSpanId,
   type ExportSpan,
   type MemoryItemInput,
 } from "./otel.js";
@@ -89,8 +88,8 @@ export interface MemoryBackfillStats {
 }
 
 /**
- * The span ID of a run's span in agentwatch: the stored one when the trace is there (live
- * runs before journal 153 had random IDs), null when agentwatch does not hold the trace.
+ * The span ID of a run's span in agentwatch, as stored (live runs before journal 153 had
+ * random IDs); null when agentwatch holds no span for the run.
  */
 export type RunSpanLookup = (
   traceId: string,
@@ -133,16 +132,19 @@ export async function buildMemoryBackfill(
           parentSpanId: parent,
           operation: "search_memory",
           store: token(row.store),
-          items: row.items.map((i): MemoryItemInput => ({
-            key: i.key,
-            itemId: i.item_id,
-            revisionId: i.id,
-            revision: i.revision,
-            kind: i.kind,
-            learned: isLearned(i),
-            characters: contextSize(i),
-            value: i.value,
-          })),
+          // Sorted as the live selection sorts them.
+          items: [...row.items]
+            .sort((a, b) => a.key.localeCompare(b.key))
+            .map((i): MemoryItemInput => ({
+              key: i.key,
+              itemId: i.item_id,
+              revisionId: i.id,
+              revision: i.revision,
+              kind: i.kind,
+              learned: isLearned(i),
+              characters: contextSize(i),
+              value: i.value,
+            })),
           content: options.content,
           startNs: at,
           endNs: at,
@@ -241,10 +243,9 @@ export function agentwatchLookup(
         traces.set(traceId, runs);
       }
     }
-    const runs = traces.get(traceId);
-    if (!runs) return null;
-    // A run the trace does not show (a child that never finished): its derived ID.
-    return runs.get(runId) ?? runSpanId(runId);
+    // A run the trace does not show (cut short by a restart) has nothing to hang a span on: a
+    // made-up parent would leave an orphan that agentwatch would read as another run's.
+    return traces.get(traceId)?.get(runId) ?? null;
   };
 }
 

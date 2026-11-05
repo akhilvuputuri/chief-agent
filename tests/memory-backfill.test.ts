@@ -14,6 +14,7 @@ import {
 } from "../src/memory-backfill.js";
 import { setOpsSink } from "../src/ops-log.js";
 import {
+  encode,
   memoryContext,
   runSpanId,
   startTracing,
@@ -174,15 +175,35 @@ test("rebuilt memory spans equal what live export sent", async (t) => {
           a.name.localeCompare(b.name) ||
           JSON.stringify(a).localeCompare(JSON.stringify(b)),
       );
-  // The learned change had no traced run either way, so only its parent may differ.
-  const comparable = (s: ReturnType<typeof shape>) =>
-    s.attributes["chief.memory.origin"] === "learned"
-      ? { ...s, parent: undefined }
-      : s;
+  assert.deepEqual(byName(rebuilt.spans), byName(live));
+  // Changes that joined the turn are in its trace; the others are traces of their own.
+  const turnTrace = turn.replaceAll("-", "");
   assert.deepEqual(
-    byName(rebuilt.spans).map(comparable),
-    byName(live).map(comparable),
+    rebuilt.spans.map((s) => s.traceId === turnTrace),
+    [true, false, true, false],
   );
+  // A turn exported live before 5 November had a random span ID: the read hangs under it.
+  const random = "0123456789abcdef";
+  const live5Nov = await buildMemoryBackfill(
+    rows,
+    { content: true },
+    async (traceId, runId) =>
+      traceId === turnTrace && runId === turn ? random : null,
+  );
+  assert.deepEqual(
+    live5Nov.spans
+      .filter((s) => s.traceId === turnTrace)
+      .map((s) => [s.name.split(" ")[0], s.parentSpanId]),
+    [
+      ["create_memory", random],
+      ["search_memory", random],
+    ],
+  );
+  // Without --content, no key or value is sent.
+  const plain = await buildMemoryBackfill(rows, { content: false }, lookup);
+  const bytes = JSON.stringify(encode(plain.spans));
+  for (const text of ["timezone", "UTC+8", "Quote the sender", "lesson:mail"])
+    assert.ok(!bytes.includes(text), text);
   // Posting the same rows again gives the same span IDs.
   const again = await buildMemoryBackfill(rows, { content: true }, lookup);
   assert.deepEqual(
@@ -199,7 +220,7 @@ test("rebuilt memory spans equal what live export sent", async (t) => {
   assert.equal(none.stats.revisionsOnTheirOwn, 3);
 });
 
-test("a run's span is found in agentwatch by its run ID, and a missing trace is null", async () => {
+test("a run's span is found in agentwatch by its run ID, else null", async () => {
   const run = randomUUID();
   const asked: string[] = [];
   const send = (async (url: string | URL | Request) => {
@@ -215,9 +236,8 @@ test("a run's span is found in agentwatch by its run ID, and a missing trace is 
   }) as typeof fetch;
   const lookup = agentwatchLookup("http://localhost:14318", send);
   assert.equal(await lookup("t1", run), "aaaaaaaaaaaaaaaa");
-  // A run the trace does not show gets its derived ID; the trace is read once.
-  const other = randomUUID();
-  assert.equal(await lookup("t1", other), runSpanId(other));
+  // A run the trace does not show has no span to hang one on; the trace is read once.
+  assert.equal(await lookup("t1", randomUUID()), null);
   assert.equal(await lookup("missing", run), null);
   assert.deepEqual(asked, [
     "http://localhost:14318/api/traces/t1",

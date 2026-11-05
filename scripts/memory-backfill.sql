@@ -3,7 +3,7 @@
 -- Read-only: one SELECT, no writes, no temporary tables. Set the window with psql variables
 -- at the top of the input, e.g.
 --   \set since '2026-09-06T00:00:00Z'
---   \set until '2026-11-05T13:39:00Z'
+--   \set until '2026-11-05T13:39:11Z'
 -- The output holds the owner's memories: keep it private.
 WITH RECURSIVE
 -- Each child run's parent, from the event its parent recorded when starting it.
