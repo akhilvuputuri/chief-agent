@@ -61,6 +61,7 @@ import {
   type SandboxRequest,
 } from "./provider.js";
 import { scrubTrace } from "../trace-scrub.js";
+import { storable } from "../storable.js";
 import { ownerProgress } from "./progress-text.js";
 import { seal, open } from "../secret-box.js";
 import { errorFields, opsLog } from "../ops-log.js";
@@ -68,6 +69,29 @@ import { ModelError } from "../model.js";
 import { CodingModelFailure, type CodingFailureCode } from "./model-failure.js";
 import { boxView } from "./box-sandbox.js";
 import { runtimeMemory } from "./memory-schema.js";
+
+/**
+ * Worker text (plans, findings, check output, summaries) is made storable: Postgres
+ * refuses NUL and lone surrogates (journal 155). Code is published byte for byte, a
+ * report document is bound to its hash, and review findings are compared with the exact
+ * sealed reply, so any of these that is not storable text is refused, never changed.
+ * Current Pi workers refuse such files and documents before sending them.
+ */
+function storableCheckpoint<T extends Checkpoint>(c: T, findings?: string): T {
+  const document = c.piState?.reportDocument;
+  const exact = {
+    patch: c.patch,
+    files: c.files,
+    findings: findings ?? null,
+    // Text the host compares with the document must not lose characters either.
+    ...(document
+      ? { document, plan: c.plan, reviewFindings: c.piState?.findings ?? null }
+      : {}),
+  };
+  if (canonicalJson(storable(exact)) !== canonicalJson(exact))
+    throw new Error("Exact content is not storable text");
+  return storable(c);
+}
 
 const active = ["provisioning", "running"];
 /** Why the host paused an attempt. Only sandbox_stopped and heartbeat_lost are transient. */
@@ -508,7 +532,9 @@ export class CodingController {
         job.id,
         job.attempt_id,
         `${job.attempt_id}:request-rejected:${randomUUID()}`,
-        JSON.stringify({ kind: "worker_request_rejected", ...failure }),
+        JSON.stringify(
+          storable({ kind: "worker_request_rejected", ...failure }),
+        ),
         failure.phase,
       ],
     );
@@ -1344,7 +1370,7 @@ export class CodingController {
     return { accepted: true };
   }
   async progress(job: CodingJob, raw: unknown) {
-    const reported = workerEvent.parse(raw);
+    const reported = storable(workerEvent.parse(raw));
     // Stored and shown in owner-facing words; deterministic, so a retry still matches.
     const e = { ...reported, summary: ownerProgress(reported.summary) };
     const prior = (
@@ -1428,7 +1454,7 @@ export class CodingController {
       throw new Error("Review document must match the saved findings");
   }
   async save(job: CodingJob, raw: unknown) {
-    const c = checkpoint.parse(raw);
+    const c = storableCheckpoint(checkpoint.parse(raw));
     this.validateReportCheckpoint(job, c);
     if (
       job.mode === "implement" &&
@@ -1518,7 +1544,14 @@ export class CodingController {
       });
   }
   async finish(job: CodingJob, raw: unknown) {
-    const r = outcome.parse(raw);
+    const parsed = outcome.parse(raw);
+    const r = storable({
+      ...parsed,
+      checkpoint: storableCheckpoint(
+        parsed.checkpoint,
+        parsed.review?.findings,
+      ),
+    });
     this.validateReportCheckpoint(job, r.checkpoint);
     if (
       job.settings.runtime !== "pi" &&
@@ -1744,15 +1777,18 @@ export class CodingController {
           input.callId,
           input.role,
           hash(input),
-          JSON.stringify({
-            ...scrubTrace(input),
-            requestedModel:
-              input.role === "reviewer"
-                ? job.settings.reviewerModel
-                : input.role === "leader"
-                  ? (job.settings.leaderModel ?? job.settings.model)
-                  : job.settings.model,
-          }),
+          // The readable copy; the request hash and provider request stay exact.
+          JSON.stringify(
+            storable({
+              ...scrubTrace(input),
+              requestedModel:
+                input.role === "reviewer"
+                  ? job.settings.reviewerModel
+                  : input.role === "leader"
+                    ? (job.settings.leaderModel ?? job.settings.model)
+                    : job.settings.model,
+            }),
+          ),
           input.retryOf ?? null,
         ],
       );
@@ -1839,15 +1875,17 @@ export class CodingController {
                     job.id,
                     job.attempt_id,
                     `${job.attempt_id}:model-progress:${randomUUID()}`,
-                    JSON.stringify({
-                      kind: "model_progress",
-                      role: input.role,
-                      callId: input.callId,
-                      responseId,
-                      provider: value.provider?.slice(0, 100),
-                      elapsedMs: Date.now() - started,
-                      receivedBytes: value.bytes,
-                    }),
+                    JSON.stringify(
+                      storable({
+                        kind: "model_progress",
+                        role: input.role,
+                        callId: input.callId,
+                        responseId,
+                        provider: value.provider?.slice(0, 100),
+                        elapsedMs: Date.now() - started,
+                        receivedBytes: value.bytes,
+                      }),
+                    ),
                   ],
                 );
                 // Optional telemetry must not hold the stream reader indefinitely.
@@ -1870,7 +1908,8 @@ export class CodingController {
         "UPDATE coding_model_calls SET state='complete',result=$2::jsonb,result_box=$3 WHERE id=$1",
         [
           input.callId,
-          JSON.stringify(scrubTrace(result)),
+          // The readable copy; the sealed copy and the worker's response stay exact.
+          JSON.stringify(storable(scrubTrace(result))),
           seal(
             this.resultKey(),
             JSON.stringify(result),
@@ -1883,14 +1922,16 @@ export class CodingController {
         [
           job.id,
           `${job.attempt_id}:model:${randomUUID()}`,
-          JSON.stringify({
-            kind: "model_usage",
-            role: input.role,
-            ...(input.purpose ? { purpose: input.purpose } : {}),
-            model: result.model,
-            usage: result.usage,
-            provider: result.provider,
-          }),
+          JSON.stringify(
+            storable({
+              kind: "model_usage",
+              role: input.role,
+              ...(input.purpose ? { purpose: input.purpose } : {}),
+              model: result.model,
+              usage: result.usage,
+              provider: result.provider,
+            }),
+          ),
         ],
       );
       return result;

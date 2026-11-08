@@ -28,8 +28,15 @@ const reasons: Record<string, string> = {
   "Model is not the job's pinned role selection": "model_not_pinned",
   "Worker attempt superseded": "attempt_superseded",
   "Progress key conflict": "progress_key_conflict",
+  "Exact content is not storable text": "exact_content_not_storable",
 };
 
 export function rejectionReason(error: unknown) {
-  return (error instanceof Error && reasons[error.message]) || "unclassified";
+  if (error instanceof Error && reasons[error.message])
+    return reasons[error.message];
+  // Postgres data exceptions (SQLSTATE class 22) mean the host could not store a value.
+  const code = (error as { code?: unknown })?.code;
+  if (typeof code === "string" && /^22[0-9A-Z]{3}$/.test(code))
+    return "database_value_rejected";
+  return "unclassified";
 }

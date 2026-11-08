@@ -161,6 +161,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 4 November | [152 — Fixes reach an open PR](152-fixes-reach-an-open-pr.md): why could nobody fix PR 416 through Chief? | Tested on synthetic jobs; release pending. Owner fix requests join the PR's feedback round, and the operator stop moves after review |
 | 4 November | [153 — Memory transparency](153-memory-transparency.md): can the owner see what Chief remembers, where each item came from, and what each prompt held? | Released 5 November and earlier memory backfilled: 41 items, 58 changes, 37 runs' context. Not yet seen on a live turn. |
 | 5 November | [154 — Failed checks go back to the coder](154-failed-checks-go-back-to-the-coder.md): why did a job stop at the first failed check instead of fixing it? | Tested on synthetic jobs; release pending. Failed checks get up to two repair rounds, stored output names the failures, and a stopped job can move to the current worker |
+| 8 November | [155 — Text Postgres cannot store](155-text-postgres-cannot-store.md): why did one model reply pause a coding job? | Tested on synthetic jobs; release pending. Descriptive text is made storable where the host writes it; exact copies and code stay exact |
 
 ## Coding-agent learning path
 
