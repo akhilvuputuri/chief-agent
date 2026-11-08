@@ -174,7 +174,17 @@ After them, 16 learned facts and 10 lessons were active, 9 of them procedures. T
 
 **Review.** Independent review (Claude Opus 5.5) requested changes on `4492e8b`, and reproduced three defects in throwaway tests. The procedure pass was shown only the first 1,000 characters of each procedure, so revising a long one would silently drop the rest; it is now shown whole. One shared word let an invented recipient, address or payment destination save with routine flags only, and the docs no longer said so. Addresses, links and payment words now get warning flags, and the remaining gap for names is documented. The exfiltration pattern missed "shared" and "sharing" and newly flagged harmless text such as "a pin of the restaurant". It also corrected the token estimate and two record wordings. It then approved `a739ab6`, and `67a5d90`, which widened domains to any ending, compared payment words by root and restored plural PINs. File names such as "notes.md" now also raise the contact warning, which is accepted as noise to prune.
 
-**Deployment.** Merged as `d3f1234` (PR 418) and live in `c8f00dc` from 22:05 SGT on 5 November, after an independent review approved the final merge of main (`6db5285`). Its own release run stopped at the current-main check because PR 423 had already landed, and the release of `c8f00dc` carried it. The first night under these limits is 6 November; nothing about it is measured yet.
+**Deployment.** Merged as `d3f1234` (PR 418) and live in `c8f00dc` from 22:05 SGT on 5 November, after an independent review approved the final merge of main (`6db5285`). Its own release run stopped at the current-main check because PR 423 had already landed, and the release of `c8f00dc` carried it. The facts pass first ran under these limits on the night of 6 November. The procedure pass had already caught up on 4 November and runs weekly, so its next window was not due until 11 November; see the next section.
+
+## Re-running one procedure window under the new limit — 2026-11-08
+
+**Measured.** On 4 November, under the 800-character limit, the procedure pass proposed coding, stocks and calendar procedures of 896, 904 and 888 characters. All three were refused as invalid arguments, then resent at 719, 657 and 659 characters and accepted, so each lost a fifth to a quarter of its text. On the nights of 5 to 8 November the facts pass read 3, 0, 3 and 1 items and saved 1 fact, on 7 November (flagged `paraphrased`), with no refusals, at under $0.06 a night in actual provider charges. The procedure pass did not run, because its next window ends at 03:41 SGT on 10 November and must then pass the 24-hour success window.
+
+**Change, a production database write approved by the owner.** There is no manual trigger for the procedure pass. To run the 20 October to 2 November window again under the 2,000-character limit, the `through` value of procedure run `9ec53071` was moved back from `2026-11-02T19:41:01.291Z` to `2026-10-26T19:41:01.291Z` at 17:13 SGT on 8 November. The old value and the reason are kept in that row's summary under `rewound`. No code changed. The night of 9 November should run exactly that one window and return `through` to 2 November, so the weekly window due on 11 November is unchanged.
+
+**Hypothesis, not measured.** With the procedures shown whole and room for 2,000 characters, the pass may restore what the three refusals cut. It may also leave them as they are, since nothing in the evidence has changed. Expected cost is about $0.30: the 4 November pass over the same window was charged $0.27 (`provider_charges.actual_usd`).
+
+**Deployment.** The write is live; the re-run is due on the night of 9 November SGT. Update with what it wrote.
 
 ## Follow-up and next iteration
 
