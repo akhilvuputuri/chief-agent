@@ -344,3 +344,11 @@ Evidence boundary:
 - **Measured:** one paused job and its stored output.
 - **Tested:** synthetic jobs that fail, repair and pass, or fail three times and pause.
 - **Not yet measured:** how often a real repair round fixes the failures.
+
+**The host must store what the model writes (8 November).** A rebuilt job paused when a coder reply quoted a regular expression with a NUL character: Postgres refused the reply's readable copy, and the API called it an unclassified worker refusal. The reply itself was fine. Descriptive text is now made storable where the host writes it; exact copies, code and hash-bound report documents stay exact and are refused if they cannot be stored, and a database value refusal is named. Review caught the first version normalizing report documents, which would have saved a plan whose hash no longer matched. See [journal 155](155-text-postgres-cannot-store.md).
+
+Evidence boundary:
+
+- **Measured:** one paused job, its gateway log and the Postgres error.
+- **Tested:** synthetic model calls on both routes and a finish report with NUL and a lone surrogate, which failed before the fix and pass after it; code and report documents with NUL are refused.
+- **Not yet measured:** the resumed job on a release with the fix.

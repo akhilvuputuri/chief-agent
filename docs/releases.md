@@ -1,3 +1,9 @@
+## Text Postgres cannot store no longer pauses coding jobs (8 November 2026)
+
+- **Code.** The coding host makes descriptive worker and model text storable (NUL removed, lone surrogates replaced) where it writes it, keeps the provider traffic, sealed copies and Pi sessions exact, refuses code or a report document that is not storable text, and names a Postgres value refusal `database_value_rejected`. The Pi runtime's report check also refuses NUL; workers get that with the next pinned image. No database or Compose change.
+- **Why.** Job `280f2d70` paused when Postgres refused a coder reply that contained a NUL character. See [journal 155](journey/155-text-postgres-cannot-store.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Memory in agentwatch: live in `4e8f886`, backfilled by `c8f00dc` (5 November 2026)
 
 - **What merged.** agentwatch#20 (`ce79f96`): a Memory page, each item's history linked to its source, and the items in each model call's context, from GenAI memory spans; schema 11. [PR 421](https://github.com/akhilvuputuri/chief-agent/pull/421) (`4e8f886`): Chief exports its memory selection, `memory_recall` and `memory_list` reads, and every committed revision, and traces learner runs under the service `chief-learner`. [PR 423](https://github.com/akhilvuputuri/chief-agent/pull/423) (`c8f00dc`): a backfill of memory from before the export.

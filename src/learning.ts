@@ -25,6 +25,7 @@ import { runFamily } from "./run-family.js";
 import { jsonSchema } from "./runtime.js";
 import { Spending, spending } from "./spending.js";
 import { scrubTrace } from "./trace-scrub.js";
+import { storable } from "./storable.js";
 
 export const LEARNER_PROMPT_VERSION = "learner-v5";
 export const PROCEDURE_PROMPT_VERSION = "procedures-v1";
@@ -407,23 +408,6 @@ const clip = (text: string, max: number) => {
   const last = cut.charCodeAt(cut.length - 1);
   return (last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut) + "…";
 };
-
-// Text Postgres jsonb accepts: no NUL and no lone surrogates.
-function storable(value: unknown): unknown {
-  if (typeof value === "string")
-    return value
-      .replace(/\u0000/g, "")
-      .replace(
-        /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
-        "\ufffd",
-      );
-  if (Array.isArray(value)) return value.map(storable);
-  if (value && typeof value === "object")
-    return Object.fromEntries(
-      Object.entries(value).map(([k, v]) => [k, storable(v)]),
-    );
-  return value;
-}
 
 const factKey = z.string().regex(/^[a-z_]{1,50}$/);
 const taskIds = z.array(z.string().uuid()).min(1).max(10);

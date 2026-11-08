@@ -20,11 +20,15 @@ export function reportDocument(report: Report): ReportDocument {
       !["APPROVE", "REQUEST_CHANGES"].includes(report.verdict ?? ""))
   )
     throw new Error("Invalid report kind, text or review verdict");
+  // The host stores reports in Postgres, which refuses NUL and lone surrogates (journal 155).
   if (
     Buffer.from(report.detail).toString() !== report.detail ||
-    Buffer.from(report.summary).toString() !== report.summary
+    Buffer.from(report.summary).toString() !== report.summary ||
+    /\u0000/.test(report.detail + report.summary)
   )
-    throw new Error("Report text must contain well-formed Unicode");
+    throw new Error(
+      "Report text must contain well-formed Unicode and no NUL characters; write \\u0000 as text, not as the character",
+    );
   if (!report.detail.trim() || report.detail.length > reportLimits.document)
     throw new Error(
       `Report document must contain 1–${reportLimits.document} characters; preserve the complete scope.`,
