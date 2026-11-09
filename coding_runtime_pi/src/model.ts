@@ -7,6 +7,7 @@ import {
   gatewayOutageFetch,
   terminalHttpRecoveryFetch,
 } from "./terminal-http-recovery.js";
+import { patientFetch } from "./patient-fetch.js";
 
 export type ModelFactory = (admit: () => Promise<void>) => Promise<{
   runtime: ModelRuntime;
@@ -44,6 +45,9 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
       allowModelNetwork: false,
     });
     const known = knownModel(runtime, config.provider, config.model);
+    const baseFetch = config.responseTimeoutMs
+      ? patientFetch(config.responseTimeoutMs)
+      : globalThis.fetch;
     const provider = "runtime";
     runtime.registerProvider(provider, {
       api: "openai-completions",
@@ -82,6 +86,9 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
           await admit();
           return stream(model, context, {
             ...options,
+            ...(config.responseTimeoutMs
+              ? { timeoutMs: config.responseTimeoutMs }
+              : {}),
             maxRetries: 0,
             ...(config.terminalHttpRecovery &&
             config.baseUrl &&
@@ -96,11 +103,13 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
                       baseUrl: config.baseUrl,
                       requestIdField: config.requestIdField,
                       admit,
-                      fetch: options?.fetch ?? globalThis.fetch,
+                      fetch: options?.fetch ?? baseFetch,
                     }),
                   }),
                 }
-              : {}),
+              : config.responseTimeoutMs
+                ? { fetch: options?.fetch ?? baseFetch }
+                : {}),
             onPayload: async (payload, selected) => {
               const original = await options?.onPayload?.(payload, selected);
               const request = original ?? payload;

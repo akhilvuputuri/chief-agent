@@ -1,0 +1,71 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import {
+  codingSettings,
+  modelCallTimeoutMs,
+  outputAllowance,
+} from "../src/coding/schema.js";
+import { fixture, settings } from "./helpers/coding-fixture.js";
+
+// Job d5a8bd74 paused when its planning report reached 16,000 output tokens (journal 156).
+const pi = { ...settings, runtime: "pi", squad: false, autoMerge: false };
+
+test("coder and planner allowances reach 128,000; the reviewer keeps 16,000 unless set", () => {
+  assert(codingSettings.safeParse({ ...pi, maxOutputTokens: 128000 }).success);
+  for (const changes of [
+    { maxOutputTokens: 128001 },
+    { reviewerMaxOutputTokens: 128001 },
+    { reviewerMaxOutputTokens: 0 },
+  ])
+    assert(!codingSettings.safeParse({ ...pi, ...changes }).success);
+  assert(
+    !codingSettings.safeParse({ ...settings, reviewerMaxOutputTokens: 16000 })
+      .success,
+  );
+  const wide = { maxOutputTokens: 128000 };
+  assert.equal(outputAllowance(wide, "leader"), 128000);
+  assert.equal(outputAllowance(wide, "coder"), 128000);
+  assert.equal(outputAllowance(wide, "reviewer"), 16000);
+  assert.equal(
+    outputAllowance({ ...wide, reviewerMaxOutputTokens: 64000 }, "reviewer"),
+    64000,
+  );
+  // Earlier jobs keep their behaviour.
+  assert.equal(outputAllowance({ maxOutputTokens: 16000 }, "reviewer"), 16000);
+  assert.equal(outputAllowance({ maxOutputTokens: 8000 }, "reviewer"), 8000);
+  assert.equal(outputAllowance({}, "coder"), 8000);
+  // A call may take as long as its allowance needs at 100 tokens a second, never under 5 minutes.
+  assert.equal(modelCallTimeoutMs(16000), 300000);
+  assert.equal(modelCallTimeoutMs(128000), 1280000);
+});
+
+test("each role's model call is sent its own allowance", async (t) => {
+  const f = await fixture(t);
+  const started: any = await f.start("output-allowance", "plan");
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    started.id,
+    JSON.stringify({ ...pi, maxOutputTokens: 128000, planCheck: true }),
+  ]);
+  await f.c.tick();
+  const job = await f.row(started.id);
+  const sent: number[] = [];
+  f.setGeneration((_model, input) => {
+    sent.push(input.maxOutputTokens);
+    return { message: { role: "assistant", content: "Complete" } };
+  });
+  for (const [role, requested] of [
+    ["leader", undefined],
+    ["leader", 200000],
+    ["leader", 6553],
+    ["reviewer", 128000],
+  ] as const)
+    await f.c.generate(job, {
+      callId: randomUUID(),
+      role,
+      messages: [{ role: "user", content: "Synthetic" }],
+      tools: [],
+      ...(requested ? { maxOutputTokens: requested } : {}),
+    });
+  assert.deepEqual(sent, [128000, 128000, 6553, 16000]);
+});

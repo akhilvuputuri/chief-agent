@@ -76,7 +76,7 @@ test("Pi profile rejects Python selectors and automatic merge", async () => {
     undefined,
   );
   for (const changes of [
-    { maxOutputTokens: 16001 },
+    { maxOutputTokens: 128001 },
     { maxOutputTokens: 0 },
     { maxOutputTokens: 1.5 },
   ])
