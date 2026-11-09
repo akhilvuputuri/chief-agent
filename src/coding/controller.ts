@@ -42,6 +42,8 @@ import {
   outcome,
   workerEvent,
   assertCodingBrief,
+  modelCallTimeoutMs,
+  outputAllowance,
   type CodingAction,
   type CodingSettings,
   type Checkpoint,
@@ -1744,11 +1746,13 @@ export class CodingController {
     const started = Date.now();
     const enhanced =
       job.settings.harnessVersion === 2 || job.settings.runtime === "pi";
+    const allowance = outputAllowance(job.settings, input.role);
     const total = AbortSignal.timeout(
       Math.max(
         1,
         Math.min(
-          enhanced ? 300000 : 120000,
+          // The idle timeout still stops a stalled stream after 90 seconds.
+          enhanced ? modelCallTimeoutMs(allowance) : 120000,
           new Date(job.attempt_deadline).getTime() - this.clock().getTime(),
         ),
       ),
@@ -1843,8 +1847,8 @@ export class CodingController {
           ? {
               requireComplete: true,
               maxOutputTokens: Math.min(
-                input.maxOutputTokens ?? job.settings.maxOutputTokens ?? 8000,
-                job.settings.maxOutputTokens ?? 8000,
+                input.maxOutputTokens ?? allowance,
+                allowance,
               ),
             }
           : {}),

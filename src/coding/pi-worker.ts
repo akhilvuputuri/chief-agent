@@ -25,6 +25,8 @@ import {
   codingContextWindows,
   codingSettings,
   checkpoint,
+  modelCallTimeoutMs,
+  outputAllowance,
   type Checkpoint,
   type Outcome,
 } from "./schema.js";
@@ -358,7 +360,10 @@ export async function runPiWorker(
       apiKey: workerToken,
       // Pi supplies the selected model's capacity. The request byte envelope
       // below is a separate transport bound, not an artificial model window.
-      maxTokens: config.maxOutputTokens ?? 8000,
+      maxTokens: outputAllowance(config, role),
+      // The host replies only when the generation is done (journal 156).
+      responseTimeoutMs:
+        modelCallTimeoutMs(outputAllowance(config, role)) + 60000,
       reasoning: config.effort,
       requestIdField: "runtime_call_id",
       requestPurposeField: "runtime_purpose",

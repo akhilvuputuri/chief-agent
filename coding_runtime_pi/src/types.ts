@@ -83,6 +83,8 @@ export type ModelConfig = {
   requestIdField?: string;
   requestPurposeField?: string;
   maxRequestBytes?: number;
+  /** How long to wait for a model reply, when longer than Node's 300-second fetch default. */
+  responseTimeoutMs?: number;
   /** Opt-in authenticated host receipt protocol; direct providers stay disabled. */
   terminalHttpRecovery?: { attemptId: string };
 };

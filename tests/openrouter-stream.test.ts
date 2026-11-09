@@ -175,14 +175,14 @@ test("trusted output allowance supports Pi reasoning headroom without changing o
   await adapter.generate({
     ...input,
     requireComplete: true,
-    maxOutputTokens: 16000,
+    maxOutputTokens: 128000,
   });
   assert.deepEqual(
     requests.map((r) => r.max_tokens),
-    [8000, 16000],
+    [8000, 128000],
   );
   assert.deepEqual(requests[0].provider, requests[1].provider);
-  for (const maxOutputTokens of [0, 16001, Infinity, 1.5])
+  for (const maxOutputTokens of [0, 128001, Infinity, 1.5])
     await assert.rejects(adapter.generate({ ...input, maxOutputTokens }));
   assert.equal(requests.length, 2);
 });

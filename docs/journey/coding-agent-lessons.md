@@ -352,3 +352,16 @@ Evidence boundary:
 - **Measured:** one paused job, its gateway log and the Postgres error.
 - **Tested:** synthetic model calls on both routes and a finish report with NUL and a lone surrogate, which failed before the fix and pass after it; code and report documents with NUL are refused.
 - **Not yet measured:** the resumed job on a release with the fix.
+
+**A limit below its own contract (9 November).** The fresh study-links job planned for 90 seconds, then its one report call reached the 16,000-token output limit and the job paused. A plan may be 32,000 characters, and the planner reasons in the same call; earlier plans had already used up to 14,027 tokens. The limit was Chief's own, not the model's. The schema now allows coder and planner calls up to 128,000 tokens; the reviewer keeps 16,000. The profile moves to 128,000 with the next worker image, because the worker checks its settings with the schema it was built with ([journal 156](156-room-for-the-whole-plan.md)).
+
+Review found the hidden second limit: the host would allow a long call 21 minutes, but the worker's fetch gives up after 5 without response headers.
+
+- Size a limit from what it must hold, not from what has fitted so far.
+- When raising one limit, follow the request end to end; every hop has its own timeout.
+
+Evidence boundary:
+
+- **Measured:** one paused job and the output sizes of earlier planning calls.
+- **Tested:** synthetic calls that receive each role's allowance, and a Pi run that waits for a slow reply only as long as configured.
+- **Not yet measured:** a planning report above 16,000 tokens in production.

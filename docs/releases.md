@@ -1,3 +1,9 @@
+## Room for the whole plan: larger output allowance for coding calls (9 November 2026)
+
+- **Code.** Coder and planner model calls may use up to 128,000 output tokens; the reviewer keeps 16,000 unless `reviewerMaxOutputTokens` is set. A call's time limit grows with its allowance, and the worker waits for the reply that long (through undici 8's fetch, now a direct dependency of the Pi runtime). The profile stays at 16,000 until a worker image built from this change is pinned. No database or Compose change.
+- **Why.** Job `d5a8bd74` paused when its planning report reached the 16,000-token limit. See [journal 156](journey/156-room-for-the-whole-plan.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Text Postgres cannot store no longer pauses coding jobs (8 November 2026)
 
 - **Code.** The coding host makes descriptive worker and model text storable (NUL removed, lone surrogates replaced) where it writes it, keeps the provider traffic, sealed copies and Pi sessions exact, refuses code or a report document that is not storable text, and names a Postgres value refusal `database_value_rejected`. The Pi runtime's report check also refuses NUL; workers get that with the next pinned image. No database or Compose change.

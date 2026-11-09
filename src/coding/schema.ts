@@ -1,6 +1,7 @@
 import { squadState } from "./squad-schema.js";
 import { runtimeMemory } from "./memory-schema.js";
 import { z } from "zod";
+import { MAX_OUTPUT_TOKENS } from "../model.js";
 import { ToolValidationError } from "../tool-errors.js";
 import { reportLimits, reportDocument } from "@chief-agent/pi-runtime/report";
 
@@ -272,7 +273,21 @@ export const codingSettings = z
     runtime: z.enum(["node", "python", "pi"]).optional(),
     harnessVersion: z.literal(2).optional(),
     effort: z.enum(["low", "medium", "high"]),
-    maxOutputTokens: z.number().int().positive().max(16000).optional(),
+    // Coder and planner allowance. One planning report holds a plan document of up to
+    // 32,000 characters plus high-effort reasoning; 16,000 tokens could not (journal 156).
+    maxOutputTokens: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_OUTPUT_TOKENS)
+      .optional(),
+    /** Reviewer allowance; defaults to the coder allowance capped at the earlier 16,000. */
+    reviewerMaxOutputTokens: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_OUTPUT_TOKENS)
+      .optional(),
     contextWindows: codingContextWindows.optional(),
     /** Host-only: Pi PRs collect GitHub/Devin feedback, then merge only after the owner confirms. */
     prWorkflow: z.literal("owner_merge").optional(),
@@ -293,7 +308,11 @@ export const codingSettings = z
   })
   .strict()
   .superRefine((value, ctx) => {
-    if (value.maxOutputTokens !== undefined && value.runtime !== "pi")
+    if (
+      (value.maxOutputTokens !== undefined ||
+        value.reviewerMaxOutputTokens !== undefined) &&
+      value.runtime !== "pi"
+    )
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Explicit output allowance belongs to the Pi profile",
@@ -334,6 +353,23 @@ export const codingSettings = z
       });
   });
 export type CodingSettings = z.infer<typeof codingSettings>;
+/**
+ * The host's time limit for one model call: at least 100 tokens a second of its allowance,
+ * never below 5 minutes. The worker waits a minute longer for the reply.
+ */
+export function modelCallTimeoutMs(allowance: number) {
+  return Math.max(300000, allowance * 10);
+}
+/** The output allowance for one model role of a job. */
+export function outputAllowance(
+  settings: Pick<CodingSettings, "maxOutputTokens" | "reviewerMaxOutputTokens">,
+  role: "leader" | "coder" | "reviewer",
+) {
+  const coder = settings.maxOutputTokens ?? 8000;
+  return role === "reviewer"
+    ? (settings.reviewerMaxOutputTokens ?? Math.min(coder, 16000))
+    : coder;
+}
 
 /** Reserve room for model/tool schema and a complete current call group. */
 export function assertCodingBrief(

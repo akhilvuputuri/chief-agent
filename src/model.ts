@@ -4,6 +4,8 @@ import {
   StreamFailure,
   type StreamProgress,
 } from "./openrouter-stream.js";
+/** The largest output allowance one model call may request (Opus 5.5 allows 128,000). */
+export const MAX_OUTPUT_TOKENS = 128000;
 export type Message = {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
@@ -173,7 +175,7 @@ export class OpenRouter implements ModelAdapter {
     if (
       !Number.isSafeInteger(maxOutputTokens) ||
       maxOutputTokens < 1 ||
-      maxOutputTokens > 16000
+      maxOutputTokens > MAX_OUTPUT_TOKENS
     )
       throw new Error("Invalid model output allowance");
     const ledger = spending.getStore();
