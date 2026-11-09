@@ -1,7 +1,7 @@
 # 156 — Why did the planner stop while writing its plan?
 
 Work date: 2026-11-09. Written: 2026-11-09.
-Status: tested on synthetic jobs; release pending, then a worker image pin.
+Status: released in `fa058f9` (9 November); worker image `sha256:e67dc9ea…` built from it and pinned with the 128,000 profile in the following change.
 
 ## User-visible problem and preceding iteration
 

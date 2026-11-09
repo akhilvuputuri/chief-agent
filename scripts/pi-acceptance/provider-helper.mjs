@@ -30,7 +30,7 @@ try {
       ]),
       messages: z.array(z.unknown()).max(2048),
       tools: z.array(z.unknown()).max(12),
-      maxOutputTokens: z.number().int().positive().max(16000),
+      maxOutputTokens: z.number().int().positive().max(128000),
       purpose: z.enum(["agent", "compaction"]),
       stream: z.literal(true),
       cacheKey: z.string().min(1).max(200),
