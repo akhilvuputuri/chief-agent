@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { reportLimits } from "@chief-agent/pi-runtime/report";
 import {
   codingSettings,
   modelCallTimeoutMs,
@@ -38,6 +40,24 @@ test("coder and planner allowances reach 128,000; the reviewer keeps 16,000 unle
   // A call may take as long as its allowance needs at 100 tokens a second, never under 5 minutes.
   assert.equal(modelCallTimeoutMs(16000), 300000);
   assert.equal(modelCallTimeoutMs(128000), 1280000);
+});
+
+test("the shipped profile leaves room for the largest report plus heavy reasoning", () => {
+  const shipped = codingSettings.parse(
+    JSON.parse(
+      readFileSync(
+        new URL("../config/coding-pi.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  );
+  // A token is at least one character of report text; observed planning reasoning reached 11,169 tokens.
+  const needed = reportLimits.document + 32000;
+  for (const role of ["leader", "coder"] as const)
+    assert(
+      outputAllowance(shipped, role) >= needed,
+      `${role} allowance ${outputAllowance(shipped, role)} is below ${needed}`,
+    );
 });
 
 test("each role's model call is sent its own allowance", async (t) => {

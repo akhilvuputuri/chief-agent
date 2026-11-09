@@ -1,8 +1,14 @@
+## Worker image with room for the whole plan (9 November 2026)
+
+- **Configuration.** New coding jobs pin worker image `sha256:e67dc9ea…`, built from `fa058f9` (PR 431), and the coder and planner allowance rises from 16,000 to 128,000 output tokens. The reviewer keeps 16,000. The previous image `sha256:7d931493…` moves to `previousImages`, so paused jobs on it still resume with their stored settings. The acceptance provider helper accepts the same bound.
+- **Why.** Job `d5a8bd74` paused when its planning report reached 16,000 tokens. See [journal 156](journey/156-room-for-the-whole-plan.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Room for the whole plan: larger output allowance for coding calls (9 November 2026)
 
 - **Code.** Coder and planner model calls may use up to 128,000 output tokens; the reviewer keeps 16,000 unless `reviewerMaxOutputTokens` is set. A call's time limit grows with its allowance, and the worker waits for the reply that long (through undici 8's fetch, now a direct dependency of the Pi runtime). The profile stays at 16,000 until a worker image built from this change is pinned. No database or Compose change.
 - **Why.** Job `d5a8bd74` paused when its planning report reached the 16,000-token limit. See [journal 156](journey/156-room-for-the-whole-plan.md).
-- **Deployment.** Not yet recorded as live; update this entry on release.
+- **Deployment.** Live in `fa058f9` on 9 November 2026: the main checks and release workflow passed, the production `RELEASE` matched and the gateway was healthy.
 
 ## Text Postgres cannot store no longer pauses coding jobs (8 November 2026)
 
