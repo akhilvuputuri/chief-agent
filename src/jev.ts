@@ -28,6 +28,9 @@ export const LINK_KINDS = [
   "other",
 ] as const;
 export type LinkKind = (typeof LINK_KINDS)[number];
+/** Whether the owner's own words named the destination, as Jev reads them. */
+export const LINK_CUES = ["explicit", "none"] as const;
+export type LinkCue = (typeof LINK_CUES)[number];
 
 const text = z.string().min(1).max(2000);
 const probability = z.number().min(0).max(1);
@@ -64,6 +67,9 @@ const schema = z
           .strict(),
         kind: z
           .object({ instructions: text, criteria: choices(LINK_KINDS) })
+          .strict(),
+        cue: z
+          .object({ instructions: text, criteria: choices(LINK_CUES) })
           .strict(),
       })
       .strict(),
@@ -102,6 +108,12 @@ export type LinkJudgeResult =
       confidence: number;
       topic: LinkTopic | null;
       kind: LinkKind;
+      /**
+       * "explicit" only when the owner's words themselves said where it goes. It is what
+       * lets an unreadable page still be saved where the owner asked, instead of asked
+       * about, so a missing answer is treated as "none" (ask) rather than guessed.
+       */
+      cue: LinkCue;
       model: string | null;
     }
   | {
@@ -159,6 +171,11 @@ export class JevLinks {
           instructions: this.config.question.kind.instructions,
           criteria: this.config.question.kind.criteria,
         },
+        cue: {
+          type: "choice",
+          instructions: this.config.question.cue.instructions,
+          criteria: this.config.question.cue.criteria,
+        },
       },
     };
     const ledger = spending.getStore();
@@ -209,6 +226,7 @@ export class JevLinks {
       const topicScore: unknown =
         topicAnswer?.probabilities?.[topicChoice as string];
       const kindChoice: unknown = data?.answers?.kind?.choice;
+      const cueChoice: unknown = data?.answers?.cue?.choice;
       return {
         ok: true,
         route: chosen as LinkRoute,
@@ -223,6 +241,9 @@ export class JevLinks {
         kind: LINK_KINDS.includes(kindChoice as LinkKind)
           ? (kindChoice as LinkKind)
           : "other",
+        // A missing or unrecognised answer is "no explicit cue": the owner is asked
+        // rather than the destination being guessed.
+        cue: cueChoice === "explicit" ? "explicit" : "none",
         model: typeof data?.model === "string" ? data.model : this.model,
       };
     } catch (error) {

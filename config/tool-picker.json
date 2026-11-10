@@ -24,7 +24,7 @@
       "examples": "save the brief for offline reading, check that Reader save, list MCP tools"
     },
     "links": {
-      "description": "Save a shared link after Chief classifies it as study material or offline reading, and manage the owner's study list: add, list, filter by topic, tag or status, update status, notes or tags, move between the study list and Reader, remove.",
+      "description": "Save a link the owner shared after Chief classifies it as study material or offline reading, and manage the owner's study list: add, list, filter by topic, tag or status, update status, notes or tags, move between the study list and Reader, remove. Never for a job posting, role or application, which belongs to jobs.",
       "examples": "save this for AI learning, add this tutorial to my study list, what's on my AI study list, no move it to Reader, remove that from my study list"
     },
     "gmail": {

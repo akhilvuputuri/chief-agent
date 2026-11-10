@@ -5,6 +5,8 @@ import { migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { readerServer } from "./helpers/reader-mock.js";
 import { mcpReaderLink, type ReaderLink } from "../src/news.js";
+import { JobTools } from "../src/tools.js";
+import { McpFailure } from "../src/mcp-errors.js";
 import type { FeedFetcher } from "../src/news-feed.js";
 import {
   StudyLinks,
@@ -55,6 +57,9 @@ const verdict = (
   confidence: 0.86,
   topic: "agent-platforms",
   kind: "technical",
+  // Only a cue Jev actually read from the owner's words is explicit; the default is
+  // "no cue", so nothing here saves to a cued place by accident.
+  cue: "none",
   model: "typesafe/jev-1.13-20260917",
   ...overrides,
 });
@@ -113,6 +118,33 @@ async function fixture(linkJudge: LinkJudge) {
     store: new StudyStore(db),
   };
 }
+
+/** The real tool dispatcher, so the host's own gate and turn record are what is tested. */
+const jobTools = (db: Database, links: StudyLinks, mcp?: any) =>
+  new JobTools(
+    db,
+    { call: async () => ({}) },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    mcp,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    links,
+  );
 
 const studyCount = async (db: Database, user = "123") =>
   Number(
@@ -359,8 +391,11 @@ test("the Reader key is on the decision row before the call, so a crash stays re
     decisionId = saved.decisionId;
     const first = await links.confirm("123", decisionId, "reader", 401);
     assert.equal(first.settled, false);
-    assert.match(first.text, /uncertain/);
-    assert.doesNotMatch(first.text, /^Nothing was written/);
+    // The crash was before Chief persisted the request, so Reader cannot hold the link: a
+    // definite non-send, never an uncertain one, and never "nothing was written" after a
+    // partial write (there was none).
+    assert.match(first.text, /nothing was saved/i);
+    assert.doesNotMatch(first.text, /may already have it/);
     // The row already carried the key when Reader was first contacted.
     assert.equal(probe.seen.length, 1);
     assert.equal(probe.seen[0]!.rowKey, probe.seen[0]!.key);
@@ -448,43 +483,56 @@ test("confident offline reading goes to Reader with one normalised URL and no st
 });
 
 test("the owner's explicit cue decides both directions and reaches the classifier", async () => {
-  const tutorial: any[] = [];
-  const studyIt = await fixture({
+  // The stub decides from the message it is given, the way Jev does: a cue that the host
+  // dropped or the model paraphrased changes the answer, so this test can fail.
+  const cue = (message: string): "reader" | "study" | "unsure" =>
+    /offline reading|read later/i.test(message)
+      ? "reader"
+      : /study|learning/i.test(message)
+        ? "study"
+        : "unsure";
+  const reading = await fixture({
     judge: async (input) => {
-      tutorial.push(input.message);
-      return verdict("reader", { kind: "technical" });
+      const route = cue(input.message);
+      return route === "unsure"
+        ? verdict("unsure", { confidence: 0.4 })
+        : verdict(route, { kind: "technical" });
     },
   });
   try {
     // "for offline reading" wins even though the page is a tutorial.
-    const result: any = await studyIt.links().save("123", {
+    const result: any = await reading.links().save("123", {
       url: "https://example.org/agents",
       ownerMessage: "save this tutorial for offline reading",
     });
     assert.equal(result.outcome, "reader");
-    assert.equal(tutorial[0], "save this tutorial for offline reading");
-    assert.equal(await studyCount(studyIt.db), 0);
+    assert.equal(await studyCount(reading.db), 0);
+    // Without the cue the same page is a question, so the assertion above really depends
+    // on the owner's words reaching the classifier.
+    const silent: any = await reading.links().save("123", {
+      url: "https://example.org/agents",
+      ownerMessage: "save this",
+    });
+    assert.equal(silent.outcome, "needs_choice");
   } finally {
-    await studyIt.pg.close();
+    await reading.pg.close();
   }
-  const news: any[] = [];
-  const studyNews = await fixture({
-    judge: async (input) => {
-      news.push(input.message);
-      return verdict("study", { kind: "news" });
-    },
+  const studying = await fixture({
+    judge: async (input) =>
+      verdict(cue(input.message) === "reader" ? "reader" : "study", {
+        kind: "news",
+      }),
   });
   try {
-    const result: any = await studyNews.links().save("123", {
+    const result: any = await studying.links().save("123", {
       url: "https://example.org/agents",
       ownerMessage: "save this news story to my study list",
     });
     assert.equal(result.outcome, "study");
-    assert.equal(news[0], "save this news story to my study list");
-    assert.equal(await studyCount(studyNews.db), 1);
-    assert.equal(studyNews.reader.calls.length, 0);
+    assert.equal(await studyCount(studying.db), 1);
+    assert.equal(studying.reader.calls.length, 0);
   } finally {
-    await studyNews.pg.close();
+    await studying.pg.close();
   }
 });
 
@@ -527,16 +575,62 @@ test("an unsure link asks with three taps and saves nothing; a slow Jev never fa
 });
 
 test("a page Chief could not read cannot become study material with an invented title", async () => {
-  const f = await fixture(judge(() => verdict("study")).api);
+  // Jev reads the cue from the owner's words, as the real one does; a page it cannot read
+  // contributes no title, so only an explicit cue decides where it goes.
+  const reading = (input: any): LinkJudgeResult =>
+    verdict("study", {
+      cue: /ai learning|study|offline/i.test(input.message)
+        ? "explicit"
+        : "none",
+    });
+  const f = await fixture(judge(reading).api);
   try {
+    // No cue: nothing names it honestly, so it is a question, not an entry called "blocked".
     const saved: any = await f.links().save("123", {
       url: "https://blocked.example.org/thread",
-      ownerMessage: "save this thread for AI learning",
+      ownerMessage: "save this",
     });
     assert.equal(saved.outcome, "needs_choice");
     assert.match(saved.question, /title could not be read/);
     assert.equal(await studyCount(f.db), 0);
     assert.equal(f.reader.calls.length, 0);
+    // An explicit cue wins even when the page has no readable title: it is saved where the
+    // owner said, named after the site, and the receipt says the title could not be read.
+    const cued: any = await f.links().save("123", {
+      url: "https://blocked.example.org/thread",
+      ownerMessage: "save this for AI learning",
+    });
+    assert.equal(cued.outcome, "study", cued.message);
+    assert.match(cued.message, /Saved to your study list/);
+    assert.match(cued.message, /title couldn't be read/);
+    const entry = (await f.store.list("123"))[0]!;
+    assert.equal(entry.title, "blocked.example.org");
+    assert.equal(entry.url, "https://blocked.example.org/thread");
+    assert.equal(f.reader.calls.length, 0);
+    assert.equal(await studyCount(f.db), 1);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a cued Reader save of an unreadable page still goes to Reader, never to the study list", async () => {
+  const f = await fixture(
+    judge(() =>
+      verdict("reader", {
+        kind: "news",
+        topic: null,
+        cue: "explicit",
+      }),
+    ).api,
+  );
+  try {
+    const saved: any = await f.links().save("123", {
+      url: "https://blocked.example.org/story",
+      ownerMessage: "save this story for offline reading",
+    });
+    assert.equal(saved.outcome, "reader", saved.message);
+    assert.equal(await studyCount(f.db), 0);
+    assert.equal(f.reader.calls.length, 1);
   } finally {
     await f.pg.close();
   }
@@ -704,9 +798,14 @@ test("an unsure link's tap writes only the chosen destination and reports exactl
   }
 });
 
-test("a partial write after a tap names what may be saved, and a re-tap resumes only the rest", async () => {
+test("a Both card whose Reader half is refused settles instead of asking again for ever", async () => {
+  let answer: "unsure" | "reader" = "unsure";
   const f = await fixture(
-    judge(() => verdict("unsure", { confidence: 0.4 })).api,
+    judge(() =>
+      answer === "unsure"
+        ? verdict("unsure", { confidence: 0.4 })
+        : verdict("reader", { kind: "news", topic: null }),
+    ).api,
   );
   try {
     const links = f.links();
@@ -716,22 +815,36 @@ test("a partial write after a tap names what may be saved, and a re-tap resumes 
     });
     f.reader.fail("invalid");
     const first = await links.confirm("123", saved.decisionId, "both", 401);
-    assert.equal(first.settled, false);
+    // Nothing is dropped and nothing is called uncertain: the study entry is named, the
+    // refusal is given, and the card is settled rather than left re-sending to Reader.
+    assert.equal(first.settled, true, first.text);
     assert.match(first.text, /Saved to your study list/);
-    assert.match(first.text, /Nothing else was changed/);
+    assert.match(first.text, /Reader refused/);
     assert.doesNotMatch(first.text, /^Nothing was written/);
+    assert.doesNotMatch(first.text, /tap again/i);
+    assert.match(first.text, /save it to Reader/);
     assert.equal(await studyCount(f.db), 1);
     const after = await links.decisions.get("123", saved.decisionId);
-    assert.equal(after!.state, "pending");
+    assert.equal(after!.state, "confirmed");
     assert.equal(after!.studyState, "done");
     assert.equal(after!.readerState, "rejected");
     assert.equal(after!.choice, "both");
-    // A second tap retries only the Reader part under a new key and keeps one entry.
-    const second = await links.confirm("123", saved.decisionId, "both", 401);
-    assert.equal(second.settled, true, second.text);
-    assert.match(second.text, /study list and Reader/);
+    // A later tap never sends a second Reader request for a card that is already settled.
+    const repeat = await links.confirm("123", saved.decisionId, "both", 401);
+    assert.equal(repeat.settled, true);
+    assert.match(repeat.text, /already saved to your study list/);
+    assert.match(repeat.text, /add it to Reader too/);
+    assert.equal(f.reader.calls.length, 1);
+    // Only a new, explicit request retries Reader, and it gets a new key (requirement 9).
+    answer = "reader";
+    const retried: any = await links.save("123", {
+      url: "https://example.org/agents",
+      ownerMessage: "save it to Reader",
+    });
+    assert.equal(retried.outcome, "reader", retried.message);
+    assert.equal(f.reader.calls.length, 2);
+    assert.notEqual(f.reader.calls[1]!.key, f.reader.calls[0]!.key);
     assert.equal(await studyCount(f.db), 1);
-    assert.notEqual(f.reader.calls.at(-1)!.key, f.reader.calls[0]!.key);
     // Reader accepted, so the entry now records it.
     assert.equal((await f.store.list("123"))[0]!.readerSaved, true);
   } finally {
@@ -1273,20 +1386,23 @@ test("a study entry that was inserted is reported as saved when its card update 
     assert.doesNotMatch(outcome.text, /study entry wasn't written/);
     assert.doesNotMatch(outcome.text, /Nothing was written/);
     // Two days pass before the owner retries. The entry exists even though the row does not
-    // say so, so the card is not expired into "nothing was written" either.
+    // say so, so the expired card must not claim nothing was written either - and it acts
+    // on nothing, while still reporting the entry it finds in the collection.
     await f.db.query(
       "UPDATE link_decisions SET expires_at=now()-interval '1 hour' WHERE id=$1",
       [saved.decisionId],
     );
-    // A re-tap with the card working settles it without a second entry.
     links.decisions.setStudy = real;
     const retried = await links.confirm("123", saved.decisionId, "study", 401);
     assert.equal(retried.settled, true, retried.text);
-    assert.doesNotMatch(retried.text, /expired/i);
-    assert.match(retried.text, /Already on your study list/);
+    assert.match(retried.text, /expired/i);
+    assert.match(retried.text, /already in your study list/);
+    assert.doesNotMatch(retried.text, /nothing was written/i);
     assert.equal(await studyCount(f.db), 1);
     const row = await links.decisions.get("123", saved.decisionId);
-    assert.equal(row!.studyState, "done");
+    // Nothing was written by the late tap, so the card still does not claim the entry.
+    assert.equal(row!.studyState, "none");
+    assert.equal(row!.state, "pending");
   } finally {
     await f.pg.close();
   }
@@ -1366,18 +1482,38 @@ test("'what's on my AI study list' finds AI interests whose labels contain no AI
       page("A developer tool", "A CLI for agents.", "Example Tools"),
     );
     await other.save("123", { url: "https://example.org/tools" });
+    // An entry Jev could not name a topic for is still study material: a broad question
+    // must list it, labelled "Other", instead of hiding it behind the label filter.
+    const untopiced = f.links({
+      judge: {
+        judge: async () => verdict("study", { topic: null }),
+      },
+    });
+    f.pages.set(
+      dedupeKey("https://example.org/unfiled"),
+      page("An unfiled thread", "Something to work through.", "Example"),
+    );
+    assert.equal(
+      (await untopiced.save("123", { url: "https://example.org/unfiled" }))
+        .entry?.topic,
+      null,
+    );
     const listed: any = await links.list("123", {
       topic: "what's on my AI study list",
     });
-    assert.equal(listed.count, 2, listed.text);
-    assert.deepEqual(listed.entries.map((e: any) => e.topic).sort(), [
-      "agent platforms",
-      "developer tools",
-    ]);
+    assert.equal(listed.count, 3, listed.text);
+    assert.deepEqual(
+      listed.entries.map((e: any) => e.topic).sort(),
+      [null, "agent platforms", "developer tools"].sort(),
+    );
+    assert.match(listed.text, /An unfiled thread[\s\S]*Other/);
     assert.match(
       listed.text,
-      /Study list \(topic what's on my AI study list\) — 2 shown/,
+      /Study list \(topic what's on my AI study list\) — 3 shown/,
     );
+    // A narrow topic query still matches only what it names.
+    const narrow: any = await links.list("123", { topic: "agent platforms" });
+    assert.equal(narrow.count, 1, narrow.text);
     // A topic the list does not hold still reports what is in use instead of guessing.
     const missing: any = await links.list("123", { topic: "quantum" });
     assert.equal(missing.count, 0);
@@ -1469,7 +1605,7 @@ test("an expired choice card writes nothing", async () => {
   }
 });
 
-test("an expired card that already holds a write resumes instead of claiming nothing", async () => {
+test("an expired card acts on nothing and still reports what it already holds", async () => {
   const f = await fixture(
     judge(() => verdict("unsure", { confidence: 0.4 })).api,
   );
@@ -1488,29 +1624,36 @@ test("an expired card that already holds a write resumes instead of claiming not
       "UPDATE link_decisions SET expires_at=now()-interval '1 hour' WHERE id=$1",
       [saved.decisionId],
     );
-    // Expiry cannot call that nothing: the row is resumed and reported from the record,
-    // and the buttons can still settle the Reader request it holds.
+    // A tap two days late is not the owner's answer, so it writes nothing - and it still
+    // never says nothing was written, because the study entry and the Reader attempt exist.
     const second = await links.confirm("123", saved.decisionId, "both", 401);
     assert.equal(second.settled, true, second.text);
-    assert.doesNotMatch(second.text, /expired/i);
+    assert.match(second.text, /expired/i);
+    assert.match(second.text, /already in your study list/);
+    assert.match(
+      second.text,
+      /Reader copy from that attempt may still have landed/,
+    );
     assert.doesNotMatch(second.text, /^Nothing was written/);
-    assert.match(second.text, /study list and Reader/);
     assert.equal(await studyCount(f.db), 1);
-    // Only the unfinished Reader step ran, under the request key it was already given.
-    assert.equal(f.reader.calls.length, 2);
-    assert.equal(f.reader.calls[1]!.key, f.reader.calls[0]!.key);
+    // No second Reader save was sent by the late tap.
+    assert.equal(f.reader.calls.length, 1);
     const row = await links.decisions.get("123", saved.decisionId);
-    assert.equal(row!.state, "confirmed");
-    assert.equal(row!.readerState, "accepted");
+    assert.equal(row!.state, "pending");
+    assert.equal(row!.readerState, "uncertain");
   } finally {
     await f.pg.close();
   }
 });
 
-test("an expired card whose Reader write was refused still retries only that half", async () => {
-  const f = await fixture(
-    judge(() => verdict("unsure", { confidence: 0.4 })).api,
-  );
+test("expired or refused cards never block a later explicit request for either place", async () => {
+  let answer: "unsure" | "reader" = "unsure";
+  const f = await fixture({
+    judge: async () =>
+      answer === "unsure"
+        ? verdict("unsure", { confidence: 0.4 })
+        : verdict("reader", { kind: "news", topic: null }),
+  });
   try {
     const links = f.links();
     const saved: any = await links.save("123", {
@@ -1519,21 +1662,22 @@ test("an expired card whose Reader write was refused still retries only that hal
     });
     f.reader.fail("invalid");
     const first = await links.confirm("123", saved.decisionId, "both", 401);
-    assert.equal(first.settled, false, first.text);
+    // The study entry is written and Reader refused that link, so the card settles and a
+    // later tap can never re-send to Reader (review finding 4).
+    assert.equal(first.settled, true, first.text);
     assert.match(first.text, /Reader refused/);
     assert.equal(await studyCount(f.db), 1);
-    await f.db.query(
-      "UPDATE link_decisions SET expires_at=now()-interval '1 hour' WHERE id=$1",
-      [saved.decisionId],
-    );
-    // A stored refusal is progress too: the study entry exists, so the card is not expired
-    // into "nothing was written", and a new attempt gets a new key (requirement 9).
-    const second = await links.confirm("123", saved.decisionId, "both", 401);
-    assert.equal(second.settled, true, second.text);
-    assert.match(second.text, /study list and Reader/);
-    assert.equal(await studyCount(f.db), 1);
+    // A new explicit request retries only Reader, under a new key (requirement 9).
+    answer = "reader";
+    const retried: any = await links.save("123", {
+      url: "https://example.org/agents?utm_source=again",
+      ownerMessage: "save it to Reader",
+    });
+    assert.equal(retried.outcome, "reader", retried.message);
     assert.equal(f.reader.calls.length, 2);
     assert.notEqual(f.reader.calls[1]!.key, f.reader.calls[0]!.key);
+    assert.equal(f.reader.calls[1]!.url, "https://example.org/agents");
+    assert.equal(await studyCount(f.db), 1);
   } finally {
     await f.pg.close();
   }
@@ -1649,6 +1793,325 @@ test("a tap acts on the row it claims, not the snapshot it read first", async ()
     const row = await links.decisions.get("123", saved.decisionId);
     assert.equal(row!.readerState, "accepted");
     assert.equal(row!.state, "confirmed");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("x.com and twitter.com share links de-duplicate, and no other site loses s or t", () => {
+  // An app share adds s and t, and twitter.com serves the same post: one entry, not three.
+  assert.equal(
+    dedupeKey("https://twitter.com/someone/status/1?s=20&t=AbCd"),
+    "x.com/someone/status/1",
+  );
+  assert.equal(
+    dedupeKey("https://x.com/someone/status/1?s=46&t=Zz9"),
+    dedupeKey("https://www.x.com/someone/status/1/"),
+  );
+  // Only a status link of those two hosts: elsewhere s and t can be real parameters.
+  assert.equal(
+    dedupeKey("https://example.org/post?s=20&t=AbCd"),
+    "example.org/post?s=20&t=AbCd",
+  );
+  assert.equal(dedupeKey("https://x.com/someone?s=20"), "x.com/someone?s=20");
+  assert.equal(
+    dedupeKey("https://news.example.org/story/1?t=12"),
+    "news.example.org/story/1?t=12",
+  );
+});
+
+test("the same X thread shared twice with different share codes is one study entry", async () => {
+  const f = await fixture(judge(() => verdict("study")).api);
+  try {
+    f.pages.set(
+      dedupeKey("https://x.com/someone/status/9"),
+      page("Thread on agent architectures", "How the agents are wired."),
+    );
+    const links = f.links();
+    const first: any = await links.save("123", {
+      url: "https://x.com/someone/status/9?s=20&t=one",
+    });
+    assert.equal(first.outcome, "study");
+    const again: any = await links.save("123", {
+      url: "https://twitter.com/someone/status/9?s=46&t=two",
+    });
+    assert.equal(again.outcome, "duplicate", again.message);
+    assert.match(again.message, /Already on your study list/);
+    assert.equal(await studyCount(f.db), 1);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a stored Reader auth refusal before anything is sent says not saved, not uncertain", async () => {
+  const f = await fixture(judge(() => verdict("reader", { topic: null })).api);
+  try {
+    // src/mcp.ts refuses a connection with a stored auth failure before it transports
+    // anything, so nothing can be in Reader and the reply must not say it might be.
+    let calls = 0;
+    const links = f.links({
+      reader: () => ({
+        save: async () => {
+          calls++;
+          throw new McpFailure("auth");
+        },
+        savedArticles: async () => ({
+          articles: [],
+          partial: false,
+          skipped: 0,
+        }),
+      }),
+    });
+    const result: any = await links.save("123", {
+      url: "https://example.org/agents",
+      ownerMessage: "save this for offline reading",
+    });
+    assert.equal(result.outcome, "failed", result.message);
+    assert.match(result.message, /nothing was saved/i);
+    assert.doesNotMatch(result.message, /uncertain|may already/i);
+    assert.equal(calls, 1);
+    assert.equal(await studyCount(f.db), 0);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a cancelled turn creates no choice card and writes nothing", async () => {
+  const f = await fixture(judge(() => verdict("study")).api);
+  try {
+    const controller = new AbortController();
+    controller.abort();
+    const error = await f
+      .links()
+      .save(
+        "123",
+        { url: "https://example.org/agents", ownerMessage: "save this" },
+        controller.signal,
+      )
+      .then(() => undefined)
+      .catch((e) => e);
+    assert.ok(error instanceof ToolValidationError, String(error));
+    assert.match(error.message, /cancelled/i);
+    const cards = (
+      await f.db.query("SELECT count(*)::int AS n FROM link_decisions")
+    ).rows[0].n;
+    assert.equal(cards, 0);
+    assert.equal(f.asked.length, 0);
+    assert.equal(await studyCount(f.db), 0);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a turn cannot save a link straight to Reader; it is pointed at link_save", async () => {
+  const f = await fixture(judge(() => verdict("study")).api);
+  try {
+    const run = randomUUID();
+    await f.db.query("INSERT INTO runtime_runs(id,user_id) VALUES($1,'123')", [
+      run,
+    ]);
+    const tools = jobTools(f.db, f.links(), f.reader.make(f.db));
+    await assert.rejects(
+      tools.execute("123", run, {
+        operation: "mcp_write",
+        connection: "reader",
+        tool: "save_link",
+        requestKey: randomUUID(),
+        arguments: { url: "https://example.org/agents" },
+      }),
+      (error: any) => {
+        assert.ok(error instanceof ToolValidationError, String(error));
+        assert.match(error.message, /link_save/);
+        assert.match(error.message, /nothing was sent/i);
+        return true;
+      },
+    );
+    // Nothing reached Reader and nothing was persisted.
+    assert.equal(f.reader.calls.length, 0);
+    const operations = (
+      await f.db.query("SELECT count(*)::int AS n FROM mcp_operations")
+    ).rows[0].n;
+    assert.equal(operations, 0);
+    // Other Reader writes are not the link path, so they are not refused by this guard.
+    assert.equal(
+      await f.db
+        .query(
+          "SELECT count(*)::int AS n FROM mcp_operations WHERE tool='save_link'",
+        )
+        .then((r) => r.rows[0].n),
+      0,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("the host's record of the owner's turn is what the classifier reads", async () => {
+  const seen: any[] = [];
+  const f = await fixture({
+    judge: async (input) => {
+      seen.push(input);
+      return verdict(
+        /offline reading/i.test(input.message) ? "reader" : "study",
+        {
+          topic: null,
+        },
+      );
+    },
+  });
+  try {
+    const run = randomUUID();
+    await f.db.query("INSERT INTO runtime_runs(id,user_id) VALUES($1,'123')", [
+      run,
+    ]);
+    await f.db.query(
+      "INSERT INTO work_turns(run_id,user_id,request) VALUES($1,'123',$2)",
+      [run, "save this tutorial for offline reading"],
+    );
+    const tools = jobTools(f.db, f.links());
+    const result: any = await tools.execute("123", run, {
+      operation: "link_save",
+      url: "https://example.org/agents",
+      // A paraphrase the model wrote must not replace the owner's own words.
+      ownerMessage: "save this",
+    });
+    // The cue in the host's record decided the route, so the owner's words really arrived.
+    assert.equal(result.outcome, "reader", JSON.stringify(result));
+    assert.equal(seen[0].message, "save this tutorial for offline reading");
+    assert.equal(await studyCount(f.db), 0);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a Reader save that timed out is settled from chat, and later writes are not blocked", async () => {
+  // Review blocking finding: the guard that sends a Reader link save back to link_save must
+  // still let a replay of Chief's own persisted request through, or one timeout would refuse
+  // every ordinary write for ever.
+  const f = await fixture(judge(() => verdict("reader", { topic: null })).api);
+  try {
+    const run = randomUUID();
+    await f.db.query("INSERT INTO runtime_runs(id,user_id) VALUES($1,'123')", [
+      run,
+    ]);
+    const mcp = f.reader.make(f.db);
+    const tools = jobTools(f.db, f.links(), mcp);
+    // Reader times out: the link save is uncertain and its mcp_operations row stays pending.
+    f.reader.fail("uncertain");
+    const saved: any = await tools.execute("123", run, {
+      operation: "link_save",
+      url: "https://example.org/agents",
+    });
+    assert.equal(saved.outcome, "uncertain", saved.message);
+    const key = f.reader.calls[0]!.key;
+    // While it is pending the host gate refuses an ordinary write...
+    assert.equal(
+      await mcp.pendingAllows("123", {
+        operation: "memory_set",
+        key: "python",
+        value: "3.13",
+      }),
+      false,
+    );
+    // ...and the documented recovery is a replay of that exact request, with no arguments.
+    const settled: any = await tools.execute("123", run, {
+      operation: "mcp_write",
+      connection: "reader",
+      tool: "save_link",
+      requestKey: key,
+    });
+    assert.equal(settled.state, "complete", JSON.stringify(settled));
+    // The pending row is gone, so the unrelated write is allowed again.
+    assert.equal(
+      await mcp.pendingAllows("123", {
+        operation: "memory_set",
+        key: "python",
+        value: "3.13",
+      }),
+      true,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a replay bound to another payload is still refused, so the guard is not a back door", async () => {
+  const f = await fixture(judge(() => verdict("reader", { topic: null })).api);
+  try {
+    const run = randomUUID();
+    await f.db.query("INSERT INTO runtime_runs(id,user_id) VALUES($1,'123')", [
+      run,
+    ]);
+    const tools = jobTools(f.db, f.links(), f.reader.make(f.db));
+    await tools.execute("123", run, {
+      operation: "link_save",
+      url: "https://example.org/agents",
+    });
+    const key = f.reader.calls[0]!.key;
+    await assert.rejects(
+      tools.execute("123", run, {
+        operation: "mcp_write",
+        connection: "reader",
+        tool: "save_link",
+        requestKey: key,
+        // A different payload under a persisted key is not a replay of it.
+        arguments: { url: "https://example.org/something-else" },
+      }),
+      (error: any) => {
+        assert.ok(error instanceof ToolValidationError, String(error));
+        assert.match(error.message, /link_save/);
+        return true;
+      },
+    );
+    assert.equal(f.reader.calls.length, 1);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a Reader failure before Chief persisted the request says nothing was saved", async () => {
+  const f = await fixture(judge(() => verdict("reader", { topic: null })).api);
+  try {
+    // No mcp_operations row means the request never left Chief, which src/mcp.ts guarantees
+    // by writing the row before it contacts the server.
+    const links = f.links({
+      reader: () =>
+        ({
+          save: async () => {
+            throw new Error("connect ECONNREFUSED reader.example.com");
+          },
+        }) as any,
+    });
+    const result: any = await links.save("123", {
+      url: "https://example.org/agents",
+      ownerMessage: "save this for offline reading",
+    });
+    assert.equal(result.outcome, "failed", result.message);
+    assert.match(result.message, /nothing was saved/i);
+    assert.doesNotMatch(result.message, /uncertain|may already/i);
+    assert.equal(await studyCount(f.db), 0);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("both writes landing are reported as saved even when the cross-reference fails", async () => {
+  // The Reader copy and the study entry exist; a failed markReaderSaved must not turn the
+  // pair into "nothing was written" (review nit).
+  class FailingStore extends StudyStore {
+    async markReaderSaved() {
+      throw new Error("the collection is unavailable");
+    }
+  }
+  const f = await fixture(judge(() => verdict("both")).api);
+  try {
+    const result: any = await f
+      .links({ store: new FailingStore(f.db) })
+      .save("123", { url: "https://example.org/agents" });
+    assert.equal(result.outcome, "both", result.message);
+    assert.match(result.message, /study list and to Reader/);
+    assert.equal(await studyCount(f.db), 1);
+    assert.equal(f.reader.calls.length, 1);
   } finally {
     await f.pg.close();
   }

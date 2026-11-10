@@ -416,6 +416,28 @@ export class McpTools {
       }
     });
   }
+  /**
+   * Whether this exact write is already persisted for the owner, so calling it replays
+   * Chief's own earlier request instead of starting a new one. A pending idempotent write
+   * is settled from chat this way (same connection, tool, request key and payload), and a
+   * guard that refuses new writes must let that replay through.
+   */
+  async persistedWrite(user: string, input: unknown) {
+    const a = mcpAction.safeParse(input);
+    if (!a.success || a.data.operation !== "mcp_write") return false;
+    try {
+      const { c, binding } = this.owned(user, a.data.connection);
+      this.grant(c, a.data.tool, "idempotent_write");
+      const row = await this.stored(user, a.data.connection, a.data.requestKey);
+      if (!row) return false;
+      this.checkReplay(row, binding, a.data);
+      return true;
+    } catch {
+      // An unknown connection, an ungranted tool or a key bound to another payload is not
+      // a replay of anything this owner persisted.
+      return false;
+    }
+  }
   async pendingAllows(user: string, input: unknown) {
     const pending = (
       await this.db.query(

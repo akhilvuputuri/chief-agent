@@ -29,6 +29,8 @@ async function fixture() {
     raw = undefined as string | undefined,
     runState = "stopped",
     age = "10 minutes",
+    /** How long the call itself ran; its own writes fall inside this window. */
+    took = "5 seconds",
   } = {}) => {
     const run = randomUUID();
     const id = randomUUID();
@@ -38,13 +40,14 @@ async function fixture() {
     );
     await db.query(
       `INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state,result,started_at,finished_at)
-       VALUES($1,$2,'c',$3,$4::jsonb,true,'uncertain','{"error":{"code":"TOOL_FAILED"}}',now()-$5::interval,now()-$5::interval)`,
+       VALUES($1,$2,'c',$3,$4::jsonb,true,'uncertain','{"error":{"code":"TOOL_FAILED"}}',now()-$5::interval,now()-$5::interval+$6::interval)`,
       [
         id,
         run,
         operation,
         JSON.stringify({ raw: raw ?? JSON.stringify(args) }),
         age,
+        took,
       ],
     );
     return { run, id };
@@ -167,7 +170,7 @@ test("a link_move settles from the direction it actually writes", async () => {
       operation: "link_move",
       args: { url: "https://example.org/missing", to: "study" },
     });
-    // Study → Reader: a Reader save started after the call is the only write it makes.
+    // Study → Reader: a Reader save made during the call is the only write it makes.
     const toReader = await f.call({
       operation: "link_move",
       args: { id: randomUUID(), to: "reader" },
@@ -175,7 +178,7 @@ test("a link_move settles from the direction it actually writes", async () => {
     });
     await f.readerSave({
       url: "https://example.org/agents",
-      age: "10 minutes",
+      age: "30 minutes",
     });
     const toReaderMissing = await f.call({
       operation: "link_move",
@@ -195,13 +198,33 @@ test("a save whose page redirected settles from the write it made, not as failed
   const f = await fixture();
   try {
     // The public fetcher follows the redirect and stores nothing about it, so the final
-    // URL cannot be compared with the shared one.
+    // URL cannot be compared with the shared one. The entry was written inside the call.
     const { id } = await f.call({ args: { url: "https://t.co/abc" } });
-    await f.entry({ url: "https://example.org/agents", added: "0 minutes" });
+    await f.entry({ url: "https://example.org/agents", added: "10 minutes" });
     assert.equal(await settleUncertainStudyWrites(f.db, "123"), 1);
     const row = await f.state(id);
     assert.equal(row.state, "success");
-    assert.match(row.result.reconciliation.basis, /record for this link/);
+    assert.match(
+      row.result.reconciliation.basis,
+      /record written during the call/,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a save for another link after the call returned is not evidence for it", async () => {
+  const f = await fixture();
+  try {
+    // A redirect hides the final URL, so only the call's own window counts. A tap or the
+    // next turn writing five minutes later belongs to something else.
+    const { id } = await f.call({
+      args: { url: "https://t.co/redirected" },
+      age: "10 minutes",
+    });
+    await f.entry({ url: "https://example.org/other", added: "5 minutes" });
+    assert.equal(await settleUncertainStudyWrites(f.db, "123"), 1);
+    assert.equal((await f.state(id)).state, "failed");
   } finally {
     await f.pg.close();
   }

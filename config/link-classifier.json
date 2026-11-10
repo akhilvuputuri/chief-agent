@@ -38,6 +38,13 @@
         "product": "Product: launch, pricing or vendor announcement.",
         "other": "Other: unclear, generic or empty page data."
       }
+    },
+    "cue": {
+      "instructions": "Did the owner's own words in owner_message state where the link should go, or why they want it? Judge the meaning of the whole message, not a keyword list: the same request can be phrased many ways. Choose none when they only asked to save it, or said nothing that decides the destination.",
+      "criteria": {
+        "explicit": "Explicit: the owner's words name the destination or the purpose, for example for AI learning, to study, add it to my study list, for offline reading, to read later, or save it to Reader.",
+        "none": "None: the owner only asked to save, keep or bookmark the link, with nothing that says where it belongs."
+      }
     }
   },
   "interests": [

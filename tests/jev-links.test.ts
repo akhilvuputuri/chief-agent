@@ -17,6 +17,7 @@ const answer = (
   probabilities: Record<string, number>,
   topic: [string, number] = ["agent-platforms", 0.8],
   kind: [string, number] = ["technical", 0.7],
+  cue = "explicit",
 ) => ({
   model: "typesafe/jev-1.13-20260917",
   usage: { cost: 0.00004 },
@@ -29,6 +30,10 @@ const answer = (
     kind: {
       choice: kind[0],
       probabilities: { [kind[0]]: kind[1], other: 1 - kind[1] },
+    },
+    cue: {
+      choice: cue,
+      probabilities: { [cue]: 0.82, other: 0.18 },
     },
   },
 });
@@ -54,6 +59,7 @@ test("the Jev client asks one decision with the pinned model and a choice questi
   );
   const result = await judge.judge(input);
   assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.cue, "explicit");
   assert.equal(requests.length, 1);
   assert.equal(requests[0]!.url, "https://openrouter.ai/api/alpha/decisions");
   // The model id has one source of truth: config/tool-picker.json.
@@ -62,6 +68,7 @@ test("the Jev client asks one decision with the pinned model and a choice questi
     "route",
     "topic",
     "kind",
+    "cue",
   ]);
   for (const question of Object.values<any>(requests[0]!.body.questions))
     assert.equal(question.type, "choice");
@@ -127,6 +134,30 @@ test("a weak topic answer is omitted instead of stretched, and the classifier co
       assert.equal(result.confidence, 0.91);
       assert.equal(result.topic, null);
       assert.equal(result.kind, "technical");
+      assert.equal(result.cue, "explicit");
       assert.equal(result.model, "typesafe/jev-1.13-20260917");
     });
+});
+
+test("an answer without an explicit cue is read as none, so a thin page asks", async () => {
+  const body: any = answer("study", { study: 0.9 });
+  delete body.answers.cue;
+  const result = await new JevLinks("k", config, "m", respond(body)).judge(
+    input,
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.cue, "none");
+  const odd: any = answer(
+    "study",
+    { study: 0.9 },
+    undefined,
+    undefined,
+    "maybe",
+  );
+  odd.answers.cue = { choice: "maybe", probabilities: { maybe: 0.9 } };
+  const second = await new JevLinks("k", config, "m", respond(odd)).judge(
+    input,
+  );
+  assert.equal(second.ok, true);
+  if (second.ok) assert.equal(second.cue, "none");
 });

@@ -25,16 +25,22 @@ asks only when it is genuinely unsure.
    style content is skipped), so a thread or tutorial with thin meta tags still reaches the
    classifier as text. A PDF or other binary body is treated as unreadable rather than parsed as
    markup, and a blocked page leaves the title unknown; nothing is invented.
-3. `JevLinks.judge()` ([src/jev.ts](../src/jev.ts)) asks Jev three `choice` questions in one
+3. `JevLinks.judge()` ([src/jev.ts](../src/jev.ts)) asks Jev four `choice` questions in one
    request on `config/link-classifier.json`: the route (study, reader, both, unsure), which of
-   the owner's learning interests the page covers, and what kind of page it is. The model id
-   is read from `config/tool-picker.json` — the one place the repo pins Jev — so a snapshot
-   change lands once. Chief's main model is untouched.
+   the owner's learning interests the page covers, what kind of page it is, and whether the
+   owner's own words stated the destination (`cue`: explicit or none). The model id is read
+   from `config/tool-picker.json` — the one place the repo pins Jev — so a snapshot change
+   lands once. Chief's main model is untouched.
 4. Host safety only ([src/study-links.ts](../src/study-links.ts) and
    `judgeLink()`): the answer must validate; a Jev timeout, transport failure or unparseable
    reply becomes `unsure`; a probability below `apply.minConfidence` becomes `unsure`; study
-   material without a readable page title becomes `unsure` (there is nothing honest to call
-   it). **No failure path falls back to Reader.**
+   material without a readable page title becomes `unsure` **unless** Jev read an explicit cue
+   from the owner's words. In that case the cue wins: the entry is named after the site and
+   the receipt says the page title could not be read. An unreadable page with no cue is a
+   question, never an entry named from the URL or an invented title. A missing or
+   unrecognised `cue` answer counts as `none`, so a degraded answer asks instead of guessing.
+   **No failure path falls back to Reader.** A cancelled turn throws a validation refusal
+   before the page is read or after it, so it never leaves a question behind.
 5. Confident study material is inserted into `study_resources`; confident offline reading is
    saved to Reader; `both` does both. The reply names the destination in one line so the
    owner can correct it. `unsure` creates a `link_decisions` row and sends three Telegram
@@ -43,6 +49,11 @@ asks only when it is genuinely unsure.
 Explicit cues always win because they travel in the same request and the rubric says so:
 "for AI learning"/"to study" is study, "for offline reading"/"read later" is Reader. There is
 no keyword switch in code.
+
+`link_save`'s `ownerMessage` is not taken from the model. `src/tools.ts` reads the owner's own
+message for the turn from `work_turns.request` (a child agent's run copies its parent's) and
+passes that to the classifier, so a cue cannot be dropped or paraphrased on the way. A
+model-written `ownerMessage` is only a fallback for a run the host has no record of.
 
 ## Storage
 
@@ -90,6 +101,15 @@ the buttons were sent to, a claim lease and the last error. It is never deleted 
   was already in progress and that this settled that same request, whether the request was
   reached from a tap or from a repeat `link_save` (requirement 8). That note travels on the
   outcome itself, so an accepted, pending or refused result all name it.
+- A Reader refusal or failure that happens before anything is sent is never reported as
+  uncertain. A stored auth failure (`McpFailure("auth")` from `src/mcp.ts`'s connection guard)
+  says plainly that nothing was saved and that Reader needs reconnecting; a rate-limit refusal
+  before the send says nothing was sent, and leaves no attempt on the card. A transport failure
+  is checked against `mcp_operations`: `src/mcp.ts` writes that row before it contacts the
+  server, so no row for the key is a definite non-send ("Reader wasn't reached, so nothing was
+  saved"), while a row with no stored result stays uncertain. An unreadable row keeps the
+  uncertain wording, because then the outcome really is unknown. Either way the card keeps no
+  reader state it cannot back.
 
 ## The tap handler
 
@@ -103,14 +123,13 @@ slot. The decision row is the state:
   study list and the owner taps Both, the advice is "say 'add it to Reader too'" rather than
   "move it to Reader", because a move takes the entry off the study list and would lose the
   half the owner asked to keep.
-- An expired card (`expires_at`, two days) writes nothing **only while nothing was written and
-  nothing is in flight** (`study_state='none'` and no unconfirmed Reader attempt). An expired
-  card that already holds a study entry, or a Reader save that may still land, is resumed and
-  reported from its record: calling that "nothing was written" would be false, and clearing its
-  buttons would strand the write it holds. A card that holds only a refused Reader attempt
-  wrote nothing, so it expires like an untouched one. The study collection is checked too, not
-  only the row, so an entry inserted by an earlier tap whose card update failed still counts as
-  a write.
+- An expired card (`expires_at`, two days) acts on nothing: a tap after that is not the
+  owner's answer to this question, so it writes nothing, sends nothing and clears its buttons.
+  It still reports what the record and the collection hold, so a card that already inserted a
+  study entry (including one whose card update failed) is named as saved, an unconfirmed
+  Reader attempt is named as possibly landed, and only a card that holds nothing says nothing
+  was written. The owner is told how to continue: "add it to Reader too" for a saved entry,
+  "check that Reader save" for an unconfirmed attempt, or sharing the link again.
 - A conditional `UPDATE … RETURNING` claims the row for two minutes; no row means another tap
   is in flight. The lease expires, so a failed tap cannot permanently disable the buttons.
 - Only the unfinished step runs. The study insert records `study_state='done'` and `study_id`;
@@ -126,6 +145,13 @@ slot. The decision row is the state:
   its existing key instead of settling the card and later calling the Reader copy absent. A
   settled card never says "isn't in Reader" while the Reader side is still unconfirmed.
 - All requested steps done → `confirmed` and one line naming the destination.
+- A `Both` card whose study half is written and whose Reader half is **refused** settles
+  there: "Saved to your study list … Reader refused it … say 'save it to Reader' and I'll try
+  only the Reader copy." Leaving it open would make every later tap resolve to Both again and
+  re-send a request Reader has already refused, so the card could never be settled. Nothing
+  is lost: a later explicit request (`link_save` with the owner's words, or `link_move`)
+  retries Reader with a new key. A refusal while the study half also failed wrote nothing, so
+  that card stays resumable.
 - A failure after a partial write names exactly what may be saved ("Saved to your study list;
   Reader refused that link… tap again and I'll retry only the part that failed") and never says
   nothing was written. Each write is reported the moment it returns, before the card that records
@@ -151,12 +177,31 @@ slot. The decision row is the state:
 | `link_move`    | Study → Reader (saves, then removes the entry once Reader accepted) or Reader → study.      |
 
 They belong to the `links` tool domain, are cued by saving or study-list language (including a
-bare "save this <url>"), and are offered only when migrations up to 036 are installed, so
-nothing fails while an operator rollout is pending.
+bare "save this <url>", but not a job posting, which stays with `jobs`), and are offered only
+when migrations up to 036 are installed, so nothing fails while an operator rollout is pending.
 
 Malformed input is a validation refusal, not a failure: a `http://`, private-host or oversized
 link raises `ToolValidationError` (`VALIDATION_FAILED`) and says nothing was written. A plain
 error there would be recorded as an uncertain write and block every later write.
+
+### Reader is closed to new saves from a turn, but a persisted one can be settled
+
+Requirement 6 is enforced in code, not only in the prompt. `src/tools.ts` refuses a **new**
+`mcp_write` to the `reader` connection for the `save_link` tool with a `ToolValidationError`
+that points at `link_save` and says nothing was sent, so a turn with only the `mcp` domain
+loaded cannot bypass the classification. The classification path and the news feed call
+Reader through `McpTools` directly, so a save that arrives from them is unaffected. Reader's
+other tools (`save_document`, `get_save_status`, the read-only `list_saved_articles`) are
+unchanged.
+
+The guard lets one case through: `McpTools.persistedWrite()` returns true when
+`mcp_operations` already holds that owner's row for the same connection, tool, request key and
+payload. That is a replay of Chief's own earlier request, not a new save, and it is the only
+way a Reader save left pending by a timeout can be settled from chat (`mcp_write` with that
+`requestKey` and no arguments). Without the exception one timeout would hold the pending-write
+gate — and therefore every ordinary write — indefinitely, because only a re-dispatch of that
+key moves the row to complete or rejected. A key bound to another payload, an ungranted tool
+or an unknown connection is not a replay and is still refused.
 
 ## Pending MCP writes and uncertain-write settlement
 
@@ -173,9 +218,11 @@ error there would be recorded as an uncertain write and block every later write.
   settles it as failed, and unreadable arguments or an invalid link are left for an operator.
   Nothing is replayed, and Reader's own operation keeps its state. A page that redirected to
   another address has no stored final URL to compare, because the public fetcher follows the
-  redirect without recording it, so a study, decision or Reader record for that owner created
-  after the call started settles it as done. Settling such a call as failed would claim
-  nothing was written when something may have been.
+  redirect without recording it, so a study, decision or Reader record this owner wrote inside
+  the call's own window (from `started_at` to `finished_at`, capped when a restart left no
+  finish time) settles it as done. Settling such a call as failed would claim nothing was
+  written when something may have been. Records written after the call returned — a tap, or the
+  next turn saving another link — are deliberately **not** evidence for it.
 
 Reader → study keeps Reader's copy: `config/mcp.json` grants no Reader removal tool, so the
 reply says plainly that Reader still has its own copy and how to remove it there. Adding a
@@ -191,15 +238,25 @@ the model that named the topic.
 with the link itself (tappable on the phone), its site, topic, status and tags. A broad topic
 query - "AI", "my AI study list", "learning", a question phrased around it - resolves to every
 one of the owner's learning interests, because the stored topics are the area labels and
-"agent platforms" and "developer tools" contain no "AI" to match; any other query matches a
-topic label partially, with `%` and `_` escaped. The result carries the topics actually
-in use (`topics`) to correct a filter. Exact ids travel in the returned entries for later
-changes rather than in the text. A canvas or Mini App view is a nice-to-have and is not built.
+"agent platforms" and "developer tools" contain no "AI" to match. It also covers entries with
+no topic at all: an entry Jev could not name a topic for is still study material, so it is
+listed (and labelled "Other") instead of disappearing behind the label filter. Any other query
+matches a topic label partially, with `%` and `_` escaped. The result carries the topics
+actually in use (`topics`) to correct a filter. Exact ids travel in the returned entries for
+later changes rather than in the text. A canvas or Mini App view is a nice-to-have and is not
+built.
+
+Duplicate detection uses `dedupeKey()` (`canonicalUrl()` in
+[src/news-feed.ts](../src/news-feed.ts)): no `www`, no trailing slash, sorted parameters, and -
+for an `x.com` or `twitter.com` status link only - the `s` and `t` share codes dropped and
+`twitter.com` folded into `x.com`. The same post shared from the phone twice therefore cannot
+become two entries, and no other site loses a query parameter that might mean something.
 
 ## Limitations
 
 - The route is model judgment, so its quality is Jev's quality. When a page blocks fetching,
-  the classifier sees only the site, and a study route then becomes a question.
+  the classifier sees only the site: an explicit cue still saves where the owner said (named
+  after the site), and without one a study route becomes a question.
 - A page that renders only in JavaScript (an X thread served as a shell, for example) gives the
   classifier whatever its markup and meta tags carry - often the title, site and a short
   description, not the whole thread. The route then leans on the owner's words and interests,
@@ -210,8 +267,9 @@ changes rather than in the text. A canvas or Mini App view is a nice-to-have and
   an entry with a guessed title.
 - Reader has no removal grant, so "move" only removes the study entry.
 - `link_save` and `link_move` always send Reader the article form of a link; they cannot ask for
-  a Reddit discussion target. When the owner explicitly wants the discussion preserved, that is
-  the existing `mcp_write` `readerTarget` path, not this tool.
+  a Reddit discussion target. A direct `mcp_write` `readerTarget` save is refused for a turn
+  (see "Reader is closed to direct saves"), so preserving a discussion is not available from
+  chat until `link_save` grows that choice; nothing here pretends otherwise.
 - The three choice buttons go through the same topic delivery as every other host card, so
   they land in Main when threaded mode is on, and the thread they really reached is stored on
   the decision row. A tap replies where the buttons are. A wrong tap is recoverable with
@@ -219,8 +277,39 @@ changes rather than in the text. A canvas or Mini App view is a nice-to-have and
 - Live Telegram keyboard behaviour is exercised through tests and the existing callback
   conventions, not by a production tap.
 
-## Rollout
+## Deployment
 
-`db/036_study_links.sql` is additive: two empty tables and indexes. Deployment therefore needs
-the reviewed operator procedure (`scripts/deploy-study-links.py`, modelled on the mail-vector
-rollout) rather than an automatic release, and the previous image ignores the new tables.
+The release guard refuses any `db/` or `compose.yaml` change that an operator rollout has not
+installed. The rollout PR carries:
+
+- `db/036_study_links.sql`;
+- its Compose inventory line after `035_mail_index_vectors.sql`;
+- the reviewed [`scripts/deploy-study-links.py`](../scripts/deploy-study-links.py), whose `BASE`
+  must equal the live release when the PR merges.
+
+Before running it, check that the live `RELEASE` equals that `BASE` and merge the PR by hand (the
+guard stops an automatic release). Then, under the release lock with the gateway idle:
+
+1. Upload the merged `git archive` of the merge commit and the script, and compare the uploaded
+   script with the merged file.
+2. Run `sudo python3 deploy-study-links.py <archive.tar> <merge SHA>`. It:
+   - checks that only migration 036 and its Compose line changed, that `Dockerfile.postgres` and
+     `scripts/cloud-release.py` did not, and that the archive's commit is the SHA requested;
+   - builds the candidate;
+   - refuses active runs or queued input;
+   - stops the gateway, applies the migration, and checks the version 36 marker and both tables;
+   - starts the candidate, checks health, and installs the reviewed source and `RELEASE`;
+   - on any failure stops the gateway, restores the previous image, Compose file and source, and
+     checks health again. Migration 036 is additive, so it is kept rather than reversed: the
+     previous image ignores the two empty tables, and no task is replayed.
+3. The automatic release that follows pulls and starts the verified CI-built image: one more
+   restart, which finds the tables installed.
+
+Postgres is not restarted, and no existing row is changed. `python3 scripts/test-deploy-study-links.py`
+runs the rollout offline. [`scripts/deploy-mail-index.py`](../scripts/deploy-mail-index.py) and
+[`scripts/deploy-mail-vectors.py`](../scripts/deploy-mail-vectors.py) are the records of the
+earlier migration rollouts.
+
+**Rollback:** the previous image ignores `study_resources` and `link_decisions`, so nothing is
+reversed and no data is lost. If the new code later returns, it finds whatever the previous image
+left. Dropping the two tables would delete the owner's study list, so it needs its own decision.

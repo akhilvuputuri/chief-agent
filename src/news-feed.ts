@@ -381,17 +381,30 @@ export function withoutTracking(raw: string) {
     if (TRACKING.test(key)) u.searchParams.delete(key);
   return u.toString();
 }
+/**
+ * X and Twitter add `s` and `t` when a post is shared from the app. Those two are
+ * share-source values, not part of the post, and `twitter.com` serves the same post as
+ * `x.com`. Only a status link is normalised this way: on any other site `s` and `t` can
+ * be meaningful query parameters and are kept.
+ */
+const X_STATUS = /^\/(?:[^/]+\/)?status(?:es)?\//i;
+function xShare(host: string, path: string) {
+  return (host === "x.com" || host === "twitter.com") && X_STATUS.test(path);
+}
 /** Scheme-less, tracking-free identity used for deduplication and delivery history. */
 export function canonicalUrl(raw: string) {
   const u = new URL(raw);
+  const host = domainOf(raw);
+  const shared = xShare(host, u.pathname);
   const params = [...u.searchParams.entries()]
     .filter(([k]) => !TRACKING.test(k))
+    .filter(([k]) => !(shared && /^(?:s|t)$/i.test(k)))
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const query = params.length
     ? "?" + new URLSearchParams(params).toString()
     : "";
   const path = u.pathname.length > 1 ? u.pathname.replace(/\/+$/, "") : "";
-  return `${domainOf(raw)}${path}${query}`;
+  return `${shared ? "x.com" : host}${path}${query}`;
 }
 export function domainOf(raw: string) {
   return new URL(raw).hostname.toLowerCase().replace(/^www\./, "");

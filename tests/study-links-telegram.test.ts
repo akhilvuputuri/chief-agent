@@ -59,13 +59,15 @@ async function harness(
     },
     savedArticles: async () => ({ articles: [], partial: false, skipped: 0 }),
   } as unknown as ReaderLink;
+  let route: "unsure" | "study" | "reader" = "unsure";
   const judge: LinkJudge = {
     judge: async () => ({
       ok: true,
-      route: "unsure",
-      confidence: 0.3,
+      route,
+      confidence: route === "unsure" ? 0.3 : 0.9,
       topic: null,
-      kind: "other",
+      kind: route === "reader" ? "news" : "other",
+      cue: "none",
       model: null,
     }),
   };
@@ -153,6 +155,9 @@ async function harness(
     mcpReader,
     setReader: (next: "accepted" | "uncertain") => {
       reader = next;
+    },
+    setRoute: (next: "unsure" | "study" | "reader") => {
+      route = next;
     },
     tap,
   };
@@ -260,7 +265,7 @@ test("a failed message edit still reports the outcome and keeps the buttons work
   assert.match(h.replies[1]!, /Saved to Reader/);
 });
 
-test("an expired card that holds a partial write still settles and never says nothing was written", async (t) => {
+test("an expired card acts on nothing and still never says nothing was written", async (t) => {
   const h = await harness(t, { reader: "uncertain" });
   await h.bot.handleUpdate(h.tap("both", h.saved.decisionId) as any);
   await waitFor(() => h.replies.length > 0);
@@ -276,11 +281,12 @@ test("an expired card that holds a partial write still settles and never says no
   h.setReader("accepted");
   await h.bot.handleUpdate(h.tap("both", h.saved.decisionId) as any);
   await waitFor(() => h.replies.length > 1);
-  // Expiry applied only to a card that holds nothing: this one is resumed and reported
-  // from its record, and its buttons settle the Reader request instead of being cleared.
-  assert.doesNotMatch(h.replies[1]!, /expired/i);
+  // A tap on an expired card writes nothing: it reports the study entry it finds and the
+  // Reader attempt that may still be in flight, then clears its buttons.
+  assert.match(h.replies[1]!, /expired/i);
+  assert.match(h.replies[1]!, /already in your study list/i);
   assert.doesNotMatch(h.replies[1]!, /nothing was written/i);
-  assert.match(h.replies[1]!, /Reader/);
+  assert.equal(h.readerCalls.length, 1);
   const entries = (
     await h.db.query(
       "SELECT count(*)::int AS n FROM study_resources WHERE user_id='123'",
@@ -293,8 +299,8 @@ test("an expired card that holds a partial write still settles and never says no
       [h.saved.decisionId],
     )
   ).rows[0];
-  assert.equal(row.state, "confirmed");
-  assert.equal(row.reader_state, "accepted");
+  assert.equal(row.state, "pending");
+  assert.equal(row.reader_state, "uncertain");
   assert.deepEqual(h.keyboards.at(-1), { inline_keyboard: [] });
 });
 
@@ -396,15 +402,17 @@ test("a Both tap writes both through the real Reader mock and clears the buttons
   assert.deepEqual(h.keyboards.at(-1), { inline_keyboard: [] });
 });
 
-test("a Both tap whose Reader write is refused names the study entry and keeps the buttons", async (t) => {
+test("a Both tap whose Reader write is refused settles the card, naming the study entry", async (t) => {
   const h = await harness(t, { mcpReader: true, readerFails: "invalid" });
   await h.bot.handleUpdate(h.tap("both", h.saved.decisionId) as any);
   await waitFor(() => h.replies.length > 0);
   assert.match(h.replies[0]!, /Saved to your study list/);
   assert.match(h.replies[0]!, /Reader refused/);
   assert.doesNotMatch(h.replies[0]!, /Nothing was written/);
-  assert.match(h.replies[0]!, /tap again/i);
-  // The entry is saved, the Reader half is recorded as refused, and the card stays tappable.
+  // The card settles instead of re-sending to Reader on every later tap, and the button
+  // bar is cleared.
+  assert.doesNotMatch(h.replies[0]!, /tap again/i);
+  assert.match(h.replies[0]!, /save it to Reader/);
   const entries = (
     await h.db.query(
       "SELECT reader_saved FROM study_resources WHERE user_id='123'",
@@ -414,21 +422,27 @@ test("a Both tap whose Reader write is refused names the study entry and keeps t
   assert.equal(entries[0].reader_saved, false);
   const row = (
     await h.db.query(
-      "SELECT reader_state,study_state FROM link_decisions WHERE id=$1",
+      "SELECT state,reader_state,study_state FROM link_decisions WHERE id=$1",
       [h.saved.decisionId],
     )
   ).rows[0];
   assert.equal(row.study_state, "done");
   assert.equal(row.reader_state, "rejected");
-  assert.deepEqual(
-    h.keyboards.at(-1).inline_keyboard[0].map((b: any) => b.text),
-    ["Study list", "Reader", "Both"],
-  );
-  // A second tap retries only the Reader half, under a new key, and finishes the card.
-  h.mcpReader.fail(null);
+  assert.equal(row.state, "confirmed");
+  assert.deepEqual(h.keyboards.at(-1), { inline_keyboard: [] });
+  // No later tap sends a second Reader request for the settled card.
   await h.bot.handleUpdate(h.tap("both", h.saved.decisionId) as any);
   await waitFor(() => h.replies.length > 1);
-  assert.match(h.replies[1]!, /Saved to your study list and Reader/);
+  assert.match(h.replies[1]!, /already saved to your study list/);
+  assert.equal(h.mcpReader.calls.length, 1);
+  // A new explicit request is what retries Reader, under a new key.
+  h.mcpReader.fail(null);
+  h.setRoute("reader");
+  const retried: any = await h.links.save("123", {
+    url: "https://example.org/agents",
+    ownerMessage: "save it to Reader",
+  });
+  assert.equal(retried.outcome, "reader", retried.message);
+  assert.equal(h.mcpReader.calls.length, 2);
   assert.notEqual(h.mcpReader.calls[1]!.key, h.mcpReader.calls[0]!.key);
-  assert.deepEqual(h.keyboards.at(-1), { inline_keyboard: [] });
 });

@@ -1241,6 +1241,12 @@
     "split": "tuning"
   },
   {
+    "id": "links-job-posting",
+    "message": "save this job posting: https://careers.grab.com/job/22222",
+    "gold": ["jobs"],
+    "split": "tuning"
+  },
+  {
     "id": "links-study-list",
     "message": "what's on my AI study list",
     "gold": ["links"],

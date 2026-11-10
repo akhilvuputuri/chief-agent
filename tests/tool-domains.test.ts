@@ -72,6 +72,15 @@ test("initial domains come from message cues, task binding, approvals and recent
   ]);
   assert.deepEqual(pick("what's on my AI study list"), ["links"]);
   assert.deepEqual(pick("no, move it to Reader"), ["links", "mcp"]);
+  // A job posting is not a link save: it stays with jobs, so the links cue stays off.
+  assert.deepEqual(
+    pick("save this posting https://careers.grab.com/job/12345"),
+    ["jobs"],
+  );
+  assert.deepEqual(
+    pick("save this job posting: https://careers.grab.com/job/22222"),
+    ["jobs"],
+  );
   // No false match inside words.
   assert.deepEqual(pick("remailing and scheduling-ish"), []);
 });

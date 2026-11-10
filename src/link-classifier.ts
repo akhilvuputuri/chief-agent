@@ -5,6 +5,7 @@
 // falls back to Reader.
 import { parse, type DefaultTreeAdapterMap } from "parse5";
 import { publicLink } from "./link-resolution.js";
+import { ToolValidationError } from "./tool-errors.js";
 import {
   canonicalUrl,
   domainOf,
@@ -194,6 +195,10 @@ export async function pageInfo(
       fetched: true,
     };
   } catch {
+    // A cancelled turn must not leave a question behind: nothing was read, so no card is
+    // created and nothing is written. The host records this as a validation refusal.
+    if (signal?.aborted)
+      throw new ToolValidationError("Task cancelled; nothing was written");
     // A blocked or empty page leaves the title unknown; the caller asks instead of guessing.
     return base;
   }
@@ -240,6 +245,11 @@ export interface LinkJudgment {
   confidence: number;
   model: string | null;
   unsureBecause?: LinkVerdict["unsureBecause"];
+  /**
+   * The page had no readable title, and the owner's own words chose the destination, so it
+   * is saved under the site's name and the receipt says the title could not be read.
+   */
+  titleUnread?: boolean;
 }
 
 /**
@@ -254,9 +264,11 @@ export function topicLabel(topic: LinkTopic | null | undefined) {
 const percent = (p: number) => `${Math.round(p * 100)}%`;
 
 /**
- * Jev's route, with the host's safety rules on top. A page without a readable
- * title cannot be named from its content, so study material becomes a question
- * rather than an entry with an invented title.
+ * Jev's route, with the host's safety rules on top. A page without a readable title cannot
+ * be named from its content, so study material becomes a question rather than an entry with
+ * an invented title - unless the owner's own words chose the destination themselves, which
+ * is a decision the host does not second-guess (the entry is named after the site and the
+ * receipt says the title could not be read).
  */
 export function judgeLink(
   verdict: LinkJudgeResult,
@@ -295,7 +307,7 @@ export function judgeLink(
       model: verdict.model,
       unsureBecause: "confidence",
     };
-  if (!page.title && verdict.route !== "reader")
+  if (!page.title && verdict.route !== "reader" && verdict.cue !== "explicit")
     return {
       page,
       route: "unsure",
@@ -313,7 +325,17 @@ export function judgeLink(
     reason: `${ROUTE_LABEL[verdict.route]} — ${judged}`,
     confidence: verdict.confidence,
     model: verdict.model,
+    ...(!page.title ? { titleUnread: true } : {}),
   };
 }
 
 export type { LinkJudgeInput };
+
+/**
+ * The name a save of this page is stored under. The page's own title when there is one;
+ * otherwise the owner's own words chose the destination, so the site (never an invented
+ * name) stands in and the receipt says the title could not be read.
+ */
+export function pageTitle(page: PageInfo) {
+  return page.title ?? (page.site || page.url);
+}

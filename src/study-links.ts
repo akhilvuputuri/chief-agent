@@ -19,6 +19,7 @@ import {
   judgeLink,
   linkUrl,
   pageInfo,
+  pageTitle,
   topicLabel,
   type PageInfo,
 } from "./link-classifier.js";
@@ -29,6 +30,7 @@ import {
   type LinkRoute,
 } from "./jev.js";
 import { MemoryStore } from "./memory.js";
+import { McpFailure } from "./mcp-errors.js";
 import { errorFields, opsLog, projectEvent } from "./ops-log.js";
 import { ToolValidationError } from "./tool-errors.js";
 import type { ReaderLink } from "./news.js";
@@ -116,6 +118,11 @@ export interface StudyFilter {
   topic?: string;
   /** Exact stored topic labels, used for a broad learning-interest query. */
   topics?: string[];
+  /**
+   * A broad query over the whole collection ("what's on my AI study list"), so an entry
+   * without a topic belongs in the answer instead of being hidden by the label filter.
+   */
+  broad?: boolean;
   tag?: string;
   status?: StudyStatus;
   limit?: number;
@@ -142,7 +149,7 @@ const NOISE_WORD = /^(?:machine)$/;
  */
 export function topicFilter(query: string, interests: string[]) {
   const wanted = query.trim().toLowerCase();
-  if (!wanted) return { labels: [] as string[], like: undefined };
+  if (!wanted) return { labels: [] as string[], like: undefined, broad: false };
   const words = wanted
     .replace(TOPIC_FILLER, " ")
     .split(/[^a-z0-9./]+/)
@@ -152,6 +159,7 @@ export function topicFilter(query: string, interests: string[]) {
     return {
       labels: interests.map((area) => area.toLowerCase()),
       like: undefined,
+      broad: true,
     };
   return {
     labels: interests
@@ -161,6 +169,7 @@ export function topicFilter(query: string, interests: string[]) {
       })
       .map((area) => area.toLowerCase()),
     like: wanted,
+    broad: false,
   };
 }
 
@@ -240,6 +249,9 @@ export class StudyStore {
         values.push(likePattern(filter.topic));
         parts.push(`lower(topic) LIKE $${values.length} ESCAPE '\\'`);
       }
+      // A question about the whole collection must not hide entries Jev could not name a
+      // topic for: they are the owner's study material too, shown under "Other".
+      if (filter.broad) parts.push("topic IS NULL");
       where.push(`(${parts.join(" OR ")})`);
     }
     if (filter.tag) {
@@ -634,8 +646,10 @@ export function linkChoiceButtons(id: string) {
 
 export type ReaderOutcome = {
   /** `blocked` is a definite non-send: another Reader save is in flight, so this one
-   * never left Chief and nothing was written to Reader. */
-  state: "accepted" | "rejected" | "pending" | "blocked" | "unavailable";
+   * never left Chief and nothing was written to Reader. `failed` is a definite non-send
+   * too: Chief never persisted a request for it, so Reader cannot hold the link. */
+  state:
+    "accepted" | "rejected" | "pending" | "blocked" | "unavailable" | "failed";
   detail: string;
   /**
    * What the owner should know beside the outcome: an earlier save of this exact link was
@@ -750,6 +764,8 @@ export class StudyLinks {
     signal?: AbortSignal,
   ) {
     const page = await pageInfo(this.fetcher, shared, signal);
+    if (signal?.aborted)
+      throw new ToolValidationError("Task cancelled; nothing was written");
     const verdict = await this.deps.judge.judge({
       url: page.url,
       title: page.title,
@@ -774,6 +790,10 @@ export class StudyLinks {
     input: { url: string; ownerMessage?: string },
     signal?: AbortSignal,
   ) {
+    // A cancelled turn writes nothing and asks nothing: no card is left behind for a
+    // question the owner never saw.
+    if (signal?.aborted)
+      throw new ToolValidationError("Task cancelled; nothing was written");
     const shared = validatedLink(input.url);
     const message = input.ownerMessage?.trim() || "Save this link.";
     const { page, judgment } = await this.classify(
@@ -782,6 +802,12 @@ export class StudyLinks {
       message,
       signal,
     );
+    // The page's own title, or - only when the owner's words chose the destination - the
+    // site's name, with the receipt saying the title could not be read.
+    const title = pageTitle(page);
+    const unread = judgment.titleUnread
+      ? " The page title couldn't be read, so it's named after the site."
+      : "";
     const heading = page.title ?? page.url;
     if (judgment.route === "unsure") {
       const asked = await this.askChoice(user, {
@@ -800,7 +826,7 @@ export class StudyLinks {
       const saved = await this.store.add(user, {
         url: page.url,
         canonicalUrl: page.canonicalUrl,
-        title: page.title!,
+        title,
         source: page.site,
         topic: judgment.topic,
         route: judgment.route,
@@ -814,11 +840,17 @@ export class StudyLinks {
           entry: summarize(saved.entry),
           message: saved.existing
             ? `Already on your study list: ${saved.entry.title}.`
-            : `Saved to your study list: ${saved.entry.title} (${saved.entry.topic ?? "no topic yet"}).`,
+            : `Saved to your study list: ${saved.entry.title} (${saved.entry.topic ?? "no topic yet"}).${unread}`,
         };
       const reader = await this.readerSave(user, page.url, {}, signal);
       if (reader.state === "accepted")
-        await this.store.markReaderSaved(user, page.canonicalUrl);
+        await this.store
+          .markReaderSaved(user, page.canonicalUrl)
+          .catch((error) => {
+            // Both writes landed; only the cross-reference failed, so the receipt must not
+            // turn a completed pair of saves into a failure.
+            opsLog("link.mark_reader_saved_failed", "warn", errorFields(error));
+          });
       const both = saved.existing
         ? `Already on your study list: ${saved.entry.title}.`
         : `Saved to your study list: ${saved.entry.title}.`;
@@ -833,17 +865,25 @@ export class StudyLinks {
           reader.state === "accepted"
             ? // An earlier save of this same link that was in flight is named, so the owner
               // knows no second save was started (requirement 8).
-              [savedLine, reader.note].filter(Boolean).join(" ")
-            : `${both} ${readerMessage(reader)}`,
+              [`${savedLine}${unread}`, reader.note].filter(Boolean).join(" ")
+            : `${both}${unread} ${readerMessage(reader)}`,
       };
     }
     const reader = await this.readerSave(user, page.url, {}, signal);
-    if (reader.state === "accepted")
+    if (reader.state === "accepted") {
+      // A link already on the study list records its Reader copy too, so a later "add it to
+      // Reader too" does not look unfulfilled.
+      await this.store
+        .markReaderSaved(user, page.canonicalUrl)
+        .catch((error) =>
+          opsLog("link.mark_reader_saved_failed", "warn", errorFields(error)),
+        );
       return {
         outcome: "reader" as const,
         reader,
         message: `Saved to Reader for offline reading: ${heading}.${reader.note ? ` ${reader.note}` : ""}`,
       };
+    }
     return {
       // A refusal is a definite no; a save already in flight that this one never joined is
       // a definite non-send; a pending or timed-out save is uncertain.
@@ -1001,6 +1041,38 @@ export class StudyLinks {
           detail: `Reader refused it: ${clip(message, 160)}`,
           requestKey: key,
         });
+      // An auth or capacity refusal from Reader's own connection guard happens before
+      // anything is sent, so it is a definite non-save and must not read as uncertain.
+      if (
+        error instanceof McpFailure &&
+        (error.category === "auth" || error.category === "capacity")
+      )
+        return done({
+          state: error.category === "auth" ? "rejected" : "unavailable",
+          detail:
+            error.category === "auth"
+              ? "Reader rejected Chief's connection before anything was sent, so nothing was saved. Reconnect Reader, then ask again."
+              : `Reader is rate-limiting Chief${error.retryAfterSeconds ? ` for about ${error.retryAfterSeconds} seconds` : ""}, so nothing was sent. Ask again shortly.`,
+          requestKey: key,
+        });
+      // Nothing this call sent can be uncertain if Chief never persisted the request:
+      // src/mcp.ts writes the mcp_operations row before it contacts the server, so no row
+      // for this key is a definite non-send, not an uncertain write.
+      let persisted: { state: string } | undefined;
+      let checked = false;
+      try {
+        persisted = await this.store.readerOperation(user, key);
+        checked = true;
+      } catch (readError) {
+        // An unreadable record leaves the outcome unknown, which stays uncertain.
+        opsLog("link.reader_operation_failed", "warn", errorFields(readError));
+      }
+      if (checked && !persisted)
+        return done({
+          state: "failed",
+          detail: `Reader wasn't reached, so nothing was saved (${clip(message, 160)}). Ask again and I'll retry.`,
+          requestKey: key,
+        });
       return done({
         state: "pending",
         detail: `The Reader copy couldn't be confirmed, so its result is uncertain (${clip(message, 160)}).`,
@@ -1047,6 +1119,7 @@ export class StudyLinks {
       const match = topicFilter(input.topic, this.config.interests);
       filter.topic = match.like;
       filter.topics = match.labels;
+      filter.broad = match.broad;
     }
     const entries = await this.store.list(user, filter);
     const counts = await this.store.counts(user);
@@ -1068,7 +1141,9 @@ export class StudyLinks {
     const lines = entries.map((e) => {
       const detail = [
         e.source,
-        e.topic,
+        // An entry Jev could not name a topic for is still study material; it is shown
+        // under "Other" rather than left looking unclassified.
+        e.topic ?? "Other",
         STATUS_LABEL[e.status],
         e.tags.length ? `#${e.tags.join(" #")}` : undefined,
       ]
@@ -1366,24 +1441,23 @@ export class StudyLinks {
       current.readerState === "pending" || current.readerState === "uncertain";
     const written =
       current.studyState === "done" || current.readerState === "accepted";
-    // Expiry writes nothing only while nothing has been written and nothing is in flight.
-    // An expired card that already holds a study entry, or a Reader save that may still
-    // land, is resumed and reported from the record: calling that "nothing was written"
-    // would be false, and clearing its buttons would strand the write it holds. The
-    // collection is checked as well, because an entry inserted by an earlier tap whose card
-    // update failed is a write this row cannot see.
-    if (
-      current.expiresAt &&
-      Date.parse(current.expiresAt) < Date.now() &&
-      !written &&
-      !readerUnconfirmed &&
-      !(await this.store.findByCanonical(user, current.canonicalUrl))
-    )
+    // An expired card acts on nothing: a tap two days late is not the owner's answer to
+    // this question. It still reports what the record and the collection hold, so a card
+    // that already wrote something never claims nothing was written, and its buttons are
+    // cleared instead of pretending a later tap would do something.
+    if (current.expiresAt && Date.parse(current.expiresAt) < Date.now()) {
+      const entry = await this.store
+        .findByCanonical(user, current.canonicalUrl)
+        .catch((error) => {
+          opsLog("link.expiry_read_failed", "warn", errorFields(error));
+          return undefined;
+        });
       return {
-        text: "That choice expired before it was answered, so nothing was written. Share the link again and I'll classify it.",
+        text: expiredText(current, current.studyState === "done" || !!entry),
         settled: true,
         choice: null,
       };
+    }
     const progress = written || readerUnconfirmed;
     const resolved: LinkChoice = !current.choice
       ? choice
@@ -1412,6 +1486,8 @@ export class StudyLinks {
     let studyExisting = false;
     /** An earlier Reader save of this link that this tap settled, when there was one. */
     let readerNote: string | undefined;
+    /** The Reader half was definitely not written (refused, or Reader not available). */
+    let refused: string | undefined;
     let recordable = true;
     try {
       if (claimed.choice !== resolved)
@@ -1504,6 +1580,8 @@ export class StudyLinks {
             if (outcome.state === "pending") mayHave.push("Reader");
             failed.push(outcome.detail);
           }
+          if (outcome.state === "rejected" || outcome.state === "unavailable")
+            refused = outcome.detail;
           try {
             const recorded: DecisionRecord["readerState"] =
               outcome.state === "accepted"
@@ -1512,9 +1590,9 @@ export class StudyLinks {
                   ? "rejected"
                   : outcome.state === "pending"
                     ? "uncertain"
-                    : outcome.state === "blocked"
-                      ? "none"
-                      : "rejected";
+                    : // A save that was never sent leaves no attempt on the card, so a
+                      // later tap starts it cleanly (blocked or Reader unavailable).
+                      "none";
             if (outcome.requestKey && recorded !== "none")
               // The key is stored with the outcome, so a re-tap resumes this exact request.
               await this.decisions.setReaderAttempt(
@@ -1550,21 +1628,100 @@ export class StudyLinks {
         }
       }
     }
-    const settled = failed.length === 0;
+    // A "Both" card settles once the study half is written and Reader has definitely not
+    // taken the link. Leaving it open would make every later tap resolve to Both again and
+    // re-send a request Reader has already refused, so the card could never be settled. A
+    // later explicit request (link_save, or "save it to Reader") retries Reader with a new
+    // key, so nothing is lost by settling here.
+    const settledByRefusal =
+      !!refused &&
+      resolved === "both" &&
+      (claimed.studyState === "done" || wrote.includes("your study list"));
+    const settled = failed.length === 0 || settledByRefusal;
     if (settled) await this.decisions.confirm(user, id);
     else {
       await this.decisions.fail(user, id, failed.join(" "));
       await this.decisions.release(user, id);
     }
     return {
-      text: outcomeText(resolved, wrote, failed, claimed, mayHave, {
-        studyExisting,
-        readerNote,
-      }),
+      text: settledByRefusal
+        ? refusedText(refused!, {
+            title: claimed.title,
+            studyExisting,
+            readerNote,
+          })
+        : outcomeText(resolved, wrote, failed, claimed, mayHave, {
+            studyExisting,
+            readerNote,
+          }),
       settled,
       choice: resolved,
     };
   }
+}
+
+/**
+ * A settled "Both" card whose Reader half was refused: the study entry is named as saved,
+ * the refusal is given, and the owner is told how to retry just the Reader copy.
+ */
+function refusedText(
+  detail: string,
+  note: {
+    title: string | null;
+    studyExisting: boolean;
+    readerNote?: string;
+  },
+) {
+  const title = note.title ? ` (${note.title})` : "";
+  const head = note.studyExisting
+    ? `Already on your study list${title}`
+    : `Saved to your study list${title}`;
+  // Reader's own detail already says it refused, so its prefix is not repeated.
+  const reason = detail
+    .replace(
+      /^Reader (refused (it|that link)|rejected Chief's connection)/i,
+      "",
+    )
+    .replace(/^\.?\s*/, "")
+    .trim();
+  return [
+    `${head}. Reader refused it${reason ? `: ${reason}` : "."}`,
+    "Say 'save it to Reader' and I'll try only the Reader copy.",
+    note.readerNote ?? "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * An expired card acted on nothing, so it reports only what already exists - and never
+ * claims nothing was written when an earlier tap did write something.
+ */
+function expiredText(
+  row: {
+    title: string | null;
+    readerState: DecisionRecord["readerState"];
+  },
+  study: boolean,
+) {
+  const title = row.title ? ` (${row.title})` : "";
+  const held: string[] = [];
+  if (study) held.push("your study list");
+  if (row.readerState === "accepted") held.push("Reader");
+  const parts = [
+    held.length
+      ? `That choice expired before it was answered, so I didn't save anything more${title}: it is already in ${held.join(" and ")}.`
+      : `That choice expired before it was answered, so nothing was written${title}.`,
+  ];
+  if (row.readerState === "pending" || row.readerState === "uncertain")
+    parts.push(
+      "The Reader copy from that attempt may still have landed; say 'check that Reader save' and I'll settle it.",
+    );
+  else if (study && row.readerState !== "accepted")
+    parts.push("Say 'add it to Reader too' and I'll save a Reader copy.");
+  else if (!held.length)
+    parts.push("Share the link again and I'll classify it.");
+  return parts.join(" ");
 }
 
 const failureMessage = (error: unknown) =>
@@ -1704,15 +1861,16 @@ export function outcomeText(
  * Postgres rows keyed by the link or the entry id, plus - for the Reader hand-off - the
  * `mcp_operations` row for the request key. Once the run has stopped and the call is
  * older than two minutes, that trace decides: present means the write happened, absent
- * means it did not. A link save whose page redirected has no stored final URL to compare,
- * so a write for that owner created after the call started counts as evidence rather than
- * letting the call be called failed. Nothing is replayed, and a reader operation still in
- * flight leaves the call uncertain because its outcome belongs to Reader.
+ * means it did not. A Reader row that is still pending counts as written, because Reader
+ * may yet land it and the call must never be recorded as having written nothing. A link
+ * save whose page redirected has no stored final URL to compare, so a write for that
+ * owner inside the call's own window counts as evidence rather than letting the call be
+ * called failed. Nothing is replayed.
  */
 export async function settleUncertainStudyWrites(db: Database, user: string) {
   const candidates = (
     await db.query(
-      `SELECT c.id,c.operation,c.arguments,c.started_at FROM runtime_calls c
+      `SELECT c.id,c.operation,c.arguments,c.started_at,c.finished_at FROM runtime_calls c
          JOIN runtime_runs r ON r.id=c.run_id
         WHERE r.user_id=$1 AND c.state='uncertain' AND c.operation = ANY($2::text[])
           AND r.state<>'running' AND c.started_at < now() - interval '2 minutes'`,
@@ -1732,7 +1890,7 @@ export async function settleUncertainStudyWrites(db: Database, user: string) {
       user,
       String(row.operation),
       args,
-      new Date(row.started_at),
+      callWindow(row),
     );
     if (trace === "unknown") continue;
     const fixed = await db.query(
@@ -1752,7 +1910,7 @@ export async function settleUncertainStudyWrites(db: Database, user: string) {
         row.id,
         trace === "wrote" ? "success" : "failed",
         trace === "wrote"
-          ? "run stopped with the study, decision or Reader record for this link"
+          ? "run stopped with a study, decision or Reader record written during the call"
           : "run stopped with no study, decision or Reader record for this call",
         user,
         String(row.operation),
@@ -1766,13 +1924,39 @@ export async function settleUncertainStudyWrites(db: Database, user: string) {
   return settled;
 }
 
+/** The stretch a single call can have written in: from its start to when it returned. */
+interface CallWindow {
+  start: Date;
+  end: Date;
+}
+
+/**
+ * A call's own window. A call interrupted at restart has no finish time, so the window is
+ * capped rather than left open: counting every later write would let an unrelated save
+ * settle this call as done.
+ */
+function callWindow(row: {
+  started_at: unknown;
+  finished_at?: unknown;
+}): CallWindow {
+  const start = new Date(row.started_at as string);
+  const finished = row.finished_at
+    ? new Date(row.finished_at as string)
+    : undefined;
+  const end =
+    finished && finished > start
+      ? finished
+      : new Date(start.getTime() + 10 * 60_000);
+  return { start, end };
+}
+
 /** What the study collection, the decision rows or Reader hold for one uncertain call. */
 async function studyWriteTrace(
   db: Database,
   user: string,
   operation: string,
   args: Record<string, unknown>,
-  startedAt: Date,
+  window: CallWindow,
 ): Promise<"wrote" | "absent" | "unknown"> {
   const id =
     typeof args.id === "string" && /^[0-9a-f-]{36}$/i.test(args.id)
@@ -1796,7 +1980,7 @@ async function studyWriteTrace(
       )
     ).rows[0];
     // A row that has not moved since the call started did not take this update.
-    return row && new Date(row.updated_at) >= startedAt ? "wrote" : "absent";
+    return row && new Date(row.updated_at) >= window.start ? "wrote" : "absent";
   }
   if (operation === "study_remove") {
     if (!id) return "unknown";
@@ -1812,7 +1996,7 @@ async function studyWriteTrace(
   if (operation === "link_move") {
     if (args.to === "reader") {
       // Reader is the only write in this direction; the study delete follows its success.
-      const reader = await startedReaderSave(db, user, startedAt);
+      const reader = await startedReaderSave(db, user, window);
       return reader ? "wrote" : "absent";
     }
     if (!link && id) {
@@ -1833,10 +2017,10 @@ async function studyWriteTrace(
   if (await linkTrace(db, user, link)) return "wrote";
   // A page that redirected is not recorded anywhere: the public fetcher follows the
   // redirect without storing it, so the final URL cannot be compared here. A study,
-  // decision or Reader record for this owner created after the call started is still
+  // decision or Reader record this owner wrote inside the call's own window is still
   // evidence that it wrote something, and settling it as failed would claim nothing was
   // written when something was.
-  return (await wroteSince(db, user, startedAt)) ? "wrote" : "absent";
+  return (await wroteIn(db, user, window)) ? "wrote" : "absent";
 }
 
 /** Any record of a save for this link: a study entry, a choice card or a Reader save. */
@@ -1863,16 +2047,23 @@ async function linkTrace(db: Database, user: string, link: string) {
   return false;
 }
 
-/** A study, decision or Reader record for this owner created since the call started. */
-async function wroteSince(db: Database, user: string, since: Date) {
+/**
+ * A study, decision or Reader record this owner wrote inside the call's own window. Only
+ * that window counts: a save for another link that happened later (a tap, or the next turn)
+ * is not evidence for this call.
+ */
+async function wroteIn(db: Database, user: string, window: CallWindow) {
   return (
     await db.query(
-      `SELECT 1 FROM study_resources WHERE user_id=$1 AND added_at >= $2
-       UNION ALL SELECT 1 FROM link_decisions WHERE user_id=$1 AND created_at >= $2
+      `SELECT 1 FROM study_resources
+         WHERE user_id=$1 AND added_at BETWEEN $2 AND $3
+       UNION ALL SELECT 1 FROM link_decisions
+         WHERE user_id=$1 AND created_at BETWEEN $2 AND $3
        UNION ALL SELECT 1 FROM mcp_operations
-         WHERE user_id=$1 AND connection='reader' AND tool='save_link' AND created_at >= $2
+         WHERE user_id=$1 AND connection='reader' AND tool='save_link'
+           AND created_at BETWEEN $2 AND $3
        LIMIT 1`,
-      [user, since.toISOString()],
+      [user, window.start.toISOString(), window.end.toISOString()],
     )
   ).rows[0];
 }
@@ -1906,13 +2097,17 @@ async function readerSaves(db: Database, user: string) {
   ).rows;
 }
 
-async function startedReaderSave(db: Database, user: string, since: Date) {
+async function startedReaderSave(
+  db: Database,
+  user: string,
+  window: CallWindow,
+) {
   return (
     await db.query(
       `SELECT 1 FROM mcp_operations
         WHERE user_id=$1 AND connection='reader' AND tool='save_link'
-          AND created_at >= $2 ORDER BY created_at DESC LIMIT 1`,
-      [user, since.toISOString()],
+          AND created_at BETWEEN $2 AND $3 ORDER BY created_at DESC LIMIT 1`,
+      [user, window.start.toISOString(), window.end.toISOString()],
     )
   ).rows[0];
 }

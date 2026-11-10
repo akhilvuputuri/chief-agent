@@ -13,7 +13,7 @@ import { RoutineTools } from "./routines.js";
 import { HistoryStore } from "./history.js";
 import { Canvases } from "./canvases.js";
 import { WorkTools } from "./work.js";
-import { toolError } from "./tool-errors.js";
+import { toolError, ToolValidationError } from "./tool-errors.js";
 import type { DailyTools, DailyAction } from "./daily.js";
 import { SkillTools } from "./skills.js";
 import { PreparationTools } from "./preparation.js";
@@ -128,6 +128,23 @@ export class JobTools {
       throw error;
     }
   }
+  /**
+   * The owner's actual message for this turn, as the host recorded it: `work_turns.request`
+   * is the turn's own request, and a child agent's run copies its parent's. Undefined when
+   * the host has no record, so the caller can decide what to send instead.
+   */
+  private async turnMessage(user: string, run: string) {
+    const row = (
+      await this.db.query(
+        "SELECT request AS message FROM work_turns WHERE user_id=$1 AND run_id=$2",
+        [user, run],
+      )
+    ).rows[0];
+    const message = row?.message;
+    if (typeof message !== "string" || !message.trim()) return undefined;
+    // The classifier only needs the request itself; a pasted essay is bounded here.
+    return message.trim().slice(0, 4000);
+  }
   private async dispatch(
     user: string,
     run: string,
@@ -140,6 +157,22 @@ export class JobTools {
       a.operation === "mcp_write" ||
       a.operation === "mcp_operation"
     ) {
+      // Reader is for offline reading only (requirement 6). The classification path and the
+      // news feed call Reader through McpTools directly, so a Reader link save that reaches
+      // this dispatcher is a model (or plugin) turn skipping the classification - unless it
+      // replays a request Chief itself already persisted, which is how a pending Reader save
+      // left by a timeout is settled from chat (never blocked for ever).
+      if (
+        a.operation === "mcp_write" &&
+        a.connection === "reader" &&
+        a.tool === "save_link" &&
+        !(await this.mcp?.persistedWrite(user, a))
+      )
+        throw new ToolValidationError(
+          this.studyLinks
+            ? "Reader only takes offline reading, and a shared link is classified first: use link_save with the owner's words, and it saves to Reader itself when Reader is where the link belongs. Nothing was sent to Reader."
+            : "Reader can't take a link directly, and link classification isn't available here, so nothing was sent to Reader. Tell the owner it is unavailable.",
+        );
       if (!this.mcp) throw new Error("MCP is not configured");
       return this.mcp.call(user, a, signal);
     }
@@ -307,7 +340,11 @@ export class JobTools {
             user,
             {
               url: a.url,
-              ...(a.ownerMessage ? { ownerMessage: a.ownerMessage } : {}),
+              // The owner's own message for this turn comes from the host's record, so an
+              // explicit cue cannot be dropped or paraphrased by the model. A model-written
+              // ownerMessage is only a fallback when the host has no turn record.
+              ownerMessage:
+                (await this.turnMessage(user, run)) ?? a.ownerMessage,
             },
             signal,
           );
