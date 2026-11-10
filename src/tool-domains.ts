@@ -27,6 +27,7 @@ export const CORE_OPERATIONS = new Set([
 
 export const TOOL_DOMAINS = [
   "mcp",
+  "links",
   "gmail",
   "calendar",
   "daily",
@@ -51,7 +52,9 @@ export type ToolDomain = (typeof TOOL_DOMAINS)[number];
 
 /** One line per domain for the model's catalogue of loadable tools. */
 export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
-  mcp: "connected remote MCP tools, Reader article/brief saving and submission status",
+  mcp: "connected remote MCP tools, sourced brief saving and Reader submission status",
+  links:
+    "the owner's study list for study material: classify a shared link, add, list, filter, update, move, remove",
   gmail: "read-only Gmail search/thread/read across connected accounts",
   calendar: "Calendar lookups and approval-gated event drafts",
   daily: "saved items, reminders, briefings and the daily Sheet",
@@ -85,6 +88,8 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
  * the request instead of changing the cached prefix.
  */
 export const DOMAIN_GUIDANCE: Partial<Record<ToolDomain, string>> = {
+  links:
+    'When the study-list tools are offered, a shared link is classified before anything is saved: call link_save with the owner\'s own words in ownerMessage. Never default to Reader; Reader is only for offline reading. A confident save goes straight through — say where it went in one line so the owner can correct it ("no, move it to Reader" is link_move; "add it to Reader too" keeps the study entry, so that is link_save, not a move). A needs_choice result means the three tap buttons were sent; do not ask an open question instead. Titles and topics come from the page, never invented. study_list returns phone-friendly text plus entries with the ids study_update, link_move and study_remove need.',
   canvas:
     "When canvas tools are available, use saved canvases for rich results worth revisiting (tables of roles, evidence-backed analyses, preparation plans). Choose useful components based on the request; short conversation stays in Telegram. canvas_list finds earlier documents; canvas_read retrieves exact revisions in chunks. Refining the same topic updates that canvas; a new topic creates a separate canvas. Updates must reconcile the latest base revision and preserve block IDs. A saved canvas is a snapshot, not an independently verified finding. Ground content in actual records/sources; do not invent URLs or data. Use finish_turn.canvases with saved IDs and optional exact revisions to attach open buttons. The Mini App never authorizes sensitive actions. Do not promise a canvas or link before a successful save.",
   jobs: "For job fit, interview research and preparation, use the job-alignment skill and job_alignment_start/resume/read. The scope can be selected roles or all saved roles, never force a one-role workflow. Get exact role IDs from the jobs agent (its refs) or allSaved, and select relevant memory keys. For substantial work establish durable work tracking. Automatically resume pending roles within the existing allocation, keeping scopeId in the task checkpoint; do not restart the scope on each pass. Read full reports before synthesis and requested prep/Sheet saves. Combine overlapping preparation while retaining role/evidence links. Scope history is context, not authorization to resume old work. Reports distinguish unknown experience and interview uncertainty; do not upgrade those to gaps or confirmed stages.",
@@ -93,6 +98,8 @@ export const DOMAIN_GUIDANCE: Partial<Record<ToolDomain, string>> = {
 
 const PREFIXES: [string, ToolDomain][] = [
   ["mcp_", "mcp"],
+  ["study_", "links"],
+  ["link_", "links"],
   ["gmail_", "gmail"],
   ["calendar_", "calendar"],
   ["item_", "daily"],
@@ -132,6 +139,12 @@ export function domainOf(operation: string): ToolDomain | undefined {
 // Conservative cues: a missed domain costs one tools_load step, an extra one
 // costs only schema characters. Word boundaries avoid matching inside words.
 const CUES: [ToolDomain, RegExp][] = [
+  [
+    "links",
+    // A shared link is classified before it is saved, so a bare "save this <url>" belongs
+    // here too; "save the brief" and Reader status questions stay with mcp below.
+    /\b(study (list|material)|for (my )?ai learning|to study|offline reading|read later|tutorials?|(save|keep)\s+(this|that|it)\b[\s\S]{0,120}https?:\/\/|(save|add|move|remove).{0,40}(link|thread|tutorial|study list|reader))\b/i,
+  ],
   [
     "mcp",
     /\b(mcp|reader|offline|read later|save.{0,40}(article|brief|link))\b/i,

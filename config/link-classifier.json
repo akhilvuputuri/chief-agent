@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "timeoutMs": 8000,
+  "apply": { "minConfidence": 0.6, "minTopicConfidence": 0.45 },
+  "limits": {
+    "titleChars": 300,
+    "excerptChars": 2400,
+    "messageChars": 1200,
+    "interestsChars": 600,
+    "topicChars": 60,
+    "reasonChars": 300
+  },
+  "question": {
+    "instructions": "The owner shared a link and asked Chief to save it. Decide where it belongs from the page data in `link`, the owner's words in `owner_message` and their saved `learning_interests`. An explicit instruction in owner_message always wins: for AI learning, to study, add to my study list, study material means study; for offline reading, to read later, save it to Reader means reader. With no explicit instruction, study is material the owner would work through to learn applied AI engineering, agent platforms, developer tools or voice/conversational AI; reader is offline reading that is not study material. Use both only when the owner asked for both or the page plainly serves both. Use unsure only when the page data is too thin to tell and the owner gave no explicit instruction.",
+    "criteria": {
+      "study": "Study material: a thread, tutorial, course, paper, repository, documentation or engineering deep dive on AI engineering, agent platforms, developer tools or voice/conversational AI.",
+      "reader": "Offline reading: a news story, essay, opinion or long-form general-interest article to read later, not technical study material.",
+      "both": "Both: the owner asked for both, or the page is study material they also want available offline.",
+      "unsure": "Unsure: the page data is too thin (blocked, empty or generic) and no explicit instruction exists."
+    },
+    "topic": {
+      "instructions": "Which one of the owner's learning interests does the page text actually cover? Choose other when it covers none of them; do not stretch a match.",
+      "criteria": {
+        "applied-ai-engineering": "Applied AI engineering: models, evaluation, retrieval, prompting, fine-tuning or production AI systems.",
+        "agent-platforms": "Agent platforms: agent architectures, tool use, orchestration, multi-agent systems, MCP or agent runtimes.",
+        "developer-tools": "Developer tools: repositories, SDKs, CLIs, editors, testing or developer workflow tooling.",
+        "voice-conversational-ai": "Voice and conversational AI: speech, realtime voice, transcription or conversational assistants.",
+        "other": "Other: none of the owner's learning interests, or the page text does not say."
+      }
+    },
+    "kind": {
+      "instructions": "What kind of page is this, using the page data only? Choose other when the page data is too thin to tell.",
+      "criteria": {
+        "technical": "Technical: tutorial, course, paper, repository, documentation or reference.",
+        "discussion": "Discussion: a post or thread on a social site or forum.",
+        "news": "News: reported event or announcement.",
+        "essay": "Essay: opinion, analysis or long-form argument.",
+        "product": "Product: launch, pricing or vendor announcement.",
+        "other": "Other: unclear, generic or empty page data."
+      }
+    }
+  },
+  "interests": [
+    "applied AI engineering",
+    "agent platforms",
+    "developer tools",
+    "voice and conversational AI"
+  ]
+}

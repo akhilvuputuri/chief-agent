@@ -8,6 +8,7 @@ import type { CodingController } from "./coding/controller.js";
 import { codingAction } from "./coding/schema.js";
 import type { Responsibilities } from "./responsibilities.js";
 import type { NewsTools } from "./news.js";
+import type { StudyLinks, StudyFilter, StudyStatus } from "./study-links.js";
 import { RoutineTools } from "./routines.js";
 import { HistoryStore } from "./history.js";
 import { Canvases } from "./canvases.js";
@@ -61,6 +62,8 @@ export class JobTools {
     readonly mailRecall?: Pick<MailIndex, "recall">,
     private recallEmbedder?: Embedder,
     readonly publicBrowser?: PublicBrowser,
+    /** The owner's study collection and link classification. */
+    readonly studyLinks?: StudyLinks,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -289,6 +292,53 @@ export class JobTools {
       a.operation === "routine_history"
     )
       return new RoutineTools(db).call(user, run, a);
+    if (
+      a.operation === "link_save" ||
+      a.operation === "study_list" ||
+      a.operation === "study_update" ||
+      a.operation === "study_remove" ||
+      a.operation === "link_move"
+    ) {
+      if (!this.studyLinks) throw new Error("The study list is not configured");
+      const links = this.studyLinks;
+      switch (a.operation) {
+        case "link_save":
+          return links.save(
+            user,
+            {
+              url: a.url,
+              ...(a.ownerMessage ? { ownerMessage: a.ownerMessage } : {}),
+            },
+            signal,
+          );
+        case "study_list":
+          return links.list(user, {
+            ...(a.topic ? { topic: a.topic } : {}),
+            ...(a.tag ? { tag: a.tag } : {}),
+            ...(a.status ? { status: a.status as StudyStatus } : {}),
+            ...(a.limit ? { limit: a.limit } : {}),
+          } as StudyFilter);
+        case "study_update":
+          return links.update(user, {
+            id: a.id,
+            ...(a.status ? { status: a.status as StudyStatus } : {}),
+            ...(a.notes !== undefined ? { notes: a.notes } : {}),
+            ...(a.tags ? { tags: a.tags } : {}),
+          });
+        case "study_remove":
+          return links.remove(user, a.id);
+        case "link_move":
+          return links.move(
+            user,
+            {
+              ...(a.id ? { id: a.id } : {}),
+              ...(a.url ? { url: a.url } : {}),
+              to: a.to,
+            },
+            signal,
+          );
+      }
+    }
     if (
       a.operation === "news_source_add" ||
       a.operation === "news_source_remove" ||

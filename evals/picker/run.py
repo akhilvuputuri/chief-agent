@@ -1,7 +1,7 @@
 """Live eval of the tool-group picker against Jev on OpenRouter.
 
 Run by hand: kite run eval:picker -- [--runs 3] [--split held-out] ...
-Each call asks all 13 groups; picked groups are scored against the labels.
+Each call asks all 21 groups; picked groups are scored against the labels.
 """
 
 from __future__ import annotations

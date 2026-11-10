@@ -14,6 +14,11 @@ import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
 import { formatTelegram } from "./telegram-format.js";
+import {
+  linkChoiceButtons,
+  type LinkChoice,
+  type LinkChoiceMessage,
+} from "./study-links.js";
 import { telegramChunks, type Portfolio } from "./portfolio.js";
 import { slowReply } from "./delivery-routing.js";
 import { runFamily } from "./run-family.js";
@@ -482,6 +487,92 @@ export function telegram(
         opsLog("news.save_reply_failed", "warn", errorFields(error)),
       );
   });
+  // Link classification: the three quick taps for a link Chief could not place.
+  // The decision row is the resume record, so the handler runs only the unfinished
+  // step and never reports a partial write as nothing.
+  bot.callbackQuery(
+    /^lnk:(study|reader|both):([0-9a-f-]{36})$/,
+    async (ctx) => {
+      if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+      const user = String(ctx.from.id);
+      const choice = ctx.match[1] as LinkChoice;
+      const decisionId = ctx.match[2]!;
+      const message = ctx.callbackQuery.message;
+      const links = assistant.tools?.studyLinks;
+      await ctx.answerCallbackQuery({
+        text: links
+          ? "Saving…"
+          : "The study list isn't available, so nothing was saved.",
+      });
+      if (!links) return;
+      // Reply where the buttons really are: the tapped message usually carries the thread,
+      // and the decision row records the one the card was actually sent to.
+      const thread =
+        message?.message_thread_id ??
+        (await links.decisions
+          .get(user, decisionId)
+          .then((row) => row?.telegramThreadId ?? undefined)
+          .catch((error) => {
+            opsLog("link.decision_read_failed", "warn", errorFields(error));
+            return undefined;
+          }));
+      // A Reader save can take a minute; finish it outside the handler so the runner's
+      // update slots are not held. The claim in the durable row stops a second tap.
+      void links
+        .confirm(user, decisionId, choice, message?.message_id)
+        .then(async (outcome) => {
+          if (outcome.settled)
+            await ctx
+              .editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
+              .catch((error) =>
+                opsLog(
+                  "link.keyboard_clear_failed",
+                  "warn",
+                  errorFields(error),
+                ),
+              );
+          else
+            // A tap that did not finish keeps its buttons, so a second tap can resume.
+            await ctx
+              .editMessageReplyMarkup({
+                reply_markup: {
+                  inline_keyboard: [
+                    linkChoiceButtons(decisionId).map((b) => ({
+                      text: b.text,
+                      callback_data: b.data,
+                    })),
+                  ],
+                },
+              })
+              .catch((error) =>
+                opsLog("link.keyboard_keep_failed", "warn", errorFields(error)),
+              );
+          await ctx
+            .reply(outcome.text, {
+              ...(thread ? { message_thread_id: thread } : {}),
+              link_preview_options: { is_disabled: true },
+            })
+            .catch((error) =>
+              opsLog("link.reply_failed", "warn", errorFields(error)),
+            );
+        })
+        .catch(async (error) => {
+          // The row keeps what was already written; say the result is uncertain.
+          opsLog("link.confirm_failed", "warn", errorFields(error));
+          await ctx
+            .reply(
+              "Something went wrong part-way through, so the result is uncertain: check your study list and Reader before retrying. Tap the same button again and I'll resume only the unfinished part.",
+              {
+                ...(thread ? { message_thread_id: thread } : {}),
+                link_preview_options: { is_disabled: true },
+              },
+            )
+            .catch((replyError) =>
+              opsLog("link.reply_failed", "warn", errorFields(replyError)),
+            );
+        });
+    },
+  );
   // Buttons on bulletins sent before votes were replaced by Save.
   bot.callbackQuery(/^nw:(up|dn):[0-9a-f-]{36}$/, async (ctx) => {
     if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
@@ -1326,6 +1417,39 @@ export function telegram(
     opsLog("telegram.handler_failed", "error", errorFields(error.error)),
   );
   return Object.assign(bot, { topics });
+}
+
+/**
+ * Sends the three quick taps for a link Chief could not place. It goes through the topics
+ * helper like every other host card, so it lands in Main when threaded mode is on, and the
+ * thread it really reached is returned for the decision row. Nothing here decides a route.
+ */
+export function studyLinkChoiceAsk(bot: Bot & { topics: TelegramTopics }) {
+  return async (user: string, message: LinkChoiceMessage) => {
+    const sent = await bot.topics.deliver(
+      user,
+      { kind: "general" },
+      async (extra) =>
+        bot.api.sendMessage(user, message.text, {
+          ...extra,
+          link_preview_options: { is_disabled: true },
+          reply_markup: {
+            inline_keyboard: [
+              message.buttons.map((b) => ({
+                text: b.text,
+                callback_data: b.data,
+              })),
+            ],
+          },
+        }),
+    );
+    return {
+      messageId: sent?.message_id ?? null,
+      // sentThread() rather than message_thread_id: an intentional root fallback must not
+      // be recorded as the default Main topic.
+      threadId: sent ? (sentThread(sent) ?? null) : null,
+    };
+  };
 }
 
 const approvalSends = new SerialQueue();

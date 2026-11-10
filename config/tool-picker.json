@@ -20,8 +20,12 @@
   "alwaysAvailable": "Web search, reading web pages, memory, conversation-history search and skill reading are always available and are not part of these groups.",
   "domains": {
     "mcp": {
-      "description": "Use reviewed remote MCP connections, including saving articles and sourced briefs to Reader or checking submission status.",
-      "examples": "save this article to Reader, save the brief for offline reading, check that Reader save, list MCP tools"
+      "description": "Use reviewed remote MCP connections, including saving a sourced brief to Reader for offline reading or checking submission status.",
+      "examples": "save the brief for offline reading, check that Reader save, list MCP tools"
+    },
+    "links": {
+      "description": "Save a shared link after Chief classifies it as study material or offline reading, and manage the owner's study list: add, list, filter by topic, tag or status, update status, notes or tags, move between the study list and Reader, remove.",
+      "examples": "save this for AI learning, add this tutorial to my study list, what's on my AI study list, no move it to Reader, remove that from my study list"
     },
     "gmail": {
       "description": "Search or read the user's Gmail (two connected accounts).",

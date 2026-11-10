@@ -88,6 +88,8 @@ import { JobTools } from "./tools.js";
 import { WebTools } from "./providers.js";
 import { Assistant } from "./agent.js";
 import { ToolPicker } from "./tool-picker.js";
+import { JevLinks } from "./jev.js";
+import { StudyLinks } from "./study-links.js";
 import { ShadowDecisions } from "./shadow.js";
 import { EffortPicker } from "./effort.js";
 import { closeServer, server } from "./server.js";
@@ -109,6 +111,7 @@ import {
   sendLibraryApprovals,
   sendPortfolioApprovals,
   sendResponsibilityApprovals,
+  studyLinkChoiceAsk,
 } from "./telegram.js";
 // Startup refusals carry a fixed code so the sanitized crash line identifies them.
 const startupError = (code: string, message: string) =>
@@ -745,6 +748,11 @@ const publicBrowser =
 const linksMigrated = !!(
   await db.query("SELECT 1 FROM runtime_migrations WHERE version=31")
 ).rows.length;
+// Migration 036 adds the study collection. Until it is installed the tools are simply
+// not offered, so no turn fails while an operator rollout is pending.
+const studyMigrated = !!(
+  await db.query("SELECT 1 FROM runtime_migrations WHERE version=36")
+).rows.length;
 const linkBrowser =
   c.GATHERING_BROWSER === "on" && c.GATHERING_BROWSER_KEY
     ? new BrowserRpc("http://gathering-browser:3001", c.GATHERING_BROWSER_KEY)
@@ -794,6 +802,19 @@ if (mcpMigrated) {
     links,
   );
 }
+// Study links: Jev classifies a shared link, study material goes to its own collection and
+// Reader is only for offline reading. The unsure case sends three tap buttons from here,
+// because the tool runs inside a turn and the buttons must outlive it.
+const studyLinksConfigured = studyMigrated && !!c.OPENROUTER_API_KEY;
+const studyLinks = studyLinksConfigured
+  ? new StudyLinks({
+      db,
+      judge: new JevLinks(c.OPENROUTER_API_KEY),
+      reader: () => (mcp ? mcpReaderLink(mcp) : undefined),
+      // Built on first use: the bot exists after the tools it serves.
+      ask: (user, message) => studyLinkChoiceAsk(bot)(user, message),
+    })
+  : undefined;
 const assistant = new Assistant(
   db,
   new CustomAgent(
@@ -850,10 +871,12 @@ const assistant = new Assistant(
     mailIndex,
     recallEmbedder,
     publicBrowser,
+    studyLinks,
   ),
   {
     links: !!links,
     publicBrowser: !!publicBrowser,
+    studyLinks: !!studyLinks,
     mcp: !!mcp?.configured,
     canvases: !!c.MINIAPP_ORIGIN,
     web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),

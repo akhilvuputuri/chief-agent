@@ -30,6 +30,7 @@ export const readOperations = new Set([
   "tools_load",
   "finish_turn",
   "feed_read",
+  "study_list",
   "conversation_search",
   "memory_recall",
   "conversation_read",

@@ -1225,8 +1225,26 @@
   {
     "id": "mcp-reader-save",
     "message": "Save this article to Reader for offline reading: https://example.org/article",
-    "gold": ["mcp"],
+    "gold": ["links"],
     "split": "tuning"
+  },
+  {
+    "id": "links-study-save",
+    "message": "save this thread on agent architectures for AI learning: https://x.com/example/status/1",
+    "gold": ["links"],
+    "split": "tuning"
+  },
+  {
+    "id": "links-save-url",
+    "message": "save this https://x.com/example/status/2",
+    "gold": ["links"],
+    "split": "tuning"
+  },
+  {
+    "id": "links-study-list",
+    "message": "what's on my AI study list",
+    "gold": ["links"],
+    "split": "held-out"
   },
   {
     "id": "mcp-reader-brief",

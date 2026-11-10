@@ -64,6 +64,14 @@ test("initial domains come from message cues, task binding, approvals and recent
     }),
     ["gmail"],
   );
+  // A shared link is classified before it is saved, so the bare trigger offers `links`.
+  assert.deepEqual(pick("save this https://x.com/someone/status/1"), ["links"]);
+  // The link can be on the next line, as it usually is when the owner shares one.
+  assert.deepEqual(pick("save this\nhttps://x.com/someone/status/1"), [
+    "links",
+  ]);
+  assert.deepEqual(pick("what's on my AI study list"), ["links"]);
+  assert.deepEqual(pick("no, move it to Reader"), ["links", "mcp"]);
   // No false match inside words.
   assert.deepEqual(pick("remailing and scheduling-ish"), []);
 });

@@ -369,6 +369,18 @@ export function parseFeed(xml: string, base: string, now = new Date()) {
 
 const TRACKING =
   /^(utm_.*|fbclid|gclid|dclid|mc_cid|mc_eid|ref|ref_src|cmpid|ocid|_ga|igshid|smid|guccounter)$/i;
+/**
+ * The address the owner shared, with only tracking parameters and the fragment
+ * removed. A save sends this exact value to the other service, so the host and path
+ * stay as the server serves them (unlike `canonicalUrl`, which is a dedupe key).
+ */
+export function withoutTracking(raw: string) {
+  const u = new URL(raw);
+  u.hash = "";
+  for (const key of [...u.searchParams.keys()])
+    if (TRACKING.test(key)) u.searchParams.delete(key);
+  return u.toString();
+}
 /** Scheme-less, tracking-free identity used for deduplication and delivery history. */
 export function canonicalUrl(raw: string) {
   const u = new URL(raw);

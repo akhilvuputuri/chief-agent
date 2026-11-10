@@ -21,7 +21,7 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack 
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /out/ ./
-COPY config/model-policy.json config/tool-picker.json config/decisions.json config/runtime.json config/reasoning-effort.json config/coding.json config/coding-pi.json config/coding-backend.json config/mcp.json config/boxes.json ./config/
+COPY config/model-policy.json config/tool-picker.json config/decisions.json config/runtime.json config/reasoning-effort.json config/coding.json config/coding-pi.json config/coding-backend.json config/mcp.json config/boxes.json config/link-classifier.json ./config/
 COPY skills ./skills
 COPY plugins ./plugins
 COPY web ./web

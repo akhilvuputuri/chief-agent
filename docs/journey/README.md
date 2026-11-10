@@ -162,6 +162,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 4 November | [153 — Memory transparency](153-memory-transparency.md): can the owner see what Chief remembers, where each item came from, and what each prompt held? | Released 5 November and earlier memory backfilled: 41 items, 58 changes, 37 runs' context. Not yet seen on a live turn. |
 | 5 November | [154 — Failed checks go back to the coder](154-failed-checks-go-back-to-the-coder.md): why did a job stop at the first failed check instead of fixing it? | Tested on synthetic jobs; release pending. Failed checks get up to two repair rounds, stored output names the failures, and a stopped job can move to the current worker |
 | 8 November | [155 — Text Postgres cannot store](155-text-postgres-cannot-store.md): why did one model reply pause a coding job? | Tested on synthetic jobs; release pending. Descriptive text is made storable where the host writes it; exact copies and code stay exact |
+| 10 November | [157 — Study material or offline reading](157-study-links.md): can a shared link go to the right place without the owner choosing every time? | Implemented on a branch: Jev classifies before saving, study material gets its own Postgres collection, three taps only when unsure; focused tests pass, picker eval blocked on credentials, review pending |
 | 9 November | [156 — Room for the whole plan](156-room-for-the-whole-plan.md): why did the planner stop while writing its plan? | Released in `fa058f9`; image pin follows. The schema allows coder and planner calls up to 128,000 output tokens, and the worker waits as long as the host allows; the profile stays at 16,000 until the next worker image pin |
 
 ## Coding-agent learning path
@@ -245,6 +246,6 @@ Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python 
 
 MCP integrations: [67 — Remote MCP connectors](67-mcp-connectors.md), [15 — Portable plugins](15-portable-plugins.md).
 
-Article targets: [67 — Reader MCP](67-mcp-connectors.md) → [69 — Shared link resolution](69-link-resolution.md).
+Article targets: [67 — Reader MCP](67-mcp-connectors.md) → [69 — Shared link resolution](69-link-resolution.md) → [157 — Study material or offline reading](157-study-links.md).
 
 - 13 October 2026: [83 — Sustained Pi context verification](83-pi-context-verification.md) — failing native budget/compaction reproductions and representative acceptance gates; Gemini coder convergence diagnosed; owner-selected lean release in progress.

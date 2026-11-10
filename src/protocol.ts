@@ -1,4 +1,11 @@
 import { linkResolve } from "./link-schema.js";
+import {
+  linkSave,
+  studyList,
+  studyUpdate,
+  studyRemove,
+  linkMove,
+} from "./study-links-schema.js";
 import { singaporeSchemas } from "./singapore/schema.js";
 import { mcpTools, mcpRead, mcpWrite, mcpOperation } from "./mcp-schema.js";
 import {
@@ -123,6 +130,11 @@ const workSteps = z
   );
 export const action = z.discriminatedUnion("operation", [
   linkResolve,
+  linkSave,
+  studyList,
+  studyUpdate,
+  studyRemove,
+  linkMove,
   ...singaporeSchemas,
   mcpTools,
   mcpRead,

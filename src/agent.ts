@@ -29,6 +29,10 @@ import {
   settleUncertainDrafts,
   type Budget,
 } from "./execution.js";
+import {
+  STUDY_WRITE_OPERATIONS,
+  settleUncertainStudyWrites,
+} from "./study-links.js";
 import { SkillTools } from "./skills.js";
 import { WorkTools } from "./work.js";
 import { runtimeContext, jsonSchema } from "./runtime.js";
@@ -434,6 +438,10 @@ export class Assistant {
       opsLog("runtime.settle_failed", "warn", errorFields(error)),
     );
     await settleUncertainCoding(this.db, user).catch((error) =>
+      opsLog("runtime.settle_failed", "warn", errorFields(error)),
+    );
+    // A study write that provably wrote nothing must not keep the whole owner paused.
+    await settleUncertainStudyWrites(this.db, user).catch((error) =>
       opsLog("runtime.settle_failed", "warn", errorFields(error)),
     );
     return this.db.query(
@@ -1595,6 +1603,23 @@ export class Assistant {
           });
         }
       }
+      if (
+        uncertain.rows.some((r) =>
+          STUDY_WRITE_OPERATIONS.has(String(r.operation)),
+        )
+      ) {
+        // A study or link write that left no record of any kind is settled here, so one
+        // interrupted save cannot freeze every later write (review finding 8).
+        try {
+          await settleUncertainStudyWrites(this.db, scope.user);
+          uncertain = await unresolved();
+        } catch (error) {
+          opsLog("runtime.settle_failed", "warn", {
+            runId: scope.run,
+            ...errorFields(error),
+          });
+        }
+      }
       if (uncertain.rows.some((r) => r.operation === "calendar_draft")) {
         // This runs after the call was marked dispatched, so a failure here must
         // fall back to the ordinary refusal, never become this write's error.
@@ -1633,8 +1658,12 @@ export class Assistant {
         this.tools.mcp &&
         op === "mcp_write" &&
         (await this.tools.mcp.replayMatches(scope.user, input, uncertain.rows));
+      // A study or link write is local to the owner's collection, and its Reader half
+      // reports - rather than duplicates - a save that is already in flight, so a pending
+      // MCP operation does not block it. Every other write still waits (review finding 6).
       if (
         this.tools.mcp &&
+        !STUDY_WRITE_OPERATIONS.has(String(op)) &&
         !(await this.tools.mcp.pendingAllows(scope.user, input))
       )
         throw new WriteBlockedError(
