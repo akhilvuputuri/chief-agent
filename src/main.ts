@@ -53,6 +53,7 @@ import { CustomAgent } from "./custom-agent.js";
 import { OpenRouter } from "./model.js";
 import {
   resolveAgentModel,
+  resolveJudgeModel,
   resolveMainModel,
   resolvePriceCeilings,
 } from "./model-policy.js";
@@ -1406,6 +1407,7 @@ workTimer.unref();
 // The nightly learner (docs/learning.md): one bounded run per owner a night, from 03:30
 // Singapore, deferred while the owner is active. LEARNING in config/runtime.json turns it off.
 const learnerModel = resolveAgentModel("standard", mainModel).model;
+const judgeModel = resolveJudgeModel(mainModel);
 const learner = new Learner(db, {
   model: new OpenRouter(
     c.OPENROUTER_API_KEY,
@@ -1414,6 +1416,15 @@ const learner = new Learner(db, {
     priceCeilings.output,
   ),
   modelName: learnerModel,
+  judge: {
+    model: new OpenRouter(
+      c.OPENROUTER_API_KEY,
+      judgeModel,
+      priceCeilings.input,
+      priceCeilings.output,
+    ),
+    modelName: judgeModel,
+  },
   enabled: c.LEARNING === "on",
 });
 await learner.recover();

@@ -170,6 +170,15 @@ const fields: Record<string, Shape> = {
   absorbedCount: "count",
   periodCount: "count",
   unreadCount: "count",
+  /** The judge pass of learner.finished (docs/learning.md#nightly-judge). Counts only. */
+  judgedFactCount: "count",
+  supportedCount: "count",
+  turnCount: "count",
+  relevantCount: "count",
+  followedCount: "count",
+  ignoredCount: "count",
+  contradictedCount: "count",
+  missedCount: "count",
 };
 
 // Written as null rather than omitted: an unknown charge stays visibly unknown.
@@ -479,6 +488,14 @@ const projections: Record<string, Projection> = {
       absorbedCount: d.absorbed,
       periodCount: d.periods,
       unreadCount: d.unread,
+      judgedFactCount: d.judgedFacts,
+      supportedCount: d.supported,
+      turnCount: d.turns,
+      relevantCount: d.relevant,
+      followedCount: d.followed,
+      ignoredCount: d.ignored,
+      contradictedCount: d.contradicted,
+      missedCount: d.missed,
     },
   ],
   "recall.searched": (run, d) => [

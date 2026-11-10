@@ -762,6 +762,43 @@ export function turnFeedback(
   }
 }
 
+export const MEMORY_RELEVANT_EVALUATION = "memory_relevant";
+export const MEMORY_FOLLOWED_EVALUATION = "memory_followed";
+
+/**
+ * The nightly judge's score for one turn (docs/learning.md#nightly-judge), on that turn's
+ * root span: how many memories in its context were relevant, and, when that could be judged,
+ * whether Chief kept to them, with the worst use as label. The turn ended a day or more ago,
+ * so its span is addressed by the IDs every run's span derives from its run ID.
+ */
+export function memoryUse(
+  run: string,
+  score: { relevant: number; followed?: boolean; label?: string },
+) {
+  if (!exporter) return;
+  try {
+    const at = {
+      traceId: traceIdFor(run),
+      spanId: runSpanId(run),
+      timeNs: nowNs(),
+    };
+    exporter.enqueueEvaluation({
+      ...at,
+      name: MEMORY_RELEVANT_EVALUATION,
+      value: score.relevant,
+    });
+    if (score.followed !== undefined)
+      exporter.enqueueEvaluation({
+        ...at,
+        name: MEMORY_FOLLOWED_EVALUATION,
+        value: score.followed,
+        ...(score.label ? { label: nameValue(score.label) } : {}),
+      });
+  } catch {
+    /* Tracing is not the action ledger. */
+  }
+}
+
 export function callStarted(
   run: string,
   callId: string,

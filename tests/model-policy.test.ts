@@ -6,6 +6,8 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 import {
   readModelPolicy,
+  resolveAgentModel,
+  resolveJudgeModel,
   resolveMainModel,
   resolvePriceCeilings,
 } from "../src/model-policy.js";
@@ -67,6 +69,17 @@ test("reviewed policy price ceilings replace the environment's, and stay bounded
   // The bundled policy names a main model whose listed price fits its own ceilings.
   const bundled = readModelPolicy();
   assert.equal(bundled.main, "anthropic/claude-opus-5.5");
+  // The judge is another family than the main and learner models, so it does not grade its
+  // own work; without one in the policy it falls back to the standard tier.
+  assert.equal(resolveJudgeModel("main/model"), "openai/gpt-6.1-sol");
+  assert.notEqual(
+    resolveJudgeModel("main/model").split("/")[0],
+    bundled.main!.split("/")[0],
+  );
+  assert.equal(
+    resolveJudgeModel("main/model", { ...bundled, judge: undefined }),
+    resolveAgentModel("standard", "main/model").model,
+  );
   assert.deepEqual(bundled.priceCeilings, { input: 4, output: 20 });
   const directory = mkdtempSync(join(tmpdir(), "chief-model-policy-"));
   const file = join(directory, "model-policy.json");

@@ -25,6 +25,9 @@ const schema = z
       .strict()
       .refine((a) => !!a.tiers[a.default], "the default tier needs a model")
       .optional(),
+    // The nightly memory judge (docs/learning.md#nightly-judge): a different family from the
+    // main and learner models, so it does not grade its own work. Unset, it uses the standard tier.
+    judge: modelId.optional(),
     // Provider price ceilings ($ per million tokens) for every OpenRouter caller. When set, this
     // reviewed value replaces OPENROUTER_MAX_INPUT_PRICE/OPENROUTER_MAX_OUTPUT_PRICE; raising it
     // needs an explicit owner request (owner-approved $4/$20 on 19 October 2026 for Opus 5.5).
@@ -75,6 +78,14 @@ export function resolveAgentModel(
       `Agent validation: model tier "${tier}" is not configured; use ${MODEL_TIERS.filter((t) => agents.tiers[t]).join(" or ")}`,
     );
   return { tier, model };
+}
+
+/** The nightly judge's model: the reviewed policy value, else the learner's standard tier. */
+export function resolveJudgeModel(
+  mainModel: string,
+  policy: ModelPolicy = readModelPolicy(),
+): string {
+  return policy.judge ?? resolveAgentModel("standard", mainModel, policy).model;
 }
 
 /** The effective provider price ceilings: the reviewed policy value, else the environment's. */

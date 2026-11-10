@@ -1,3 +1,7 @@
+# A nightly judge of memory — not yet released, 10 November 2026
+
+Issue #326. The learner now ends each night with a judge on another model family (`openai/gpt-6.1-sol`): it checks each new learned fact against the owner's message it cites, and each owner turn against the memory that was in its context, and records which memories were relevant and whether they were followed. It changes no memory. Nothing is measured until its first production nights; the first has a backlog of 20 facts and about 54 turns. See [learning](learning.md#nightly-judge) and [journal 157](journey/157-nightly-memory-judge.md). Next: read the first week with `scripts/judge-report.sql`, then decide whether verdicts should flag anything.
+
 # Memory in agentwatch — live in `4e8f886`, 5 November 2026
 
 agentwatch shows what Chief remembers: each item's history, linked to the turns it came from, and the items each model call had in its prompt, labelled "in context", never "used". Earlier memory was backfilled from Postgres: 41 items, 58 changes and 37 runs' context, from 28 October; the backfilled changes are traces of their own, since the learner runs that made most of them were not traced. The release traces learner runs under their own service. Not yet seen: a live turn's memory spans, and a traced learner run. See [tracing](tracing.md#memory) and [journal 153](journey/153-memory-transparency.md).

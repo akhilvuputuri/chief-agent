@@ -5,12 +5,32 @@
 // proposed fact on the host, and applies each batch's accepted ones through MemoryStore. Then
 // about once a week it reads two weeks of that work together and revises one procedure per
 // kind of work. No approval is asked; provenance, trust tags and rollback are the safety net.
+// Last, a judge checks what the learner cannot check of itself: whether each new fact means
+// what the owner said, and whether the memory in each turn's context was relevant and followed
+// (memory-judge.ts). It records verdicts and changes no memory.
 // Nothing here sends a message, calls a domain tool or touches anything outside memory.
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { isLearned, MemoryStore } from "./memory.js";
+import {
+  JUDGE_INSTRUCTIONS,
+  JUDGE_LIMITS,
+  JUDGE_PROMPT_VERSION,
+  type JudgeBatch,
+  type JudgeFact,
+  type JudgeMemory,
+  type JudgeToolName,
+  type JudgeTurn,
+  judgePrompt,
+  judgeToolDescriptions,
+  judgeTools,
+  newJudgements,
+  recordJudgement,
+  turnScore,
+  unjudged,
+} from "./memory-judge.js";
 import * as otel from "./otel.js";
 import {
   ModelError,
@@ -556,6 +576,8 @@ Do not write facts about the owner, which are saved separately, or secrets, cred
 export interface LearnerOptions {
   model: ModelAdapter;
   modelName: string;
+  /** The judge pass's own model, so it does not grade its own writing; else the learner's. */
+  judge?: { model: ModelAdapter; modelName: string };
   clock?: () => Date;
   enabled?: boolean;
 }
@@ -622,39 +644,63 @@ export class Learner {
       prompt_version: string;
       summary: { periods?: number };
     }>;
-    const ofPass = (procedures: boolean) =>
-      runs
-        .filter(
-          (r) => r.prompt_version.startsWith("procedures-") === procedures,
-        )
-        .map((r) => r.state);
-    const tonight = ofPass(false);
-    // The item pass comes first, and the procedure pass on a later tick reads what it left.
-    const itemsDone = tonight.some((s) => s !== "deferred");
-    const attempts = itemsDone ? ofPass(true) : tonight;
-    if (attempts.some((s) => s !== "deferred")) return null;
-    if (attempts.length >= LEARNING_LIMITS.deferrals) return null;
-    const periods = itemsDone ? await this.duePeriods(user, now) : [];
-    if (itemsDone && !periods.length) return null;
-    const version = itemsDone
-      ? PROCEDURE_PROMPT_VERSION
-      : LEARNER_PROMPT_VERSION;
+    const passOf = (version: string) =>
+      version.startsWith("procedures-")
+        ? "procedures"
+        : version.startsWith("judge-")
+          ? "judge"
+          : "items";
+    const states = (pass: ReturnType<typeof passOf>) =>
+      runs.filter((r) => passOf(r.prompt_version) === pass).map((r) => r.state);
+    const settled = (pass: ReturnType<typeof passOf>) =>
+      states(pass).some((s) => s !== "deferred");
+    const spent = (pass: ReturnType<typeof passOf>) =>
+      states(pass).length >= LEARNING_LIMITS.deferrals;
+    // The item pass comes first, the procedure pass on a later tick reads what it left, and
+    // the judge runs last, so it also sees the facts written tonight.
+    let version: string;
+    let start: () => Promise<unknown>;
+    if (!settled("items")) {
+      if (spent("items")) return null;
+      version = LEARNER_PROMPT_VERSION;
+      start = () => this.run(user, now);
+    } else {
+      const periods = settled("procedures")
+        ? []
+        : await this.duePeriods(user, now);
+      if (periods.length) {
+        if (spent("procedures")) return null;
+        version = PROCEDURE_PROMPT_VERSION;
+        start = () =>
+          this.runProcedures(
+            user,
+            now,
+            periods,
+            // Windows a deferred attempt finished tonight count towards the night's limit.
+            LEARNING_LIMITS.procedurePasses -
+              runs.reduce((n, r) => n + (r.summary.periods ?? 0), 0),
+          );
+      } else {
+        if (settled("judge") || spent("judge")) return null;
+        if (!(await this.judgeDue(user, now))) return null;
+        version = JUDGE_PROMPT_VERSION;
+        start = () => this.runJudge(user, now);
+      }
+    }
     if (await this.ownerActive(user)) {
       await this.record(user, "deferred", null, version, {
         reason: "owner_active",
       });
       return { state: "deferred" as const };
     }
-    return itemsDone
-      ? this.runProcedures(
-          user,
-          now,
-          periods,
-          // Windows a deferred attempt finished tonight count towards the night's limit.
-          LEARNING_LIMITS.procedurePasses -
-            runs.reduce((n, r) => n + (r.summary.periods ?? 0), 0),
-        )
-      : this.run(user, now);
+    return start();
+  }
+
+  /** The model a pass of this prompt version runs on. */
+  private modelNameOf(version: string) {
+    return version === JUDGE_PROMPT_VERSION
+      ? (this.options.judge?.modelName ?? this.options.modelName)
+      : this.options.modelName;
   }
 
   private async record(
@@ -672,7 +718,7 @@ export class Learner {
         user,
         run,
         state,
-        this.options.modelName,
+        this.modelNameOf(version),
         version,
         JSON.stringify(summary),
         this.clock(),
@@ -688,10 +734,10 @@ export class Learner {
     run: string,
     messages: Message[],
     call: () => Promise<Generation>,
+    requestedModel = this.options.model.model ?? this.options.modelName,
   ) {
     const invocationId = randomUUID();
     const start = Date.now();
-    const requestedModel = this.options.model.model ?? this.options.modelName;
     otel.runEvent(run, "model.started", { invocationId });
     try {
       const generation = await call();
@@ -728,14 +774,15 @@ export class Learner {
   private async open(user: string, now: Date, version: string) {
     const id = randomUUID();
     const run = randomUUID();
+    const modelName = this.modelNameOf(version);
     await this.db.query(
       "INSERT INTO runtime_runs(id,user_id,model) VALUES($1,$2,$3)",
-      [run, user, this.options.modelName],
+      [run, user, modelName],
     );
     await this.db.query(
       `INSERT INTO learner_runs(id,user_id,run_id,state,model,prompt_version,started_at)
        VALUES($1,$2,$3,'running',$4,$5,$6)`,
-      [id, user, run, this.options.modelName, version, now],
+      [id, user, run, modelName, version, now],
     );
     await event(this.db, user, run, "learner.started", { learnerRun: id });
     // Its own trace in agentwatch: model calls, cost and the memory it wrote.
@@ -743,7 +790,11 @@ export class Learner {
     // Its own service, so its calls stay out of the turns' cost, error and latency monitors.
     otel.runAgent(
       run,
-      version === PROCEDURE_PROMPT_VERSION ? "procedures" : "learner",
+      version === PROCEDURE_PROMPT_VERSION
+        ? "procedures"
+        : version === JUDGE_PROMPT_VERSION
+          ? "judge"
+          : "learner",
       "chief-learner",
     );
     const finish = async (
@@ -995,6 +1046,437 @@ export class Learner {
     } catch (error) {
       opsLog("learner.failed", "warn", { runId: run, ...errorFields(error) });
       return finish("failed", { error: "learner_failed", ...summary() });
+    }
+  }
+
+  /** How far the judge has read: the newest turn context and the newest fact it has judged. */
+  private async judgeMarks(user: string) {
+    const row = (
+      await this.db.query(
+        `SELECT max((summary->>'through')::timestamptz)::text AS through,
+         max((summary->>'factsThrough')::timestamptz)::text AS facts
+         FROM learner_runs WHERE user_id=$1 AND prompt_version LIKE 'judge-%'`,
+        [user],
+      )
+    ).rows[0] as { through: string | null; facts: string | null } | undefined;
+    return { through: row?.through ?? null, factsThrough: row?.facts ?? null };
+  }
+
+  /** Whether the judge has anything to read, so a quiet night opens no run. */
+  private async judgeDue(user: string, now: Date) {
+    const marks = await this.judgeMarks(user);
+    return (
+      (await this.judgeFactRows(user, marks.factsThrough, 1)).length > 0 ||
+      (await this.judgeTurnRows(user, marks.through, now, 1)).length > 0
+    );
+  }
+
+  private async judgeFactRows(
+    user: string,
+    after: string | null,
+    limit: number,
+  ) {
+    return (
+      await this.db.query(
+        `SELECT r.id,r.key,r.value,r.source,r.created_at::text AS at FROM memory_heads h
+         JOIN memory_revisions r ON r.user_id=h.user_id AND r.id=h.revision_id
+         WHERE h.user_id=$1 AND r.status='active' AND r.kind='fact' AND r.origin='learned'
+         AND ($2::timestamptz IS NULL OR r.created_at>$2::timestamptz)
+         ORDER BY r.created_at,r.id LIMIT $3`,
+        [user, after, limit],
+      )
+    ).rows as Array<{
+      id: string;
+      key: string;
+      value: string;
+      source: { messageIds?: unknown };
+      at: string;
+    }>;
+  }
+
+  /**
+   * The owner's turns whose memory context the judge has not read, oldest first: past the
+   * success window, so the learner's label and any correction are in.
+   */
+  private async judgeTurnRows(
+    user: string,
+    after: string | null,
+    now: Date,
+    limit: number,
+  ) {
+    return (
+      await this.db.query(
+        `SELECT c.run_id,c.created_at::text AS at,c.selected,r.started_at,
+         (SELECT l.label FROM learning_reviews l WHERE l.user_id=c.user_id AND l.task_id=c.run_id) AS label
+         FROM memory_context c JOIN runtime_runs r ON r.user_id=c.user_id AND r.id=c.run_id
+         WHERE c.user_id=$1 AND c.created_at<=$3 AND c.created_at>=$4
+         AND ($2::timestamptz IS NULL OR c.created_at>$2::timestamptz)
+         AND cardinality(c.selected)>0 AND r.state='stopped'
+         AND EXISTS (SELECT 1 FROM conversation_inputs i WHERE i.user_id=c.user_id AND i.run_id=c.run_id)
+         ORDER BY c.created_at,c.run_id LIMIT $5`,
+        [
+          user,
+          after,
+          new Date(now.getTime() - LEARNING_LIMITS.quietMs),
+          new Date(now.getTime() - LEARNING_LIMITS.maxAgeMs),
+          limit,
+        ],
+      )
+    ).rows as Array<{
+      run_id: string;
+      at: string;
+      selected: string[];
+      started_at: Date | string;
+      label: string | null;
+    }>;
+  }
+
+  /**
+   * The owner's own words in the messages a fact cites: a turn's inputs, a task's request or
+   * its later messages. The quote itself is not stored on the revision, so the judge reads
+   * the whole message, which also shows whose words they were.
+   */
+  private async ownerTexts(user: string, ids: string[]) {
+    const tasks = ids
+      .filter((id) => id.startsWith("request:"))
+      .map((id) => id.slice("request:".length));
+    const others = ids.filter((id) => !id.startsWith("request:"));
+    const rows = (
+      await this.db.query(
+        `SELECT request AS said FROM work_tasks WHERE user_id=$1 AND id::text=ANY($2::text[])
+         UNION ALL SELECT message FROM conversation_inputs WHERE user_id=$1 AND id::text=ANY($3::text[])
+         UNION ALL SELECT mc.payload->>'content' FROM conversation_messages cm
+         JOIN message_contents mc ON mc.user_id=cm.user_id AND mc.hash=cm.hash
+         WHERE cm.user_id=$1 AND cm.id::text=ANY($3::text[]) AND mc.payload->>'role'='user'`,
+        [user, tasks, others],
+      )
+    ).rows as Array<{ said: string | null }>;
+    return rows
+      .map((r) =>
+        clip(ownerWords(r.said ?? "").text, JUDGE_LIMITS.messageChars),
+      )
+      .filter((text) => text.trim());
+  }
+
+  /** One judged turn: the owner's words, Chief's reply and the names of its tool calls. */
+  private async judgeTurn(
+    user: string,
+    row: Awaited<ReturnType<Learner["judgeTurnRows"]>>[number],
+  ) {
+    const owner = (
+      await this.db.query(
+        "SELECT message FROM conversation_inputs WHERE user_id=$1 AND run_id=$2 ORDER BY ordinal",
+        [user, row.run_id],
+      )
+    ).rows
+      .map((i) => ownerWords(i.message as string).text)
+      .filter((text) => text.trim())
+      .join("\n");
+    const reply = (
+      await this.db.query(
+        `SELECT mc.payload->>'content' AS content FROM conversation_messages cm
+         JOIN message_contents mc ON mc.user_id=cm.user_id AND mc.hash=cm.hash
+         WHERE cm.user_id=$1 AND cm.run_id=$2 AND mc.payload->>'role'='assistant'
+         ORDER BY cm.ordinal DESC LIMIT 1`,
+        [user, row.run_id],
+      )
+    ).rows[0]?.content as string | undefined;
+    const calls = (
+      await this.db.query(
+        `SELECT operation,state FROM runtime_calls WHERE run_id=$1
+         AND operation NOT IN ('finish_turn','tools_load') ORDER BY started_at,call_id LIMIT $2`,
+        [row.run_id, JUDGE_LIMITS.calls],
+      )
+    ).rows.map((c) => `${c.operation}:${c.state}`);
+    return {
+      id: "",
+      runId: row.run_id,
+      at: row.at,
+      selected: row.selected,
+      date: day(row.started_at),
+      ...(row.label === "success" || row.label === "pitfall"
+        ? { label: row.label }
+        : {}),
+      owner: clip(
+        owner || "(an attachment without text)",
+        JUDGE_LIMITS.messageChars,
+      ),
+      reply: clip(reply ?? "", JUDGE_LIMITS.replyChars),
+      calls,
+      memories: [] as string[],
+    };
+  }
+
+  /**
+   * One batch in front of the judge: every fact and turn gets one judgement, with one reminder
+   * for what the first response left out or had refused. Nothing is recorded when the owner
+   * starts a turn; the batch is read again later.
+   */
+  private async judge(
+    user: string,
+    run: string,
+    batch: JudgeBatch,
+    progress: { modelCalls: number; refused: number },
+  ) {
+    const tools: ToolDefinition[] = Object.entries(judgeTools).map(
+      ([name, schema]) => ({
+        name,
+        description: judgeToolDescriptions[name as JudgeToolName],
+        parameters: jsonSchema(schema),
+      }),
+    );
+    const messages: Message[] = [
+      { role: "system", content: JUDGE_INSTRUCTIONS },
+      { role: "user", content: judgePrompt(batch) },
+    ];
+    const done = newJudgements();
+    const adapter = this.options.judge?.model ?? this.options.model;
+    for (let i = 0; i < JUDGE_LIMITS.modelCalls; i++) {
+      if (await this.ownerActive(user)) return { deferred: true as const };
+      const generation = await this.traced(
+        run,
+        messages,
+        () =>
+          adapter.generate({
+            messages,
+            tools,
+            reasoning: "medium",
+            signal: AbortSignal.timeout(LEARNING_LIMITS.callMs),
+            cacheKey: `judge:${user}`,
+          }),
+        adapter.model ?? this.modelNameOf(JUDGE_PROMPT_VERSION),
+      );
+      progress.modelCalls++;
+      messages.push(generation.message);
+      for (const call of generation.message.tool_calls ?? []) {
+        const name = call.function.name as JudgeToolName;
+        const schema = judgeTools[name];
+        let result: Record<string, unknown>;
+        if (!schema) result = { refused: "Unknown tool" };
+        else {
+          const parsed = parseArguments(schema, call.function.arguments);
+          if (!("args" in parsed))
+            result = { refused: "Invalid arguments", detail: parsed.problem };
+          else if (name === "judge_finish") result = { ok: true };
+          else {
+            const problem = recordJudgement(name, parsed.args, batch, done);
+            result = problem ? { refused: problem } : { recorded: true };
+          }
+        }
+        if ("refused" in result) progress.refused++;
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          content: JSON.stringify(result),
+        });
+      }
+      const left = unjudged(batch, done);
+      if (!left.length) break;
+      messages.push({
+        role: "user",
+        content: `Not judged yet, or refused (the tool results say why): ${left.join(", ")}. Judge each with one tool call, then call judge_finish.`,
+      });
+    }
+    return { deferred: false as const, done };
+  }
+
+  /**
+   * The night's judge pass: new learned facts against the messages they cite, then the turns
+   * past the success window against the memory that was in their context. Verdicts go to the
+   * events table and, for turns, to trace export as evaluations. No memory is changed. Progress
+   * is saved after each batch, so a failure or an owner turn repeats only that batch.
+   */
+  private async runJudge(user: string, now: Date) {
+    const { id, run, finish } = await this.open(
+      user,
+      now,
+      JUDGE_PROMPT_VERSION,
+    );
+    const progress = {
+      modelCalls: 0,
+      refused: 0,
+      judgedFacts: 0,
+      supported: 0,
+      overstated: 0,
+      unsupported: 0,
+      contradictedFacts: 0,
+      noSource: 0,
+      turns: 0,
+      skippedTurns: 0,
+      relevant: 0,
+      followed: 0,
+      ignored: 0,
+      contradicted: 0,
+      unclear: 0,
+      missed: 0,
+    };
+    let through: string | undefined;
+    let factsThrough: string | undefined;
+    const summary = () => ({
+      ...progress,
+      ...(through ? { through } : {}),
+      ...(factsThrough ? { factsThrough } : {}),
+    });
+    const save = () =>
+      this.db.query(
+        "UPDATE learner_runs SET summary=$3::jsonb WHERE id=$1 AND user_id=$2",
+        [id, user, JSON.stringify(summary())],
+      );
+    const chunks = <T>(items: T[]) =>
+      Array.from(
+        { length: Math.ceil(items.length / JUDGE_LIMITS.batch) },
+        (_, i) =>
+          items.slice(i * JUDGE_LIMITS.batch, (i + 1) * JUDGE_LIMITS.batch),
+      );
+    const deferred = () =>
+      finish("deferred", { ...summary(), reason: "owner_active" });
+    try {
+      const marks = await this.judgeMarks(user);
+      const spend = new Spending(this.db, user, run);
+      const facts: Array<JudgeFact & { at: string }> = [];
+      for (const r of await this.judgeFactRows(
+        user,
+        marks.factsThrough,
+        JUDGE_LIMITS.facts,
+      ))
+        facts.push({
+          id: "",
+          revisionId: r.id,
+          key: r.key,
+          value: r.value,
+          at: r.at,
+          messages: await this.ownerTexts(
+            user,
+            Array.isArray(r.source.messageIds)
+              ? r.source.messageIds.filter((m) => typeof m === "string")
+              : [],
+          ),
+        });
+      for (const chunk of chunks(facts)) {
+        chunk.forEach((f, i) => (f.id = `f${i + 1}`));
+        // A fact whose messages are gone cannot be judged; that is recorded, not guessed.
+        const sourced = chunk.filter((f) => f.messages.length);
+        const outcome = sourced.length
+          ? await spending.run(spend, () =>
+              this.judge(
+                user,
+                run,
+                { facts: sourced, turns: [], memories: [] },
+                progress,
+              ),
+            )
+          : { deferred: false as const, done: newJudgements() };
+        if (outcome.deferred) return await deferred();
+        for (const f of chunk) {
+          const judged = outcome.done.facts.get(f.id);
+          const verdict = !f.messages.length
+            ? "no_source"
+            : (judged?.verdict ?? "missed");
+          if (verdict === "no_source") progress.noSource++;
+          else if (verdict === "missed") progress.missed++;
+          else {
+            progress.judgedFacts++;
+            progress[
+              verdict === "contradicted" ? "contradictedFacts" : verdict
+            ]++;
+          }
+          await this.trace(user, run, "judge.fact", {
+            learnerRun: id,
+            revisionId: f.revisionId,
+            key: f.key,
+            verdict,
+            ...(judged ? { reason: judged.reason } : {}),
+          });
+        }
+        factsThrough = chunk.at(-1)!.at;
+        await save();
+      }
+      const turns: Array<JudgeTurn & { at: string; selected: string[] }> = [];
+      for (const row of await this.judgeTurnRows(
+        user,
+        marks.through,
+        now,
+        JUDGE_LIMITS.turns,
+      ))
+        turns.push(await this.judgeTurn(user, row));
+      for (const chunk of chunks(turns)) {
+        const revisions = (
+          await this.db.query(
+            `SELECT id,key,kind,value,origin,source FROM memory_revisions
+             WHERE user_id=$1 AND id=ANY($2::uuid[]) AND value IS NOT NULL ORDER BY key,revision`,
+            [user, [...new Set(chunk.flatMap((t) => t.selected))]],
+          )
+        ).rows;
+        const memories: JudgeMemory[] = revisions.map((r, i) => ({
+          id: `m${i + 1}`,
+          revisionId: r.id,
+          key: r.key,
+          kind: r.kind,
+          learned: isLearned(r),
+          value: clip(r.value, JUDGE_LIMITS.memoryChars),
+        }));
+        const memoryOf = new Map(memories.map((m) => [m.id, m]));
+        chunk.forEach((t, i) => {
+          t.id = `t${i + 1}`;
+          // In the list's order, whatever order the context was recorded in.
+          t.memories = memories
+            .filter((m) => t.selected.includes(m.revisionId))
+            .map((m) => m.id);
+        });
+        // A turn with no reply, or whose memories are gone, has nothing to judge.
+        const judgeable = chunk.filter((t) => t.reply && t.memories.length);
+        const outcome = judgeable.length
+          ? await spending.run(spend, () =>
+              this.judge(
+                user,
+                run,
+                { facts: [], turns: judgeable, memories },
+                progress,
+              ),
+            )
+          : { deferred: false as const, done: newJudgements() };
+        if (outcome.deferred) return await deferred();
+        for (const t of chunk) {
+          const relevant = outcome.done.turns.get(t.id);
+          const state = !judgeable.includes(t)
+            ? "skipped"
+            : relevant
+              ? "judged"
+              : "missed";
+          if (state === "skipped") progress.skippedTurns++;
+          else if (state === "missed") progress.missed++;
+          else {
+            progress.turns++;
+            progress.relevant += relevant!.length;
+            for (const r of relevant!) progress[r.use]++;
+            otel.memoryUse(t.runId, turnScore(relevant!));
+          }
+          await this.trace(user, run, "judge.turn", {
+            learnerRun: id,
+            turnRunId: t.runId,
+            state,
+            ...(t.label ? { label: t.label } : {}),
+            inContext: t.memories.length,
+            relevant: (relevant ?? []).map((r) => {
+              const m = memoryOf.get(r.memory)!;
+              return {
+                revisionId: m.revisionId,
+                key: m.key,
+                kind: m.kind,
+                learned: m.learned,
+                use: r.use,
+                reason: r.reason,
+              };
+            }),
+          });
+        }
+        through = chunk.at(-1)!.at;
+        await save();
+      }
+      return await finish("completed", summary());
+    } catch (error) {
+      opsLog("learner.failed", "warn", { runId: run, ...errorFields(error) });
+      return finish("failed", { error: "judge_failed", ...summary() });
     }
   }
 

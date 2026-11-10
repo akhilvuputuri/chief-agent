@@ -103,6 +103,15 @@ Create, change or switch it off through agentwatch's Judges page or API, over th
 
 A judge's verdicts are evidence to read beside `user_redirected`, not ground truth: trace content is untrusted, and whether this judge agrees with the owner has not been measured.
 
+## Memory use
+
+Chief's nightly judge ([learning](learning.md#nightly-judge)) scores each owner turn a day or more after it ended. The scores are `gen_ai.evaluation.result` log records on that turn's root span, which is addressed by the IDs derived from the turn's run ID, as the backfill derives them:
+
+- `memory_relevant`: a number, how many memory items in the turn's context the judge found relevant to it. 0 is the usual value.
+- `memory_followed`: sent only when at least one was relevant and its use could be judged. `true` with the label `followed`, or `false` with the label `ignored` or `contradicted`, the worst use among them.
+
+They carry a count and a fixed label, never a key, a value or the judge's reason; those stay in Postgres. The judge's own run is a trace under the service `chief-learner` with the agent name `judge`. A turn whose trace agentwatch never had or has pruned gets no score there. As with the other judge, a verdict is evidence to read, not ground truth.
+
 ## Monitors and alerts
 
 agentwatch watches metrics over a trailing window and raises an alert when one crosses its limit, and again when it recovers ([agentwatch's design notes](https://github.com/akhilvuputuri/agentwatch/blob/main/docs/design.md#monitors-and-alerts)). A rate fires only when its 95% Wilson bound clears the limit, so a few failures at low volume do not alert. Once firing, a monitor resolves only after staying good for its cooldown (60 minutes by default), so it does not flap (a cooldown of 0 turns this off); editing or deleting a firing monitor sends a resolved alert saying so.
@@ -201,7 +210,7 @@ The file holds the owner's memories: keep it private. The CLI prints only counts
 
 ## What leaves the process
 
-Spans carry the same kind of values as the [operational log](operational-logs.md): IDs, model names that pass the model-name shape, fixed provider slugs (`providerName` in `ops-log.ts`), token counts, cost, durations, fixed finish reasons, host-defined tool names (`logOperation`, so a model-invented tool name becomes `unknown`), stop reasons and error codes that pass the code shape. Feedback evaluations carry only a fixed name, a boolean and a fixed label. Memory spans carry revision IDs, kinds, sizes and host flags, with keys and values only under content capture ([memory](#memory)). Unless message content is switched on (above), never prompts, replies, tool arguments or results, error messages or OpenRouter's provider display text. The integration test checks the exported bytes for planted private strings.
+Spans carry the same kind of values as the [operational log](operational-logs.md): IDs, model names that pass the model-name shape, fixed provider slugs (`providerName` in `ops-log.ts`), token counts, cost, durations, fixed finish reasons, host-defined tool names (`logOperation`, so a model-invented tool name becomes `unknown`), stop reasons and error codes that pass the code shape. Feedback and memory-use evaluations carry only a fixed name, a boolean or a count, and a fixed label. Memory spans carry revision IDs, kinds, sizes and host flags, with keys and values only under content capture ([memory](#memory)). Unless message content is switched on (above), never prompts, replies, tool arguments or results, error messages or OpenRouter's provider display text. The integration test checks the exported bytes for planted private strings.
 
 ## Failure behaviour
 
