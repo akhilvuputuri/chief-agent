@@ -48,7 +48,9 @@ type Pooled = {
   /** Finds the tables that hold rows, so an untouched table costs nothing to reset. */
   probe: string;
   /** Rows the migrations themselves inserted, put back after each reset. */
-  seeds: { insert: string; rows: string }[];
+  seeds: { table: string; insert: string; rows: string }[];
+  /** Role count at the start: event triggers do not see roles being created. */
+  roles: number;
 };
 const idle = new Map<string, Pooled[]>();
 const stats = { created: 0, reused: 0, discarded: 0 };
@@ -57,17 +59,25 @@ export const databaseStats = () => ({ ...stats });
 
 const USER_TABLES = `SELECT format('%I.%I', schemaname, tablename) AS name FROM pg_tables
   WHERE schemaname !~ '^pg_' AND schemaname NOT IN ('information_schema', 'test_pool')`;
+// What a reset cannot undo: schema changes, roles and large objects.
+const UNCLEAN = `SELECT (SELECT count(*) FROM test_pool.changes)::int AS changes,
+  (SELECT count(*) FROM pg_roles)::int AS roles,
+  (SELECT count(*) FROM pg_largeobject_metadata)::int AS large_objects`;
 
 async function pooled(pg: PGlite): Promise<Pooled> {
-  // Event triggers see every schema change, including ones a rolled-back transaction
-  // undoes (the setting rolls back with it). A changed schema is never reused.
+  // Event triggers record every schema change in a table, so a rolled-back change is
+  // rolled back in the record too, and no session setting can clear it. ENABLE ALWAYS
+  // keeps them firing when a test switches session_replication_role.
   await pg.exec(`
     CREATE SCHEMA test_pool;
+    CREATE TABLE test_pool.changes (at timestamptz NOT NULL DEFAULT now());
     CREATE FUNCTION test_pool.mark() RETURNS event_trigger LANGUAGE plpgsql AS
-      $$ BEGIN PERFORM set_config('test_pool.dirty', '1', false); END $$;
+      $$ BEGIN INSERT INTO test_pool.changes DEFAULT VALUES; END $$;
     CREATE EVENT TRIGGER test_pool_ddl ON ddl_command_end EXECUTE FUNCTION test_pool.mark();
     CREATE EVENT TRIGGER test_pool_drop ON sql_drop EXECUTE FUNCTION test_pool.mark();
-    SELECT set_config('test_pool.dirty', '', false);`);
+    ALTER EVENT TRIGGER test_pool_ddl ENABLE ALWAYS;
+    ALTER EVENT TRIGGER test_pool_drop ENABLE ALWAYS;
+    DELETE FROM test_pool.changes;`);
   const tables = (await pg.query<{ name: string }>(USER_TABLES)).rows.map(
     (row) => row.name,
   );
@@ -95,53 +105,87 @@ async function pooled(pg: PGlite): Promise<Pooled> {
       )
     ).rows[0]!.rows;
     seeds.push({
+      table: name,
       insert: `INSERT INTO ${name} (${columns}) OVERRIDING SYSTEM VALUE
         SELECT ${columns} FROM json_populate_recordset(NULL::${name}, $1::json)`,
       rows,
     });
   }
-  return { pg, probe, seeds };
+  const { roles } = (await pg.query<{ roles: number }>(UNCLEAN)).rows[0]!;
+  return { pg, probe, seeds, roles };
 }
 
 /** Empties a returned database. False means it cannot be reused and must be closed. */
-async function reset({ pg, probe, seeds }: Pooled): Promise<boolean> {
+async function reset({ pg, probe, seeds, roles }: Pooled): Promise<boolean> {
   await pg.exec("ROLLBACK");
-  const { dirty } = (
-    await pg.query<{ dirty: string }>(
-      "SELECT coalesce(current_setting('test_pool.dirty', true), '') AS dirty",
+  const unclean = (
+    await pg.query<{ changes: number; roles: number; large_objects: number }>(
+      UNCLEAN,
     )
   ).rows[0]!;
-  if (dirty) return false;
-  const filled = probe
-    ? (await pg.query<{ name: string }>(probe)).rows.map((row) => row.name)
-    : [];
-  // Replica mode skips foreign-key and user triggers, so the order of deletes is free and
-  // nothing fires. Deleted rows are never vacuumed here, so new rows still land in
-  // insertion order, as they would in a fresh database.
-  await pg.exec(
-    `SET session_replication_role = replica; ${filled
-      .map((name) => `DELETE FROM ${name};`)
-      .join(" ")}`,
-  );
-  for (const seed of seeds) await pg.query(seed.insert, [seed.rows]);
+  if (unclean.changes || unclean.large_objects || unclean.roles !== roles)
+    return false;
+  const filled = [
+    ...new Set([
+      ...(probe
+        ? (await pg.query<{ name: string }>(probe)).rows.map((row) => row.name)
+        : []),
+      ...seeds.map((seed) => seed.table),
+    ]),
+  ];
+  if (filled.length) {
+    // Replica mode skips foreign-key and user triggers, so the order of deletes is free
+    // and nothing fires.
+    await pg.exec(
+      `SET session_replication_role = replica; ${filled
+        .map((name) => `DELETE FROM ${name};`)
+        .join(" ")}`,
+    );
+    // Without this, later rows can land in space the deleted ones left, and an unordered
+    // SELECT then returns them in a different order than a fresh database would. Vacuum
+    // gives an emptied table back all its pages; anything else is not reused.
+    await pg.exec(`VACUUM ${filled.join(", ")}`);
+    const { size } = (
+      await pg.query<{ size: number }>(
+        `SELECT coalesce(sum(pg_relation_size(name::regclass)), 0)::int AS size
+           FROM unnest($1::text[]) AS name`,
+        [filled],
+      )
+    ).rows[0]!;
+    if (size) return false;
+    for (const seed of seeds) await pg.query(seed.insert, [seed.rows]);
+  }
+  // Every sequence, since one moved with setval(..., false) reports no last value.
   await pg.query(
     `SELECT setval(format('%I.%I', schemaname, sequencename)::regclass, start_value, false)
-       FROM pg_sequences WHERE last_value IS NOT NULL`,
+       FROM pg_sequences`,
   );
-  // Settings, prepared statements, listeners, advisory locks and temporary tables.
+  // Settings, prepared statements, SQL-level listeners, advisory locks and temporary
+  // tables, and session_replication_role with them.
   await pg.exec("DISCARD ALL");
   // PGlite sets this for its session at start; DISCARD ALL returns it to the server default.
   await pg.exec("SET search_path TO public");
   return true;
 }
 
-/** A handle that behaves like its own database: once closed, it refuses further use. */
+/**
+ * A handle that behaves like its own database: once closed, it refuses further calls.
+ * Values that are not methods, such as an extension's namespace, are passed through as
+ * they are and are not covered by that.
+ */
 function lease(key: string, entry: Pooled): PGlite {
   let closed = false;
+  // PGlite keeps listener callbacks on the instance, where no SQL reaches them.
+  const unsubscribe: (() => unknown)[] = [];
   const close = async () => {
     if (closed) return;
     closed = true;
-    if (await reset(entry).catch(() => false)) {
+    const reusable = await (async () => {
+      await entry.pg.exec("ROLLBACK");
+      for (const stop of unsubscribe) await stop();
+      return reset(entry);
+    })().catch(() => false);
+    if (reusable) {
       const list = idle.get(key);
       if (list) list.push(entry);
       else idle.set(key, [entry]);
@@ -158,10 +202,19 @@ function lease(key: string, entry: Pooled): PGlite {
       const value: unknown = Reflect.get(target, property, target);
       if (typeof value !== "function") return value;
       // PGlite's methods read private fields, so they must run on the real instance.
-      return (...args: unknown[]) =>
-        closed
-          ? Promise.reject(new Error("PGlite is closed"))
-          : value.apply(target, args);
+      return (...args: unknown[]) => {
+        if (closed) return Promise.reject(new Error("PGlite is closed"));
+        const result: unknown = value.apply(target, args);
+        if (property === "onNotification" && typeof result === "function")
+          unsubscribe.push(result as () => unknown);
+        if (property === "listen" && result instanceof Promise)
+          return result.then((stop: unknown) => {
+            if (typeof stop === "function")
+              unsubscribe.push(stop as () => unknown);
+            return stop;
+          });
+        return result;
+      };
     },
   });
 }

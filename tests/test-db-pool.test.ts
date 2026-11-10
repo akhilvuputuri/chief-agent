@@ -102,6 +102,117 @@ test("a changed schema is discarded, and a rolled-back change is not", async () 
   await fresh.close();
 });
 
+test("rows come back in insertion order after many reuses, as in a fresh database", async () => {
+  // Deleting without vacuuming let later rows land in freed space: with rows of these
+  // sizes the order first went wrong on about the sixteenth reuse.
+  for (let cycle = 0; cycle < 60; cycle++) {
+    const db = await migratedPGlite();
+    const ids = Array.from(
+      { length: 5 + (cycle % 40) },
+      (_, i) => `${i}-${cycle}-${"x".repeat(cycle % 3 ? 20 : 200)}`,
+    );
+    await db.query("INSERT INTO users(id) SELECT unnest($1::text[])", [ids]);
+    if (cycle % 2)
+      await db.query("UPDATE users SET created_at = now() + interval '1 s'");
+    assert.deepEqual(
+      (await db.query<{ id: string }>("SELECT id FROM users")).rows.map(
+        (row) => row.id,
+      ),
+      ids,
+      `reuse ${cycle}`,
+    );
+    await db.close();
+  }
+});
+
+test("the rows migrations inserted are restored exactly", async () => {
+  const dump = async (db: Awaited<ReturnType<typeof migratedPGlite>>) =>
+    Promise.all(
+      ["runtime_migrations", "library_pacing"].map(
+        async (table) =>
+          (
+            await db.query<{ row: string }>(
+              `SELECT t::text AS row FROM ${table} t`,
+            )
+          ).rows,
+      ),
+    );
+  const first = await migratedPGlite();
+  const fresh = await dump(first);
+  assert.ok(fresh.every((rows) => rows.length > 0));
+  await first
+    .query("UPDATE library_pacing SET updated_at = now()")
+    .catch(() => {});
+  await first.query("DELETE FROM runtime_migrations");
+  await first.close();
+  const second = await supplied(() => migratedPGlite());
+  assert.equal(second.reused, 1);
+  assert.deepEqual(await dump(second.value), fresh);
+  await second.value.close();
+});
+
+test("a closed test's listeners hear nothing from the next test", async () => {
+  const heard: string[] = [];
+  const first = await migratedPGlite();
+  await first.listen("pool_channel", (payload) =>
+    heard.push(`first:${payload}`),
+  );
+  first.onNotification((channel, payload) =>
+    heard.push(`first-any:${payload}`),
+  );
+  await first.close();
+  const second = await supplied(() => migratedPGlite());
+  assert.equal(second.reused, 1);
+  await second.value.listen("pool_channel", (payload) =>
+    heard.push(`second:${payload}`),
+  );
+  await second.value.query("NOTIFY pool_channel, 'x'");
+  assert.deepEqual(heard, ["second:x"]);
+  await second.value.close();
+});
+
+test("state a reset cannot undo is never reused", async () => {
+  const cases: Record<string, string> = {
+    "a schema change hidden by RESET ALL":
+      "ALTER TABLE users ADD COLUMN extra int; RESET ALL",
+    "a schema change made in replica mode":
+      "SET session_replication_role = replica; CREATE TABLE made_in_replica(a int)",
+    "a large object": "SELECT lo_from_bytea(0, 'x')",
+    "a role": "CREATE ROLE pool_test_role",
+  };
+  for (const [name, sql] of Object.entries(cases)) {
+    const db = await migratedPGlite();
+    await db.exec(sql);
+    assert.equal((await supplied(() => db.close())).discarded, 1, name);
+  }
+});
+
+test("a sequence moved without being called is put back", async () => {
+  const first = await migratedPGlite();
+  const sequence = (
+    await first.query<{ name: string }>(
+      "SELECT format('%I.%I', schemaname, sequencename) AS name FROM pg_sequences WHERE schemaname = 'public' LIMIT 1",
+    )
+  ).rows[0]!.name;
+  const start = (
+    await first.query<{ value: string }>(
+      `SELECT nextval('${sequence}')::text AS value`,
+    )
+  ).rows[0]!.value;
+  await first.query(`SELECT setval('${sequence}', 100, false)`);
+  assert.equal((await supplied(() => first.close())).discarded, 0);
+  const second = await migratedPGlite();
+  assert.equal(
+    (
+      await second.query<{ value: string }>(
+        `SELECT nextval('${sequence}')::text AS value`,
+      )
+    ).rows[0]!.value,
+    start,
+  );
+  await second.close();
+});
+
 test("different migration lists never share a database", async () => {
   const partial = await migratedPGlite(["001_initial"]);
   await partial.close();

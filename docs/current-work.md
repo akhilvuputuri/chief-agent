@@ -1,6 +1,6 @@
-# Reused test databases — tested locally, 10 November 2026
+# Reused test databases — tested, 10 November 2026
 
-A profile showed tests spend most of their time creating PGlite databases, not in Chief's code. A closed test database is now emptied and reused; a 31-file sample fell from 81.9 s to 54.2 s on a Mac with every test passing. CI timings are pending. `TEST_DB_REUSE=0` turns it off. See [journal 157](journey/157-reused-test-databases.md).
+A profile showed tests spend most of their time creating PGlite databases, not in Chief's code. A closed test database is now emptied and reused. In one CI run the six test steps took 382 s against 617 s on main. `TEST_DB_REUSE=0` turns it off. See [journal 157](journey/157-reused-test-databases.md).
 
 # Memory in agentwatch — live in `4e8f886`, 5 November 2026
 
