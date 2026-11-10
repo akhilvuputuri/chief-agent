@@ -1,3 +1,7 @@
+# Reused test databases — tested locally, 10 November 2026
+
+A profile showed tests spend most of their time creating PGlite databases, not in Chief's code. A closed test database is now emptied and reused; a 31-file sample fell from 81.9 s to 54.2 s on a Mac with every test passing. CI timings are pending. `TEST_DB_REUSE=0` turns it off. See [journal 157](journey/157-reused-test-databases.md).
+
 # Memory in agentwatch — live in `4e8f886`, 5 November 2026
 
 agentwatch shows what Chief remembers: each item's history, linked to the turns it came from, and the items each model call had in its prompt, labelled "in context", never "used". Earlier memory was backfilled from Postgres: 41 items, 58 changes and 37 runs' context, from 28 October; the backfilled changes are traces of their own, since the learner runs that made most of them were not traced. The release traces learner runs under their own service. Not yet seen: a live turn's memory spans, and a traced learner run. See [tracing](tracing.md#memory) and [journal 153](journey/153-memory-transparency.md).
