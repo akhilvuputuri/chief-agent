@@ -184,7 +184,9 @@ After them, 16 learned facts and 10 lessons were active, 9 of them procedures. T
 
 **Hypothesis, not measured.** With the procedures shown whole and room for 2,000 characters, the pass may restore what the three refusals cut. It may also leave them as they are, since nothing in the evidence has changed. Expected cost is about $0.30: the 4 November pass over the same window was charged $0.27 (`provider_charges.actual_usd`).
 
-**Deployment.** The write is live; the re-run is due on the night of 9 November SGT. Update with what it wrote.
+**Deployment.** The write is live, and the re-run ran on the night of 9 November SGT.
+
+**Measured, the re-run.** Run `06bf929f` read the same 57 items in one model call, refused nothing and returned `through` to 2 November. It revised coding from 719 to 1,320 characters and calendar from 659 to 969, and left stocks at 657. Actual charge $0.18 (estimate $0.72). As a rough word check, of the distinct words over three letters in each refused 4 November draft, the trimmed versions had kept 64 of 79 (coding), 56 of 81 (calendar) and 53 of 72 (stocks); the revisions keep 70 of 79 and 59 of 81. So the new text is mostly additions rather than the cut text coming back: coding is now well past its 896-character draft. Whether the longer procedures help turns is not measured. The next night's facts pass read 4 items and saved 2 facts, both flagged `paraphrased`, with no refusals, for $0.08.
 
 ## Follow-up and next iteration
 
