@@ -34,7 +34,7 @@ export const responsibilitySpec = z
       .strict()
       .optional(),
     schedule: z.string().trim().min(1).max(150).optional(),
-    // One public page the host re-reads with no model; a model runs only when its text changes.
+    // One public page the host re-reads with no model; a model runs on the first reading and on a change.
     page: z
       .object({
         url: z.string().max(2000).transform(publicHttps),

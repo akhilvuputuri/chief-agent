@@ -290,13 +290,6 @@ export class ResponsibilityWorker {
             },
           },
         ];
-        // Only the latest reading matters; an earlier one no investigation took is superseded.
-        // Guarded like the commit below, so a watch paused during the read loses nothing.
-        await this.db.query(
-          `DELETE FROM responsibility_candidates c WHERE c.responsibility_id=$1 AND c.revision=$2 AND c.user_id=$3 AND c.task_id IS NULL AND c.payload->>'kind'='page'
-          AND EXISTS(SELECT 1 FROM responsibility_triggers t JOIN responsibilities r ON r.id=t.responsibility_id AND r.revision=t.revision WHERE t.id=$4 AND t.lease=$5 AND r.status='active')`,
-          [t.responsibility_id, t.revision, t.user_id, t.id, lease],
-        );
       }
       cursor = { ...cursor, pageHash };
       next = new Date(now.getTime() + t.config.minutes * 60000);
@@ -316,6 +309,7 @@ export class ResponsibilityWorker {
     }
     await this.db.query(
       `WITH live AS (SELECT t.id FROM responsibility_triggers t JOIN responsibilities r ON r.id=t.responsibility_id AND r.revision=t.revision WHERE t.id=$1 AND t.lease=$2 AND r.status='active' FOR UPDATE OF t),
+      superseded AS (DELETE FROM responsibility_candidates c USING live WHERE $10::boolean AND c.responsibility_id=$4 AND c.revision=$5 AND c.user_id=$3 AND c.task_id IS NULL AND c.payload->>'kind'='page'),
       saved AS (INSERT INTO responsibility_candidates(id,user_id,responsibility_id,revision,source_key,payload)
         SELECT gen_random_uuid(),$3,$4,$5,c->>'key',c->'payload' FROM jsonb_array_elements($6::jsonb)c,live ON CONFLICT DO NOTHING RETURNING id),
       checked AS (INSERT INTO responsibility_checks(id,user_id,trigger_id,outcome,candidates) SELECT gen_random_uuid(),$3,$1,'success',(SELECT count(*) FROM saved) FROM live)
@@ -330,6 +324,9 @@ export class ResponsibilityWorker {
         JSON.stringify(cursor),
         next,
         now,
+        // Only the latest page reading matters: one no investigation took is replaced in
+        // the same statement that admits the new one, so a pause in between loses neither.
+        changes.some((c) => c.payload.kind === "page"),
       ],
     );
   }

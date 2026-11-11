@@ -82,9 +82,14 @@ export class PublicBrowser {
    * A host check with no model: opens one address, reads its text once it stops changing,
    * and closes. It never clicks, fills or runs a caller's script, and stores nothing.
    */
-  async snapshot(user: string, session: string, url: string) {
-    // The whole check ends inside the caller's two-minute lease, however slow the page is.
-    const deadline = AbortSignal.timeout(90_000);
+  async snapshot(
+    user: string,
+    session: string,
+    url: string,
+    timeoutMs = 90_000,
+  ) {
+    // The reading is cut off inside the caller's two-minute lease, however slow the page is.
+    const deadline = AbortSignal.timeout(timeoutMs);
     const call = async (command: PublicBrowserCommand) => {
       const reply = await this.rpc.call(user, session, command, deadline);
       if (reply.busy === true) return undefined;
@@ -99,8 +104,10 @@ export class PublicBrowser {
       for (let reads = 0; reads < 4; reads++) {
         await call({ kind: "wait", ms: 2500 });
         const read = await call({ kind: "read" });
-        const now = String(read?.result ?? "");
-        address = String(read?.url ?? "");
+        // The service reclaimed the session for another run: busy, not a failed page.
+        if (!read) return { busy: true as const };
+        const now = String(read.result ?? "");
+        address = String(read.url ?? "");
         if (now === text) break;
         text = now;
       }

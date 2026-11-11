@@ -1,6 +1,6 @@
 # Watched pages for parcel tracking — in review, 11 November 2026
 
-A scheduled watch could only run one fixed web search, so it never opened a carrier's tracking page; SingPost showed nothing until the owner asked for the browser in the foreground. A responsibility can now name one public page. The host re-reads it with no model and wakes an investigation only when its text changes. No migration. Tested with mocked sources only: no real carrier page has been read, and whether SingPost shows a result at a direct address is unknown. A refused `responsibility_report` now logs which field failed. [Journal 160](journey/160-watched-pages.md), [responsibilities](responsibilities.md#source-adapters).
+A scheduled watch could only run one fixed web search, so it never opened a carrier's tracking page; SingPost showed nothing until the owner asked for the browser in the foreground. A responsibility can now name one public page. The host re-reads it with no model and wakes an investigation on the first reading and whenever its text changes. No migration. Tested with mocked sources only: no real carrier page has been read, and whether SingPost shows a result at a direct address is unknown. A refused `responsibility_report` now logs which field failed. [Journal 160](journey/160-watched-pages.md), [responsibilities](responsibilities.md#source-adapters).
 
 # Faster test runs — live in `2b4521c`, 11 November 2026
 

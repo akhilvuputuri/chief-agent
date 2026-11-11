@@ -1,6 +1,6 @@
 ## Watched pages (11 November 2026)
 
-- **Code.** A responsibility can name one public HTTPS page. The host opens it in the public browser with no model every 30–720 minutes (default 120) and runs a bounded investigation only when its text changes. The investigation holds only the report tool and writes no parcel record. A refused `responsibility_report` logs `errorField`, the first refused argument path. No migration and no Compose change; the public browser service is unchanged.
+- **Code.** A responsibility can name one public HTTPS page. The host opens it in the public browser with no model every 30–720 minutes (default 120) and runs a bounded investigation on the first reading and whenever its text changes. The investigation holds only the report tool and writes no parcel record. A refused `responsibility_report` logs `errorField`, the first refused argument path. No migration and no Compose change; the public browser service is unchanged.
 - **Why.** A scheduled parcel watch could run only one fixed web search and never opened the carrier's tracking page. See [journal 160](journey/160-watched-pages.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
 

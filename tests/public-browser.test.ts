@@ -809,3 +809,37 @@ test("a host page check reports a busy browser, and closes after a failure witho
   );
   assert.deepEqual(sent, ["open", "close"]);
 });
+
+test("a host page check is cut off at its deadline, closes, and treats a reclaimed session as busy", async () => {
+  const { db, user } = await database();
+  const sent: string[] = [];
+  const hanging = new PublicBrowser(db, {
+    call: (_u, _s, command, signal) => {
+      sent.push(command.kind);
+      if (command.kind !== "wait")
+        return Promise.resolve({ ok: true, result: {} });
+      // A page that never settles: only the deadline ends this call.
+      assert.ok(signal, "every command before close carries the deadline");
+      return new Promise((_resolve, reject) =>
+        signal.addEventListener("abort", () => reject(signal.reason)),
+      );
+    },
+  });
+  // The deadline's own timer does not keep the process alive, so hold it open here.
+  const alive = setTimeout(() => {}, 5000);
+  await assert.rejects(
+    hanging.snapshot(user, randomUUID(), "https://carrier.example/t", 20),
+  );
+  clearTimeout(alive);
+  assert.deepEqual(sent, ["open", "wait", "close"]);
+  const reclaimed = new PublicBrowser(db, {
+    call: async (_u, _s, command) =>
+      command.kind === "read"
+        ? { ok: false, busy: true, error: "busy" }
+        : { ok: true, result: {} },
+  });
+  assert.deepEqual(
+    await reclaimed.snapshot(user, randomUUID(), "https://carrier.example/t"),
+    { busy: true },
+  );
+});

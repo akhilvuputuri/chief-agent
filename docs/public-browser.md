@@ -47,7 +47,7 @@ The model reaches a typed command list (`src/public-browser/commands.ts`): `open
 
 `PublicBrowser.snapshot` is the one way the browser runs outside the browser agent. A [responsibility](responsibilities.md#source-adapters) names one owner-confirmed public HTTPS address, and the host sends a fixed sequence: `open`, then `wait` and `read` until two readings match (at most four), then `close`. No model chooses a command, nothing is clicked, filled or scripted, and nothing is stored as a source. The text goes to the responsibility check, which marks each reading untrusted for the model that later interprets a change.
 
-The check uses the same single session as the agent. While it runs, at most 90 seconds (not yet measured on a real page), a browser agent run gets the "busy" error; while an agent runs, the check waits two minutes and tries again. It is a gateway-side change only, using commands the service already accepts, so it needs no browser refresh.
+The check uses the same single session as the agent. While it runs, a browser agent run gets the "busy" error; while an agent runs, the check waits two minutes and tries again. The reading is cut off at 90 seconds and closing can take up to 45 more; neither is measured on a real page yet. It is a gateway-side change only, using commands the service already accepts, so it needs no browser refresh.
 
 The agent's instructions also stop it at login walls, CAPTCHAs and payment steps, and from posting, sending, booking or buying. That is guidance, not a host check.
 

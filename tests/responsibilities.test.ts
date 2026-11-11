@@ -2038,6 +2038,7 @@ function pageFixture(f: Awaited<ReturnType<typeof fixture>>) {
     url: "https://carrier.example/track?id=RR1",
     busy: false,
     reads: 0,
+    during: undefined as undefined | (() => Promise<unknown>),
   };
   const page = {
     snapshot: async (user: string, session: string, url: string) => {
@@ -2045,6 +2046,7 @@ function pageFixture(f: Awaited<ReturnType<typeof fixture>>) {
       assert.match(session, /^[0-9a-f-]{36}$/);
       assert.equal(url, "https://carrier.example/track?id=RR1");
       state.reads++;
+      await state.during?.();
       return state.busy
         ? { busy: true as const }
         : { url: state.url, text: state.text };
@@ -2194,6 +2196,34 @@ test("an unread earlier page reading is superseded, and a blocked or redirected 
       ],
     );
     assert.match(rows[1].payload.text, /Out for delivery/);
+    // Paused while the page is being read: the waiting reading stays and nothing is admitted.
+    const id = (await p.service.list("a"))[0].id;
+    p.state.text = "Tracking RR1 status: Cleared customs in Singapore today";
+    p.state.during = () =>
+      f.db.query("UPDATE responsibilities SET status='paused' WHERE id=$1", [
+        id,
+      ]);
+    const before = (
+      await f.db.query("SELECT cursor FROM responsibility_triggers")
+    ).rows[0].cursor;
+    await p.again();
+    p.state.during = undefined;
+    const kept = await p.candidates();
+    assert.equal(kept.length, 2);
+    assert.match(kept[1].payload.text, /Out for delivery/);
+    assert.deepEqual(
+      (await f.db.query("SELECT cursor FROM responsibility_triggers")).rows[0]
+        .cursor,
+      before,
+    );
+    await f.db.query(
+      "UPDATE responsibilities SET status='active' WHERE id=$1",
+      [id],
+    );
+    await f.db.query(
+      "UPDATE responsibility_triggers SET lease=NULL,lease_until=NULL",
+    );
+    p.state.text = "Tracking RR1 status: Out for delivery with the courier";
     // An empty page is a failed check, never a quiet "nothing changed".
     p.state.text = " ";
     await p.again();

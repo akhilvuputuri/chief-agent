@@ -49,7 +49,15 @@ Independent review (Claude Opus 5.5) requested changes on `5ab0e3e`:
 - A slow page could outlast the two-minute lease. The reading is now cut off at 90 seconds.
 - Smaller: the superseding delete was not guarded by the lease and active status; a `www.` redirect degraded the watch; the investigation prompt forbade "carrier verification" while asking for a carrier page to be reported; a reading carried no untrusted marker; the log test used a hand-written message, not a real schema refusal. All corrected.
 
-The reviewer found no boundary break in the host browser path or in `errorField`. Re-review of the corrected head: pending.
+The reviewer found no boundary break in the host browser path or in `errorField`.
+
+A second independent review (Claude Opus 5.5) approved `7950e31` with no blocking finding, after re-testing each correction, and asked for three more changes before release:
+
+- The delete of a superseded reading and the statement admitting the new one were separate, so a pause between them could lose both. Confirmed by the reviewer's own test. They are now one statement.
+- The 90-second cut-off and the pause-during-check guard had no test in the repository. Both now have one.
+- Three places still said the model runs "only when its text changes". Corrected.
+
+It also noted that a "busy" reply after a successful open degraded the watch instead of retrying (now treated as busy), and that a rollback to an older image degrades each page watch once (now in the responsibilities doc). Review of the head with these changes: pending.
 
 ## Verification and outcome
 
