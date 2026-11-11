@@ -1,6 +1,10 @@
 # Reused test databases — tested, 10 November 2026
 
-A profile showed tests spend most of their time creating PGlite databases, not in Chief's code. A closed test database is now emptied and reused. In one CI run the six test steps took 324 s against 617 s on main. `TEST_DB_REUSE=0` turns it off. See [journal 157](journey/157-reused-test-databases.md).
+A profile showed tests spend most of their time creating PGlite databases, not in Chief's code. A closed test database is now emptied and reused. In one CI run the six test steps took 324 s against 617 s on main. `TEST_DB_REUSE=0` turns it off. See [journal 158](journey/158-reused-test-databases.md).
+
+# A nightly judge of memory — not yet released, 10 November 2026
+
+Issue #326. The learner now ends each night with a judge on another model family (`openai/gpt-6.1-sol`): it checks each new learned fact against the owner's message it cites, and each owner turn against the memory that was in its context, and records which memories were relevant and whether they were followed. It changes no memory. Nothing is measured until its first production nights; the first has a backlog of 20 facts and about 54 turns. See [learning](learning.md#nightly-judge) and [journal 157](journey/157-nightly-memory-judge.md). Next: read the first week with `scripts/judge-report.sql`, then decide whether verdicts should flag anything.
 
 # Memory in agentwatch — live in `4e8f886`, 5 November 2026
 

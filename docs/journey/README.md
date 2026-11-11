@@ -163,7 +163,8 @@ For the latest verified release and open work, read [current work](../current-wo
 | 5 November | [154 — Failed checks go back to the coder](154-failed-checks-go-back-to-the-coder.md): why did a job stop at the first failed check instead of fixing it? | Tested on synthetic jobs; release pending. Failed checks get up to two repair rounds, stored output names the failures, and a stopped job can move to the current worker |
 | 8 November | [155 — Text Postgres cannot store](155-text-postgres-cannot-store.md): why did one model reply pause a coding job? | Tested on synthetic jobs; release pending. Descriptive text is made storable where the host writes it; exact copies and code stay exact |
 | 9 November | [156 — Room for the whole plan](156-room-for-the-whole-plan.md): why did the planner stop while writing its plan? | Released in `fa058f9`; image pin follows. The schema allows coder and planner calls up to 128,000 output tokens, and the worker waits as long as the host allows; the profile stays at 16,000 until the next worker image pin |
-| 10 November | [157 — Reused test databases](157-reused-test-databases.md): where does test time go, and can a test get a database for less? | Tested: CI's six test steps took 324 s in one run against 617 s on main; release pending |
+| 10 November | [157 — Nightly memory judge](157-nightly-memory-judge.md): is the memory right, and is it used? | Tested on synthetic data; release pending. A judge on another model family checks each new fact against the owner's message and each turn against the memory in its context, and changes no memory |
+| 10 November | [158 — Reused test databases](158-reused-test-databases.md): where does test time go, and can a test get a database for less? | Tested: CI's six test steps took 324 s in one run against 617 s on main; release pending |
 
 ## Coding-agent learning path
 

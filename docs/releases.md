@@ -1,7 +1,13 @@
 ## Reused test databases (10 November 2026)
 
 - **Code.** Tests only. A database a test closes is emptied and handed to the next test, instead of each test restoring a snapshot. `TEST_DB_REUSE=0` turns it off. No migration, and nothing in the running application changes.
-- **Why.** Creating databases took most of a test run's time. See [journal 157](journey/157-reused-test-databases.md).
+- **Why.** Creating databases took most of a test run's time. See [journal 158](journey/158-reused-test-databases.md).
+
+## A nightly judge of memory (10 November 2026)
+
+- **Code.** After the item and procedure passes, the learner runs a judge (`judge-v1`): each new learned fact against the owner's message it cites, and each owner turn past the success window against the memory that was in its context (which items were relevant, and whether each was followed, ignored or contradicted). Verdicts go to `events` and, for turns, to trace export as `memory_relevant` and `memory_followed`. It changes no memory. No database or Compose change.
+- **Configuration.** `config/model-policy.json` gains `judge`: `openai/gpt-6.1-sol`, a different family from the main model and the learner, inside the existing price ceilings.
+- **Why.** Nothing checked whether a saved fact means what the owner said, or whether memory in context is used, and the owner rates nothing. See [journal 157](journey/157-nightly-memory-judge.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
 
 ## Worker image with room for the whole plan (9 November 2026)
@@ -47,7 +53,7 @@
 - **Code.** A procedure may run to 2,000 characters, and learned items get 30,000 characters of a turn's context. A refused malformed call says which field failed. A fact's word checks now flag instead of refusing; a value of framing words only, or one sharing no word with its quote, is still refused. An added number, negation, address, link or payment word is a warning flag. No prompt version, database or Compose change.
 - **Why.** On the first two nights, all 15 procedure refusals were over the 800-character limit, and 13 facts were refused by the word checks, most of them well worded. See [journal 130](journey/130-nightly-learner.md#first-two-nights-of-procedures-and-refusals-become-flags--2026-11-03).
 - **Review.** Independent review (Claude Opus 5.5) requested changes on `4492e8b`: long procedures were cut to 1,000 characters when shown for revision, invented recipients saved with routine flags only, and the exfiltration pattern missed "shared". All fixed, and it approved `a739ab6`, `67a5d90` and the final head, which merges main and adds doc edits only. Its remaining low notes: file names also raise the contact warning, and a few phrasings ("the PIN on the card", a spaced-out " . ") are not caught.
-- **Deployment.** Merged as `d3f1234` (PR 418) on 5 November. Its own release run stopped at the current-main check because PR 423 had already landed. Live in `c8f00dc`, which contains it, by the [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/42041411757) at 22:05 SGT. The facts pass first ran under these limits on 6 November. The weekly procedure pass was next due on 11 November; on 8 November its progress was moved back a week, with the owner's approval, so it re-runs the 20 October to 2 November window on 9 November ([journal 130](journey/130-nightly-learner.md#re-running-one-procedure-window-under-the-new-limit--2026-11-08)).
+- **Deployment.** Merged as `d3f1234` (PR 418) on 5 November. Its own release run stopped at the current-main check because PR 423 had already landed. Live in `c8f00dc`, which contains it, by the [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/42041411757) at 22:05 SGT. The facts pass first ran under these limits on 6 November. The weekly procedure pass was next due on 11 November; on 8 November its progress was moved back a week, with the owner's approval, and it re-ran the 20 October to 2 November window on 9 November, lengthening the coding and calendar procedures ([journal 130](journey/130-nightly-learner.md#re-running-one-procedure-window-under-the-new-limit--2026-11-08)).
 
 ## Worker image with failure-hunting review, and the plan check on (4 November 2026)
 
