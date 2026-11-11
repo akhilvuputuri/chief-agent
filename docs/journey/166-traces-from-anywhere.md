@@ -54,6 +54,8 @@ Tested, not live. What the rollout will have to show: the gateway still exports 
 
 Limits: one account; sessions are kept in memory, so a restart (each agentwatch update) signs the owner out; 30 failed sign-ins an hour from many addresses keeps new sign-ins refused while it lasts; the API key has no scopes. The traces are now reachable from the internet behind one password, where before they needed an SSH key.
 
+**Update, 12 November 2026 (rollout).** The key rollout released `eb62691` and the agentwatch update installed `cc5742d`: agentwatch reported `{"auth":true}` and answered `/api/traces` with 401 without the key, and the alert relay's next polls succeeded (one poll failed one second after agentwatch restarted). The Caddy site procedure then refused before changing anything, as designed: it expected the Mini App site's root to answer 302 to `/miniapp/`, but the live root answers an empty 200, because journal 124's fix was never installed on the host. The check now records the existing site's status and redirect target on `/`, `/miniapp/`, `/about` and an unknown path before the change and requires the same after; on the host these were 200, 200, 200 and 404.
+
 ### Release closure
 
 Pending: merge agentwatch#21 and pin its image; the owner adds `AGENTWATCH_PASSWORD_HASH` and `AGENTWATCH_API_KEY` to the host's `.env`; run the key rollout, then the agentwatch update, then the Caddy site; verify from a phone.
