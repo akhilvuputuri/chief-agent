@@ -99,6 +99,8 @@ A second delta review requested changes on `82decac`: the new HTTPS checks mostl
 
 **Not done:** a real task. The host shows 0 `public_browser` calls. No owner message has asked for one, and a scheduled routine could also start one, so the first schema test may happen unattended. No provider has accepted this tool's schema yet, and success rates are unknown.
 
+> **Update, 11 November 2026 ([journal 163](163-browser-errors-reach-the-agent.md)):** the first real tasks ran on 8, 9 and 11 November, all parcel tracking, so a provider has accepted the tool's schema. On 11 November 6 of 13 clicks failed on SingPost, and the agent saw only a generic error; journal 163 makes the browser's reason reach it.
+
 ## Limitations and deferred work
 
 - The brief is not checked for private data. The description and instructions ask for it to stay out, and that is all.

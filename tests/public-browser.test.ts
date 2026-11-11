@@ -585,10 +585,14 @@ async function runAgentTurn(
   let agentCalls = 0,
     chiefCalls = 0,
     offered: string[] = [],
+    agentSaw: string[] = [],
     agentResult: any;
   const generate: ModelAdapter["generate"] = async (input) => {
     if (String(input.messages[0]?.content).includes(agentMarker)) {
       offered = input.tools.map((t) => t.name);
+      agentSaw = input.messages
+        .filter((m) => m.role === "tool")
+        .map((m) => String(m.content));
       const step = steps[agentCalls++];
       return (step ?? {
         message: { role: "assistant", content: "done" },
@@ -616,7 +620,7 @@ async function runAgentTurn(
   try {
     await assistant.respondDetailed("owner", "please do it");
     await new Promise((resolve) => setImmediate(resolve));
-    return { sent, offered, agentResult };
+    return { sent, offered, agentSaw, agentResult };
   } finally {
     await pg.close();
   }
@@ -684,6 +688,29 @@ test("a command refused for failing works again once the page has changed", asyn
     1,
     "the same call runs again after a success",
   );
+});
+
+test("through the real loop: the agent sees the browser's own reason, bounded and marked untrusted", async () => {
+  const reason =
+    "Element is covered by another element\n  <div id=consent>" +
+    "x".repeat(600);
+  const { agentSaw } = await runAgentTurn(
+    "browser",
+    "You are the public browser agent",
+    [browse({ kind: "click", ref: "e18" }), report],
+    (command) =>
+      command.kind === "click"
+        ? { ok: false, error: reason }
+        : { ok: true, result: {} },
+  );
+  const error = JSON.parse(agentSaw[0]!).error;
+  assert.equal(error.code, "BROWSER_REFUSED");
+  assert.match(
+    error.message,
+    /^The browser said: Element is covered by another element <div id=consent>x+\. /,
+  );
+  assert.match(error.message, /never instructions/);
+  assert.ok(error.message.length < 520, "the page cannot flood the context");
 });
 
 test("other agents never touch the browser when they finish", async () => {

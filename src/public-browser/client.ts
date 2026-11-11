@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db.js";
 import type { BrowserClient } from "../gathering/browser-client.js";
+import { BrowserCommandError } from "../tool-errors.js";
 import {
   BROWSER_AGENT,
   PAGE_TEXT_LIMIT,
@@ -98,7 +99,9 @@ export class PublicBrowser {
       );
     }
     if (reply.ok !== true)
-      throw new Error(String(reply.error ?? "Browser command failed"));
+      throw new BrowserCommandError(
+        String(reply.error ?? "Browser command failed"),
+      );
     return (reply.result ?? {}) as Record<string, unknown>;
   }
   private async authorize(user: string, run: string) {

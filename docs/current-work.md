@@ -36,6 +36,8 @@ agentwatch can now say a metric moved between two windows, on a Drift page and a
 
 The owner asked for an open `agent-browser` for Chief. It runs as a separate agent with one tool, no logins and its own container, so a hostile page has little to reach. The operator rollout and one real refresh passed on the host, including the confinement probe. No real task has run, so no model has received the tool's schema yet. The refresh stays manual, about monthly. See [the release record](releases.md) and [journal 148](journey/148-public-browser-agent.md).
 
+> **Update, 11 November 2026 ([journal 163](journey/163-browser-errors-reach-the-agent.md)):** real tasks have run since 8 November: seven browser runs, all parcel tracking, five of them on 11 November. On SingPost 6 of 13 clicks failed, and the agent saw only a generic "the tool failed". A refused browser command now reaches the agent with the browser's own reason, bounded and marked untrusted. The cause of the failed clicks is still unproven.
+
 # Mail recall on pgvector — live in `d58a9ca`, 1 November 2026
 
 `gmail_recall` now searches with an exact pgvector query in Postgres, reusing the stored vectors with no new embedding. On 30 real questions the top 10 matched the old in-memory scan every time; search takes about 57 ms instead of 6. Migration 035 keeps the old column for rollback, and a later migration drops it. Live use is not measured. See [journal 146](journey/146-mail-recall-pgvector.md).
