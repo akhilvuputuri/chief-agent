@@ -368,10 +368,11 @@ Evidence boundary:
 
 ## Serial test runs share a process — 11 November 2026
 
-**What changed for a coding job.** `kite run check` runs the TypeScript tests serially, and a serial run now loads every test file into one process ([journal 159](159-shared-process-test-runs.md)). A file that fails there runs again alone before the result is decided, so a failing check costs one extra run of the failing files, and a pass means what it meant before.
+**What changed for a coding job.** `kite run check` runs the TypeScript tests serially, and a serial run now loads every test file into one process ([journal 159](159-shared-process-test-runs.md)). A file that fails there runs again alone before the result is decided, so a failing check costs one extra run of the failing files. A shared run is believed only when its process exits cleanly: a crash, or a failure that names no file, sends every file through a process of its own.
 
 - When the output says a file passes on its own but failed in the shared process, the cause is state shared between test files, not the change under test alone. Fix the leak; do not retry.
 - CI runs a process per file. A test that passes in a job and fails in CI probably relies on another file's leftovers.
+- Do not put `before` or `after` at the top of a test file to change shared state such as an environment variable: in a shared process it runs around every file's tests. Set and restore inside the test.
 
 Evidence boundary:
 

@@ -16,6 +16,7 @@ import {
   assignShards,
   isolationMode,
   parseShard,
+  rerunPlan,
   undecidedFiles,
 } from "./test-shard.mjs";
 import {
@@ -222,24 +223,28 @@ test("a shared run decides nothing it cannot vouch for", (t) => {
     return { code: result.status, output: result.stdout + result.stderr };
   };
 
+  const remove = (...names) =>
+    names.forEach((name) => rmSync(join(dir, "tests", `${name}.test.ts`)));
+
   write("a", `globalThis.leaked = true; test("a", () => {});`);
   let result = run();
   assert.equal(result.code, 0, result.output);
-  assert.doesNotMatch(result.output, /Running them one process each/);
+  assert.doesNotMatch(result.output, /one process each/);
 
-  // Fails only beside a: it runs again alone, passes, and says why.
+  // Fails only beside a. It passes alone, but that leaves the failed run unexplained, so
+  // a runs alone too before the run may pass.
   write("b", `test("b", () => assert.equal(globalThis.leaked, undefined));`);
   result = run();
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /1 test file\(s\) failed or did not report/);
-  assert.match(result.output, /They pass on their own/);
+  assert.match(result.output, /Running the other 1 file\(s\) one process each/);
 
-  // A real failure still fails, and only the failed files run again.
+  // A real failure fails at once, from the failed files alone.
   write("d", `test("d", () => assert.equal(1, 2));`);
   result = run();
   assert.equal(result.code, 1, result.output);
   assert.match(result.output, /2 test file\(s\) failed or did not report/);
-  assert.doesNotMatch(result.output, /They pass on their own/);
+  assert.doesNotMatch(result.output, /Running the other/);
 
   // A file that ends the process early cannot hide the files after it.
   write("c", `test("c", () => process.exit(0));`);
@@ -251,4 +256,48 @@ test("a shared run decides nothing it cannot vouch for", (t) => {
   result = run({ TEST_ISOLATION: "process" });
   assert.equal(result.code, 1, result.output);
   assert.doesNotMatch(result.output, /shared process/);
+  remove("c", "d");
+
+  // Node fails this run without naming x: its timer throws after its test ended. b is the
+  // only named failure and passes alone, which must not pass the run.
+  write(
+    "x",
+    `test("x", () => { setTimeout(() => { throw new Error("late"); }, 50); });
+     test("x waits", () => new Promise((done) => setTimeout(done, 200)));`,
+  );
+  result = run();
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /Running the other 2 file\(s\) one process each/);
+  remove("b", "x");
+
+  // A crash after a file's first test: that file has reported, and must still not count.
+  write(
+    "k",
+    `test("k1", () => {});
+     test("k2", async () => {
+       await new Promise((done) => setTimeout(done, 300));
+       process.kill(process.pid, "SIGKILL");
+     });`,
+  );
+  result = run();
+  // tsx reports its child's death as a failed exit, not a signal, so this arrives as a
+  // failure that names no file. Either way every file runs alone.
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /Running every file one process each/);
+  assert.match(result.output, /not ok \d+ - tests\/k\.test\.ts/);
+});
+
+test("only a clean shared run is believed", () => {
+  const files = ["a", "b", "c"];
+  const plan = (undecided, code, crashed = false) =>
+    rerunPlan({ files, undecided, code, crashed });
+  assert.deepEqual(plan([], 0), { first: [], thenIfPassed: [] });
+  // Clean exit, but a file never reported: only that file is in doubt.
+  assert.deepEqual(plan(["c"], 0), { first: ["c"], thenIfPassed: [] });
+  // Named failures run first; if they pass alone, the others must run too.
+  assert.deepEqual(plan(["b"], 1), { first: ["b"], thenIfPassed: ["a", "c"] });
+  // A failure nothing accounts for, and a crash: every file runs alone.
+  assert.deepEqual(plan([], 1), { first: files, thenIfPassed: [] });
+  assert.deepEqual(plan(["b"], 1, true), { first: files, thenIfPassed: [] });
+  assert.deepEqual(plan([], 0, true), { first: files, thenIfPassed: [] });
 });

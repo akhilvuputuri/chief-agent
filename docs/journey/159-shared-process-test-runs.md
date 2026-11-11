@@ -1,7 +1,7 @@
 # 159 — What does a test file's own process cost, and can a serial run do without it?
 
 Work dates: 10–11 November 2026. Written: 11 November 2026.
-Status: tested locally. CI is unchanged by design; coding boxes are not yet measured.
+Status: tested locally. CI is unchanged by design; coding boxes are not yet measured. The timings below are from the first version; the rule for re-running files changed in review and affects failing runs only.
 
 ## User-visible problem and preceding iteration
 
@@ -9,7 +9,7 @@ Status: tested locally. CI is unchanged by design; coding boxes are not yet meas
 
 ## Evidence
 
-**Measured, 11 November, a quiet Mac on Node 22.23.4, all 154 test files with database reuse on.** CPU time is the test processes' user and system time.
+**Measured, 11 November, a quiet Mac on Node 22.23.4, all 154 test files then present, with database reuse on.** CPU time is the test processes' user and system time.
 
 | Run                                        |      Wall |       CPU |
 | ------------------------------------------ | --------: | --------: |
@@ -39,15 +39,28 @@ Files in one process can see each other's module state, a crash takes every file
 
 - **Mode:** a serial run shares one process (`TEST_ISOLATION=shared`). Parallel files, as in CI, keep one process each (`TEST_ISOLATION=process`). Either can be set by hand; shared with parallel files is refused.
 - **Report:** a second reporter, `scripts/test-ran-files.mjs`, writes each file as it reports a test and again when one fails.
-- **Undecided files:** any file with a failed test, and any file that never reported, runs again in a process of its own. That run decides the result. If such a file passes alone, the run passes and says the file depends on, or disturbs, another file's state.
+- **Only a clean run is believed.** If the shared process exits cleanly, any file that never reported runs again in a process of its own. If it fails, the files with a failed test and the files that never reported run again alone, and a failure there fails the run. If they pass alone, the shared failure is unexplained, so every other file runs alone too before the run may pass. If the shared run names no file at all, or dies by a signal, every file runs alone.
 
-A file that only passes because of what another file left behind still passes in a shared run. CI, with a process per file, is what catches that.
+**What differs from a process per file, and is not undone:**
+
+- A file that only passes because of what another file left behind still passes. CI, with a process per file, is what catches that.
+- Node imports every file before running any test, so top-level code in one file runs before another file's tests.
+- A hook at the top of a file (`before`, `after`, `beforeEach`) runs around every file's tests. `core.test.ts` and `gathering.test.ts` have such hooks; they only open and close their own database.
+- A crash can lose the shared run's output; the re-run's output is what remains.
+
+**Review (Claude Opus 5.5), `ca9cd37`: changes requested.** Each finding was reproduced on a synthetic suite:
+
+- **A crash partway through a file passed.** The file had already reported one test, so the first version counted it as decided and exited 0 once the other files passed alone.
+- **A failure naming no file was lost.** A timer that throws after its test ended fails the run without a failed test; with any other file re-run and passing, the first version exited 0.
+- **A top-level hook leaked.** `tests/test-db-pool.test.ts` cleared `TEST_DB_REUSE` in a top-level `before`, which in a shared process turned reuse back on for every file and so defeated `TEST_DB_REUSE=0`. Its tests now set and restore the variable themselves.
+
+The first version's header and the lessons page said a pass meant what it meant before. That was wrong, and is replaced by the list above.
 
 ## Verification and outcome
 
 **Tested, same Mac, through `kite run test:ts`:** 175.6 s shared against 285.6 s with a process per file. Every file was decided in the shared run except the flaky one, which ran again alone as designed. After that test was fixed, two more shared runs took 173.9 s and 170.7 s, passed, and re-ran nothing.
 
-**Tested, a four-file synthetic suite:** a file that fails only beside another passes after running alone; a real failure still fails; a file that exits the process early cannot hide the files after it.
+**Tested, a synthetic suite (`scripts/test-shard.test.mjs`):** a file that fails only beside another passes only after every file has run alone; a real failure fails from the failed files alone; a file that exits the process early cannot hide the files after it; a timer that throws after its test ended fails the run; a process killed after a file's first test fails the run.
 
 **Not measured:** coding boxes, where `kite run check` runs this serially. Their gain is expected to be similar and is unproven.
 

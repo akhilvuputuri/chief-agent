@@ -1,6 +1,6 @@
 ## Serial test runs share one process (11 November 2026)
 
-- **Code.** Tests only. `kite run test:ts` loads every test file into one process when it runs serially, and runs any file that failed or did not report again on its own, which decides the result. CI's parallel runs keep a process per file. `TEST_ISOLATION=process` restores the old behaviour.
+- **Code.** Tests only. `kite run test:ts` loads every test file into one process when it runs serially, and believes that run only if it exits cleanly: files that failed or did not report run again on their own, and an unexplained failure or a crash sends every file through a process of its own. CI's parallel runs keep a process per file. `TEST_ISOLATION=process` restores the old behaviour.
 - **Why.** Each file's own process recompiled the test database engine and reloaded the application. See [journal 159](journey/159-shared-process-test-runs.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
 
