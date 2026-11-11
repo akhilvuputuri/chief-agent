@@ -16,9 +16,15 @@ import { opsLog } from "./ops-log.js";
 
 export type ModelRoute = "anthropic-direct" | "openrouter";
 export type ProviderFault =
-  "auth" | "billing" | "rate_limit" | "unavailable" | "not_found";
+  | "auth"
+  | "permission"
+  | "billing"
+  | "rate_limit"
+  | "unavailable"
+  | "not_found";
 const FAULTS = new Set<string>([
   "auth",
+  "permission",
   "billing",
   "rate_limit",
   "unavailable",
@@ -35,10 +41,13 @@ export function providerFault(error: unknown): ProviderFault | undefined {
     : undefined;
 }
 
+/** Faults that say nothing about other models, so they cool only the failing one. */
+const MODEL_ONLY = new Set<ProviderFault>(["not_found", "permission"]);
+
 /**
  * Per-process memory of a failing direct pathway, so a dead key or exhausted credits costs
  * one failed request per window rather than one on every call. Key, billing and rate-limit
- * faults apply to every model; an unknown model applies to that model only.
+ * faults apply to every model; an unknown or refused (permission) model to that model only.
  */
 export class DirectCooldown {
   private until = new Map<string, { at: number; fault: ProviderFault }>();
@@ -57,7 +66,7 @@ export class DirectCooldown {
   remember(model: string, fault: ProviderFault, retryAfter?: unknown) {
     const seconds = DirectCooldown.seconds(fault, retryAfter);
     if (seconds > 0)
-      this.until.set(fault === "not_found" ? model : "*", {
+      this.until.set(MODEL_ONLY.has(fault) ? model : "*", {
         at: this.now() + seconds * 1000,
         fault,
       });

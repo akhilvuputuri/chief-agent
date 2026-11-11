@@ -156,6 +156,7 @@ test("the OpenRouter route is the plain adapter, and every adapter keeps the Ope
 test("each provider fault falls back once on OpenRouter, marked and logged structurally", async () => {
   for (const kind of [
     "auth",
+    "permission",
     "billing",
     "rate_limit",
     "unavailable",
@@ -252,6 +253,7 @@ test("cooldowns skip the direct pathway for a bounded time; an outage falls back
   assert.equal(DirectCooldown.seconds("rate_limit", 3600), 120);
   assert.equal(DirectCooldown.seconds("unavailable"), 0);
   assert.equal(DirectCooldown.seconds("auth"), 600);
+  assert.equal(DirectCooldown.seconds("permission"), 600);
   // A rate limit expires after its bounded hint.
   now = 0;
   const limited = new DirectCooldown(() => now);
@@ -265,6 +267,16 @@ test("cooldowns skip the direct pathway for a bounded time; an outage falls back
   limited.remember(OPUS, "unavailable");
   assert.equal(limited.active(OPUS), "not_found");
   assert.equal(limited.active("anthropic/other"), undefined);
+  // A permission refusal (403) is per model too; a bad key (401) cools every model.
+  now = 0;
+  const scoped = new DirectCooldown(() => now);
+  assert.equal(scoped.remember(OPUS, "permission"), 600);
+  assert.equal(scoped.active(OPUS), "permission");
+  assert.equal(scoped.active("anthropic/other"), undefined);
+  now = 600_000;
+  assert.equal(scoped.active(OPUS), undefined);
+  scoped.remember(OPUS, "auth");
+  assert.equal(scoped.active("anthropic/other"), "auth");
   // Without OpenRouter to fall back to, a cooldown does not stop the direct call.
   const { r, calls } = router({ cooldown: limited, openRouterKey: "" });
   await r.modelFor(OPUS).generate(input());

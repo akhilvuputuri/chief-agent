@@ -251,7 +251,15 @@ const FINISH: Record<string, string> = {
   model_context_window_exceeded: "length",
   refusal: "content_filter",
 };
-type Fault = "auth" | "billing" | "rate_limit" | "unavailable" | "not_found";
+type Fault =
+  | "auth"
+  | "permission"
+  | "billing"
+  | "rate_limit"
+  | "unavailable"
+  | "not_found";
+/** On every failure, so model.failed lines and failed spans name this pathway. */
+const ROUTE = { route: "anthropic-direct", provider: "Anthropic" } as const;
 
 function retryAfter(headers: Headers | undefined) {
   const value = headers?.get("retry-after");
@@ -412,7 +420,7 @@ export class AnthropicDirect implements ModelAdapter {
       : null;
     // Structural diagnostics only; never response text or provider messages.
     const diagnostics = {
-      provider: "Anthropic",
+      ...ROUTE,
       responseId:
         typeof message.id === "string" ? message.id.slice(0, 160) : null,
       finishReason,
@@ -487,7 +495,7 @@ export class AnthropicDirect implements ModelAdapter {
           t.function.name,
       )
     )
-      throw new ModelError("Invalid model tool calls");
+      throw new ModelError("Invalid model tool calls", false, ROUTE);
     return {
       message: {
         role: "assistant",
@@ -549,26 +557,26 @@ export class AnthropicDirect implements ModelAdapter {
       const status =
         typeof error.status === "number" ? error.status : undefined;
       const type = error.type;
+      // A bad key fails every model; a permission refusal may be this model's alone.
       const value: Fault | undefined =
-        status === 401 ||
-        status === 403 ||
-        type === "authentication_error" ||
-        type === "permission_error"
+        status === 401 || type === "authentication_error"
           ? "auth"
-          : status === 402 ||
-              type === "billing_error" ||
-              error.errorCode === "enforced_spend_limit_reached"
-            ? "billing"
-            : status === 429 || type === "rate_limit_error"
-              ? "rate_limit"
-              : (status !== undefined && status >= 500) ||
-                  ["api_error", "overloaded_error", "timeout_error"].includes(
-                    String(type),
-                  )
-                ? "unavailable"
-                : status === 404 || type === "not_found_error"
-                  ? "not_found"
-                  : undefined;
+          : status === 403 || type === "permission_error"
+            ? "permission"
+            : status === 402 ||
+                type === "billing_error" ||
+                error.errorCode === "enforced_spend_limit_reached"
+              ? "billing"
+              : status === 429 || type === "rate_limit_error"
+                ? "rate_limit"
+                : (status !== undefined && status >= 500) ||
+                    ["api_error", "overloaded_error", "timeout_error"].includes(
+                      String(type),
+                    )
+                  ? "unavailable"
+                  : status === 404 || type === "not_found_error"
+                    ? "not_found"
+                    : undefined;
       const seconds = retryAfter(error.headers as Headers | undefined);
       return new ModelError(
         status
@@ -576,6 +584,7 @@ export class AnthropicDirect implements ModelAdapter {
           : "Model stream failed",
         value === "rate_limit" || value === "unavailable",
         {
+          ...ROUTE,
           ...(status ? { httpStatus: status } : { failureCode: "provider" }),
           ...(typeof type === "string" ? { errorType: type.slice(0, 60) } : {}),
           ...fault(value),
@@ -584,6 +593,7 @@ export class AnthropicDirect implements ModelAdapter {
       );
     }
     return new ModelError("Model transport failed", true, {
+      ...ROUTE,
       failureCode: "transport",
       ...fault("unavailable"),
     });

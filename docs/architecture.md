@@ -10,6 +10,7 @@ One Node application owns the Telegram gateway, the coordinator runtime, tools, 
 | `custom-agent.ts`                                          | Sequential model → validated tool → observation loop and explicit stop reasons                                     |
 | `context.ts` / `history.ts`                                | Core instructions, Singapore time, memories, skill and agent catalogues, bounded history selection                 |
 | `model.ts` / `model-policy.ts` / `effort.ts`               | OpenRouter adapter, reviewed model policy and tiers, price ceilings, per-message reasoning effort                  |
+| `model-router.ts` / `anthropic.ts` | Per-model provider choice (OpenRouter, or Anthropic direct for policy-mapped models with a key) and the direct Anthropic adapter with OpenRouter fallback ([model providers](model-providers.md)) |
 | `execution.ts`                                             | Persisted checkpoints, invocation journal, budgets, traces and restart recovery                                    |
 | `runtime.ts` / `protocol.ts`                               | Individual tool definitions from Zod; strict operation-specific arguments                                          |
 | `tools.ts`                                                 | Owner-scoped dispatcher and action receipts                                                                        |

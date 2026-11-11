@@ -75,8 +75,9 @@ const schema = z.object({
   // through OpenRouter exactly as before.
   ANTHROPIC_API_KEY: z.string().default(""),
   // "anthropic" sends models mapped in config/model-policy.json providers.anthropic direct
-  // to Anthropic when ANTHROPIC_API_KEY is set; "openrouter" keeps every call on OpenRouter.
-  MODEL_PROVIDER: z.enum(["openrouter", "anthropic"]).default("openrouter"),
+  // to Anthropic when ANTHROPIC_API_KEY is set, and is inert without it; "openrouter" keeps
+  // every call on OpenRouter.
+  MODEL_PROVIDER: z.enum(["openrouter", "anthropic"]).default("anthropic"),
   AGENT_MODEL: z.string().default("openai/gpt-5.6-sol"),
   // Jev picks the tool domains per message; "off" uses the deterministic cues; "all" offers
   // every available domain on every call, so the cached tool list never changes (journal 107).

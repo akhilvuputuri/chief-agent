@@ -436,7 +436,9 @@ test("finish reasons map to OpenRouter values and requireComplete rejects trunca
       !error.transient &&
       error.diagnostics.failureCode === "incomplete" &&
       error.diagnostics.finishReason === "length" &&
-      error.diagnostics.providerFault === undefined,
+      error.diagnostics.providerFault === undefined &&
+      error.diagnostics.route === "anthropic-direct" &&
+      error.diagnostics.provider === "Anthropic",
   );
   const empty = adapter(() =>
     sse(
@@ -478,6 +480,7 @@ test("a refusal is a non-transient content_filter failure and partial output is 
       assert.equal(error.diagnostics.failureCode, "refusal");
       assert.equal(error.diagnostics.finishReason, "content_filter");
       assert.equal(error.diagnostics.refusalCategory, "cyber");
+      assert.equal(error.diagnostics.route, "anthropic-direct");
       assert.ok(!JSON.stringify(error.diagnostics).includes("private"));
       assert.ok(!error.message.includes("Partial"));
       return true;
@@ -546,7 +549,7 @@ test("provider faults are classified only before any output", async () => {
     );
   const cases: [Response, string | undefined, boolean, number?][] = [
     [error(401, "authentication_error"), "auth", false],
-    [error(403, "permission_error"), "auth", false],
+    [error(403, "permission_error"), "permission", false],
     [error(402, "billing_error"), "billing", false],
     [
       error(429, "rate_limit_error", { "retry-after": "7" }),
@@ -569,6 +572,9 @@ test("provider faults are classified only before any output", async () => {
         assert.equal(e.transient, transient);
         assert.equal(e.diagnostics.httpStatus, response.status);
         assert.equal(e.diagnostics.retryAfterSeconds, retry);
+        // Failed log lines and spans attribute the failure to this pathway.
+        assert.equal(e.diagnostics.route, "anthropic-direct");
+        assert.equal(e.diagnostics.provider, "Anthropic");
         assert.ok(!JSON.stringify(e.diagnostics).includes("raw provider"));
         assert.ok(!e.message.includes("raw provider"));
         return true;
@@ -588,7 +594,9 @@ test("provider faults are classified only before any output", async () => {
     (e: ModelError) =>
       e.transient &&
       e.diagnostics.failureCode === "transport" &&
-      e.diagnostics.providerFault === "unavailable",
+      e.diagnostics.providerFault === "unavailable" &&
+      e.diagnostics.route === "anthropic-direct" &&
+      e.diagnostics.provider === "Anthropic",
   );
   const overloaded = {
     type: "error",
@@ -601,7 +609,8 @@ test("provider faults are classified only before any output", async () => {
     (e: ModelError) =>
       e.transient &&
       e.diagnostics.failureCode === "provider" &&
-      e.diagnostics.providerFault === "unavailable",
+      e.diagnostics.providerFault === "unavailable" &&
+      e.diagnostics.route === "anthropic-direct",
   );
   const late = adapter(() => sse([...events.slice(0, 3), overloaded]));
   await assert.rejects(
@@ -615,7 +624,8 @@ test("provider faults are classified only before any output", async () => {
     (e: ModelError) =>
       e.transient &&
       e.diagnostics.failureCode === "transport" &&
-      e.diagnostics.providerFault === undefined,
+      e.diagnostics.providerFault === undefined &&
+      e.diagnostics.route === "anthropic-direct",
   );
 });
 

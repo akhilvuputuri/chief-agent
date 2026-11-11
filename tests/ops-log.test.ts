@@ -283,6 +283,30 @@ test("model logs name the direct pathway, its fallbacks and the startup routes",
     assert.equal(direct.costUsd, 0.001);
     assert.equal(fallback.fallbackFrom, "anthropic-direct");
     assert.equal(fallback.provider, "claude-aws");
+    // A direct failure (AnthropicDirect diagnostics) names its pathway; OpenRouter's do not.
+    projectEvent("model.failed", randomUUID(), {
+      model: "anthropic/claude-opus-5.5",
+      transient: false,
+      diagnostics: {
+        route: "anthropic-direct",
+        provider: "Anthropic",
+        httpStatus: 403,
+        errorType: "permission_error",
+        providerFault: "permission",
+      },
+    });
+    projectEvent("model.failed", randomUUID(), {
+      model: "anthropic/claude-opus-5.5",
+      transient: true,
+      diagnostics: { httpStatus: 502 },
+    });
+    const [, , failedDirect, failedRouted] = log.parsed();
+    assert.equal(failedDirect.event, "model.failed");
+    assert.equal(failedDirect.route, "anthropic-direct");
+    assert.equal(failedDirect.provider, "anthropic");
+    assert.equal(failedDirect.httpStatus, 403);
+    assert.equal("dropped" in failedDirect, false);
+    assert.equal("route" in failedRouted, false);
     const routes = sanitize("model.routes", "info", {
       modelProvider: "anthropic",
       anthropicKey: false,

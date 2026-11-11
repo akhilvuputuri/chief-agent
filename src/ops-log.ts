@@ -437,6 +437,8 @@ const projections: Record<string, Projection> = {
       latencyMs: d.latencyMs,
       transient: d.transient,
       provider: providerName(d.diagnostics?.provider),
+      // Set by the direct Anthropic adapter on its failures; OpenRouter failures omit it.
+      route: d.diagnostics?.route,
       errorCode: d.diagnostics?.errorCode,
       httpStatus: d.diagnostics?.httpStatus,
       state: finishName(d.diagnostics?.finishReason),

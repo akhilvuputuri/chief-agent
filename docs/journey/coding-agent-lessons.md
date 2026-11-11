@@ -379,3 +379,15 @@ Evidence boundary:
 - **Measured:** a Mac, 175.6 s against 285.6 s for the whole suite.
 - **Tested:** the fallback on a synthetic suite.
 - **Not yet measured:** a coding box's check duration before and after.
+
+## The host may serve a coding model directly from Anthropic — 11 November 2026
+
+**What changed for a coding job.** Nothing in the sandbox: Pi and the Python squad still hold no provider key and send every model call to the host. The host now builds each role's model through the gateway's model router ([journal 160](160-direct-anthropic-provider.md), [model providers](../model-providers.md)). Once the gateway has an Anthropic key, a mapped Anthropic model is served by the Anthropic API directly, with one OpenRouter retry if the direct call fails before any output. Today that would be the `anthropic/claude-opus-5.5` reviewer; the DeepSeek coders and the model catalogue stay on OpenRouter. Not enabled yet.
+
+- The direct route stores Anthropic thinking under its own tag. Pi's OpenAI-completions client replays only OpenAI-style reasoning entries, so it drops those between tool turns; the Python squad returns them unchanged. Chief also rebuilds history per call, so the API usually drops earlier thinking anyway (`drop_block`). Expect lost reasoning continuity, not request errors.
+- A job's `model_usage` coding events tell the routes apart: a direct call records provider `Anthropic` and usage `route: "anthropic-direct"`; a fallback records OpenRouter's provider and `fallback_from: "anthropic-direct"`.
+
+Evidence boundary:
+
+- **Tested:** mocked direct requests, routing, fallback and the reasoning strip; Pi's reasoning filter read from its bundled client.
+- **Not yet measured:** any coding call on the direct route, its review quality, cost or rate-limit behaviour on a new account.

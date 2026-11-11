@@ -22,6 +22,10 @@ Main-model estimates use input UTF-8 bytes plus an overhead allowance, configure
 
 Speech runs outside the task loop and is not included here. Neither are infrastructure, other applications sharing the key or historical requests before migration. This ledger is not a complete provider bill. Existing base-price routing filters do not cap cache-write premiums or total task spending.
 
+### Direct Anthropic route
+
+Not yet enabled in production ([model providers](model-providers.md)). A call served directly by Anthropic records its charge under `anthropic-main`; OpenRouter calls, including a fallback after a direct failure, keep `openrouter-main`. Its estimate is formed the same way, from the policy's list input price with the 1.25 multiplier and the full output allowance. Anthropic returns no dollar cost, so the settled cost is computed from the token counts and the reviewed prices in `config/model-policy.json`: uncached input, cache reads (`cacheRead`, $0.20/M for Opus 5.5), 5-minute cache writes (`cacheWrite`, $5/M) and output. It is a priced estimate of the invoice, not a provider-reported amount, and is wrong if those prices drift from Anthropic's. A direct attempt that fails and falls back leaves its estimate unsettled, beside the settled OpenRouter charge. The OpenRouter price ceilings do not apply on this route; instead a mapped model goes direct only while its listed prices fit them.
+
 ## Verification and operation
 
 Focused tests cover stable opening prompts, intact tool observations, owner/task isolation, search reuse without network calls, persisted usage across task runs, unknown-versus-reported cost, and accepting an estimate above $1 without imposing a cap. Provider request tests verify the session ID while retaining Sol, medium reasoning and the existing routing filters.

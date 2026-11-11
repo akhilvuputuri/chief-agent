@@ -8,9 +8,11 @@ Issue [#143](https://github.com/akhilvuputuri/chief-agent/issues/143) separates 
 | Personal identifiers | Private environment (the repository is public)                        | allowed Telegram IDs, owner IDs, email addresses, spreadsheet IDs, Mini App origin                   |
 | Secrets              | Private environment today; a secret store is planned (#143)           | bot token, API keys, Google client secret and refresh tokens, `LIBRARY_IDENTITY_KEY`, `DATABASE_URL` |
 
+A secret or identifier reaches the production gateway only if `compose.yaml` passes it. `ANTHROPIC_API_KEY` is not passed yet, so a value in the server `.env` has no effect until the reviewed Compose rollout in [model providers](model-providers.md#enabling-it).
+
 Other reviewed policy files already in the repo:
 
-- `config/model-policy.json`: main and agent models, the nightly judge's model (`judge`, [learning](learning.md#nightly-judge)), and optional `priceCeilings`. A pinned main model wins over `AGENT_MODEL`. When `priceCeilings` is set, it wins over `OPENROUTER_MAX_INPUT_PRICE`/`OPENROUTER_MAX_OUTPUT_PRICE` from both the environment and `config/runtime.json`, which keeps mirroring the code defaults.
+- `config/model-policy.json`: main and agent models, the nightly judge's model (`judge`, [learning](learning.md#nightly-judge)), optional `priceCeilings` and optional `providers.anthropic`, the models that may go directly to Anthropic with their native IDs and list prices ([model providers](model-providers.md)). A pinned main model wins over `AGENT_MODEL`. When `priceCeilings` is set, it wins over `OPENROUTER_MAX_INPUT_PRICE`/`OPENROUTER_MAX_OUTPUT_PRICE` from both the environment and `config/runtime.json`, which keeps mirroring the code defaults.
 - `config/tool-picker.json`: the Jev domain picker.
 - `config/decisions.json`: the shadow decisions.
 - `config/reasoning-effort.json`: Jev's reasoning-effort question, thresholds and escalation schedule ([reasoning effort](reasoning-effort.md)).
@@ -30,7 +32,7 @@ Other reviewed policy files already in the repo:
 An environment value still wins over the file.
 
 - **Passed by Compose (20 names):** production's Compose file passes these with Compose defaults, so the file cannot change them in production until Compose stops passing them. That step is part of the operator rollout in #143.
-- **Not passed (`MEDIA_MODEL`, `TOOL_PICKER`, `MAIL_INDEX`, `SHADOW_DECISIONS`, `EFFORT_PICKER`, `TELEGRAM_TOPICS`, `CODING_QUIET_HOURS`):** the file is already authoritative in production. Editing them in a PR changes production on the next release, with no operator step. `CODING_QUIET_HOURS` (`HH:MM-HH:MM`, Asia/Singapore, empty for off) holds coding progress that would start a new message ([journal 115](journey/115-fewer-coding-notices.md)).
+- **Not passed (`MEDIA_MODEL`, `TOOL_PICKER`, `MAIL_INDEX`, `SHADOW_DECISIONS`, `EFFORT_PICKER`, `TELEGRAM_TOPICS`, `CODING_QUIET_HOURS`, `MODEL_PROVIDER`):** the file is already authoritative in production. Editing them in a PR changes production on the next release, with no operator step, and a server `.env` line for them has no effect. `MODEL_PROVIDER` (`anthropic`, the default, or `openrouter`) chooses whether policy-mapped Anthropic models go direct; it does nothing until the gateway has `ANTHROPIC_API_KEY` ([model providers](model-providers.md)). `CODING_QUIET_HOURS` (`HH:MM-HH:MM`, Asia/Singapore, empty for off) holds coding progress that would start a new message ([journal 115](journey/115-fewer-coding-notices.md)).
 
 To make the switch safe:
 

@@ -835,4 +835,24 @@ test("the provider name follows the pathway that served the call", () => {
     "anthropic",
   );
   assert.equal(span({ diagnostics: { httpStatus: 500 } }, true), "openrouter");
+  // AnthropicDirect's failure diagnostics carry both its route and its provider name.
+  const failed = modelSpan({
+    traceId: "0".repeat(32),
+    spanId: "1".repeat(16),
+    parentSpanId: "2".repeat(16),
+    data: {
+      model: "anthropic/claude-opus-5.5",
+      latencyMs: 10,
+      diagnostics: {
+        route: "anthropic-direct",
+        provider: "Anthropic",
+        httpStatus: 403,
+        providerFault: "permission",
+      },
+    },
+    failed: true,
+    endNs: 1_000_000_000n,
+  }).attributes;
+  assert.equal(failed["gen_ai.provider.name"], "anthropic");
+  assert.equal(failed["chief.upstream_provider"], "anthropic");
 });

@@ -54,7 +54,8 @@ Ask Chief for what's missing, and it builds it on the [Pi](https://github.com/ea
 ## Run it
 
 You need Node 22.19+, Docker Compose, a Telegram bot token, and an OpenRouter key. Other integrations
-are optional. One deployment serves one owner. Chief installs and runs with
+are optional, including an Anthropic Console key for calling mapped Claude models directly
+([model providers](docs/model-providers.md)). One deployment serves one owner. Chief installs and runs with
 [Kite](https://github.com/akhilvuputuri/kite), a Rust package manager that replaces npm.
 
 ```sh
