@@ -171,6 +171,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 11 November | [162 — Advisories in the dependency tree](162-advisories-in-the-dependency-tree.md): which published advisories reach Chief, and which can be fixed without a major upgrade? | Released in `1335f6d`: six packages updated in range on the gateway. The Pi runtime's undici 8.12.4 waits for a worker image; zod, minimatch and `pi-coding-agent`'s pinned undici stay open |
 | 11 November | [163 — Browser errors reach the agent](163-browser-errors-reach-the-agent.md): why did the browser agent's clicks fail, and why couldn't it tell? | Released in `1cb516b` |
 | 11 November | [164 — Claude models everywhere](164-claude-models-everywhere.md): which of Chief's models can move to Claude? | Tested offline; request shape verified live; releases after PR 442's rollout (done). Haiku 5.5 for the fast agent tier, Opus 5.5 for the judge, both direct; fallbacks to OpenRouter are reported to the owner; Jev, embeddings and speech stay |
+| 11 November | [165 — Four test shards](165-four-test-shards.md): how many test shards does CI need now that tests are faster? | Measured on its pull request: four test steps of 78–99 s, an 11-job run of 172 s; not yet released |
 
 ## Coding-agent learning path
 
