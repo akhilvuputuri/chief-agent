@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { contextSize, isLearned } from "./memory.js";
 import {
+  agentwatchHeaders,
   encode,
   memoryLinks,
   memoryRecordId,
@@ -217,12 +218,14 @@ export async function buildMemoryBackfill(
 export function agentwatchLookup(
   base: string,
   send: typeof fetch = fetch,
+  headers: Record<string, string> = agentwatchHeaders(),
 ): RunSpanLookup {
   const traces = new Map<string, Map<string, string> | null>();
   return async (traceId, runId) => {
     if (!traces.has(traceId)) {
       const response = await send(`${base}/api/traces/${traceId}`, {
         redirect: "error",
+        headers,
         signal: AbortSignal.timeout(30_000),
       });
       if (response.status === 404) {

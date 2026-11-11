@@ -1,3 +1,9 @@
+# Traces from anywhere, behind a sign-in — prepared, 12 November 2026
+
+Branch `feat/traces-signin`, with agentwatch's sign-in in agentwatch#21 ([journal 166](journey/166-traces-from-anywhere.md), [tracing](tracing.md#viewing-traces-from-anywhere)). The exporter, alert relay and backfill CLIs send `AGENTWATCH_API_KEY` as a Bearer key when it is set; `compose.yaml` passes it to the gateway; `scripts/deploy-agentwatch-key.py` has `BASE` = `dcb7ea37bce3a5539dc630cf10570271b70e2d2a`, the host's `RELEASE` on 12 November. Once merged, no other release can land until the key rollout runs. `scripts/deploy-agentwatch-update.py` now permits signing in as a whole, and `scripts/deploy-traces-site.py` adds the Caddy site only once agentwatch requires signing in.
+
+Next, in order: merge agentwatch#21 and note its image digest; review and merge this branch, with `BASE` still the live release; the owner adds the password hash and key to the host's `.env`; the key rollout; a Compose change pinning the new agentwatch with signing in on, installed by the update script; the Caddy site; the owner signs in from a phone.
+
 # Four test shards in CI — in review, 11 November 2026
 
 CI jobs were queueing for runners: no more than 20 were seen running at once across the account, and one pull request run wants 13. With tests about twice as fast, CI now splits them four ways instead of six, which should keep each test job under the image job's length. See [journal 165](journey/165-four-test-shards.md).

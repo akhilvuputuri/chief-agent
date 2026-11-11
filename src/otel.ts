@@ -80,6 +80,8 @@ export interface ExporterOptions {
   batchSize?: number;
   intervalMs?: number;
   timeoutMs?: number;
+  /** Sent with every request, such as agentwatch's API key (agentwatchHeaders). */
+  headers?: Record<string, string>;
   fetch?: typeof fetch;
 }
 
@@ -184,7 +186,10 @@ export class OtlpExporter {
     try {
       const response = await this.post(url, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          ...this.options.headers,
+          "content-type": "application/json",
+        },
         body: JSON.stringify(document),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
@@ -378,6 +383,17 @@ export function logsEndpoint(env: NodeJS.ProcessEnv = process.env) {
   if (traces && /\/v1\/traces\/?$/.test(traces))
     return httpUrl(traces.replace(/\/v1\/traces\/?$/, "/v1/logs"));
   return undefined;
+}
+
+/**
+ * agentwatch's API key, from AGENTWATCH_API_KEY, as request headers; none when it is unset.
+ * agentwatch requires it once signing in is on there, for ingest and its API alike.
+ */
+export function agentwatchHeaders(
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const key = env.AGENTWATCH_API_KEY?.trim();
+  return key ? { authorization: `Bearer ${key}` } : {};
 }
 
 /** Resolves the traces endpoint from the standard OTLP environment variables. */

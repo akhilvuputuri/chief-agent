@@ -47,6 +47,19 @@ STAGED_COMPOSE = LIVE_COMPOSE.replace(
     '    image: ' + OLD_IMAGE + '\n',
     '    image: ' + NEW_IMAGE + '\n    environment:\n      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}\n'
 ).replace('        "90",\n', '        "90",\n' + JUDGE_POLICY)
+SIGN_IN = ('        "--auth-user",\n        "owner",\n'
+           '        "--api-key-env",\n        "AGENTWATCH_API_KEY",\n'
+           '        "--forwarded-allow-ips",\n        "172.18.0.1",\n')
+SIGNED_COMPOSE = STAGED_COMPOSE.replace(
+    '      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}\n',
+    '      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}\n'
+    '      AGENTWATCH_PASSWORD_HASH: ${AGENTWATCH_PASSWORD_HASH:-}\n'
+    '      AGENTWATCH_API_KEY: ${AGENTWATCH_API_KEY:-}\n'
+).replace('        "50",\n', '        "50",\n' + SIGN_IN)
+KEY = 'secret-sentinel-' + 'k' * 32
+SIGNED_ENV = ('PRIVATE_SENTINEL=must-stay-private\n'
+              'AGENTWATCH_PASSWORD_HASH=scrypt:32768:8:3:c2FsdHNhbHRzYWx0c2FsdA:secret-sentinel-hash\n'
+              'AGENTWATCH_API_KEY=' + KEY + '\n')
 UP = ('compose', 'up', '-d', '--no-deps', 'agentwatch')
 IMAGE_ID = ('docker', 'inspect', '--format', '{{.Image}}', update.AGENTWATCH_CONTAINER)
 HEALTH = ('docker', 'inspect', '--format', '{{.State.Health.Status}}', update.AGENTWATCH_CONTAINER)
@@ -74,7 +87,9 @@ class AgentwatchUpdateTests(unittest.TestCase):
                  requested_sha=SHA, archive_sha=SHA, changes=None, unsafe=None,
                  pull_failure=False, current_missing=False, gateway_before=True,
                  gateway_after=True, new_health='healthy', ingest_failure=False,
-                 old_health='healthy', expected_error=None):
+                 old_health='healthy', expected_error=None,
+                 env='PRIVATE_SENTINEL=must-stay-private\n', open_without_key=False,
+                 gateway='172.18.0.1 '):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             live = root / 'live'
@@ -92,7 +107,7 @@ class AgentwatchUpdateTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content)
             (live / 'RELEASE').write_text('e' * 40 + '\n')
-            (live / '.env').write_text('PRIVATE_SENTINEL=must-stay-private\n')
+            (live / '.env').write_text(env)
             candidate = dict(original)
             candidate['src/main.ts'] = '// reviewed main\n'
             candidate['compose.yaml'] = staged_compose
@@ -125,6 +140,8 @@ class AgentwatchUpdateTests(unittest.TestCase):
             def run(args, **kwargs):
                 args = tuple(args)
                 commands.append(args)
+                if args[:3] == ('docker', 'network', 'inspect'):
+                    return subprocess.CompletedProcess(args, 0, stdout=gateway + '\n')
                 if args[:2] == ('docker', 'pull') and pull_failure:
                     raise subprocess.CalledProcessError(1, args, stderr='PRIVATE_SENTINEL')
                 if args[:2] == ('docker', 'inspect'):
@@ -137,6 +154,11 @@ class AgentwatchUpdateTests(unittest.TestCase):
                 if args == GATEWAY and not (gateway_after if UP in commands else gateway_before):
                     raise subprocess.CalledProcessError(7, args)
                 if args[0] == 'curl' and args[-1].endswith('/v1/traces') and ingest_failure:
+                    raise subprocess.CalledProcessError(22, args)
+                if args[0] == 'curl' and '--config' in args:
+                    self.assertEqual(kwargs.get('input'), 'header = "authorization: Bearer ' + KEY + '"\n')
+                elif (args[0] == 'curl' and '--auth-user' in staged_compose and not open_without_key
+                        and ('/v1/traces' in args[-1] or '/api/traces/' in args[-1])):
                     raise subprocess.CalledProcessError(22, args)
                 return subprocess.CompletedProcess(args, 0, stdout='')
 
@@ -165,13 +187,16 @@ class AgentwatchUpdateTests(unittest.TestCase):
             # Never the gateway (beyond its read-only health), RELEASE, source, volume or .env.
             for command in commands:
                 self.assertTrue(command in (UP, GATEWAY) or command[0] == 'curl' and ':4318/' in command[-1]
-                                or command[:2] in (('docker', 'pull'), ('docker', 'inspect')), command)
+                                or command[:2] in (('docker', 'pull'), ('docker', 'inspect'))
+                                or command[:3] == ('docker', 'network', 'inspect'), command)
                 if command != GATEWAY:
                     self.assertFalse(any('gateway' in part or ':3000' in part for part in command), command)
             self.assertEqual((live / 'RELEASE').read_text(), 'e' * 40 + '\n')
             self.assertEqual((live / 'src/main.ts').read_text(), original['src/main.ts'])
-            self.assertEqual((live / '.env').read_text(), 'PRIVATE_SENTINEL=must-stay-private\n')
-            self.assertNotIn('PRIVATE_SENTINEL', output.getvalue())
+            self.assertEqual((live / '.env').read_text(), env)
+            for secret in ('PRIVATE_SENTINEL', 'secret-sentinel'):
+                self.assertNotIn(secret, output.getvalue())
+                self.assertFalse(any(secret in ' '.join(c) for c in commands), secret)
             if not expected_error:
                 image = re.search(r'    image: (\S+)\n', staged_compose).group(1)
                 self.assertEqual(json.loads(output.getvalue()), {'agentwatch': image, 'healthy': True})
@@ -288,6 +313,72 @@ class AgentwatchUpdateTests(unittest.TestCase):
         self.scenario(staged_compose=staged)
         unreviewed = staged.replace('    restart:', '    user: root\n    restart:')
         self.scenario(staged_compose=unreviewed, expected_error='allow-list')
+
+    def test_signing_in_sends_the_key_on_stdin_and_checks_it_is_required(self):
+        commands = self.scenario(staged_compose=SIGNED_COMPOSE, env=SIGNED_ENV)
+        keyed = [c for c in commands if c[0] == 'curl' and '--config' in c]
+        bare = [c for c in commands if c[0] == 'curl' and '--config' not in c and ':4318/' in c[-1]
+                and ('/v1/traces' in c[-1] or '/api/traces/' in c[-1])]
+        self.assertEqual(len(keyed), 2)
+        self.assertEqual(len(bare), 2)
+        self.assertLess(commands.index(keyed[-1]), commands.index(bare[0]))
+
+    def test_signing_in_needs_the_private_values_first(self):
+        for env in ['PRIVATE_SENTINEL=x\n',
+                    'AGENTWATCH_API_KEY=' + KEY + '\n',
+                    'AGENTWATCH_PASSWORD_HASH=scrypt:1:2:3:abc:def\n',
+                    SIGNED_ENV.replace(KEY, 'secret-sentinel-short'),
+                    SIGNED_ENV.replace('scrypt:', 'bcrypt:'),
+                    SIGNED_ENV + 'AGENTWATCH_API_KEY=\n']:
+            with self.subTest(env=env):
+                commands = self.scenario(staged_compose=SIGNED_COMPOSE, env=env,
+                                         expected_error='private .env first')
+                self.assertFalse(any(c[:2] == ('docker', 'pull') for c in commands))
+
+    def test_the_trusted_proxy_must_be_the_network_gateway(self):
+        for gateway in ('172.19.0.1 ', '172.18.0.1 172.20.0.1 ', ''):
+            with self.subTest(gateway=gateway):
+                commands = self.scenario(staged_compose=SIGNED_COMPOSE, env=SIGNED_ENV, gateway=gateway,
+                                         expected_error='must be the Compose network gateway')
+                self.assertFalse(any(c[:2] == ('docker', 'pull') for c in commands))
+
+    def test_an_agentwatch_that_answers_without_its_key_is_rolled_back(self):
+        self.scenario(staged_compose=SIGNED_COMPOSE, env=SIGNED_ENV, open_without_key=True,
+                      expected_error='previous agentwatch restored')
+
+    def test_signing_in_settings_go_together(self):
+        def refused(compose, reason):
+            _, block, _ = update.split_compose(compose.encode(), 'Staged')
+            with self.assertRaisesRegex(RuntimeError, reason):
+                update.validate_block(block)
+        _, block, _ = update.split_compose(SIGNED_COMPOSE.encode(), 'Staged')
+        self.assertEqual(update.validate_block(block), NEW_IMAGE)
+        hash_line = '      AGENTWATCH_PASSWORD_HASH: ${AGENTWATCH_PASSWORD_HASH:-}\n'
+        key_line = '      AGENTWATCH_API_KEY: ${AGENTWATCH_API_KEY:-}\n'
+        user = '        "--auth-user",\n        "owner",\n'
+        keys = '        "--api-key-env",\n        "AGENTWATCH_API_KEY",\n'
+        proxies = '        "--forwarded-allow-ips",\n        "172.18.0.1",\n'
+        for compose, reason in (
+            (SIGNED_COMPOSE.replace(user, ''), 'go together'),
+            (SIGNED_COMPOSE.replace(hash_line, ''), 'go together'),
+            (SIGNED_COMPOSE.replace(keys, ''), 'needs --api-key-env'),
+            (SIGNED_COMPOSE.replace('"--api-key-env",\n        "AGENTWATCH_API_KEY"',
+                                    '"--api-key-env",\n        "OPENROUTER_API_KEY"'), 'needs --api-key-env'),
+            (SIGNED_COMPOSE.replace(key_line, ''), 'only when signing in'),
+            (SIGNED_COMPOSE.replace(proxies, ''), 'needs --forwarded-allow-ips'),
+            (SIGNED_COMPOSE.replace('"172.18.0.1"', '"*"'), 'must not allow any host'),
+            (SIGNED_COMPOSE.replace('"172.18.0.1"', '"proxy.example"'), 'addresses or networks'),
+            (SIGNED_COMPOSE.replace('"owner"', '"own er"'), 'must be 1 to 64'),
+            # Without signing in, neither the key nor the flag.
+            (STAGED_COMPOSE.replace('${OPENROUTER_API_KEY:-}\n', '${OPENROUTER_API_KEY:-}\n' + key_line),
+             'only when signing in'),
+            (STAGED_COMPOSE.replace('"50",\n', '"50",\n' + keys), 'only with --auth-user'),
+            # The hash may not come from another variable.
+            (SIGNED_COMPOSE.replace(hash_line, '      AGENTWATCH_PASSWORD_HASH: ${OTHER_HASH:-}\n'),
+             'only pass through reviewed variables'),
+        ):
+            with self.subTest(reason=reason, compose=compose[-400:]):
+                refused(compose, reason)
 
     def test_validation_accepts_env_only_and_limit_changes(self):
         self.scenario(staged_compose=LIVE_COMPOSE.replace('    mem_limit: 512m', '    mem_limit: 1g'))

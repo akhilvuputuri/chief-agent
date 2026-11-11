@@ -435,3 +435,23 @@ test("the base URL comes from the traces endpoint", () => {
     "http://agentwatch:4318",
   );
 });
+
+test("the relay sends agentwatch's API key on every request", async () => {
+  const seen: (string | null)[] = [];
+  const post = (async (_url: string | URL | Request, init?: RequestInit) => {
+    seen.push(new Headers(init?.headers).get("authorization"));
+    return init?.method === "POST"
+      ? new Response("{}", { status: 200 })
+      : new Response(JSON.stringify({ alerts: [alert()] }), { status: 200 });
+  }) as typeof fetch;
+  const relay = new AlertRelay(
+    "http://agentwatch:4318",
+    ["o"],
+    async () => undefined,
+    post,
+    Date.now,
+    { authorization: "Bearer k" },
+  );
+  assert.equal(await relay.poll(), 1);
+  assert.deepEqual(seen, ["Bearer k", "Bearer k"]);
+});
