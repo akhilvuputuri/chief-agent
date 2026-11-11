@@ -9,7 +9,8 @@
 - **Code.** After the item and procedure passes, the learner runs a judge (`judge-v1`): each new learned fact against the owner's message it cites, and each owner turn past the success window against the memory that was in its context (which items were relevant, and whether each was followed, ignored or contradicted). Verdicts go to `events` and, for turns, to trace export as `memory_relevant` and `memory_followed`. It changes no memory. No database or Compose change.
 - **Configuration.** `config/model-policy.json` gains `judge`: `openai/gpt-6.1-sol`, a different family from the main model and the learner, inside the existing price ceilings.
 - **Why.** Nothing checked whether a saved fact means what the owner said, or whether memory in context is used, and the owner rates nothing. See [journal 157](journey/157-nightly-memory-judge.md).
-- **Deployment.** Not yet recorded as live; update this entry on release.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `a223976`: a batch the model could not answer was marked read with no verdicts, items written in the same instant could be skipped at a batch boundary, a still-running turn was passed over, and the tracing doc overstated privacy under content capture. All fixed; it approved `e3c1248`.
+- **Deployment.** Merged as `fdff479` (PR 436) and live from 10:20 SGT on 11 November by the [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/42945250105); the gateway reported `fdff479` and healthy. The first judge run is due on the night of 12 November.
 
 ## Worker image with room for the whole plan (9 November 2026)
 
