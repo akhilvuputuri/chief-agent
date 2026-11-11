@@ -1,5 +1,7 @@
 # Every model on Claude, and fallbacks reported — prepared, 11 November 2026
 
+> **Update, 12 November 2026:** live in `8ccbe34` (PR 445, release run 43055693795). `model.routes` at startup: `mainRoute`, `standardRoute`, `fastRoute`, `judgeRoute` and `mediaRoute` all `anthropic-direct`. One call each through the released router inside the gateway returned `pong` direct with no fallback: Haiku 5.5 (1.6 s, $0.0000046), Sonnet 5.5 (1.4 s, $0.000092), Opus 5.5 (1.2 s, $0.000184). No `model.provider_fallback` in the first 20 minutes.
+
 Branch `claude-models-on-main`; PR 442's rollout is done, so it releases normally. The `fast` agent tier (the default) moves to Haiku 5.5 and the nightly judge to Opus 5.5, both on the direct route; Sonnet 5.5 is mapped but unused. Jev, the search helper (set by Compose), embeddings and speech stay. Each fallback to OpenRouter sends the owner a Telegram message (at most one per fault and model an hour), a start without the direct route for the main model sends one too, and a rate limit cools only the model that hit it. `AGENTS.md` now treats docs as a dated log. See [journal 164](journey/164-claude-models-everywhere.md). Next: after the rollout, merge, then check `model.routes` and the first direct Haiku calls and judge night.
 
 # Dependency advisories — live in `1335f6d`, 11 November 2026
