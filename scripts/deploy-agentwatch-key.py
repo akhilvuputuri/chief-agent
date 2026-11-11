@@ -99,10 +99,21 @@ def unpack(archive_path, sha, stage):
         archive.extractall(stage, members=members, filter='data')
 
 
+def gateway_block(compose):
+    """The gateway service's lines; agentwatch's own block also names AGENTWATCH_API_KEY once
+    signing in is on there, which is not this rollout's concern."""
+    start = compose.find(b'\n  gateway:\n')
+    if start < 0:
+        return b''
+    end = re.compile(rb'^  [A-Za-z0-9_-]+:', re.M).search(compose, start + len(b'\n  gateway:\n'))
+    return compose[start:end.start() if end else len(compose)]
+
+
 def expected_compose(baseline_compose):
     """The baseline with exactly the reviewed lines added, or None if the baseline is not the reviewed one."""
-    if (baseline_compose.count(COMPOSE_ANCHOR) != 1
-            or any(name.encode() in baseline_compose for name in NAMES)):
+    gateway = gateway_block(baseline_compose)
+    if (baseline_compose.count(COMPOSE_ANCHOR) != 1 or COMPOSE_ANCHOR not in gateway
+            or any(name.encode() in gateway for name in NAMES)):
         return None
     return baseline_compose.replace(COMPOSE_ANCHOR, COMPOSE_ANCHOR + COMPOSE_ADDITION)
 

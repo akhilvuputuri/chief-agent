@@ -65,7 +65,7 @@ class AgentwatchKeyRolloutTests(unittest.TestCase):
     def test_repository_compose_differs_by_exactly_the_reviewed_lines(self):
         baseline = repo_baseline()
         self.assertEqual(baseline.count(release.COMPOSE_ANCHOR.decode()), 1)
-        self.assertNotIn('AGENTWATCH_API_KEY', baseline)
+        self.assertNotIn(b'AGENTWATCH_API_KEY', release.gateway_block(baseline.encode()))
         self.assertEqual(release.COMPOSE_ADDITION.decode().splitlines(), [
             '      AGENTWATCH_API_KEY: ${AGENTWATCH_API_KEY:-}'])
         expected = release.expected_compose(baseline.encode()).decode()
@@ -282,6 +282,15 @@ class AgentwatchKeyRolloutTests(unittest.TestCase):
                         BASE_COMPOSE.replace('    read_only: true\n', addition + '    read_only: true\n')]:
             with self.subTest(compose=invalid):
                 self.scenario(changes={'compose.yaml': invalid}, expected_error='Unexpected Compose change')
+
+    def test_agentwatch_naming_the_key_does_not_hide_the_gateway_line(self):
+        # Once signing in is on, agentwatch's block passes the same variable through.
+        signed = BASE_COMPOSE + '      AGENTWATCH_API_KEY: ${AGENTWATCH_API_KEY:-}\n'
+        self.assertIsNotNone(release.expected_compose(signed.encode()))
+        self.scenario(base_compose=signed)
+        # The anchor must be the gateway's.
+        moved = BASE_COMPOSE.replace(release.COMPOSE_ANCHOR.decode(), '') + release.COMPOSE_ANCHOR.decode()
+        self.assertIsNone(release.expected_compose(moved.encode()))
 
     def test_unreviewed_compose_baseline_refuses(self):
         anchor = release.COMPOSE_ANCHOR.decode()
