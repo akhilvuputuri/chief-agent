@@ -1,7 +1,7 @@
 # 163 — Why did the browser agent's clicks fail, and why couldn't it tell?
 
 Work date: 2026-11-11. Written: 2026-11-11.
-Status: tested; release pending. Code change to the gateway only; the browser service and its images are unchanged.
+Status: released in `1cb516b`. Code change to the gateway only; the browser service and its images are unchanged.
 
 ## User-visible problem and preceding iteration
 
@@ -51,3 +51,11 @@ The owner asked whether the browser had been used. It had: the first real tasks 
 ## Lessons
 
 An error the tool layer swallows looks the same as no information. The service was built to explain its failures, and one generic mapping undid that.
+
+## Release closure — 2026-11-12
+
+[PR 447](https://github.com/akhilvuputuri/chief-agent/pull/447) was approved on `1cc7c36`, then on `1a7bcbe` after main was merged in to resolve a conflict in the journal index; hosted CI passed on both. It merged as `1cb516bf4a9d5c5d8114357f64afd679bff8a0ea`, and the automatic [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/43054717193) succeeded at 16:06 UTC on 11 November.
+
+**Measured on the host:** `RELEASE` is `1cb516b`, `/healthz` answers, and the gateway's `dist/tool-errors.js` contains `BROWSER_REFUSED`. The browser service and proxy kept running unchanged.
+
+**Not yet seen:** no browser call has run since the release (0 at 12 November), so no real reason has been recorded.
