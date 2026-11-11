@@ -175,6 +175,8 @@ export class AlertRelay {
     private readonly send: (owner: string, text: string) => Promise<void>,
     private readonly post: typeof fetch = fetch,
     private readonly now: () => number = Date.now,
+    /** agentwatch's API key, as headers (agentwatchHeaders in src/otel.ts). */
+    private readonly headers: Record<string, string> = {},
   ) {}
 
   private report(errorCode: string, deliveredCount: number) {
@@ -213,7 +215,7 @@ export class AlertRelay {
     try {
       const response = await this.post(
         `${this.base}/api/alerts?undelivered=1&limit=${MAX_PER_POLL}`,
-        { signal: AbortSignal.timeout(TIMEOUT_MS) },
+        { headers: this.headers, signal: AbortSignal.timeout(TIMEOUT_MS) },
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = (await response.json()) as { alerts?: unknown };
@@ -233,7 +235,7 @@ export class AlertRelay {
           {
             method: "POST",
             // agentwatch takes writes only as JSON, which a browser cannot send cross-site.
-            headers: { "content-type": "application/json" },
+            headers: { ...this.headers, "content-type": "application/json" },
             body: "{}",
             signal: AbortSignal.timeout(TIMEOUT_MS),
           },

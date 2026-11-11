@@ -188,6 +188,7 @@ services:
       # content out; either takes effect when the gateway is recreated.
       OTEL_EXPORTER_OTLP_ENDPOINT: ${CHIEF_TRACE_ENDPOINT-http://agentwatch:4318}
       OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${CHIEF_TRACE_CONTENT:-true}
+      AGENTWATCH_API_KEY: ${AGENTWATCH_API_KEY:-}
     ports: ["127.0.0.1:3000:3000"]
     networks: [default, browser-control, public-browser-control]
     depends_on:

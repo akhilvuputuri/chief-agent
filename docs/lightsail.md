@@ -71,6 +71,8 @@ It is published on the host's loopback only, and it has no login. To view it, op
 ssh -F ../hermes-companion-ops/ssh_config -N -L 14318:127.0.0.1:4318 chief-lightsail
 ```
 
+Update, 12 November 2026: agentwatch can now require signing in, and once it does a Caddy site, `https://traces.52-77-47-24.sslip.io`, serves it beyond the host. See [viewing traces from anywhere](tracing.md#viewing-traces-from-anywhere) for the rollout, removal and password change. Until that rollout, the paragraph above holds.
+
 Anyone who can open that tunnel, or has a shell on the host, can read the owner's conversations there, as they could the database. Other containers on the Compose network can reach it too; none of them fetches arbitrary URLs from that network. It holds the gateway's OpenRouter key for judges, restricted by its judge policy to OpenRouter and 50 calls a day ([tracing](tracing.md#judging-traces)). The traces are not in the nightly encrypted backup, which covers Postgres only; losing the volume loses telemetry, not the action ledger.
 
 Run these on the host as the operator, from `/opt/hermes-companion` so Compose reads its `.env`, and recreate the gateway only when it is idle:

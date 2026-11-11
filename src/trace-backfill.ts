@@ -18,6 +18,7 @@ import {
   MAX_BATCH_BYTES,
   REDIRECT_EVALUATION,
   agentName,
+  agentwatchHeaders,
   encode,
   encodeEvaluations,
   modelSpan,
@@ -420,13 +421,15 @@ const refusal =
 export async function post(
   list: { url: string; body: string }[],
   send: typeof fetch = fetch,
+  // agentwatch's API key, from AGENTWATCH_API_KEY, once signing in is on there.
+  headers: Record<string, string> = agentwatchHeaders(),
 ) {
   for (const [index, request] of list.entries()) {
     const response = await send(request.url, {
       method: "POST",
       // A redirect could carry the owner's content off this machine.
       redirect: "error",
-      headers: { "content-type": "application/json" },
+      headers: { ...headers, "content-type": "application/json" },
       body: request.body,
       signal: AbortSignal.timeout(60_000),
     });

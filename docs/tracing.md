@@ -208,6 +208,25 @@ rm ~/memory-rows.jsonl
 
 The file holds the owner's memories: keep it private. The CLI prints only counts (revisions, contexts, those sent as traces of their own or skipped, spans, requests, bytes).
 
+## Viewing traces from anywhere
+
+Added 12 November 2026 ([journal 166](journey/166-traces-from-anywhere.md)); rollout pending.
+
+agentwatch can require signing in ([its design notes](https://github.com/akhilvuputuri/agentwatch/blob/main/docs/design.md#signing-in)): one account whose password is stored only as a scrypt hash, sessions in a `Secure`, `HttpOnly` cookie, throttled failed sign-ins, and API keys for programs. With it on, the host's Caddy serves the viewer at `https://traces.52-77-47-24.sslip.io`, and OTLP ingest (`/v1/*`) answers 404 there: Chief exports over the Compose network, as before.
+
+Chief has two clients of agentwatch, the exporter and the alert relay. Both send `Authorization: Bearer` with `AGENTWATCH_API_KEY` when it is set (`agentwatchHeaders` in `src/otel.ts`), and so do the backfill CLIs, which read it from their own environment. agentwatch ignores the header while signing in is off, so the gateway changes first.
+
+The rollout, each step by the operator, with the owner's approval:
+
+1. **The owner's secrets, in the host's private `.env`.** The owner runs `sudo docker run --rm -it --network none ghcr.io/akhilvuputuri/agentwatch@sha256:<digest> hash-password` with the digest the sign-in Compose change pins (the running image predates the command), types the password twice, and adds the printed line as `AGENTWATCH_PASSWORD_HASH=scrypt:...`. A key is added without printing it: `printf '\nAGENTWATCH_API_KEY=%s\n' "$(openssl rand -hex 32)" | sudo tee -a .env >/dev/null` (the leading newline keeps it off the end of a last line that has none). The gateway reads both from there; a backfill run from the operator machine needs the key in its own environment too. Rotating the key means repeating the key rollout's gateway recreate, or export and alerts are refused.
+2. **The gateway's key.** [scripts/deploy-agentwatch-key.py](../scripts/deploy-agentwatch-key.py), from an exact archive of the reviewed main, adds `AGENTWATCH_API_KEY` to the gateway's Compose environment and releases the gateway, as the Anthropic key's rollout did.
+3. **Signing in on.** A Compose change to the agentwatch block (new digest, `--auth-user owner`, `--api-key-env AGENTWATCH_API_KEY`, `--forwarded-allow-ips 172.18.0.1`, `--allow-host traces.52-77-47-24.sslip.io`, and the two variables), installed by [scripts/deploy-agentwatch-update.py](../scripts/deploy-agentwatch-update.py). It refuses half a sign-in setup and a trusted proxy other than the Compose network's gateway, sends the key in its checks, and rolls back if agentwatch answers without it.
+4. **The site.** `sudo python3 scripts/deploy-traces-site.py` from a checkout of the reviewed main. It refuses unless agentwatch already requires signing in, and restores the previous Caddyfile if any check through Caddy fails.
+
+To take the site down: `sudo python3 scripts/deploy-traces-site.py --remove`; it checks nothing first and never puts the site back. To change the password: make a new hash, replace the `.env` line, and recreate agentwatch (`sudo -n docker compose -p hermes-companion up -d --no-deps agentwatch`), which also signs every session out.
+
+Once agentwatch answers a public name, the update procedure refuses a later block that keeps the public name without signing in, so an update cannot switch it off while the site serves (a block dropping both leaves agentwatch refusing the site's name). Through the SSH tunnel the sign-in is the same, but its cookie is `Secure` and the tunnel is plain HTTP on `localhost`; whether a browser keeps it there is untested. The key goes wherever `CHIEF_TRACE_ENDPOINT` points, so pointing export at another collector sends it the key.
+
 ## What leaves the process
 
 Spans carry the same kind of values as the [operational log](operational-logs.md): IDs, model names that pass the model-name shape, fixed provider slugs (`providerName` in `ops-log.ts`), token counts, cost, durations, fixed finish reasons, host-defined tool names (`logOperation`, so a model-invented tool name becomes `unknown`), stop reasons and error codes that pass the code shape. Feedback and memory-use evaluations carry only a fixed name, a boolean or a count, and a fixed label. Memory spans carry revision IDs, kinds, sizes and host flags, with keys and values only under content capture ([memory](#memory)). Unless message content is switched on (above), never prompts, replies, tool arguments or results, error messages or OpenRouter's provider display text. The integration test checks the exported bytes for planted private strings.

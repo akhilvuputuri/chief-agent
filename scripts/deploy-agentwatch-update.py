@@ -29,6 +29,7 @@ import time
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
 AGENTWATCH_CONTAINER = 'hermes-companion-agentwatch-1'
+COMPOSE_NETWORK = 'hermes-companion_default'
 AGENTWATCH_REPOSITORY = 'ghcr.io/akhilvuputuri/agentwatch'
 SERVICE_LINE = re.compile(rb'^  agentwatch:[ \t]*\n', re.M)
 # Only the next service key or a top-level key ends the block; comments do not.
@@ -59,7 +60,7 @@ OPTIONAL_VALUES = {
 # same-named, reviewed host variable (never another one, such as a database password).
 COMMAND_ITEM = re.compile(rb'      [ \t]*(?:\[|\]|"[^"$\\]*",?)')
 ENVIRONMENT_ITEM = re.compile(rb'      ([A-Z][A-Z0-9_]*): \$\{([A-Z][A-Z0-9_]*)(?::-)?\}')
-ALLOWED_ENVIRONMENT = {b'OPENROUTER_API_KEY'}
+ALLOWED_ENVIRONMENT = {b'OPENROUTER_API_KEY', b'AGENTWATCH_PASSWORD_HASH', b'AGENTWATCH_API_KEY'}
 COMMAND_VALUE = re.compile(rb'"([^"$\\]*)"')
 # With the key in its environment, agentwatch must start with the judge policy that keeps the
 # key on OpenRouter and caps its spending; its API has no login and cannot change these.
@@ -67,7 +68,21 @@ JUDGE_ENDPOINT = b'https://openrouter.ai/api/v1'
 JUDGE_KEY_ENV = b'OPENROUTER_API_KEY'
 MAX_JUDGE_DAILY = 50
 COMMAND_FLAGS = {b'--host', b'--allow-host', b'--retain-days', b'--memory-limit',
-                 b'--judge-endpoint', b'--judge-key-env', b'--judge-max-daily'}
+                 b'--judge-endpoint', b'--judge-key-env', b'--judge-max-daily',
+                 b'--auth-user', b'--api-key-env', b'--forwarded-allow-ips'}
+# Signing in (agentwatch's docs/design.md#signing-in): the password hash and --auth-user go
+# together, and so do the gateway's key and --api-key-env, or trace export and the alert relay
+# would be refused. Behind the host's Caddy, the client address must come from the proxy.
+AUTH_USER = re.compile(rb'[A-Za-z0-9._@-]{1,64}')
+# Names reachable only on the host or the Compose network. Any other --allow-host, such as the
+# Caddy site's, makes agentwatch reachable from the internet, so it needs signing in: else a
+# later update could switch signing in off while the site keeps serving.
+PRIVATE_HOSTS = {b'agentwatch', b'localhost', b'127.0.0.1', b'::1'}
+API_KEY_ENV = b'AGENTWATCH_API_KEY'
+PROXY_ADDRESSES = re.compile(rb'[0-9a-fA-F.:/]+(?:,[0-9a-fA-F.:/]+)*')
+# The private .env values signing in needs, checked for form only and never printed.
+PASSWORD_HASH = re.compile('scrypt:[0-9]+:[0-9]+:[0-9]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+')
+KEY_FORMAT = re.compile('[A-Za-z0-9_-]{32,256}')
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 
 
@@ -110,9 +125,43 @@ def agentwatch_healthy():
     return False
 
 
-def agentwatch_ingests():
+def _effective(names):
+    """The private .env's effective value of each name, '' when unset. Kept in memory only."""
+    # Compose takes the last assignment of a repeated name, so a later empty line wins.
+    values = {}
+    for line in (LIVE / '.env').read_text().splitlines():
+        name, sep, value = line.partition('=')
+        # Compose reads KEY="" , KEY='' and KEY= # note as empty, so they count as missing.
+        value = value.split(' #')[0].strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
+            value = value[1:-1].strip()
+        if not sep or name.strip() not in names:
+            continue
+        values[name.strip()] = '' if value.startswith('#') else value
+    return {name: values.get(name, '') for name in names}
+
+
+def signing_in_ready():
+    """True when the private .env holds a well-formed password hash and key. Values are never returned."""
+    values = _effective(('AGENTWATCH_PASSWORD_HASH', 'AGENTWATCH_API_KEY'))
+    return bool(PASSWORD_HASH.fullmatch(values['AGENTWATCH_PASSWORD_HASH'])
+                and KEY_FORMAT.fullmatch(values['AGENTWATCH_API_KEY']))
+
+
+def curl(url, *extra, key=None):
+    """curl, with agentwatch's key (when signing in) as a header read from stdin, so the key
+    is in no command line."""
+    args = ['curl', '--fail', '--silent', '--max-time', '5', *extra]
+    if key is None:
+        return run(args + [url])
+    return run(args + ['--config', '-', url], text=True,
+               input='header = "authorization: Bearer ' + key + '"\n')
+
+
+def agentwatch_ingests(key=None):
     """Sends one labelled span and reads it back: the database is writable as configured
-    (read-only root, no capabilities), which the health check alone does not show."""
+    (read-only root, no capabilities), which the health check alone does not show. With
+    signing in on, the gateway's key is sent, and the same requests without it must be refused."""
     trace = secrets.token_hex(16)
     now = str(time.time_ns())
     body = json.dumps({'resourceSpans': [{
@@ -121,11 +170,26 @@ def agentwatch_ingests():
         'scopeSpans': [{'spans': [{
             'traceId': trace, 'spanId': secrets.token_hex(8), 'name': 'rollout check',
             'kind': 1, 'startTimeUnixNano': now, 'endTimeUnixNano': now}]}]}]})
-    run(['curl', '--fail', '--silent', '--max-time', '5', '-X', 'POST',
-         '-H', 'content-type: application/json', '--data-binary', body,
-         'http://127.0.0.1:4318/v1/traces'])
-    run(['curl', '--fail', '--silent', '--max-time', '5',
-         'http://127.0.0.1:4318/api/traces/' + trace])
+    post = ('-X', 'POST', '-H', 'content-type: application/json', '--data-binary', body)
+    curl('http://127.0.0.1:4318/v1/traces', *post, key=key)
+    curl('http://127.0.0.1:4318/api/traces/' + trace, key=key)
+    if key is None:
+        return
+    for url, extra in (('http://127.0.0.1:4318/v1/traces', post),
+                       ('http://127.0.0.1:4318/api/traces/' + trace, ())):
+        # Exactly 401: any other failure (a crash, a 404) would prove nothing about signing in.
+        status = run(['curl', '--silent', '--max-time', '5', '--output', '/dev/null',
+                      '--write-out', '%{http_code}', *extra, url], text=True).stdout.strip()
+        if status != '401':
+            raise RuntimeError('agentwatch did not refuse a request without its key; signing in is not on')
+
+
+def network_gateway():
+    """The Compose network's gateway: the address Caddy on the host reaches agentwatch from,
+    through Docker's loopback port proxy."""
+    return run(['docker', 'network', 'inspect', '--format',
+                '{{range .IPAM.Config}}{{.Gateway}} {{end}}', COMPOSE_NETWORK],
+               text=True).stdout.split()
 
 
 def agentwatch_image_id():
@@ -186,8 +250,28 @@ def validate_command(command, environment):
         values.setdefault(flag, []).append(value)
     if any(len(found) > 1 for flag, found in values.items() if flag != b'--allow-host'):
         raise RuntimeError('agentwatch command repeats an argument')
+    signing_in = b'--auth-user' in values
+    if signing_in != (b'AGENTWATCH_PASSWORD_HASH' in environment):
+        raise RuntimeError('agentwatch --auth-user and AGENTWATCH_PASSWORD_HASH go together')
+    if signing_in and not AUTH_USER.fullmatch(values[b'--auth-user'][0]):
+        raise RuntimeError('agentwatch --auth-user must be 1 to 64 letters, digits or ._@-')
+    keys = values.get(b'--api-key-env', [])
+    if keys != ([API_KEY_ENV] if signing_in else []):
+        raise RuntimeError('agentwatch signing in needs --api-key-env AGENTWATCH_API_KEY, and only with --auth-user')
+    if (API_KEY_ENV in environment) != signing_in:
+        raise RuntimeError('agentwatch passes AGENTWATCH_API_KEY through only when signing in')
+    # agentwatch also answers the name it binds to, so that is held to the same rule.
+    if values.get(b'--host', [b'0.0.0.0'])[0] not in {b'0.0.0.0', b'::', *PRIVATE_HOSTS}:
+        raise RuntimeError('agentwatch --host must be 0.0.0.0, :: or loopback')
+    if not signing_in and any(host not in PRIVATE_HOSTS for host in values.get(b'--allow-host', [])):
+        raise RuntimeError('agentwatch may answer a public host name only with signing in on')
+    proxies = values.get(b'--forwarded-allow-ips', [])
+    if signing_in and not proxies:
+        raise RuntimeError('agentwatch signing in behind Caddy needs --forwarded-allow-ips')
+    if proxies and not PROXY_ADDRESSES.fullmatch(proxies[0]):
+        raise RuntimeError('agentwatch --forwarded-allow-ips must list addresses or networks')
     if b'OPENROUTER_API_KEY' not in environment:
-        return
+        return values
     if values.get(b'--judge-endpoint') != [JUDGE_ENDPOINT]:
         raise RuntimeError('agentwatch with a key must pin --judge-endpoint to OpenRouter')
     if values.get(b'--judge-key-env') != [JUDGE_KEY_ENV]:
@@ -195,10 +279,17 @@ def validate_command(command, environment):
     daily = values.get(b'--judge-max-daily', [b''])[0]
     if not daily.isdigit() or not 1 <= int(daily) <= MAX_JUDGE_DAILY:
         raise RuntimeError('agentwatch with a key must cap --judge-max-daily at ' + str(MAX_JUDGE_DAILY))
+    return values
 
 
 def validate_block(block):
     """Returns the pinned image reference when the block uses only the reviewed settings."""
+    return checked_block(block)[0]
+
+
+def checked_block(block):
+    """(image, command values) when the block uses only the reviewed settings. The values are
+    the parsed command's, never read off comments, so callers decide from what will run."""
     keys, environment, command, image, current = [], [], [], None, None
     for line in block.split(b'\n')[1:]:
         if COMMENT_LINE.fullmatch(line):
@@ -239,8 +330,7 @@ def validate_block(block):
             raise RuntimeError('agentwatch block must keep ' + key.decode() + ' as reviewed')
     if len(keys) != len(set(keys)) or len(environment) != len(set(environment)):
         raise RuntimeError('agentwatch block repeats a setting')
-    validate_command(command, environment)
-    return image.decode()
+    return image.decode(), validate_command(command, environment)
 
 
 def validate_changes(stage):
@@ -290,6 +380,22 @@ def main():
             stage.mkdir()
             unpack(archive_path, sha, stage)
             image = validate_changes(stage)
+            _, settings = checked_block(split_compose((stage / 'compose.yaml').read_bytes(), 'Staged')[1])
+            signing_in = b'--auth-user' in settings
+            if signing_in and not signing_in_ready():
+                raise RuntimeError('Add AGENTWATCH_PASSWORD_HASH (from agentwatch hash-password) and AGENTWATCH_API_KEY to the private .env first; nothing changed')
+            key = _effective(('AGENTWATCH_API_KEY',))['AGENTWATCH_API_KEY'] if signing_in else None
+            if signing_in:
+                # Trusting exactly the proxy: a wider range would let a neighbouring container
+                # name any client address and get round the per-address sign-in wait.
+                trusted = settings[b'--forwarded-allow-ips'][0].decode()
+                try:
+                    gateways = network_gateway()
+                except Exception:
+                    raise RuntimeError('Compose network unavailable; nothing changed') from None
+                if trusted.split(',') != gateways:
+                    raise RuntimeError('agentwatch --forwarded-allow-ips must be the Compose network gateway (' +
+                                       ' '.join(gateways) + '); nothing changed')
             try:
                 run(['docker', 'pull', image])
             except Exception:
@@ -308,7 +414,7 @@ def main():
                 compose('up', '-d', '--no-deps', 'agentwatch')
                 if not agentwatch_healthy():
                     raise RuntimeError('agentwatch failed startup health')
-                agentwatch_ingests()
+                agentwatch_ingests(key)
                 if not gateway_healthy():
                     raise RuntimeError('Gateway health failed after the agentwatch update')
             except Exception:

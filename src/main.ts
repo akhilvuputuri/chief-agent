@@ -102,6 +102,7 @@ import { captureRequested } from "./otel-content.js";
 import { AlertRelay, alertsBase } from "./trace-alerts.js";
 import {
   logsEndpoint,
+  agentwatchHeaders,
   startTracing,
   stopTracing,
   tracesEndpoint,
@@ -143,6 +144,7 @@ if (tracesUrl) {
   startTracing({
     endpoint: tracesUrl,
     captureContent,
+    headers: agentwatchHeaders(),
     ...(logsUrl ? { logsEndpoint: logsUrl } : {}),
     ...(release && /^[0-9a-f]{40}$/.test(release)
       ? { serviceVersion: release }
@@ -1470,6 +1472,9 @@ if (tracesUrl) {
     async (owner, text) => {
       await bot.api.sendMessage(owner, text);
     },
+    fetch,
+    Date.now,
+    agentwatchHeaders(),
   );
   alertTimer = setInterval(() => void relay.poll(), 60_000);
   alertTimer.unref();

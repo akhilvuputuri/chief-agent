@@ -8,6 +8,7 @@ import { setOpsSink } from "../src/ops-log.js";
 import {
   OtlpExporter,
   SpanKind,
+  agentwatchHeaders,
   encode,
   encodeEvaluations,
   logsEndpoint,
@@ -894,4 +895,36 @@ test("the provider name follows the pathway that served the call", () => {
     "content_filter",
   ]);
   assert.equal(refused["gen_ai.response.model"], undefined);
+});
+
+test("agentwatch's API key comes from AGENTWATCH_API_KEY and goes on every export", async () => {
+  assert.deepEqual(agentwatchHeaders({}), {});
+  assert.deepEqual(agentwatchHeaders({ AGENTWATCH_API_KEY: "  " }), {});
+  assert.deepEqual(agentwatchHeaders({ AGENTWATCH_API_KEY: " k1 " }), {
+    authorization: "Bearer k1",
+  });
+  const seen: (string | null)[] = [];
+  const exporter = new OtlpExporter({
+    endpoint: "http://collector/v1/traces",
+    intervalMs: 60_000,
+    headers: { authorization: "Bearer k1" },
+    fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      seen.push(
+        `${headers.get("authorization")}|${headers.get("content-type")}`,
+      );
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch,
+  });
+  exporter.enqueue({
+    traceId: "a".repeat(32),
+    spanId: "b".repeat(16),
+    name: "span",
+    kind: SpanKind.internal,
+    startNs: 1n,
+    endNs: 2n,
+    attributes: {},
+  });
+  await exporter.shutdown(1000);
+  assert.deepEqual(seen, ["Bearer k1|application/json"]);
 });
