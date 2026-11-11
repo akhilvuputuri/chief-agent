@@ -1,7 +1,7 @@
 # 160 — Can Chief call Anthropic directly, alongside OpenRouter, and switch between them?
 
 Work date: 11 November 2026. Written: 11 November 2026.
-Status: built on branch `claude/gifted-mccarthy-gond93`, tested with mocked requests and verified live with a temporary key on 11 November 2026 (local runs, not production; the OpenRouter fallback target and the sandbox were stand-ins); first independent review requested changes (addressed); a later independent review approved head `162bf66` with non-blocking findings, addressed in the working tree and awaiting re-review; not released or enabled. Enabling needs a separate Compose change through a reviewed operator procedure.
+Status: released in `a7c1993` (PR #441) on 11 November 2026, inert in production until enabled (the host has no key); tested with mocked requests and verified live with a temporary key on 11 November 2026 (local runs, not production; the OpenRouter fallback target and the sandbox were stand-ins). Enabling, owner-approved on 11 November 2026, is a separate Compose change through a reviewed operator procedure ([journal 161](161-enabling-direct-anthropic.md)).
 
 ## User-visible problem and preceding iteration
 
@@ -61,9 +61,12 @@ Implemented, tested with mocks and verified live on 11 November with a temporary
 
 No latency, cache hit rate or cost comparison with OpenRouter exists, because no OpenRouter key was available. The first production run must verify authentication (and the workspace header for an unscoped key), the effective model, cached tokens, `thinking_dropped`, acceptance of the thinking-binding beta, a Pi coding job with a direct reviewer, rate-limit behaviour on a new low-tier account and fallback firing ([checklist](../model-providers.md#first-live-run)).
 
-### Release closure
+### Release closure — 11 November 2026
 
-Pending: independent review, merge and release of the adapter (inert in production), then the separate Compose PR and operator key rollout, then the first live run.
+- **Merged:** [PR 441](https://github.com/akhilvuputuri/chief-agent/pull/441), head `867690c`, as `a7c199386c75ff8ac084d7a0e9462ca4fe810917`. Checks run 43004466110 and [release run 43004943097](https://github.com/akhilvuputuri/chief-agent/actions/runs/43004943097) succeeded. `kite run release:status` reports state success, recorded at 2026-11-11T10:37:13Z: the exact commit deployed and startup health passed at release time.
+- **Review:** recorded above up to the approval of `162bf66` and its non-blocking findings, addressed before merge. After those fixes a fresh independent reviewer (Opus 5.5, separate context, read-only) approved the merged head `867690c02ccd4433ed188798ddab453ed1cb1478` with no blocking findings; the verdict is quoted in PR #441's description.
+- **Inert:** Compose does not pass `ANTHROPIC_API_KEY` and the host has no key, so every call still goes through OpenRouter and behaviour is unchanged. No version bump and no tag.
+- **Not shown by this release:** the direct route in production (`model.routes`, authentication, caching, fallback). Those wait for the enabling rollout and the [first live run](../model-providers.md#first-live-run) ([journal 161](161-enabling-direct-anthropic.md)).
 
 ## Coding-harness learning record
 
@@ -71,8 +74,8 @@ Updated in [coding-agent lessons](coding-agent-lessons.md). Direct calls report 
 
 ## Follow-up and next iteration
 
-- Review, merge and release the adapter; then the Compose PR and key rollout ([model providers](../model-providers.md#enabling-it)).
+- The Compose PR and key rollout ([model providers](../model-providers.md#enabling-it), [journal 161](161-enabling-direct-anthropic.md)); the adapter itself is released.
 - First live run checklist, recorded here with dated evidence.
-- Owner decisions pending: output allowances (Chief's default 8,000 tokens including thinking failed 3 of 6 deliberately hard prompts at medium and high effort as an empty response; the coding coder's 128k allowance let one trivial call spend 91k output tokens, $1.82; the reviewer is capped at 16k).
+- Output allowances, decided by the owner on 11 November 2026 in [journal 161](161-enabling-direct-anthropic.md): Chief 32,000, coding reviewer 64,000, Opus 5.5 for the Pi planner and coder. (Chief's default 8,000 tokens including thinking failed 3 of 6 deliberately hard prompts at medium and high effort as an empty response; the coding coder's 128k allowance let one trivial call spend 91k output tokens, $1.82; the reviewer was capped at 16k.)
 - Deferred candidates found during the live run, predating this change: a host notice appended to the turn as a user message invalidates the cache from that point; a child's final call narrows the tool list, missing the cache and dropping its thinking blocks.
 - Deferred: persistent cooldowns; thinking continuity across a gateway restart; a same-workload cost and cache comparison against OpenRouter.

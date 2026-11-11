@@ -395,3 +395,18 @@ Evidence boundary:
 - **Tested:** mocked direct requests, routing, fallback, the reasoning strip and ping-only progress; Pi's reasoning filter read from its bundled client; refusal and billed-failure recording in the coding controller.
 - **Measured live (11 November 2026, temporary key, local runs on head `da1eb07`, the job's roles on Opus 5.5 direct):** plan, code and review jobs reached `pr_ready` with an APPROVE at about $0.25 each; a deliberately flawed candidate was rejected; a compaction call was accepted; injected 429 and 503 faults recovered; cancellation took 1.4 s; the worker's environment never contained the key; Opus 5 was refused by the price filter. Faked: no Docker daemon (the sandbox image and native process guard were not used), no OpenRouter key (the fallback target was a stand-in).
 - **Not yet measured:** the production role mix (DeepSeek coders on OpenRouter with a direct reviewer), the real OpenRouter fallback, live rate-limit and outage responses, and review quality across more than these jobs.
+
+## Every Pi role on Opus 5.5, and a 64,000-token reviewer — 11 November 2026
+
+**What changed for a coding job** (owner-approved; in the enabling change of [journal 161](161-enabling-direct-anthropic.md), not yet rolled out). New Pi jobs plan, code and review with `anthropic/claude-opus-5.5`, served directly by Anthropic once the gateway has the key. The reviewer may write up to 64,000 tokens per call (was 16,000), so the host allows a review call about 10.7 minutes (was 5) and the worker waits a minute longer. The coder and planner keep 128,000 tokens and the job keeps 150 minutes, 1,500 model calls and 4,000 tool calls.
+
+- A role the owner set with `coding_model_set` keeps that stored choice over `config/coding-pi.json`. After a profile change, read `coding_models` before assuming the file's model is in effect. Existing jobs keep the models and allowances they were created with.
+- The Python squad profile is unchanged (DeepSeek leader and coder). New jobs do not use it, and its protocol with Opus in those roles has only been message-shape tested; switching it would be an untested change to an automatic-merge path.
+- On the direct route Pi drops Anthropic thinking entries between its own tool turns (its client keeps only OpenAI-style reasoning), so the coder reasons afresh each call. With `drop_block` this costs continuity, not failed requests.
+- All roles now share one Anthropic account's rate limits (4,000 requests, 2M input and 400k output tokens per minute on the test account). A long job's bursts may hit `rate_limit`, which falls back to OpenRouter for that call.
+
+Evidence boundary:
+
+- **Measured (journal 160, local, temporary key):** three small Pi jobs with every role on Opus 5.5 direct reached `pr_ready` at about $0.25 each; one trivial coder call under 128,000 spent 91k output tokens ($1.82).
+- **Tested:** the shipped profile's reviewer allowance (64,000) and its 640-second call limit; the profile passes the gateway's startup checks.
+- **Not yet measured:** a real-sized job with an Opus coder: its cost, whether it needs fewer review rounds than the DeepSeek coder, and how often its calls hit the account's rate limits.

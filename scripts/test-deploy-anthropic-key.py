@@ -217,6 +217,11 @@ class AnthropicKeyRolloutTests(unittest.TestCase):
     def test_success_switches_compose_and_publishes_source(self):
         self.scenario()
 
+    def test_application_and_config_changes_ride_along(self):
+        # The enabling PR also changes config/ and src/, as an ordinary release would.
+        self.scenario(changes={'config/coding-pi.json': '{"model": "candidate"}\n',
+                               'src/custom-agent.ts': '// candidate loop\n'})
+
     def test_missing_or_empty_key_refuses_before_any_change(self):
         for env in ['PRIVATE_SENTINEL=x\nOPENROUTER_API_KEY=secret-sentinel-or\n',
                     'ANTHROPIC_API_KEY=\n',
