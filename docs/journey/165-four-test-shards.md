@@ -40,6 +40,12 @@ This is one run. Runner speeds varied by up to two times between shards in earli
 
 **Review (Claude Opus 5.5), `7b9a479`: changes requested, on the records only.** The index row for this entry was in the wrong table, the status said tested before any four-shard run had finished, and three places stated the 20-job limit as a known fact. The reviewer confirmed the shard split (157 files, each in exactly one shard, none without a weight) and the figures above from the run itself.
 
+### Release closure — 12 November 2026
+
+- **Merged:** [PR 448](https://github.com/akhilvuputuri/chief-agent/pull/448), approved head `7ea6f4f`, as `dcb7ea3`.
+- **Released:** release run 43057521898 succeeded on its third attempt; the two before it stopped at "Verify current main and run release checks", and their cause was not read. Read-only host check: gateway on `dcb7ea3` and healthy. Nothing in the running application changed.
+- **Measured, three more four-shard runs:** the pull request's later heads took 73, 75, 94, 80 s and 75, 69, 112, 103 s for the four test steps, and main's run 43056656534 took 68, 95, 88, 66 s. Together with the first run, test steps ranged from 66 to 112 s.
+
 ## Follow-up and next iteration
 
 - Reconsider three shards if the image job gets faster.

@@ -10,6 +10,8 @@
 - **Why.** Jobs were waiting for runners: a run wants 13 jobs, and no more than 20 were seen running at once across the account. See [journal 165](journey/165-four-test-shards.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
 
+> **Update, 12 November 2026:** live in `dcb7ea3` (PR 448, release run 43057521898). Main's first four-shard run (43056656534) took 68, 95, 88 and 66 s for its test steps and finished in about five minutes; the host reports `dcb7ea3` with a healthy gateway.
+
 ## Claude models everywhere (11 November 2026)
 
 > **Update, 12 November 2026:** live in `8ccbe34` (PR 445, release run 43055693795). `model.routes` at startup: `mainRoute`, `standardRoute`, `fastRoute`, `judgeRoute` and `mediaRoute` all `anthropic-direct`. One call each through the released router inside the gateway returned `pong` direct with no fallback: Haiku 5.5 (1.6 s, $0.0000046), Sonnet 5.5 (1.4 s, $0.000092), Opus 5.5 (1.2 s, $0.000184). No `model.provider_fallback` in the first 20 minutes.
