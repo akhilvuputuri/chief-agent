@@ -83,8 +83,10 @@ export class PublicBrowser {
    * and closes. It never clicks, fills or runs a caller's script, and stores nothing.
    */
   async snapshot(user: string, session: string, url: string) {
+    // The whole check ends inside the caller's two-minute lease, however slow the page is.
+    const deadline = AbortSignal.timeout(90_000);
     const call = async (command: PublicBrowserCommand) => {
-      const reply = await this.rpc.call(user, session, command);
+      const reply = await this.rpc.call(user, session, command, deadline);
       if (reply.busy === true) return undefined;
       if (reply.ok !== true) throw new Error("Browser command failed");
       return (reply.result ?? {}) as Record<string, unknown>;

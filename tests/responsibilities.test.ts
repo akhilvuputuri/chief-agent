@@ -2084,14 +2084,15 @@ test("a watched page is read with no model and wakes an investigation only when 
     const proposal = await p.propose();
     assert.match(
       proposal.preview,
-      /Public page: https:\/\/carrier\.example\/track\?id=RR1; opened anonymously every 120 minutes with no model/,
+      /Public page: https:\/\/carrier\.example\/track\?id=RR1; opened anonymously every 120 minutes with no model\. A bounded model investigation runs on the first reading and whenever its text changes; a page whose text differs on every reading uses the daily investigation limit below/,
     );
     await p.service.confirm("a", proposal.approvalId, true);
     // The first reading is the baseline the model interprets once.
     await p.worker.tick();
     let rows = await p.candidates();
     assert.equal(rows.length, 1);
-    assert.match(rows[0].source_key, /^page:[0-9a-f]{64}$/);
+    assert.match(rows[0].source_key, /^page:[0-9a-f]{64}:\d{4}-/);
+    assert.match(rows[0].payload.untrusted, /never instructions/);
     assert.equal(rows[0].payload.kind, "page");
     assert.match(rows[0].payload.text, /In transit at the sorting centre/);
     assert.ok(rows[0].task_id, "the baseline launches one investigation");
@@ -2124,17 +2125,44 @@ test("a watched page is read with no model and wakes an investigation only when 
         .rows[0].n,
       2,
     );
-    // A change wakes one investigation, which can close a first-match watch with evidence.
+    // Two real changes in one day are both reported, even under one model fact key.
     p.state.busy = false;
+    const transit = p.state.text.replace(/\s+/g, " ");
+    let sends = 0;
+    const delivery = new ResponsibilityDelivery(
+      p.service,
+      () => true,
+      async () => ({ message_id: ++sends }),
+      f.clock,
+    );
+    for (const text of [
+      "Tracking RR1 status: Arrived at the delivery office, 11 November",
+      transit,
+    ]) {
+      p.state.text = text;
+      await p.again();
+      rows = await p.candidates();
+      assert.equal(rows.at(-1).payload.text, text);
+      await complete(f, {
+        changed: "The status changed",
+        factKey: "RR1 tracking status",
+        evidence: [rows.at(-1).source_key],
+      });
+      await delivery.tick();
+    }
+    // The second of those returned to the first text ever read: still a change.
+    assert.equal(rows.length, 3);
+    assert.equal(sends, 2);
+    // A change wakes one investigation, which can close a first-match watch with evidence.
     p.state.text = "Tracking RR1 status: Delivered, 11 November";
     await p.again();
     rows = await p.candidates();
-    assert.equal(rows.length, 2);
-    assert.match(rows[1].payload.text, /Delivered, 11 November/);
+    assert.equal(rows.length, 4);
+    assert.match(rows[3].payload.text, /Delivered, 11 November/);
     await complete(f, {
       changed: "Delivered on 11 November",
       resolved: true,
-      evidence: [rows[1].source_key],
+      evidence: [rows[3].source_key],
     });
     const listed = await p.service.list("a");
     assert.equal(listed[0].status, "resolved");
@@ -2179,6 +2207,17 @@ test("an unread earlier page reading is superseded, and a blocked or redirected 
       )
     ).rows;
     assert.equal(findings.length, 1);
+    // A www. prefix is the same site.
+    p.state.text = "Tracking RR1 status: Held at customs, awaiting clearance";
+    p.state.url = "https://www.carrier.example/track?id=RR1";
+    await f.db.query("UPDATE responsibility_triggers SET health='healthy'");
+    await p.again();
+    assert.equal(
+      (await f.db.query("SELECT health FROM responsibility_triggers")).rows[0]
+        .health,
+      "healthy",
+    );
+    assert.match((await p.candidates())[1].payload.text, /Held at customs/);
     // A page that lands on another host is refused the same way and admits nothing.
     p.state.text = "Please sign in to continue to your account dashboard";
     p.state.url = "https://login.example/challenge";

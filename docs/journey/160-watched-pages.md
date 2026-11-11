@@ -35,13 +35,21 @@ The second fails for a page that needs a form, a click or a CAPTCHA to show its 
 
 - `src/responsibility-schema.ts`: a responsibility may name `page: { url, minutes }`, a public HTTPS address re-read every 30–720 minutes (default 120).
 - `src/public-browser/client.ts`: `PublicBrowser.snapshot` opens one address, reads its text until two readings match (at most four, 2.5 s apart) and always closes. It never clicks, fills or runs a caller's script, and stores nothing. It is a host path with no model, so it does not pass the browser agent check.
-- `src/responsibility-worker.ts`: the check normalizes whitespace, keeps the first 8,000 characters and hashes them. A new hash admits one candidate holding that text; an unchanged one admits nothing. A busy browser retries in two minutes without a failure. An empty page, or one that lands on another host, degrades the watch through the existing path. A reading no investigation has taken is replaced by the next.
+- `src/responsibility-worker.ts`: the check normalizes whitespace, keeps the first 8,000 characters and hashes them. A hash that differs from the last reading admits one candidate holding that text; an unchanged one admits nothing. A busy browser retries in two minutes without a failure. An empty page, or one that lands on another host, degrades the watch through the existing path. A reading no investigation has taken is replaced by the next.
 - `src/responsibilities.ts`: the confirmation card shows the address and interval. A page cannot share a responsibility with a schedule or parcel IDs.
 - No migration. The check is stored under the existing `schedule` trigger kind, because the triggers table's check constraint allows only four kinds and a database change cannot go out through the ordinary release.
 - The investigation writes no parcel record. `parcel_updates.source_kind` allows only `email` and `user`, and unattended parcel writes stay email-only.
 - `src/execution.ts`, `src/ops-log.ts`: a refused `responsibility_report` logs `errorField`, the first refused argument path. It is limited to that tool because its schema has only host-named keys and array indexes.
 
-Independent review: pending.
+Independent review (Claude Opus 5.5) requested changes on `5ab0e3e`:
+
+- **Blocking:** candidates were keyed by the text's hash, so a page that returned to an earlier, already investigated text admitted nothing while the check was recorded as a success. Confirmed by the reviewer's own test. Candidates are now keyed by reading.
+- The confirmation card said the model runs "only when its text changes", though the first reading always runs one, and it did not mention text that differs on every reading. Both are now on the card.
+- Findings for a page were deduplicated by outcome and the model's fact key, so a second real change within 24 hours could be dropped. A page now uses the default, per-candidate key.
+- A slow page could outlast the two-minute lease. The reading is now cut off at 90 seconds.
+- Smaller: the superseding delete was not guarded by the lease and active status; a `www.` redirect degraded the watch; the investigation prompt forbade "carrier verification" while asking for a carrier page to be reported; a reading carried no untrusted marker; the log test used a hand-written message, not a real schema refusal. All corrected.
+
+The reviewer found no boundary break in the host browser path or in `errorField`. Re-review of the corrected head: pending.
 
 ## Verification and outcome
 

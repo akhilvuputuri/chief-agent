@@ -640,7 +640,7 @@ export function preview(s: ResponsibilitySpec, email?: string) {
     );
   if (s.page)
     sources.push(
-      `Public page: ${s.page.url}; opened anonymously every ${s.page.minutes} minutes with no model. A bounded model investigation runs only when its text changes.`,
+      `Public page: ${s.page.url}; opened anonymously every ${s.page.minutes} minutes with no model. A bounded model investigation runs on the first reading and whenever its text changes; a page whose text differs on every reading uses the daily investigation limit below.`,
     );
   return [
     s.title,

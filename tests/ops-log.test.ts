@@ -17,6 +17,8 @@ import {
 } from "../src/ops-log.js";
 import { ensureUser, event, type Database } from "../src/db.js";
 import { Execution, recoverRuntime } from "../src/execution.js";
+import { responsibilityReport } from "../src/responsibility-schema.js";
+import { toolError } from "../src/tool-errors.js";
 
 // Shapes that must never reach an operational log line.
 const PRIVATE = [
@@ -687,12 +689,14 @@ test("a refused responsibility report logs which field failed, and no other tool
       new AbortController().signal,
     );
     await execution.start();
-    const refusal = {
-      error: {
-        code: "INVALID_INPUT",
-        message: `Correct the fields: finding.factKey: ${PRIVATE[0]}; finding.reply: Required`,
-      },
-    };
+    // A real refusal from the report schema, whose unknown key is model text.
+    const parsed = responsibilityReport.safeParse({
+      operation: "responsibility_report",
+      finding: { factKey: "", [PRIVATE[0]]: PRIVATE[1] },
+    });
+    assert.equal(parsed.success, false);
+    const refusal = { error: toolError(parsed.error) };
+    assert.equal(refusal.error.code, "INVALID_INPUT");
     for (const operation of ["responsibility_report", "gmail_search"])
       await execution.endCall(
         await execution.beginCall(randomUUID(), operation, {}),
@@ -710,7 +714,7 @@ test("a refused responsibility report logs which field failed, and no other tool
     assert.deepEqual(
       finished.map((l) => [l.operation, l.errorField]),
       [
-        ["responsibility_report", "finding.factKey"],
+        ["responsibility_report", "finding.changed"],
         ["gmail_search", undefined],
         ["responsibility_report", undefined],
       ],
