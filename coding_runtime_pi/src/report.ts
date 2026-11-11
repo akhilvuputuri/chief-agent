@@ -10,6 +10,11 @@ export const reportLimits = Object.freeze({
 // Immutable evidence is paged separately from model-written report documents.
 // This admits the complete existing host patch bound without larger wire pages.
 export const referenceLimits = Object.freeze({ document: 500000 });
+/**
+ * Characters in one read_document page. Every model call re-reads the whole conversation, so
+ * a 300,000-character diff in 4,000-character pages cost about 75 calls to load (journal 167).
+ */
+export const documentPageChars = 32000;
 export type ReportDocument = Report & { version: 1; hash: string };
 export function reportDocument(report: Report): ReportDocument {
   if (
@@ -54,7 +59,13 @@ export function reportDocument(report: Report): ReportDocument {
     hash: createHash("sha256").update(JSON.stringify(body)).digest("hex"),
   };
 }
-export type ReferenceDocument = { id: string; title: string; text: string };
+export type ReferenceDocument = {
+  id: string;
+  title: string;
+  text: string;
+  /** Available to consult, but not required reading before work or a verdict. */
+  optional?: boolean;
+};
 export function documentHash(text: string) {
   return createHash("sha256").update(text).digest("hex");
 }

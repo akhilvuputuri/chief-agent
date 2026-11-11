@@ -1,3 +1,9 @@
+## Review that reads what changed (10 November 2026)
+
+- **Code.** Worker only. `read_document` pages are 32,000 characters instead of 4,000, and a review round after a repair in the same run reads the earlier findings and the diff since the reviewed candidate, with the complete diff as optional reading. No host, database or Compose change; it takes effect when a worker image built from this change is pinned.
+- **Why.** The reviewer cost $16.06 of about $17 on job `4ba7fa41`, with 97% of its prompt tokens already read from cache. See [journal 167](journey/167-review-that-reads-what-changed.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Four test shards in CI (11 November 2026)
 
 - **Code.** CI splits the TypeScript tests four ways instead of six, with re-recorded shard weights. Nothing in the running application changes.

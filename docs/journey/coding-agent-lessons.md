@@ -410,3 +410,14 @@ Evidence boundary:
 - **Measured (journal 160, local, temporary key):** three small Pi jobs with every role on Opus 5.5 direct reached `pr_ready` at about $0.25 each; one trivial coder call under 128,000 spent 91k output tokens ($1.82).
 - **Tested:** the shipped profile's reviewer allowance (64,000) and its 640-second call limit; the profile passes the gateway's startup checks.
 - **Not yet measured:** a real-sized job with an Opus coder: its cost, whether it needs fewer review rounds than the DeepSeek coder, and how often its calls hit the account's rate limits.
+
+**Cost that caching cannot remove (10 November).** The study-links job cost about $17, and $16 of it was the Opus reviewer. Caching was not the problem: 97% of its prompt tokens were cache reads, and no call missed. The reviewer made 276 calls, each re-reading a conversation that grew to 200,000 tokens, because the diff came in up to 78 pages of 4,000 characters and each of five rounds read all of it again. Pages are now 32,000 characters, and a round after a repair in the same run reads the earlier findings and the diff since the reviewed candidate ([journal 167](167-review-that-reads-what-changed.md)).
+
+- A high cache hit rate says the prefix is stable, not that the work is cheap. Count calls and context size.
+- Each tool call in a loop costs a re-read of everything so far; hand over evidence in few, large pieces.
+
+Evidence boundary:
+
+- **Measured:** token, cache and cost figures for one job, and 30-day totals.
+- **Tested:** synthetic jobs with larger pages and a second review round on the delta.
+- **Estimated, not measured:** the saving, roughly $10 of $16 on that job.

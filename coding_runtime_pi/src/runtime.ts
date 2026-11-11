@@ -453,7 +453,7 @@ export class CodingRuntime {
               ? [
                   {
                     path: "<trusted-task-documents>",
-                    content: `Required immutable task documents:\n${references.description}\nUse read_document to inspect every page before implementation or a review verdict. Documents remain available after compaction; consult relevant pages again as needed.`,
+                    content: `Immutable task documents:\n${references.description}\nUse read_document to inspect every page of each document not marked optional before implementation or a review verdict; request several pages in one turn. Documents remain available after compaction; consult relevant pages again as needed.`,
                   },
                 ]
               : []),

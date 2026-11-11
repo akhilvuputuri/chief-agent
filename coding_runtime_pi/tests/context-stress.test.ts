@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { documentPageChars } from "../src/report.js";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
@@ -40,7 +41,9 @@ for (const scenario of [
       "Preserve REQUIREMENT_A and REQUIREMENT_B and source.js. Record progress through step 100 in progress.json; configured checks verify the final artifact." +
       (scenario === "large-scope" ? "\n" + rules : "");
     const pages =
-      scenario === "large-scope" ? Math.ceil(planText.length / 4000) : 0;
+      scenario === "large-scope"
+        ? Math.ceil(planText.length / documentPageChars)
+        : 0;
     let oversizedGroupSummarized = false,
       orphanToolResult = false;
     let documentReads = 0,

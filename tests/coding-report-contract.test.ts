@@ -1,4 +1,5 @@
 import { reviewDocumentReader } from "./helpers/pi-review-documents.js";
+import { documentPageChars } from "@chief-agent/pi-runtime";
 import { reportDocument } from "@chief-agent/pi-runtime/report";
 import { execFileSync } from "node:child_process";
 import {
@@ -247,10 +248,13 @@ for (const { documentLength, terminalRecovery } of [
           documentLength < 0 ? "界\n" : " Evidence retained.",
         )
         .slice(0, Math.abs(documentLength) || 62);
-    const pages = documentLength ? Math.ceil(fullPlan.length / 4000) : 0;
+    const pages = documentLength
+      ? Math.ceil(fullPlan.length / documentPageChars)
+      : 0;
     const turns = new Map<string, number>();
     const reviewed = new Map<string, number>();
     const readEvidence = reviewDocumentReader();
+    let laterRounds = 0;
     const recoveredPhases = new Set<string>();
     f.setGeneration((selected, input) => {
       const system =
@@ -285,8 +289,24 @@ for (const { documentLength, terminalRecovery } of [
       const reading = phase !== "plan" && rawCount < requiredPages;
       if (phase === "build" || phase === "repair")
         assert(system.includes("host has verified owner approval"));
-      const count = phase === "plan" ? rawCount : rawCount - requiredPages;
+      // The review-repair scenario builds a larger change, so its repair is a small part of it.
+      const larger = documentLength === 9357 && phase === "build" ? 1 : 0;
+      const count =
+        phase === "plan" ? rawCount : rawCount - requiredPages - larger;
       let tool: { name: string; arguments: any } | undefined;
+      if (larger && count === -1 && !reading)
+        tool = {
+          name: "write",
+          arguments: {
+            path: "notes.txt",
+            // Large enough that the complete diff spans two pages, and small enough
+            // for this synthetic model's 32,000-token window.
+            content: Array.from(
+              { length: 1100 },
+              (_, i) => `Synthetic supporting text, line ${i}.\n`,
+            ).join(""),
+          },
+        };
       if (phase === "plan" && count === 0)
         tool = { name: "read", arguments: { path: "sum.js" } };
       if (phase === "plan" && count === 1)
@@ -329,6 +349,47 @@ for (const { documentLength, terminalRecovery } of [
           },
         };
       if (phase === "review" && count === 0) {
+        const delivered = (id: string) =>
+          input.messages
+            .filter((m: any) => m.role === "tool")
+            .map((m: any) => {
+              try {
+                return JSON.parse(m.content);
+              } catch {
+                return null;
+              }
+            })
+            .filter((m: any) => m?.id === id)
+            .map((m: any) => m.text)
+            .join("");
+        if (documentLength === 9357 && reviewed.get(reviewKey) === 2) {
+          // The second round reads what changed since the first, not the whole change again.
+          laterRounds++;
+          assert(system.includes("This is review round 2."));
+          assert.match(system, /candidate_diff: [^\n]*; optional reference/);
+          assert.match(
+            delivered("review_delta"),
+            /-export const sum = \(a, b\) => \(a \+ b\) \|\| 0;\n\+export const sum = \(a, b\) => a \+ b;/,
+          );
+          assert(!delivered("review_delta").includes("notes.txt"));
+          // The verdict follows without re-reading the complete diff.
+          assert.equal(delivered("candidate_diff"), "");
+          assert(system.includes("first judge it yourself"));
+          assert(
+            delivered("previous_findings").startsWith(
+              "Remove the || 0 fallback",
+            ),
+          );
+        } else {
+          assert(!system.includes("review_delta"));
+          assert(!system.includes("optional reference"));
+          assert(delivered("candidate_diff").includes("sum.js"));
+          if (documentLength === 9357) {
+            // Every page of a multi-page diff arrived, in 32,000-character pages.
+            assert(delivered("candidate_diff").length > documentPageChars);
+            assert(delivered("candidate_diff").includes("line 1099."));
+          }
+        }
         assert(system.includes("historical starting state and desired change"));
         assert(!system.includes("No implementation approved"));
         assert(system.includes("host validated owner approval"));
@@ -468,6 +529,7 @@ for (const { documentLength, terminalRecovery } of [
     const result = await f.row(started.id);
     assert.equal(result.state, "publishing");
     assert.equal(result.result.review.verdict, "APPROVE");
+    assert.equal(laterRounds, documentLength === 9357 ? 1 : 0);
     assert.equal(result.checkpoint.plan, fullPlan);
     assert.equal(result.result.review.findings, fullReview);
     assert.equal(result.checkpoint.piState.reportDocument.detail, fullReview);
