@@ -1,3 +1,11 @@
+# Watched pages for parcel tracking — in review, 11 November 2026
+
+- **Problem (measured, 10–11 November logs):** a parcel watch ran as scheduled research: nine two-hourly passes, each one fixed web search, with every `web_read` refused (7) because a scheduled pass may read only addresses its own search returned. `responsibility_report` was refused once on most passes (7 `INVALID_INPUT`), field unknown.
+- **Change:** a responsibility may name `page: { url, minutes }`. The host opens the address in the public browser with no model (`PublicBrowser.snapshot`), compares the text with the last reading, and admits a candidate only on a change. The investigation holds only the report tool and writes no parcel record. No migration: the check is stored under the `schedule` trigger kind.
+- **Also:** a refused `responsibility_report` logs `errorField`.
+- **Not verified:** any real carrier page. SingPost and Japan Post were unreachable from the cloud session, so it is unknown whether SingPost shows a result at a direct address. A page needing a form or a CAPTCHA cannot be watched this way.
+- **Next:** independent review, release, then one real watch; read `errorField` on the next refused report; find out why no pass ran after 09:24 SGT on 11 November. [Journal 160](docs/journey/160-watched-pages.md).
+
 # Learning from completed work (#326) — phases 1 and 2 live (`e6f75f7`, `d7df9aa`), 28 October 2026
 
 - **Owner decisions (28 October):** the recommended defaults for the issue's open questions: a 24-hour success window with no reaction required, a nightly learner run at 03:30 Singapore on the `standard` tier with fixed allocations and no dollar cap, and the first cut-back analysis four weeks after it goes live. Recorded in [learning from completed work](docs/learning.md#decisions).

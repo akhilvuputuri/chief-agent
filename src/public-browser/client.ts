@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db.js";
 import type { BrowserClient } from "../gathering/browser-client.js";
+import { publicHttps } from "../security.js";
 import {
   BROWSER_AGENT,
   PAGE_TEXT_LIMIT,
@@ -76,6 +77,35 @@ export class PublicBrowser {
         [sourceId, user, url, text],
       );
     return { sourceId, ...page };
+  }
+  /**
+   * A host check with no model: opens one address, reads its text once it stops changing,
+   * and closes. It never clicks, fills or runs a caller's script, and stores nothing.
+   */
+  async snapshot(user: string, session: string, url: string) {
+    const call = async (command: PublicBrowserCommand) => {
+      const reply = await this.rpc.call(user, session, command);
+      if (reply.busy === true) return undefined;
+      if (reply.ok !== true) throw new Error("Browser command failed");
+      return (reply.result ?? {}) as Record<string, unknown>;
+    };
+    try {
+      if (!(await call({ kind: "open", url }))) return { busy: true as const };
+      let text: string | undefined,
+        address = "";
+      // Pages that load their content by script settle a little after they open.
+      for (let reads = 0; reads < 4; reads++) {
+        await call({ kind: "wait", ms: 2500 });
+        const read = await call({ kind: "read" });
+        const now = String(read?.result ?? "");
+        address = String(read?.url ?? "");
+        if (now === text) break;
+        text = now;
+      }
+      return { url: publicHttps(address), text: text ?? "" };
+    } finally {
+      await this.rpc.call(user, session, { kind: "close" }).catch(() => {});
+    }
   }
   /** Ends the run's session when its agent finishes; never decides the agent's outcome. */
   async release(user: string, run: string) {

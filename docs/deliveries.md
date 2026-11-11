@@ -47,7 +47,7 @@ The three operations are gated on `availability.parcels`, enabled in the deploym
 
 ## Deliberately not built
 
-No carrier API, no authenticated browsing, no scheduled refresh or alerts. A scheduled refresh should later reuse the [routine infrastructure](scheduled-routines.md) rather than own a timer. No parcel extraction specialist: the tool surface is unchanged whether the chief or a specialist does the reading, so it can be added later. Its trigger is a tracking request routinely exhausting the turn's tool budget. No new Telegram view; parcels answer as ordinary replies.
+No carrier API, no authenticated browsing, no scheduled refresh of a parcel record. A carrier's public tracking page can be watched as its own [responsibility](responsibilities.md#source-adapters), which reports changes to the owner without writing to the parcel. A scheduled refresh should later reuse the [routine infrastructure](scheduled-routines.md) rather than own a timer. No parcel extraction specialist: the tool surface is unchanged whether the chief or a specialist does the reading, so it can be added later. Its trigger is a tracking request routinely exhausting the turn's tool budget. No new Telegram view; parcels answer as ordinary replies.
 
 ## Deployment (operator-reviewed migration 019)
 

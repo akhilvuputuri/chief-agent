@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { parcelStatus } from "./parcel-schema.js";
+import { publicHttps } from "./security.js";
 
 const id = z.string().uuid();
 const clock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
@@ -33,6 +34,14 @@ export const responsibilitySpec = z
       .strict()
       .optional(),
     schedule: z.string().trim().min(1).max(150).optional(),
+    // One public page the host re-reads with no model; a model runs only when its text changes.
+    page: z
+      .object({
+        url: z.string().max(2000).transform(publicHttps),
+        minutes: z.number().int().min(30).max(720).default(120),
+      })
+      .strict()
+      .optional(),
     publicQuery: z.string().trim().min(1).max(500).optional(),
     notifyWhen: z.string().trim().min(1).max(1000),
     urgentWhen: z.string().trim().min(1).max(1000).optional(),

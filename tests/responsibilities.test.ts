@@ -2031,3 +2031,214 @@ test("source checks revalidate expiry after waiting for an earlier source in the
     await f.pg.close();
   }
 });
+
+function pageFixture(f: Awaited<ReturnType<typeof fixture>>) {
+  const state = {
+    text: "Tracking RR1 status: In transit at the sorting centre, 10 November",
+    url: "https://carrier.example/track?id=RR1",
+    busy: false,
+    reads: 0,
+  };
+  const page = {
+    snapshot: async (user: string, session: string, url: string) => {
+      assert.equal(user, "a");
+      assert.match(session, /^[0-9a-f-]{36}$/);
+      assert.equal(url, "https://carrier.example/track?id=RR1");
+      state.reads++;
+      return state.busy
+        ? { busy: true as const }
+        : { url: state.url, text: state.text };
+    },
+  };
+  const service = new Responsibilities(f.db, { page }, f.clock),
+    worker = new ResponsibilityWorker(service, () => true, { page }, f.clock);
+  const spec = {
+    ...f.spec,
+    parcelIds: [],
+    gmail: undefined,
+    page: { url: "https://carrier.example/track?id=RR1" },
+    end: "first_match",
+  };
+  const propose = (overrides: any = {}) =>
+    service.call("a", f.run, {
+      operation: "responsibility_create",
+      spec: { ...spec, ...overrides },
+    });
+  const again = async () => {
+    f.time(new Date(f.clock().getTime() + 2 * 3600000));
+    await f.due();
+    await worker.tick();
+  };
+  const candidates = async () =>
+    (
+      await f.db.query(
+        "SELECT source_key,payload,task_id FROM responsibility_candidates ORDER BY created_at,id",
+      )
+    ).rows;
+  return { state, service, worker, propose, again, candidates };
+}
+test("a watched page is read with no model and wakes an investigation only when its text changes", async () => {
+  const f = await fixture();
+  try {
+    const p = pageFixture(f);
+    const proposal = await p.propose();
+    assert.match(
+      proposal.preview,
+      /Public page: https:\/\/carrier\.example\/track\?id=RR1; opened anonymously every 120 minutes with no model/,
+    );
+    await p.service.confirm("a", proposal.approvalId, true);
+    // The first reading is the baseline the model interprets once.
+    await p.worker.tick();
+    let rows = await p.candidates();
+    assert.equal(rows.length, 1);
+    assert.match(rows[0].source_key, /^page:[0-9a-f]{64}$/);
+    assert.equal(rows[0].payload.kind, "page");
+    assert.match(rows[0].payload.text, /In transit at the sorting centre/);
+    assert.ok(rows[0].task_id, "the baseline launches one investigation");
+    await complete(f, { changed: "", proposedAttention: "quiet" });
+    // Unchanged text, even with different spacing: no candidate, so no model.
+    p.state.text = p.state.text.replace(/ /g, "\n  ");
+    await p.again();
+    assert.equal(p.state.reads, 2);
+    assert.equal((await p.candidates()).length, 1);
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int n FROM work_tasks")).rows[0].n,
+      1,
+    );
+    // A busy browser is not a failure: no check is recorded and it retries in two minutes.
+    p.state.busy = true;
+    await p.again();
+    const trigger = (
+      await f.db.query(
+        "SELECT health,next_check,lease FROM responsibility_triggers",
+      )
+    ).rows[0];
+    assert.equal(trigger.health, "healthy");
+    assert.equal(trigger.lease, null);
+    assert.equal(
+      new Date(trigger.next_check).getTime(),
+      f.clock().getTime() + 120000,
+    );
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int n FROM responsibility_checks"))
+        .rows[0].n,
+      2,
+    );
+    // A change wakes one investigation, which can close a first-match watch with evidence.
+    p.state.busy = false;
+    p.state.text = "Tracking RR1 status: Delivered, 11 November";
+    await p.again();
+    rows = await p.candidates();
+    assert.equal(rows.length, 2);
+    assert.match(rows[1].payload.text, /Delivered, 11 November/);
+    await complete(f, {
+      changed: "Delivered on 11 November",
+      resolved: true,
+      evidence: [rows[1].source_key],
+    });
+    const listed = await p.service.list("a");
+    assert.equal(listed[0].status, "resolved");
+  } finally {
+    await f.pg.close();
+  }
+});
+test("an unread earlier page reading is superseded, and a blocked or redirected page degrades the watch", async () => {
+  const f = await fixture();
+  try {
+    const p = pageFixture(f);
+    const proposal = await p.propose({ end: "until_cancelled" });
+    await p.service.confirm("a", proposal.approvalId, true);
+    await p.worker.tick();
+    // The baseline investigation is still queued, so later readings wait their turn.
+    p.state.text = "Tracking RR1 status: Arrived in Singapore";
+    await p.again();
+    p.state.text = "Tracking RR1 status: Out for delivery with the courier";
+    await p.again();
+    const rows = await p.candidates();
+    assert.deepEqual(
+      rows.map((r) => [
+        /Out for delivery|In transit/.test(r.payload.text),
+        !!r.task_id,
+      ]),
+      [
+        [true, true],
+        [true, false],
+      ],
+    );
+    assert.match(rows[1].payload.text, /Out for delivery/);
+    // An empty page is a failed check, never a quiet "nothing changed".
+    p.state.text = " ";
+    await p.again();
+    let trigger = (
+      await f.db.query("SELECT health,cursor FROM responsibility_triggers")
+    ).rows[0];
+    assert.equal(trigger.health, "degraded");
+    const findings = (
+      await f.db.query(
+        "SELECT reason FROM responsibility_findings WHERE reason='source_degraded'",
+      )
+    ).rows;
+    assert.equal(findings.length, 1);
+    // A page that lands on another host is refused the same way and admits nothing.
+    p.state.text = "Please sign in to continue to your account dashboard";
+    p.state.url = "https://login.example/challenge";
+    await f.db.query("UPDATE responsibility_triggers SET health='healthy'");
+    await p.again();
+    trigger = (await f.db.query("SELECT health FROM responsibility_triggers"))
+      .rows[0];
+    assert.equal(trigger.health, "degraded");
+    assert.equal((await p.candidates()).length, 2);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("a watched page needs the public browser, a public HTTPS address and a responsibility of its own", async () => {
+  const f = await fixture();
+  try {
+    const p = pageFixture(f);
+    await assert.rejects(
+      p.propose({ schedule: "every 2h" }),
+      /cannot share a responsibility/,
+    );
+    await assert.rejects(
+      p.propose({ parcelIds: [f.p.id] }),
+      /cannot share a responsibility/,
+    );
+    for (const url of [
+      "http://carrier.example/track",
+      "https://127.0.0.1/track",
+      "https://localhost/track",
+    ])
+      await assert.rejects(p.propose({ page: { url } }));
+    await assert.rejects(p.propose({ page: { url: p.state.url, minutes: 5 } }));
+    // The fixture's own service has no browser.
+    await assert.rejects(
+      f.service.call("a", f.run, {
+        operation: "responsibility_create",
+        spec: {
+          ...f.spec,
+          parcelIds: [],
+          gmail: undefined,
+          page: { url: p.state.url },
+          end: "until_cancelled",
+        },
+      }),
+      /public browser is unavailable/,
+    );
+    assert.equal(p.state.reads, 0);
+    // An investigation of a page watch is offered the report tool and nothing else.
+    const proposal = await p.propose();
+    await p.service.confirm("a", proposal.approvalId, true);
+    await p.worker.tick();
+    const task = (
+      await f.db.query("SELECT id FROM work_tasks WHERE status='queued'")
+    ).rows[0].id;
+    const scope = await p.service.scope("a", task);
+    assert.deepEqual(
+      [...p.service.allowedOperations(scope!)],
+      ["responsibility_report"],
+    );
+  } finally {
+    await f.pg.close();
+  }
+});

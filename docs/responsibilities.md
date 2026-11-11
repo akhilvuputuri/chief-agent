@@ -8,7 +8,7 @@ The owner can ask Chief to keep watching an ongoing concern. Chief resolves the 
 
 `responsibility_create`, `responsibility_list`, `responsibility_update` and `responsibility_history` form the management surface. Lifecycle changes are foreground-only; edit uses an exact base revision. Pause and cancel stop later checks, tool dispatch and pending notifications. Already-started actions can finish and remain recorded. Resume re-enables checks but never resumes a paused investigation automatically; the owner selects its exact task with `/continue`, or cancels it. An old revision's task cannot be continued under a newer specification.
 
-One responsibility has one outcome with explicitly declared supporting sources. Parcel IDs are fixed, not whatever is currently active in conversation. The initial tools support query-scoped Gmail, applied parcel changes, qualifying primary-Calendar meeting instances and ScheduleParser schedules. No new stock/news poller migration, carrier integration or broad mailbox synchronization is included.
+One responsibility has one outcome with explicitly declared supporting sources. Parcel IDs are fixed, not whatever is currently active in conversation. The initial tools support query-scoped Gmail, applied parcel changes, qualifying primary-Calendar meeting instances and ScheduleParser schedules. One confirmed public page can also be watched ([page](#source-adapters)). No new stock/news poller migration, carrier integration or broad mailbox synchronization is included.
 
 Default allocation is 6 investigations per concern and 25 per owner per Singapore calendar day. An investigation begins with 5 active minutes, 10 model calls and 30 tool calls. Model-backed public searches also consume that investigation's model allocation. Explicit `/continue` uses the existing owner-authorized additional allocation; it does not replay completed work. Reported provider charges and estimated unreported charges remain distinguishable. No dollar cap is added.
 
@@ -39,6 +39,15 @@ The model saves `responsibility_report` after investigation work. Findings inclu
 Both documented time forms are accepted: RFC3339 with offset, or an unambiguous local dateTime with an explicit valid IANA timeZone. Every timed value normalizes to the same UTC representation for recurrence and delivery comparisons. Ambiguous daylight-saving folds require a numeric offset; missing zones, malformed members and nonexistent local times degrade the check visibly rather than becoming healthy empty coverage. Normalization depends on the supplied wall date, not the current timezone offset.
 
 **Schedule:** the due occurrence is admitted without a model. An investigation can then perform public research and compare the saved baseline. This is the deliberately disclosed U6 clarification: unchanged results are silent, but generic scheduled research can spend model budget each occurrence. Zero model usage on unchanged arbitrary topics would require a declared deterministic source; no additional provider framework is built here. Existing ScheduleParser hourly minimum and latest-only catch-up remain.
+
+**Page:** for a result that only shows on a site's own page, such as a carrier's tracking result. The owner confirms one public HTTPS address and an interval of 30–720 minutes (default 120). The host opens it in the [public browser](public-browser.md#host-page-checks) with no model, waits for the text to settle and closes. It compares the first 8,000 characters, with whitespace collapsed, against the last reading.
+
+- **Unchanged:** nothing is admitted and no model runs.
+- **Changed, or the first reading:** one candidate carries that text, and an investigation holding only `responsibility_report` interprets it. A reading no investigation has taken is replaced by the next, so a backlog cannot build.
+- **Browser busy:** the browser runs one session at a time, so the check retries in two minutes and records no failure.
+- **Empty page, or one that lands on another host:** the check fails and the watch degrades, as for any unavailable source.
+
+Limits. It works only where the address itself shows the result; a page that needs a form, a click or a CAPTCHA cannot be watched this way. Text that differs on every reading, such as a clock, wakes the model on every check, up to the daily investigation limit. A page cannot share a responsibility with a schedule or parcel IDs: its check is stored under the schedule trigger, and parcel notification rules judge saved parcel statuses, which a page reading never changes. The investigation writes no parcel record, so unattended parcel writes remain email-only. See [journal 160](journey/160-watched-pages.md).
 
 Public research uses the exact confirmed `publicQuery`; page reads must name exact URLs returned by that investigation's search. Source text cannot widen a search or add private data to an outgoing query/URL.
 

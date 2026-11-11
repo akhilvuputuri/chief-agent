@@ -1,3 +1,7 @@
+# Watched pages for parcel tracking — in review, 11 November 2026
+
+A scheduled watch could only run one fixed web search, so it never opened a carrier's tracking page; SingPost showed nothing until the owner asked for the browser in the foreground. A responsibility can now name one public page. The host re-reads it with no model and wakes an investigation only when its text changes. No migration. Tested with mocked sources only: no real carrier page has been read, and whether SingPost shows a result at a direct address is unknown. A refused `responsibility_report` now logs which field failed. [Journal 160](journey/160-watched-pages.md), [responsibilities](responsibilities.md#source-adapters).
+
 # Faster test runs — live in `2b4521c`, 11 November 2026
 
 Tests spent most of their time creating PGlite databases and starting a process per file, not in Chief's code. A closed test database is now emptied and reused (live in `3d02997`): CI's six test steps take 324–397 s against 617 s before. A serial `kite run test:ts` now also loads every file into one process, and believes that run only if it finishes cleanly: about 170 s against 285.6 s on a Mac, not yet measured on a coding box. CI keeps a process per file. See journals [158](journey/158-reused-test-databases.md) and [159](journey/159-shared-process-test-runs.md).

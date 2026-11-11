@@ -11,6 +11,7 @@ The browser can go anywhere public and run any script a task needs, because it h
 - **One tool.** `core/browser` holds only `public_browser` and the report tool. It has no `source_read`, `observation_read`, memory, email or skills. `PluginRegistry` refuses any other agent, tool or skill alongside `public_browser` at startup, so a registry edit cannot combine them.
 - **Empty context.** Like every agent, it gets no history or memories. A brief that names a stored source or result passes only the ID, which it cannot open.
 - **Never on Chief's own run.** `PublicBrowser.act` checks the run's `agent.child_started` record, so direct mode cannot reach it either. `delegated` also withholds the tool from Chief.
+- **One host path with no model.** A [watched page](#host-page-checks) is read by the host, not by an agent.
 - **Nothing kept.** Each run gets a new Chromium with a new profile. No logins, cookies or files survive it.
 
 **What this does not cover.** Whatever Chief writes in the brief reaches the model, and a page could get it sent somewhere. The catalogue description and the agent's instructions say to keep private details out, but no check enforces that. Every browser result is marked untrusted for the agent, but its report is still text the coordinator reads, so a page could steer what Chief does next. A hijacked agent also acts from this host's public address, which sites can see.
@@ -41,6 +42,12 @@ The model reaches a typed command list (`src/public-browser/commands.ts`): `open
 - **Limits.** 180 seconds, 12 model calls and 40 tool calls per run, the most the plugin schema allows.
 - **Evidence.** `read` stores the page as an owner `research_source` and returns 8,000 characters at a time, with `nextOffset`. The address is `location.href`, which a page cannot redefine, read before and after the text, and the read is refused if it changed or is not HTTPS. After any `eval` in the session, `read` returns text with no `sourceId`, because a script could have rewritten the page. A hostile site can still say what it likes about itself, and `fill` on an editable element or a reflected search term can change page text, as a URL can with `web_read`. A checked quote proves the page showed it, not that it is true.
 - **Classification.** `public_browser` is a read operation, because it acts only anonymously and an unknown outcome must not stop the owner's writes. The loop's read assumptions do not all hold, so it is excepted from three: it is never retried, because its error text is page-controlled and the call may be a click; a success clears earlier refusals, because pages change; and repeat-failure counting is per command.
+
+### Host page checks
+
+`PublicBrowser.snapshot` is the one way the browser runs outside the browser agent. A [responsibility](responsibilities.md#source-adapters) names one owner-confirmed public HTTPS address, and the host sends a fixed sequence: `open`, then `wait` and `read` until two readings match (at most four), then `close`. No model chooses a command, nothing is clicked, filled or scripted, and nothing is stored as a source. The text goes to the responsibility check, which marks it untrusted for the model that later interprets a change.
+
+The check uses the same single session as the agent. While it runs, about 10–20 seconds, a browser agent run gets the "busy" error; while an agent runs, the check waits two minutes and tries again. It is a gateway-side change only, using commands the service already accepts, so it needs no browser refresh.
 
 The agent's instructions also stop it at login walls, CAPTCHAs and payment steps, and from posting, sending, booking or buying. That is guidance, not a host check.
 

@@ -1,7 +1,12 @@
 import { randomUUID, createHash } from "node:crypto";
 import type { Database } from "./db.js";
 import type { Delivery } from "./answer.js";
-import { Responsibilities, attention, type Scope } from "./responsibilities.js";
+import {
+  Responsibilities,
+  attention,
+  type PageSource,
+  type Scope,
+} from "./responsibilities.js";
 import { responsibilityFinding } from "./responsibility-schema.js";
 import { dueWindow } from "./routines.js";
 import type { GmailTools } from "./gmail.js";
@@ -19,6 +24,7 @@ const day = (now: Date) =>
 const hash = (v: unknown) =>
   createHash("sha256").update(JSON.stringify(v)).digest("hex");
 type Change = { key: string; payload: any };
+const PAGE_CHARS = 8000;
 /** Cheap source checks have no model dependency. Work and sends remain separate. */
 export class ResponsibilityWorker {
   private busy = false;
@@ -28,6 +34,7 @@ export class ResponsibilityWorker {
     private sources: {
       gmail?: Pick<GmailTools, "poll">;
       calendar?: Pick<CalendarTools, "list">;
+      page?: PageSource;
     } = {},
     private clock = () => new Date(),
   ) {}
@@ -246,6 +253,49 @@ export class ResponsibilityWorker {
             },
           },
         }));
+    } else if (t.config.pageUrl) {
+      if (!this.sources.page) throw new Error("Source unavailable");
+      const page = await this.sources.page.snapshot(
+        t.user_id,
+        lease,
+        t.config.pageUrl,
+      );
+      if (page.busy) {
+        // Another browser run holds the one session: not a failure, so try again shortly.
+        await this.db.query(
+          "UPDATE responsibility_triggers SET next_check=$3,lease=NULL,lease_until=NULL WHERE id=$1 AND lease=$2",
+          [t.id, lease, new Date(now.getTime() + 120000)],
+        );
+        return;
+      }
+      // What the model is shown is what is compared, so a change it cannot see never wakes it.
+      const text = page.text.replace(/\s+/g, " ").trim().slice(0, PAGE_CHARS);
+      if (
+        text.length < 40 ||
+        new URL(page.url).hostname !== new URL(t.config.pageUrl).hostname
+      )
+        throw new Error("Watched page unavailable");
+      const pageHash = hash(text);
+      if (pageHash !== cursor.pageHash) {
+        changes = [
+          {
+            key: `page:${pageHash}`,
+            payload: {
+              kind: "page",
+              url: page.url,
+              text,
+              readAt: now.toISOString(),
+            },
+          },
+        ];
+        // Only the latest reading matters; an earlier one no investigation took is superseded.
+        await this.db.query(
+          "DELETE FROM responsibility_candidates WHERE responsibility_id=$1 AND revision=$2 AND user_id=$3 AND task_id IS NULL AND payload->>'kind'='page'",
+          [t.responsibility_id, t.revision, t.user_id],
+        );
+      }
+      cursor = { ...cursor, pageHash };
+      next = new Date(now.getTime() + t.config.minutes * 60000);
     } else {
       const { due, next: following } = dueWindow(
         t.config.parsed,
@@ -435,7 +485,7 @@ export class ResponsibilityWorker {
             )
           ).rows
         : [
-            s.spec.schedule
+            s.spec.schedule || s.spec.page
               ? s.spec.outcome.trim().toLowerCase()
               : s.candidates.map((c) => c.source_key).sort(),
             f.factKey.trim().toLowerCase(),

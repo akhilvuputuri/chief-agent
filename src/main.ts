@@ -442,9 +442,12 @@ if (
     "STARTUP_MIGRATION_023",
     "Responsibilities migration 023 must be installed before enabling monitoring",
   );
+// The public browser is built further down; it joins these sources there.
+const responsibilitySources: ConstructorParameters<typeof Responsibilities>[1] =
+  { gmail, calendar };
 const responsibilities =
   c.RESPONSIBILITIES === "on"
-    ? new Responsibilities(db, { gmail, calendar })
+    ? new Responsibilities(db, responsibilitySources)
     : undefined;
 let boxes: import("./boxes/controller.js").BoxController | undefined;
 /** Each EC2 box profile's task command, for the coding sandbox's startup check. */
@@ -743,6 +746,7 @@ const publicBrowser =
         new BrowserRpc("http://public-browser:3001", c.PUBLIC_BROWSER_KEY),
       )
     : undefined;
+responsibilitySources!.page = publicBrowser;
 const linksMigrated = !!(
   await db.query("SELECT 1 FROM runtime_migrations WHERE version=31")
 ).rows.length;
@@ -951,6 +955,7 @@ const responsibilityWorker = responsibilities
   ? new ResponsibilityWorker(responsibilities, (user) => allowed.has(user), {
       gmail,
       calendar,
+      page: publicBrowser,
     })
   : undefined;
 const responsibilityDelivery = responsibilities

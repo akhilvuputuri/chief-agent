@@ -737,3 +737,75 @@ test("a re-read page reuses its stored source, and the quote check accepts it in
   assert.equal(agentResult.status, "complete");
   assert.equal(agentResult.findings[0].sourceId, sourceId);
 });
+
+test("a host page check opens one address, reads until the text settles, and always closes", async () => {
+  const { db, user } = await database();
+  const session = randomUUID();
+  const sent: string[] = [];
+  const texts = ["Loading", "Status: In transit", "Status: In transit"];
+  const browser = new PublicBrowser(db, {
+    call: async (u, s, command) => {
+      assert.equal(u, user);
+      assert.equal(s, session);
+      sent.push(command.kind);
+      if (command.kind === "open")
+        assert.equal(command.url, "https://carrier.example/track?id=1");
+      return command.kind === "read"
+        ? {
+            ok: true,
+            result: {
+              result: texts.shift(),
+              url: "https://carrier.example/track?id=1",
+            },
+          }
+        : { ok: true, result: {} };
+    },
+  });
+  assert.deepEqual(
+    await browser.snapshot(user, session, "https://carrier.example/track?id=1"),
+    { url: "https://carrier.example/track?id=1", text: "Status: In transit" },
+  );
+  assert.deepEqual(sent, [
+    "open",
+    "wait",
+    "read",
+    "wait",
+    "read",
+    "wait",
+    "read",
+    "close",
+  ]);
+  // It stores nothing: a check is not evidence.
+  const stored = await db.query(
+    "SELECT count(*)::int AS n FROM research_sources WHERE user_id=$1",
+    [user],
+  );
+  assert.equal(stored.rows[0].n, 0);
+});
+
+test("a host page check reports a busy browser, and closes after a failure without passing page text on", async () => {
+  const { db, user } = await database();
+  const sent: string[] = [];
+  let reply: Record<string, unknown> = {
+    ok: false,
+    busy: true,
+    error: "busy",
+  };
+  const browser = new PublicBrowser(db, {
+    call: async (_u, _s, command) => {
+      sent.push(command.kind);
+      return command.kind === "close" ? { ok: true, result: {} } : reply;
+    },
+  });
+  assert.deepEqual(
+    await browser.snapshot(user, randomUUID(), "https://carrier.example/t"),
+    { busy: true },
+  );
+  reply = { ok: false, busy: false, error: "page-controlled text" };
+  sent.length = 0;
+  await assert.rejects(
+    browser.snapshot(user, randomUUID(), "https://carrier.example/t"),
+    (error: Error) => error.message === "Browser command failed",
+  );
+  assert.deepEqual(sent, ["open", "close"]);
+});

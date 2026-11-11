@@ -338,7 +338,21 @@ export class Execution {
     );
     const call = this.calls.get(id);
     this.calls.delete(id);
-    const code = (result as { error?: { code?: unknown } } | null)?.error?.code;
+    const failure = (
+      result as { error?: { code?: unknown; message?: unknown } } | null
+    )?.error;
+    const code = failure?.code;
+    // Which argument the report schema refused: its path only, never a value or the message.
+    // Limited to responsibility_report, whose schema has only host-named keys and array
+    // indexes, so no model text can appear in a path (docs/operational-logs.md).
+    const field =
+      call?.operation === "responsibility_report" &&
+      code === "INVALID_INPUT" &&
+      typeof failure?.message === "string"
+        ? /^Correct the fields: ([A-Za-z][A-Za-z0-9_.]{0,79}): /.exec(
+            failure.message,
+          )?.[1]
+        : undefined;
     opsLog("tool.finished", state === "success" ? "info" : "warn", {
       runId: this.run,
       taskId: this.task,
@@ -348,6 +362,7 @@ export class Execution {
       write: call ? !readOperations.has(call.operation) : undefined,
       latencyMs: call ? Date.now() - call.started : undefined,
       errorCode: typeof code === "string" ? code : undefined,
+      errorField: field,
     });
     otel.callFinished(
       id,

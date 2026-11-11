@@ -102,9 +102,18 @@ export type Scope = {
   spec: ResponsibilitySpec;
   candidates: any[];
 };
+/** Reads one public page as text with no model. `busy` means another browser run holds the one session. */
+export type PageSource = {
+  snapshot(
+    user: string,
+    session: string,
+    url: string,
+  ): Promise<{ busy: true } | { busy?: false; url: string; text: string }>;
+};
 type Sources = {
   gmail?: Pick<GmailTools, "poll" | "call">;
   calendar?: Pick<CalendarTools, "list">;
+  page?: PageSource;
 };
 
 /** All mutations are owner-scoped; model arguments cannot authorize monitoring. */
@@ -250,9 +259,16 @@ export class Responsibilities {
       !spec.gmail &&
       !spec.calendar &&
       !spec.schedule &&
+      !spec.page &&
       !spec.parcelIds.length
     )
       fail("Choose an exact source or schedule");
+    // The page check shares the schedule trigger, and parcel notification rules judge
+    // saved parcel statuses, which a page reading never changes.
+    if (spec.page && (spec.schedule || spec.parcelIds.length))
+      fail(
+        "A watched page cannot share a responsibility with a schedule or parcel IDs; watch it on its own",
+      );
     if (spec.end === "all_parcels_terminal" && !spec.parcelIds.length)
       fail("Parcel completion needs exact parcel IDs");
     if (spec.end === "date" && !spec.expiresAt)
@@ -308,6 +324,15 @@ export class Responsibilities {
         kind: "schedule",
         config: { schedule: spec.schedule, parsed: parsed.parsed },
         due: parsed.next,
+      });
+    }
+    if (spec.page) {
+      if (!this.sources.page) fail("The public browser is unavailable");
+      // Stored under the schedule trigger kind, which the triggers table already allows.
+      configs.push({
+        kind: "schedule",
+        config: { pageUrl: spec.page.url, minutes: spec.page.minutes },
+        due: this.clock(),
       });
     }
     if (spec.parcelIds.length)
@@ -612,6 +637,10 @@ export function preview(s: ResponsibilitySpec, email?: string) {
   if (s.schedule)
     sources.push(
       `Public research: ${s.schedule}; exact search query: ${s.publicQuery ?? s.outcome}. A bounded model investigation may run each occurrence even when unchanged.`,
+    );
+  if (s.page)
+    sources.push(
+      `Public page: ${s.page.url}; opened anonymously every ${s.page.minutes} minutes with no model. A bounded model investigation runs only when its text changes.`,
     );
   return [
     s.title,

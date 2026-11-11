@@ -48,6 +48,8 @@ const fields: Record<string, Shape> = {
   tier: "name",
   effort: "name",
   errorCode: "code",
+  /** The first argument path a refused responsibility_report named, such as finding.factKey. */
+  errorField: "id",
   errorCategory: "code",
   /** The name of error.cause, when present (fetch failures carry the real error there). */
   causeCategory: "code",

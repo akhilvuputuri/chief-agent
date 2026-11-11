@@ -675,3 +675,47 @@ test("agent events log type, tier, model and outcome, never the brief", () => {
     log.restore();
   }
 });
+
+test("a refused responsibility report logs which field failed, and no other tool does", async () => {
+  const db = await database();
+  const log = capture();
+  try {
+    const execution = new Execution(
+      db,
+      "owner",
+      randomUUID(),
+      new AbortController().signal,
+    );
+    await execution.start();
+    const refusal = {
+      error: {
+        code: "INVALID_INPUT",
+        message: `Correct the fields: finding.factKey: ${PRIVATE[0]}; finding.reply: Required`,
+      },
+    };
+    for (const operation of ["responsibility_report", "gmail_search"])
+      await execution.endCall(
+        await execution.beginCall(randomUUID(), operation, {}),
+        refusal,
+        "failed",
+      );
+    // A path the report schema cannot produce is not a field name.
+    await execution.endCall(
+      await execution.beginCall(randomUUID(), "responsibility_report", {}),
+      { error: { code: "INVALID_INPUT", message: PRIVATE[1] } },
+      "failed",
+    );
+    assertClean(log.lines);
+    const finished = log.parsed().filter((l) => l.event === "tool.finished");
+    assert.deepEqual(
+      finished.map((l) => [l.operation, l.errorField]),
+      [
+        ["responsibility_report", "finding.factKey"],
+        ["gmail_search", undefined],
+        ["responsibility_report", undefined],
+      ],
+    );
+  } finally {
+    log.restore();
+  }
+});

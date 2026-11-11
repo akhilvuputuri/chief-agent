@@ -1,3 +1,9 @@
+## Watched pages (11 November 2026)
+
+- **Code.** A responsibility can name one public HTTPS page. The host opens it in the public browser with no model every 30–720 minutes (default 120) and runs a bounded investigation only when its text changes. The investigation holds only the report tool and writes no parcel record. A refused `responsibility_report` logs `errorField`, the first refused argument path. No migration and no Compose change; the public browser service is unchanged.
+- **Why.** A scheduled parcel watch could run only one fixed web search and never opened the carrier's tracking page. See [journal 160](journey/160-watched-pages.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Serial test runs share one process (11 November 2026)
 
 - **Code.** Tests only. `kite run test:ts` loads every test file into one process when it runs serially, and believes that run only if it finishes and exits cleanly: files that failed or did not report run again on their own, and an unexplained failure or a crash sends every file through a process of its own. CI's parallel runs keep a process per file. `TEST_ISOLATION=process` restores the old behaviour.
