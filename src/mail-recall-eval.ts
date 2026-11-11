@@ -24,7 +24,7 @@ import {
   OpenRouterEmbedder,
 } from "./mail-recall.js";
 
-const MODEL = "google/gemini-3.8-flash";
+const MODEL = "anthropic/claude-haiku-5.5";
 /** The index's own Gmail read pace (src/mail-recall.ts), which leaves quota for the agent. */
 const READ_INTERVAL_MS = 500;
 /** A refused read waits for the per-minute quota to renew. A lost message would shift ranks. */
@@ -50,7 +50,13 @@ function content(text: string) {
 /** A malformed model reply is treated as no answer, so one bad reply cannot end the run. */
 function parse(text: string): unknown {
   try {
-    return JSON.parse(text);
+    // Claude models may wrap JSON in a code fence; json_object mode is not guaranteed for them.
+    return JSON.parse(
+      text
+        .trim()
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/, ""),
+    );
   } catch {
     return {};
   }
@@ -69,7 +75,7 @@ async function ask(key: string, prompt: string) {
         model: MODEL,
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
-        temperature: 0.2,
+        // No temperature: Claude 5.5 models refuse any value but the default.
       }),
       signal: AbortSignal.timeout(60_000),
     },

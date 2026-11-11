@@ -170,6 +170,8 @@ Reading one item at a time produced narrow rules overgeneralised from one exampl
 
 ### Nightly judge
 
+> **Update, 11 November 2026 ([journal 164](journey/164-claude-models-everywhere.md)):** the judge's model is `anthropic/claude-opus-5.5`, the same model as the main model and the learner; the owner chose it for the quality of its judgement. The separation described below, a different family so it does not grade its own work, no longer holds. agentwatch's `answer_ok` judge stays on `openai/gpt-6.1-sol`.
+
 [`src/memory-judge.ts`](../src/memory-judge.ts), run by the learner as a night's last pass (`judge-v1`). The host checks compare a fact's words with a quote, not its meaning, and a record that a memory was in a turn's context does not say whether it was used. The owner rates nothing ([decisions](#decisions)), so a model judges both. It measures only: it writes no revision, flag or retirement.
 
 **Facts.** Each current learned fact the judge has not read, oldest first, at most 40 a night, with the owner's messages it cites (`source.messageIds`: a turn's inputs, a task's request or its later messages; the owner's own words, 3,000 characters each). The quote is not stored on a revision, so the judge reads the whole message, which also shows whose words they were. Verdicts:

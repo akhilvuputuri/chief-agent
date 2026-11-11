@@ -2,6 +2,8 @@
 
 Issue #27 phase 1. The main agent acts as coordinator and starts it with `agent_run(type="research")` (it was `research_delegate` before [coordinator agents](agents.md)). This reuses the same TypeScript loop with an isolated prompt, not a new service or framework. It runs on its agent tier's model (Gemini 3.8 Flash by default; see [coordinator and agents](agents.md#models-and-effort)). Simple requests can stay direct. Only one specialist executes at a time; recursive delegation is rejected. No dollar caps.
 
+> **Update, 11 November 2026 ([journal 164](journey/164-claude-models-everywhere.md)):** the default agent tier is Claude Haiku 5.5, not Gemini 3.8 Flash.
+
 ## Assignment and authority
 
 An assignment contains an objective, explicitly selected background, up to six combined saved job IDs/public URLs, or a general topic. Saved jobs are resolved under the authenticated owner's identity before starting the child. The specialist gets these exact targets, a short description, and no conversation history, general memory list, email, calendar or attachments. Context selection is explicit and model-chosen; it is not an automatic privacy classifier.

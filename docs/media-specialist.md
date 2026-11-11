@@ -31,6 +31,8 @@ Scanned PDFs without selectable text are still reported at intake; OCR and page 
 
 The media agent's model comes from its tier in the model policy (`fast`, Gemini 3.8 Flash, by default; see [coordinator and agents](agents.md#models-and-effort)). `MEDIA_MODEL` is used only by a runtime built without a model factory, so it has no effect in production. Nothing verifies a model's vision or document capability before use; a provider that cannot accept image input fails with the existing provider error, which the specialist reports as incomplete. Validate a candidate model with a real photo and PDF before relying on it.
 
+> **Update, 11 November 2026 ([journal 164](journey/164-claude-models-everywhere.md)):** the default agent tier is Claude Haiku 5.5, not Gemini 3.8 Flash.
+
 ## Trace inspection
 
 Same private records as research delegation, with `role: "media"` in `research.child_started` and its `profile` holding the cache key, attachment hashes, sizes and source IDs. Parent-side `media.processed` carries the compact result and status; `media.cache_hit` links a reused result to its original child run. Successful `media_report` runtime calls hold the validated report. Start from an owner-scoped parent run, select children by `research.child_started` with that `parentRunId`, then read events, calls and charges for those IDs. Never paste model inputs, extractions or file content into CI logs or issues.
