@@ -66,6 +66,10 @@ Most of a test's time goes to restoring a database snapshot into PGlite's in-mem
 
 **Not measured:** more than one CI run of each version, and coding boxes.
 
+### A test that depended on the millisecond — 11 November 2026
+
+**Measured, a quiet Mac:** `tests/memory-backfill.test.ts` failed 3 of 3 runs with reuse on and 3 of 8 with it off. It orders rows by `created_at`, which PGlite keeps to the millisecond, and two of its writes could land in the same one. The flake predates reuse; a faster run makes the tie more likely. The test now waits 2 ms before each of those writes and passed 12 of 12 runs. CI had not failed on it.
+
 ## Follow-up and next iteration
 
 - Re-record the shard weights, which the change has made stale.
