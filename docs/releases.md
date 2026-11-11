@@ -10,7 +10,7 @@
 - **Why.** Jobs were waiting for runners: a run wants 13 jobs, and no more than 20 were seen running at once across the account. See [journal 165](journey/165-four-test-shards.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
 
-> **Update, 12 November 2026:** live in `dcb7ea3` (PR 448, release run 43057521898). Main's first four-shard run (43056656534) took 68, 95, 88 and 66 s for its test steps and finished in about five minutes; the host reports `dcb7ea3` with a healthy gateway.
+> **Update, 12 November 2026:** live in `dcb7ea3` (PR 448, release run 43057521898). Main's first four-shard run (43056656534) took 68, 95, 88 and 66 s for its test steps. Its jobs were done after about 3 minutes 15 seconds, and the final gate job then waited about 110 s to start, so the run took just over 5 minutes; the host reports `dcb7ea3` with a healthy gateway.
 
 ## Claude models everywhere (11 November 2026)
 

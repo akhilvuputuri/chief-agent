@@ -3,6 +3,8 @@
 Work date: 11 November 2026. Written: 11 November 2026.
 Status: measured in one CI run on the pull request. Not yet released.
 
+> **Update, 12 November 2026:** live in `dcb7ea3` (PR 448, release run 43057521898); see Release closure below.
+
 ## User-visible problem and preceding iteration
 
 The owner saw three CI jobs waiting for runners. [Journal 158](158-reused-test-databases.md) had roughly halved the test steps, but CI still split the tests six ways, a number chosen when a shard took over two minutes ([journal 138](138-faster-ci-checks.md)).
@@ -43,7 +45,7 @@ This is one run. Runner speeds varied by up to two times between shards in earli
 ### Release closure — 12 November 2026
 
 - **Merged:** [PR 448](https://github.com/akhilvuputuri/chief-agent/pull/448), approved head `7ea6f4f`, as `dcb7ea3`.
-- **Released:** release run 43057521898 succeeded on its third attempt; the two before it stopped at "Verify current main and run release checks", and their cause was not read. Read-only host check: gateway on `dcb7ea3` and healthy. Nothing in the running application changed.
+- **Released:** release run 43057521898 succeeded. It was the third release run for this commit; the two before it stopped at "Verify current main and run release checks", and their cause was not read. Read-only host check: gateway on `dcb7ea3` and healthy. Nothing in the running application changed.
 - **Measured, three more four-shard runs:** the pull request's later heads took 73, 75, 94, 80 s and 75, 69, 112, 103 s for the four test steps, and main's run 43056656534 took 68, 95, 88, 66 s. Together with the first run, test steps ranged from 66 to 112 s.
 
 ## Follow-up and next iteration

@@ -2,7 +2,7 @@
 
 CI jobs were queueing for runners: no more than 20 were seen running at once across the account, and one pull request run wants 13. With tests about twice as fast, CI now splits them four ways instead of six, which should keep each test job under the image job's length. See [journal 165](journey/165-four-test-shards.md).
 
-> **Update, 12 November 2026:** live in `dcb7ea3` (PR 448, release run 43057521898). Main's first four-shard run (43056656534) took 68, 95, 88 and 66 s for its test steps and finished in about five minutes; the host reports `dcb7ea3` with a healthy gateway.
+> **Update, 12 November 2026:** live in `dcb7ea3` (PR 448, release run 43057521898). Main's first four-shard run (43056656534) took 68, 95, 88 and 66 s for its test steps. Its jobs were done after about 3 minutes 15 seconds, and the final gate job then waited about 110 s to start, so the run took just over 5 minutes; the host reports `dcb7ea3` with a healthy gateway.
 
 # Every model on Claude, and fallbacks reported — prepared, 11 November 2026
 
