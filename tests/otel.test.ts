@@ -855,4 +855,43 @@ test("the provider name follows the pathway that served the call", () => {
   }).attributes;
   assert.equal(failed["gen_ai.provider.name"], "anthropic");
   assert.equal(failed["chief.upstream_provider"], "anthropic");
+  assert.equal(failed["gen_ai.usage.input_tokens"], undefined);
+  assert.equal(failed["agentwatch.usage.cost_usd"], undefined);
+  // A complete response refused after it was billed carries its tokens and cost.
+  const refused = modelSpan({
+    traceId: "0".repeat(32),
+    spanId: "1".repeat(16),
+    parentSpanId: "2".repeat(16),
+    data: {
+      model: "anthropic/claude-opus-5.5",
+      latencyMs: 10,
+      diagnostics: {
+        route: "anthropic-direct",
+        provider: "Anthropic",
+        finishReason: "content_filter",
+        failureCode: "refusal",
+        usage: {
+          prompt_tokens: 1300,
+          completion_tokens: 50,
+          prompt_tokens_details: {
+            cached_tokens: 1000,
+            cache_write_tokens: 200,
+          },
+          cost: 0.0025,
+          route: "anthropic-direct",
+        },
+      },
+    },
+    failed: true,
+    endNs: 1_000_000_000n,
+  }).attributes;
+  assert.equal(refused["gen_ai.provider.name"], "anthropic");
+  assert.equal(refused["gen_ai.usage.input_tokens"], 1300);
+  assert.equal(refused["gen_ai.usage.output_tokens"], 50);
+  assert.equal(refused["gen_ai.usage.cache_read.input_tokens"], 1000);
+  assert.equal(refused["agentwatch.usage.cost_usd"], 0.0025);
+  assert.deepEqual(refused["gen_ai.response.finish_reasons"], [
+    "content_filter",
+  ]);
+  assert.equal(refused["gen_ai.response.model"], undefined);
 });

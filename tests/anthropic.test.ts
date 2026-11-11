@@ -2,8 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   AnthropicDirect,
+  anthropicToolId,
   isAnthropicDirectReasoning,
   stripAnthropicDirectReasoning,
+  thinkingStates,
+  ThinkingStates,
 } from "../src/anthropic.js";
 import { ModelError, type ModelMessage } from "../src/model.js";
 import { spending, type Spending } from "../src/spending.js";
@@ -68,7 +71,7 @@ function stream(
         : block.type === "thinking"
           ? { type: "thinking", thinking: "", signature: "" }
           : block.type === "tool_use"
-            ? { ...block, input: {} }
+            ? { ...block, input: {}, raw: undefined }
             : block;
     events.push({ type: "content_block_start", index, content_block: start });
     if (block.type === "text")
@@ -96,7 +99,8 @@ function stream(
         index,
         delta: {
           type: "input_json_delta",
-          partial_json: JSON.stringify(block.input),
+          // `raw` streams input text as given, e.g. cut off at the output allowance.
+          partial_json: block.raw ?? JSON.stringify(block.input),
         },
       });
     events.push({ type: "content_block_stop", index });
@@ -1068,4 +1072,306 @@ test("strip helper removes only direct reasoning and the constructor refuses unk
       }),
     /prices must be positive/,
   );
+});
+
+test("a tool call cut off at the output allowance carries its raw truncated input, never runnable", async () => {
+  const cut = '{"key":"poem","value":"Roses are red, vio';
+  const { model } = adapter(() =>
+    sse(
+      stream(
+        [
+          { type: "text", text: "Saving." },
+          {
+            type: "tool_use",
+            id: "toolu_a",
+            name: "memory_set",
+            input: { key: "x" },
+          },
+          {
+            type: "tool_use",
+            id: "toolu_b",
+            name: "memory_set",
+            input: {},
+            raw: cut,
+          },
+        ],
+        { stop: "max_tokens" },
+      ),
+    ),
+  );
+  const result = await run(model, [{ role: "user", content: "x" }]);
+  assert.equal(result.finishReason, "length");
+  const [complete, last] = result.message.tool_calls!;
+  // Earlier, complete calls are unchanged.
+  assert.equal(complete!.function.arguments, '{"key":"x"}');
+  // The SDK's tolerant parse would have produced {"key":"poem"}; the raw text is kept instead.
+  assert.equal(last!.id, "toolu_b");
+  assert.equal(last!.function.arguments, cut);
+  assert.throws(() => JSON.parse(last!.function.arguments));
+  // Input that happens to parse is still made unparsable; a call with no input text too.
+  for (const raw of ['{"key":"poem"} ', ""]) {
+    const { model } = adapter(() =>
+      sse(
+        stream(
+          [{ type: "tool_use", id: "toolu_c", name: "t", input: {}, raw }],
+          {
+            stop: "max_tokens",
+          },
+        ),
+      ),
+    );
+    const call = (await run(model, [{ role: "user", content: "x" }])).message
+      .tool_calls![0]!;
+    assert.throws(() => JSON.parse(call.function.arguments));
+  }
+  // A completed tool_use turn keeps the parsed input.
+  const done = adapter(() =>
+    sse(
+      stream(
+        [{ type: "tool_use", id: "toolu_d", name: "t", input: { a: 1 } }],
+        {
+          stop: "tool_use",
+        },
+      ),
+    ),
+  );
+  assert.equal(
+    (await run(done.model, [{ role: "user", content: "x" }])).message
+      .tool_calls![0]!.function.arguments,
+    '{"a":1}',
+  );
+});
+
+test("foreign tool-call ids are mapped consistently; valid ids and returned ids are unchanged", async () => {
+  const foreign = [
+    "functions.memory_set:0",
+    "call_abc|fc_68f0",
+    "",
+    "x".repeat(80),
+  ];
+  const history: ModelMessage[] = [
+    { role: "user", content: "x" },
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [...foreign, "toolu_01AbC-d_9"].map((id) => ({
+        id,
+        type: "function" as const,
+        function: { name: "t", arguments: "{}" },
+      })),
+    },
+    ...[...foreign, "toolu_01AbC-d_9"].map((id) => ({
+      role: "tool" as const,
+      tool_call_id: id,
+      content: "ok",
+    })),
+  ];
+  const { model, requests } = adapter(() =>
+    sse(
+      stream([{ type: "tool_use", id: "toolu_new", name: "t", input: {} }], {
+        stop: "tool_use",
+      }),
+    ),
+  );
+  const result = await run(model, history);
+  await run(model, history);
+  const uses = requests[0]!.body.messages[1].content.map((b: Block) => b.id);
+  const results = requests[0]!.body.messages[2].content.map(
+    (b: Block) => b.tool_use_id,
+  );
+  assert.deepEqual(uses, results);
+  for (const id of uses) {
+    assert.match(id, /^[a-zA-Z0-9_-]+$/);
+    assert.ok(id.length <= 64);
+  }
+  assert.equal(new Set(uses).size, uses.length);
+  assert.equal(uses.at(-1), "toolu_01AbC-d_9");
+  assert.match(uses[0], /^functions_memory_set_0_[0-9a-f]{16}$/);
+  // Deterministic across calls (and so across cache prefixes and thinking replays).
+  assert.deepEqual(
+    requests[1]!.body.messages[1].content.map((b: Block) => b.id),
+    uses,
+  );
+  assert.equal(anthropicToolId("call_abc|fc_68f0"), uses[1]);
+  // The caller's history and the API's own returned ids are unchanged.
+  assert.equal(history[1]!.tool_calls![0]!.id, "functions.memory_set:0");
+  assert.equal(result.message.tool_calls![0]!.id, "toolu_new");
+});
+
+/** A Chief-shaped call: two system messages, the turn so far, and a fresh state message. */
+const chiefCall = (turn: ModelMessage[], state: string): ModelMessage[] => [
+  { role: "system", content: "Stable instructions" },
+  { role: "system", content: "Turn summary" },
+  { role: "user", content: "Owner request" },
+  ...turn,
+  { role: "system", content: state },
+];
+const thinkingTurn = (signature: string, id: string) =>
+  sse(
+    stream(
+      [
+        { type: "thinking", thinking: "", signature },
+        { type: "tool_use", id, name: "t", input: {} },
+      ],
+      { stop: "tool_use" },
+    ),
+  );
+
+test("each replayed thinking block gets the exact state message it followed, rebuilt in place", async () => {
+  thinkingStates.clear();
+  const { model, requests } = adapter((call) =>
+    thinkingTurn(`sig-${call}`, `toolu_${call}`),
+  );
+  const turn: ModelMessage[] = [];
+  for (let call = 1; call <= 3; call++) {
+    const result = await run(model, chiefCall(turn, `State ${call}`));
+    turn.push(result.message, {
+      role: "tool",
+      tool_call_id: result.message.tool_calls![0]!.id,
+      content: `result ${call}`,
+    });
+  }
+  const text = (m: Block) =>
+    m.content.map((b: Block) =>
+      b.type === "text" ? `${m.role}:${b.text}` : `${m.role}:${b.type}`,
+    );
+  // Call 3: each earlier state sits where it was, before the assistant turn that followed it.
+  assert.deepEqual(requests[2]!.body.messages.flatMap(text), [
+    "user:Owner request",
+    "system:State 1",
+    "assistant:thinking",
+    "assistant:tool_use",
+    "user:tool_result",
+    "system:State 2",
+    "assistant:thinking",
+    "assistant:tool_use",
+    "user:tool_result",
+    "system:State 3",
+  ]);
+  // Byte-for-byte: call 2's whole request (apart from cache marks) is a prefix of call 3's.
+  const strip = (body: any) =>
+    JSON.parse(JSON.stringify(body.messages), (k, v) =>
+      k === "cache_control" ? undefined : v,
+    );
+  const second = strip(requests[1]!.body);
+  assert.deepEqual(strip(requests[2]!.body).slice(0, second.length), second);
+  // Re-inserted states are never cache-marked; the last mark stays on the latest results.
+  const states = requests[2]!.body.messages.filter(
+    (m: Block) => m.role === "system",
+  );
+  assert.ok(states.every((m: Block) => !m.content[0].cache_control));
+  assert.ok(requests[2]!.body.messages.at(-2).content.at(-1).cache_control);
+  // A state still in place is not duplicated.
+  const kept = chiefCall(
+    [{ role: "system", content: "State 1" }, ...turn.slice(0, 2)],
+    "State 9",
+  );
+  await run(model, kept);
+  assert.equal(
+    requests[3]!.body.messages.filter((m: Block) => m.role === "system").length,
+    2,
+  );
+  // After a restart (an empty map) nothing is inserted, as before.
+  thinkingStates.clear();
+  await run(model, chiefCall(turn, "State 4"));
+  assert.deepEqual(
+    requests[4]!.body.messages
+      .filter((m: Block) => m.role === "system")
+      .map((m: Block) => m.content[0].text),
+    ["State 4"],
+  );
+  thinkingStates.clear();
+});
+
+test("a replay retried without thinking re-inserts no states; requests without a state remember none", async () => {
+  thinkingStates.clear();
+  const first = adapter(() => thinkingTurn("sig-r", "toolu_r"));
+  const generated = await run(first.model, chiefCall([], "State A"));
+  const turn: ModelMessage[] = [
+    generated.message,
+    { role: "tool", tool_call_id: "toolu_r", content: "r" },
+  ];
+  const rejected = () =>
+    Response.json(
+      { type: "error", error: { type: "invalid_request_error", message: "x" } },
+      { status: 400 },
+    );
+  const retried = adapter((call) =>
+    call === 1 ? rejected() : sse(stream(reply)),
+  );
+  await run(retried.model, chiefCall(turn, "State B"));
+  const roles = (body: any) => body.messages.map((m: Block) => m.role);
+  assert.deepEqual(roles(retried.requests[0]!.body), [
+    "user",
+    "system",
+    "assistant",
+    "user",
+    "system",
+  ]);
+  assert.deepEqual(roles(retried.requests[1]!.body), [
+    "user",
+    "assistant",
+    "user",
+    "system",
+  ]);
+  // No trailing state message (the coding loop, the learner): nothing is remembered.
+  thinkingStates.clear();
+  const bare = adapter(() => thinkingTurn("sig-bare", "toolu_bare"));
+  await run(bare.model, [{ role: "user", content: "x" }]);
+  assert.equal(thinkingStates.entries, 0);
+});
+
+test("the state memory is bounded by entries and characters, least recently used first", () => {
+  const states = new ThinkingStates(2, 100);
+  const block = (signature: string) => ({ type: "thinking", signature });
+  states.remember(block("a"), ["A"]);
+  states.remember(block("b"), ["B"]);
+  assert.deepEqual(states.get(block("a")), ["A"]);
+  states.remember(block("c"), ["C"]);
+  // b was least recently used.
+  assert.equal(states.get(block("b")), undefined);
+  assert.deepEqual(states.get(block("a")), ["A"]);
+  states.remember(block("d"), ["x".repeat(20)]);
+  states.remember(block("e"), ["y".repeat(20)]);
+  assert.equal(states.entries, 2);
+  // Too large for the memory, or without a signature: not kept.
+  states.remember(block("f"), ["z".repeat(30)]);
+  states.remember({ type: "thinking", signature: "" }, ["S"]);
+  assert.equal(states.get(block("f")), undefined);
+  assert.equal(states.entries, 2);
+  // Redacted blocks are keyed by their data; keys are hashes, never the signature itself.
+  states.remember({ type: "redacted_thinking", data: "opaque" }, ["R"]);
+  assert.deepEqual(states.get({ type: "redacted_thinking", data: "opaque" }), [
+    "R",
+  ]);
+  assert.doesNotMatch(ThinkingStates.key(block("secret-sig"))!, /secret/);
+});
+
+test("failures after a complete, billed response carry its normalized usage", async () => {
+  const cases: [Block[], Record<string, unknown>, string][] = [
+    [[{ type: "text", text: "x" }], { stop: "refusal" }, "refusal"],
+    [[{ type: "text", text: "x" }], { stop: "max_tokens" }, "incomplete"],
+    [
+      [{ type: "thinking", thinking: "", signature: "s" }],
+      { stop: "max_tokens" },
+      "empty",
+    ],
+  ];
+  for (const [content, options, failureCode] of cases) {
+    const { model } = adapter(() => sse(stream(content, options)));
+    await assert.rejects(
+      run(model, [{ role: "user", content: "x" }], {
+        requireComplete: failureCode === "incomplete",
+      }),
+      (error: ModelError) => {
+        assert.equal(error.diagnostics.failureCode, failureCode);
+        const usage = error.diagnostics.usage as Record<string, any>;
+        assert.equal(usage.route, "anthropic-direct");
+        assert.equal(usage.prompt_tokens, 1300);
+        assert.equal(usage.completion_tokens, 50);
+        assert.ok(usage.cost > 0);
+        return true;
+      },
+    );
+  }
 });

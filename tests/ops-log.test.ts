@@ -315,6 +315,45 @@ test("model logs name the direct pathway, its fallbacks and the startup routes",
     assert.equal(failedDirect.errorType, "permission_error");
     assert.equal("dropped" in failedDirect, false);
     assert.equal("route" in failedRouted, false);
+    // Failures without usage add no token or cost fields.
+    for (const line of [failedDirect, failedRouted])
+      for (const field of ["inputTokens", "outputTokens", "costUsd"])
+        assert.equal(field in line, false);
+    // A billed response refused afterwards carries its usage: numbers only.
+    projectEvent("model.failed", randomUUID(), {
+      model: "anthropic/claude-opus-5.5",
+      transient: false,
+      diagnostics: {
+        route: "anthropic-direct",
+        provider: "Anthropic",
+        finishReason: "content_filter",
+        failureCode: "refusal",
+        refusalCategory: "cyber",
+        usage: {
+          prompt_tokens: 1300,
+          completion_tokens: 50,
+          prompt_tokens_details: {
+            cached_tokens: 1000,
+            cache_write_tokens: 200,
+          },
+          completion_tokens_details: { reasoning_tokens: 20 },
+          cost: 0.0025,
+          route: "anthropic-direct",
+          thinking_dropped: 0,
+        },
+      },
+    });
+    const refused = log.parsed().at(-1);
+    assert.equal(refused.event, "model.failed");
+    assert.equal(refused.inputTokens, 1300);
+    assert.equal(refused.outputTokens, 50);
+    assert.equal(refused.cachedTokens, 1000);
+    assert.equal(refused.cacheWriteTokens, 200);
+    assert.equal(refused.reasoningTokens, 20);
+    assert.equal(refused.costUsd, 0.0025);
+    assert.equal(refused.route, "anthropic-direct");
+    assert.equal(refused.finishReason, "content_filter");
+    assert.equal("dropped" in refused, false);
     const routes = sanitize("model.routes", "info", {
       modelProvider: "anthropic",
       anthropicKey: false,

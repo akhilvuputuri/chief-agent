@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type {
   BetaContentBlock,
@@ -90,6 +91,83 @@ type Block = Record<string, any> & { type: string };
 type Entry = { role: "user" | "assistant" | "system"; content: Block[] };
 const cacheable = (block: Block) => !NATIVE.has(block.type);
 
+/**
+ * The trailing state message each thinking block was generated after, so a replay can rebuild
+ * the block's prefix exactly. Chief rebuilds its per-call state message every call (src/context.ts),
+ * so without it the API drops every replayed in-turn block (prefix_binding_mismatch). Keys are
+ * hashes of the block's signature or data; values are the exact state text, held only in this
+ * process (bounded by entries and characters, least recently used first) and never logged. After a
+ * restart the map is empty and replayed blocks are dropped, as before.
+ */
+export class ThinkingStates {
+  private map = new Map<string, string[]>();
+  private size = 0;
+  constructor(
+    private maxEntries = 2000,
+    private maxChars = 8_000_000,
+  ) {}
+  static key(block: Block) {
+    const value =
+      block.type === "thinking"
+        ? block.signature
+        : block.type === "redacted_thinking"
+          ? block.data
+          : undefined;
+    return typeof value === "string" && value
+      ? createHash("sha256").update(`${block.type}:${value}`).digest("hex")
+      : undefined;
+  }
+  get(block: Block) {
+    const key = ThinkingStates.key(block);
+    const value = key ? this.map.get(key) : undefined;
+    if (key && value) {
+      this.map.delete(key);
+      this.map.set(key, value);
+    }
+    return value;
+  }
+  remember(block: Block, texts: string[]) {
+    const key = ThinkingStates.key(block);
+    const chars = texts.reduce((n, t) => n + t.length, 0);
+    if (!key || !texts.length || chars > this.maxChars / 4) return;
+    this.forget(key);
+    this.map.set(key, [...texts]);
+    this.size += chars;
+    for (const [oldest] of this.map) {
+      if (this.map.size <= this.maxEntries && this.size <= this.maxChars) break;
+      this.forget(oldest);
+    }
+  }
+  clear() {
+    this.map.clear();
+    this.size = 0;
+  }
+  get entries() {
+    return this.map.size;
+  }
+  private forget(key: string) {
+    const value = this.map.get(key);
+    if (!value) return;
+    this.map.delete(key);
+    this.size -= value.reduce((n, t) => n + t.length, 0);
+  }
+}
+/** Shared by every adapter in the process: the router builds a new adapter per agent run. */
+export const thinkingStates = new ThinkingStates();
+
+/**
+ * The API requires tool_use ids matching ^[a-zA-Z0-9_-]+$; other providers (through OpenRouter)
+ * return ids such as `functions.memory_set:0` that stay in history. Those are mapped, the same way
+ * for tool_use.id and tool_result.tool_use_id, to a sanitized prefix and a hash (at most 57
+ * characters). Valid ids, including every id this API returns, are sent unchanged.
+ */
+const TOOL_ID = /^[A-Za-z0-9_-]{1,64}$/;
+export function anthropicToolId(id: string) {
+  if (TOOL_ID.test(id)) return id;
+  const hash = createHash("sha256").update(id).digest("hex").slice(0, 16);
+  return `${id.replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 40)}_${hash}`;
+}
+
 function plain(content: ModelMessage["content"]) {
   return typeof content === "string"
     ? content
@@ -134,6 +212,15 @@ function toolInput(value: string) {
   // tool_use input must be an object; the paired tool result reports the invalid call.
   return {};
 }
+/** Truncated tool input that can never parse (see generate). */
+function unparsable(raw: string) {
+  try {
+    JSON.parse(raw);
+    return raw.trimEnd().slice(0, -1);
+  } catch {
+    return raw;
+  }
+}
 const reminder = (text: string): Block => ({
   type: "text",
   text: `<system-reminder>\n${text}\n</system-reminder>`,
@@ -171,7 +258,7 @@ function translate(messages: ModelMessage[], replay = true) {
       content = [
         {
           type: "tool_result",
-          tool_use_id: m.tool_call_id ?? "",
+          tool_use_id: anthropicToolId(m.tool_call_id ?? ""),
           // Content is optional; an empty or whitespace-only result is sent without it.
           ...(typeof m.content === "string"
             ? m.content.trim()
@@ -187,7 +274,7 @@ function translate(messages: ModelMessage[], replay = true) {
         ...blocks(m.content, false),
         ...(m.tool_calls ?? []).map((call) => ({
           type: "tool_use",
-          id: call.id,
+          id: anthropicToolId(call.id),
           name: call.function.name,
           input: toolInput(call.function.arguments),
         })),
@@ -201,7 +288,25 @@ function translate(messages: ModelMessage[], replay = true) {
               .filter((b) => NATIVE.has(b.type))
               .map((b) => ({ ...b }))
           : [];
-      if (native.length) replayed = true;
+      if (native.length) {
+        replayed = true;
+        // Rebuild the block's prefix: the state message that ended the request it came from,
+        // exactly as sent, unless that message is still in place.
+        const before = native.map((b) => thinkingStates.get(b)).find(Boolean);
+        const previous = messages[i - 1];
+        if (
+          before &&
+          !(
+            previous?.role === "system" &&
+            i - 1 >= start &&
+            plain(previous.content) === before.join("\n")
+          )
+        )
+          entries.push({
+            role: "system",
+            content: before.map((text) => ({ type: "text", text })),
+          });
+      }
       content = [...native, ...visible];
     } else {
       const text = plain(m.content);
@@ -258,9 +363,17 @@ function translate(messages: ModelMessage[], replay = true) {
   if (owner && !volatile.has(owner)) marks.add(owner);
   if (system.length) marks.add(system[0]!);
   for (const block of marks) block.cache_control = { type: "ephemeral" };
+  // The trailing state, when it went out as a mid-conversation system message: what any
+  // thinking block in the response was generated after.
+  const last = merged.at(-1);
+  const trailing =
+    last?.role === "system" && last.content.every((b) => volatile.has(b))
+      ? last.content.map((b) => b.text as string)
+      : undefined;
   return {
     request: { ...(system.length ? { system } : {}), messages: merged },
     replayed,
+    trailing,
   };
 }
 
@@ -389,11 +502,16 @@ export class AnthropicDirect implements ModelAdapter {
         output_config: { effort: input.reasoning },
         betas: [BETA],
       }) as unknown as BetaMessageStreamParams;
-    const { request, replayed } = translate(input.messages);
+    const { request, replayed, trailing } = translate(input.messages);
     let message: BetaMessage;
+    let rawInputs: Map<number, string>;
     let replayDropped = false;
     try {
-      message = await this.attempt(body(request), input, maxOutputTokens);
+      ({ message, rawInputs } = await this.attempt(
+        body(request),
+        input,
+        maxOutputTokens,
+      ));
     } catch (error) {
       // A rejected thinking replay (a corrupted block, or a key moved to an unlinked account)
       // would fail every later call with that turn in history, so retry once without it. The
@@ -409,11 +527,11 @@ export class AnthropicDirect implements ModelAdapter {
         throw error;
       replayDropped = true;
       try {
-        message = await this.attempt(
+        ({ message, rawInputs } = await this.attempt(
           body(translate(input.messages, false).request),
           input,
           maxOutputTokens,
-        );
+        ));
       } catch (retryError) {
         if (retryError instanceof ModelError)
           retryError.diagnostics.replayDropped = true;
@@ -432,7 +550,8 @@ export class AnthropicDirect implements ModelAdapter {
           60,
         )
       : null;
-    // Structural diagnostics only; never response text or provider messages.
+    // Structural diagnostics only; never response text or provider messages. A complete
+    // response was billed even when it is refused below, so its usage travels with the error.
     const diagnostics = {
       ...ROUTE,
       responseId:
@@ -440,6 +559,7 @@ export class AnthropicDirect implements ModelAdapter {
       finishReason,
       errorCode: null,
       hasUsage: !!message.usage,
+      usage,
     };
     if (!finishReason)
       throw new ModelError("Model stream failed", true, {
@@ -460,7 +580,16 @@ export class AnthropicDirect implements ModelAdapter {
     const text = content
       .flatMap((b) => (b.type === "text" ? [b.text] : []))
       .join("");
-    const toolCalls: ToolCall[] = content.flatMap((b) =>
+    // A response cut off at its output allowance can end inside a tool call. The SDK's tolerant
+    // parse then yields valid-looking but truncated input (a dropped long value, say), so that
+    // call carries the raw truncated text instead, as OpenRouter returns it: it fails JSON.parse
+    // and is reported to the model, never run. Text that happens to parse loses its last
+    // character so that the call can never run.
+    const truncated =
+      finishReason === "length" && content.at(-1)?.type === "tool_use"
+        ? content.length - 1
+        : -1;
+    const toolCalls: ToolCall[] = content.flatMap((b, index) =>
       b.type === "tool_use"
         ? [
             {
@@ -468,7 +597,10 @@ export class AnthropicDirect implements ModelAdapter {
               type: "function" as const,
               function: {
                 name: b.name,
-                arguments: JSON.stringify(b.input ?? {}),
+                arguments:
+                  index === truncated
+                    ? unparsable(rawInputs.get(index) ?? "")
+                    : JSON.stringify(b.input ?? {}),
               },
             },
           ]
@@ -506,7 +638,15 @@ export class AnthropicDirect implements ModelAdapter {
           t.function.name,
       )
     )
-      throw new ModelError("Invalid model tool calls", false, ROUTE);
+      throw new ModelError("Invalid model tool calls", false, {
+        ...ROUTE,
+        usage,
+      });
+    // Remember the state each new thinking block followed (see ThinkingStates).
+    if (trailing && !replayDropped)
+      for (const b of content)
+        if (NATIVE.has(b.type))
+          thinkingStates.remember(b as unknown as Block, trailing);
     return {
       message: {
         role: "assistant",
@@ -526,8 +666,10 @@ export class AnthropicDirect implements ModelAdapter {
     body: BetaMessageStreamParams,
     input: Parameters<ModelAdapter["generate"]>[0],
     maxOutputTokens: number,
-  ): Promise<BetaMessage> {
+  ): Promise<{ message: BetaMessage; rawInputs: Map<number, string> }> {
     let bytes = 0;
+    // Each tool_use block's input exactly as streamed, by content index (see generate).
+    const rawInputs = new Map<number, string>();
     // Complete-response (coding) calls bound the wire size as OpenRouter's stream reader does.
     const maxWireBytes = input.requireComplete
       ? Math.max(1600000, maxOutputTokens * 1024)
@@ -599,10 +741,23 @@ export class AnthropicDirect implements ModelAdapter {
           event.type === "content_block_delta"
         ) {
           emitted = true;
+          if (
+            event.type === "content_block_start" &&
+            event.content_block.type === "tool_use"
+          )
+            rawInputs.set(event.index, "");
+          else if (
+            event.type === "content_block_delta" &&
+            event.delta.type === "input_json_delta"
+          )
+            rawInputs.set(
+              event.index,
+              (rawInputs.get(event.index) ?? "") + event.delta.partial_json,
+            );
           if (input.stream) await progress();
         }
       }
-      return await stream.finalMessage();
+      return { message: await stream.finalMessage(), rawInputs };
     } catch (error) {
       if (oversized && !input.signal.aborted)
         throw new ModelError("Model stream failed", false, {

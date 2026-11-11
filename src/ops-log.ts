@@ -441,12 +441,16 @@ const projections: Record<string, Projection> = {
       attempt: d.attempt,
       latencyMs: d.latencyMs,
       transient: d.transient,
+      // A complete response refused after it was billed (the direct adapter's refusal,
+      // incomplete or empty response) carries its usage: tokens and cost, numbers only.
+      ...(d.diagnostics?.usage ? usageFields(d.diagnostics.usage) : {}),
       provider: providerName(d.diagnostics?.provider),
       // Set by the direct Anthropic adapter on its failures; OpenRouter failures omit it.
       route: d.diagnostics?.route,
       errorCode: d.diagnostics?.errorCode,
       errorType: d.diagnostics?.errorType,
-      replayDropped: d.diagnostics?.replayDropped,
+      replayDropped:
+        d.diagnostics?.replayDropped ?? d.diagnostics?.usage?.replay_dropped,
       httpStatus: d.diagnostics?.httpStatus,
       state: finishName(d.diagnostics?.finishReason),
       finishReason: finishName(d.diagnostics?.finishReason),

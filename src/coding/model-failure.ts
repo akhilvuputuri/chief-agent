@@ -17,7 +17,9 @@ export class CodingModelFailure extends Error {
       responseId?: string;
       finishReason?: "length" | "content_filter";
       providerStatus?: number;
-      providerFailure?: "empty" | "malformed";
+      providerFailure?: "empty" | "malformed" | "refusal";
+      /** The provider's refusal category (a short snake_case name), with providerFailure "refusal". */
+      refusalCategory?: string;
     },
   ) {
     super(
