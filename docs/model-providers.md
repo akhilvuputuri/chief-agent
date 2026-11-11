@@ -34,14 +34,14 @@ The adapter keeps the OpenRouter slug as the model name, so journals, settings, 
 
 With `fallback: true` in the policy (the committed value), a direct failure classified **before any output** retries once on OpenRouter for the same slug. A failure after output has started, any other error, or a call the caller has aborted surfaces as the direct error, and the caller's normal retry rules apply. If `OPENROUTER_API_KEY` were empty there would be nothing to fall back to.
 
-| Fault         | Classified from                                                                                      | Cooldown                                                       | Applies to       |
-| ------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------- |
-| `auth`        | HTTP 401, `authentication_error`                                                                     | 600 s                                                          | every model      |
-| `permission`  | HTTP 403, `permission_error`                                                                         | 600 s                                                          | that model only  |
-| `billing`     | HTTP 402, `billing_error`, `enforced_spend_limit_reached`                                            | 600 s                                                          | every model      |
-| `rate_limit`  | HTTP 429, `rate_limit_error`                                                                         | `retry-after`, clamped to 5–120 s (30 s without one)           | every model      |
-| `unavailable` | HTTP 5xx, `api_error`, `overloaded_error`, `timeout_error`, a transport failure with nothing emitted | none: each failing call falls back on its own                  | that call        |
-| `not_found`   | HTTP 404, `not_found_error`                                                                          | 600 s                                                          | that model only  |
+| Fault         | Classified from                                                                                      | Cooldown                                             | Applies to      |
+| ------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | --------------- |
+| `auth`        | HTTP 401, `authentication_error`                                                                     | 600 s                                                | every model     |
+| `permission`  | HTTP 403, `permission_error`                                                                         | 600 s                                                | that model only |
+| `billing`     | HTTP 402, `billing_error`, `enforced_spend_limit_reached`                                            | 600 s                                                | every model     |
+| `rate_limit`  | HTTP 429, `rate_limit_error`                                                                         | `retry-after`, clamped to 5–120 s (30 s without one) | every model     |
+| `unavailable` | HTTP 5xx, `api_error`, `overloaded_error`, `timeout_error`, a transport failure with nothing emitted | none: each failing call falls back on its own        | that call       |
+| `not_found`   | HTTP 404, `not_found_error`                                                                          | 600 s                                                | that model only |
 
 During a cooldown the direct pathway is skipped and calls go straight to OpenRouter. Cooldowns are per gateway process and reset on restart. A fallback generation's usage carries `fallback_from: "anthropic-direct"`, `fallback_reason` and, when a cooldown caused it, `fallback_cooldown: true`.
 
@@ -58,13 +58,54 @@ AWS_PROFILE=chief-logs kite run logs:cloudwatch -- models --since 2h
 AWS_PROFILE=chief-logs kite run logs:cloudwatch -- event --event model.provider_fallback --since 1d
 ```
 
-The `models` query groups by provider, so direct calls appear under `anthropic`. <!-- LOGFIELDS -->
+The `models` query groups by provider, so direct calls appear under `anthropic`. The saved queries' field lists do not include the new fields (`route`, `fallbackFrom`, `reason`, `cooldownS` and the `model.routes` fields) yet, so read those with a Logs Insights query that names them.
 
 ## Enabling it
 
 Enabling needs one Compose line, `ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}` in the gateway's environment, plus the key in the private server `.env`. The automatic release refuses Compose changes, so this ships in its own PR through a reviewed operator procedure, modelled on the [Singapore keys rollout](singapore-open-data.md#key-rollout-procedure). It is deliberately not in the change that added the adapter.
 
-<!-- ROLLOUT-PROCEDURE -->
+### Key rollout procedure
+
+`scripts/deploy-anthropic-key.py` is the one-time reviewed operator rollout, with offline tests in `scripts/test-deploy-anthropic-key.py`. Its `BASE` is deliberately unset: the PR that adds the Compose line must set it to the live release SHA, read over SSH (`sudo cat /opt/hermes-companion/RELEASE`) just before that PR is reviewed, so the reviewer approves the exact baseline. The script refuses to run while `BASE` is unset, and the offline test fails once `compose.yaml` carries the line and `BASE` is still unset. If another release lands first, set the new live SHA after review.
+
+**What the script checks and does:**
+
+1. **Before anything changes:**
+   - `BASE` is set and the server's `RELEASE` matches it exactly;
+   - the private `.env` sets `ANTHROPIC_API_KEY` to a non-empty value, using the last assignment as Compose does and counting `KEY=""` or a comment as empty. It checks presence only; the value is never printed, logged or written;
+   - the archive matches the exact requested commit and contains no unsafe entries (no `.env*` other than `.env.example`, `.git` or `RELEASE`);
+   - `db/` is unchanged, the trusted release handler (`scripts/cloud-release.py`) is unchanged, and `compose.yaml` differs from the live file only by `ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}` directly after the gateway's `OPENROUTER_API_KEY` line.
+2. **Then:**
+   - builds the candidate image first, and checks the baseline is healthy;
+   - refuses, without cancelling anything, while a run, pending conversation input, active coding job or pending coding cleanup exists; rerun it when idle;
+   - tags the previous image `:rollback`, stops the gateway, switches `compose.yaml` and the image, starts the gateway, checks health, then publishes the source and writes `RELEASE`.
+3. **On failure:** restores the previous application, source and Compose file and checks health; if that fails too, it stops and asks for operator inspection. It neither cancels nor replays owner work, and leaves the database alone.
+
+**Steps:**
+
+1. Open the Compose PR: the one line in `compose.yaml` and `BASE` set to the live release SHA. Run `python3 scripts/test-deploy-anthropic-key.py`. Get it independently reviewed.
+2. Once the PR is approved and merged, add the key to `/opt/hermes-companion/.env` (root, mode 600) through the pinned Lightsail operator connection ([lightsail.md](lightsail.md)). Pipe the value from a local private file over SSH, so it never appears in a command line, a log or the chat.
+3. Create the `git archive` of the exact merge commit, and transfer it and the reviewed script.
+4. Run:
+
+   ```sh
+   sudo python3 /tmp/deploy-anthropic-key.py /tmp/anthropic-release.tar FULL_REVIEWED_MAIN_SHA
+   ```
+
+   On success it prints `{"deployed": "<sha>", "healthy": true, "anthropicKey": "configured"}`.
+
+5. Verify the exact `RELEASE` and health. Then check that the key reached the gateway, printing only the word "present":
+
+   ```sh
+   sudo docker compose --project-directory /opt/hermes-companion -p hermes-companion exec -T gateway sh -c 'test -n "$ANTHROPIC_API_KEY" && echo present'
+   ```
+
+6. Dispatch the normal release for the same commit, which should be a no-op redeploy. That confirms later automatic releases accept the installed Compose file.
+7. Run the [first live run](#first-live-run) checks.
+
+**Until the script runs:** a merged `compose.yaml` change makes the automatic release refuse every later merge. Run it immediately after the merge.
+
+**Rollback:** the script's own failure path restores the previous state. To turn the direct route off afterwards, see [switching back](#switching-back); the Compose line can stay, since an empty key keeps every call on OpenRouter.
 
 Never paste the key into a chat, a PR, a command line or a log. It belongs only in `/opt/hermes-companion/.env` on the host, as for every other secret ([configuration](configuration.md)).
 

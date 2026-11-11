@@ -4,31 +4,31 @@ One Node application owns the Telegram gateway, the coordinator runtime, tools, 
 
 ## Modules
 
-| Module                                                     | Responsibility                                                                                                     |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `agent.ts`                                                 | Authenticated owner scope, per-user serialization, history, approvals, task continuation and child-agent execution |
-| `custom-agent.ts`                                          | Sequential model → validated tool → observation loop and explicit stop reasons                                     |
-| `context.ts` / `history.ts`                                | Core instructions, Singapore time, memories, skill and agent catalogues, bounded history selection                 |
-| `model.ts` / `model-policy.ts` / `effort.ts`               | OpenRouter adapter, reviewed model policy and tiers, price ceilings, per-message reasoning effort                  |
-| `model-router.ts` / `anthropic.ts` | Per-model provider choice (OpenRouter, or Anthropic direct for policy-mapped models with a key) and the direct Anthropic adapter with OpenRouter fallback ([model providers](model-providers.md)) |
-| `execution.ts`                                             | Persisted checkpoints, invocation journal, budgets, traces and restart recovery                                    |
-| `runtime.ts` / `protocol.ts`                               | Individual tool definitions from Zod; strict operation-specific arguments                                          |
-| `tools.ts`                                                 | Owner-scoped dispatcher and action receipts                                                                        |
-| `agents.ts` / `plugins.ts` / `plugin-registry.ts`          | `agent_run`, pinned plugin agent definitions, tool grants and report contracts                                     |
-| `work.ts` / `work-worker.ts`                               | Task steps, evidence and automatic continuation within the task allocation                                         |
-| `schedule.ts` / `daily.ts` / `routines.ts`                 | Reminders, briefings and scheduled agent routines                                                                  |
-| `responsibilities.ts`                                      | Owner-confirmed monitoring of named sources                                                                        |
-| `news.ts` / `stocks.ts` / `subscription-summary.ts`        | Deterministic bulletins, alerts and summaries that make no model call                                              |
-| `subscriptions.ts` / `gathering/` / `parcels.ts`           | Subscription tracker, invoice collections and the delivery tracker                                                 |
-| `ibkr/` / `stock-*.ts`                                     | Read-only IBKR holdings, order drafts, quotes and stock rules                                                      |
-| `singapore/`                                               | Read-only data.gov.sg and LTA DataMall tools for the Merlion agent                                                 |
-| `mcp.ts` / `mcp-client.ts`                                 | Remote MCP connectors with explicit per-tool grants                                                                |
-| `coding/` / `boxes/`                                       | Coding job controller, owner approvals, merge gates and the EC2 box layer                                          |
-| `browser/`                                                 | Isolated browser service and egress policy for invoice gathering                                                   |
-| `telegram.ts` / `telegram-topics.ts` / `telegram-views.ts` | Allowlist, voice, photo/PDF/location intake, topics, commands, views and approval cards                            |
-| `miniapp.ts` / `canvases.ts`                               | Authenticated Mini App and revisioned canvases                                                                     |
-| `attachments.ts`                                           | File classification and limits, PDF text extraction (unpdf), attachment notes for history                          |
-| `ops-log.ts`                                               | Sanitized operational log lines                                                                                    |
+| Module                                                     | Responsibility                                                                                                                                                                                    |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent.ts`                                                 | Authenticated owner scope, per-user serialization, history, approvals, task continuation and child-agent execution                                                                                |
+| `custom-agent.ts`                                          | Sequential model → validated tool → observation loop and explicit stop reasons                                                                                                                    |
+| `context.ts` / `history.ts`                                | Core instructions, Singapore time, memories, skill and agent catalogues, bounded history selection                                                                                                |
+| `model.ts` / `model-policy.ts` / `effort.ts`               | OpenRouter adapter, reviewed model policy and tiers, price ceilings, per-message reasoning effort                                                                                                 |
+| `model-router.ts` / `anthropic.ts`                         | Per-model provider choice (OpenRouter, or Anthropic direct for policy-mapped models with a key) and the direct Anthropic adapter with OpenRouter fallback ([model providers](model-providers.md)) |
+| `execution.ts`                                             | Persisted checkpoints, invocation journal, budgets, traces and restart recovery                                                                                                                   |
+| `runtime.ts` / `protocol.ts`                               | Individual tool definitions from Zod; strict operation-specific arguments                                                                                                                         |
+| `tools.ts`                                                 | Owner-scoped dispatcher and action receipts                                                                                                                                                       |
+| `agents.ts` / `plugins.ts` / `plugin-registry.ts`          | `agent_run`, pinned plugin agent definitions, tool grants and report contracts                                                                                                                    |
+| `work.ts` / `work-worker.ts`                               | Task steps, evidence and automatic continuation within the task allocation                                                                                                                        |
+| `schedule.ts` / `daily.ts` / `routines.ts`                 | Reminders, briefings and scheduled agent routines                                                                                                                                                 |
+| `responsibilities.ts`                                      | Owner-confirmed monitoring of named sources                                                                                                                                                       |
+| `news.ts` / `stocks.ts` / `subscription-summary.ts`        | Deterministic bulletins, alerts and summaries that make no model call                                                                                                                             |
+| `subscriptions.ts` / `gathering/` / `parcels.ts`           | Subscription tracker, invoice collections and the delivery tracker                                                                                                                                |
+| `ibkr/` / `stock-*.ts`                                     | Read-only IBKR holdings, order drafts, quotes and stock rules                                                                                                                                     |
+| `singapore/`                                               | Read-only data.gov.sg and LTA DataMall tools for the Merlion agent                                                                                                                                |
+| `mcp.ts` / `mcp-client.ts`                                 | Remote MCP connectors with explicit per-tool grants                                                                                                                                               |
+| `coding/` / `boxes/`                                       | Coding job controller, owner approvals, merge gates and the EC2 box layer                                                                                                                         |
+| `browser/`                                                 | Isolated browser service and egress policy for invoice gathering                                                                                                                                  |
+| `telegram.ts` / `telegram-topics.ts` / `telegram-views.ts` | Allowlist, voice, photo/PDF/location intake, topics, commands, views and approval cards                                                                                                           |
+| `miniapp.ts` / `canvases.ts`                               | Authenticated Mini App and revisioned canvases                                                                                                                                                    |
+| `attachments.ts`                                           | File classification and limits, PDF text extraction (unpdf), attachment notes for history                                                                                                         |
+| `ops-log.ts`                                               | Sanitized operational log lines                                                                                                                                                                   |
 
 ## Coordinator and agents
 
