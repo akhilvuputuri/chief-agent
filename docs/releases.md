@@ -1,3 +1,9 @@
+## Reused test databases (10 November 2026)
+
+- **Code.** Tests only. A database a test closes is emptied and handed to the next test, instead of each test restoring a snapshot. `TEST_DB_REUSE=0` turns it off. No migration, and nothing in the running application changes.
+- **Why.** Creating databases took most of a test run's time. See [journal 158](journey/158-reused-test-databases.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## A nightly judge of memory (10 November 2026)
 
 - **Code.** After the item and procedure passes, the learner runs a judge (`judge-v1`): each new learned fact against the owner's message it cites, and each owner turn past the success window against the memory that was in its context (which items were relevant, and whether each was followed, ignored or contradicted). Verdicts go to `events` and, for turns, to trace export as `memory_relevant` and `memory_followed`. It changes no memory. No database or Compose change.
