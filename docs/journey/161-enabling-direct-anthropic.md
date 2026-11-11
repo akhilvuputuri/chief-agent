@@ -5,7 +5,7 @@ Status: enabling change prepared on branch `claude/gifted-mccarthy-gond93` and t
 
 ## User-visible problem and preceding iteration
 
-[Journal 160](160-direct-anthropic-provider.md) added a direct Anthropic pathway beside OpenRouter, merged as `a7c1993` (PR #441). It is inert in production: Compose does not pass `ANTHROPIC_API_KEY` to the gateway. That entry left three owner decisions open: whether to enable it, Chief's 8,000-token output allowance, and the coding allowances.
+[Journal 160](160-direct-anthropic-provider.md) added a direct Anthropic pathway beside OpenRouter, merged as `a7c1993` (PR #441) and released on 11 November ([release run 43004943097](https://github.com/akhilvuputuri/chief-agent/actions/runs/43004943097), exact commit deployed and startup health passed). It is inert in production: Compose does not pass `ANTHROPIC_API_KEY` to the gateway. That entry left three owner decisions open: whether to enable it, Chief's 8,000-token output allowance, and the coding allowances.
 
 Owner decisions, 11 November 2026:
 
@@ -61,7 +61,7 @@ Independent review: pending.
 
 ## Verification and outcome
 
-Tested offline on 11 November 2026: `kite run typecheck`; the custom runtime, context, model policy, router, cache-hint, Anthropic, OpenRouter stream, runtime config, Dockerfile, migration rollout, agents, media, research, effort and learning tests; every `tests/coding*.test.ts`; `node --test scripts/*.test.mjs`; every `scripts/test-*.py`. No live call was made and no key was used.
+Tested offline on 11 November 2026: `kite run typecheck`; the custom runtime, context, model policy, router, cache-hint, Anthropic, OpenRouter stream, runtime config, Dockerfile, migration rollout, agents, media, research, effort and learning tests; every `tests/coding*.test.ts`; `node --test scripts/*.test.mjs`; every `scripts/test-*.py`. After the learner and judge allowances were added (same day): `kite run typecheck`, and `tests/learning.test.ts`, `tests/memory-judge.test.ts` and `tests/custom-runtime.test.ts`. No live call was made and no key was used.
 
 ### Rollout
 

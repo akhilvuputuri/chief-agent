@@ -166,8 +166,8 @@ For the latest verified release and open work, read [current work](../current-wo
 | 10 November | [157 — Nightly memory judge](157-nightly-memory-judge.md): is the memory right, and is it used? | Released 11 November in `fdff479`; first run due 12 November. A judge on another model family checks each new fact against the owner's message and each turn against the memory in its context, and changes no memory |
 | 10 November | [158 — Reused test databases](158-reused-test-databases.md): where does test time go, and can a test get a database for less? | Released in `3d02997`: CI's six test steps took 324–382 s across four runs against 617 s on main |
 | 11 November | [159 — Shared-process test runs](159-shared-process-test-runs.md): what does a test file's own process cost, and can a serial run do without it? | Released in `2b4521c`: a serial run fell from 285.6 s to about 170 s on a Mac; coding boxes not yet measured |
-| 11 November | [160 — Direct Anthropic provider](160-direct-anthropic-provider.md): can Chief call Anthropic directly, alongside OpenRouter, and switch between them? | Merged as `a7c1993` (PR #441), inert in production; verified live locally with a temporary key on 11 November; enabling follows in journal 161 |
-| 11 November | [161 — Enabling the direct Anthropic route](161-enabling-direct-anthropic.md): what does it take to switch Chief to the direct Anthropic route? | Prepared and tested offline; awaiting review, merge and the operator rollout. Owner-approved: Compose passes the key, Chief asks for 32,000 output tokens, every Pi coding role on Opus 5.5 with a 64,000-token reviewer |
+| 11 November | [160 — Direct Anthropic provider](160-direct-anthropic-provider.md): can Chief call Anthropic directly, alongside OpenRouter, and switch between them? | Released in `a7c1993` (PR #441), inert in production (no key on the host); verified live locally with a temporary key on 11 November; enabling follows in journal 161 |
+| 11 November | [161 — Enabling the direct Anthropic route](161-enabling-direct-anthropic.md): what does it take to switch Chief to the direct Anthropic route? | Prepared and tested offline; awaiting review, merge and the operator rollout. Owner-approved: Compose passes the key, Chief asks for 32,000 output tokens, every Pi coding role on Opus 5.5 with a 64,000-token reviewer; the nightly learner and judge ask for 32,000 too |
 
 ## Coding-agent learning path
 
@@ -243,7 +243,7 @@ Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python 
 ## Model configuration
 
 - 23 September 2026: [32 — Repo-controlled model releases](32-repo-controlled-model.md) — reviewed policy and image-bundling path released in v0.3.23; a future PR can select the main model without a server `.env` edit.
-- 11 November 2026: [160 — Direct Anthropic provider](160-direct-anthropic-provider.md) — policy-mapped Anthropic models can go direct with a Console key, falling back to OpenRouter; merged as `a7c1993`, inert until enabled.
+- 11 November 2026: [160 — Direct Anthropic provider](160-direct-anthropic-provider.md) — policy-mapped Anthropic models can go direct with a Console key, falling back to OpenRouter; released in `a7c1993`, inert until enabled.
 - 11 November 2026: [161 — Enabling the direct Anthropic route](161-enabling-direct-anthropic.md) — owner-approved switch: Compose passes the key through a reviewed operator rollout, Chief asks for 32,000 output tokens, every Pi coding role on Opus 5.5; prepared, not rolled out.
 
 - 1 October 2026: [53 — Feed destinations](53-feed-destinations.md): issue 137 corrects queue boundaries, approval placement and durable delivery; released in v0.3.29/v0.3.30 with review loops, exact deployment and rolled-back module smoke.
