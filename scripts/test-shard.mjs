@@ -97,14 +97,16 @@ export function undecidedFiles(files, report, cwd = process.cwd()) {
  * What must still run, one process per file, after a shared-process run. `first` decides
  * the result if it fails; `thenIfPassed` runs only when `first` passed.
  *
- * A shared run is believed only when it exits cleanly. A crash can stop a file halfway
- * after it has reported a test, and node can fail a run without naming a file (a timer
- * that throws after its test ended, a failing global hook). So after a crash every file
- * runs again, and a failed run that its named failures do not explain is not passed until
- * every other file has run on its own too.
+ * A shared run is believed only when it ran to its end and exited cleanly. A run cut
+ * short can stop a file halfway after it has reported a test, whether by a crash or by
+ * another file's leftover timer calling process.exit(0). And node can fail a run without
+ * naming a file (a timer that throws after its test ended, a failing global hook). So
+ * after a run that did not complete every file runs again, and a failed run that its
+ * named failures do not explain is not passed until every other file has run on its own
+ * too.
  */
-export function rerunPlan({ files, undecided, code, crashed }) {
-  if (crashed) return { first: files, thenIfPassed: [] };
+export function rerunPlan({ files, undecided, code, crashed, complete }) {
+  if (crashed || !complete) return { first: files, thenIfPassed: [] };
   if (code === 0) return { first: undecided, thenIfPassed: [] };
   if (!undecided.length) return { first: files, thenIfPassed: [] };
   return {
@@ -151,16 +153,18 @@ async function shared(files) {
       // No report at all: every file is undecided.
     }
     const undecided = undecidedFiles(files, written);
+    const complete = written.split("\n").includes("complete");
     const { first, thenIfPassed } = rerunPlan({
       files,
       undecided,
       code,
       crashed,
+      complete,
     });
     if (!first.length) return code;
     console.log(
-      (crashed
-        ? "\nThe shared process crashed, so its results are not used. "
+      (crashed || !complete
+        ? "\nThe shared process stopped before finishing, so its results are not used. "
         : code !== 0 && !undecided.length
           ? "\nThe shared process failed without naming a test file. "
           : `\n${first.length} test file(s) failed or did not report in the shared process. `) +
@@ -170,7 +174,8 @@ async function shared(files) {
     const decided = await perFile(first, "1");
     if (decided !== 0) return decided;
     if (!thenIfPassed.length) {
-      if (!crashed && undecided.length)
+      // Only a failed shared run says anything about files disturbing each other.
+      if (complete && !crashed && code !== 0)
         console.log(
           "\nThey pass on their own. A file that fails only in the shared process " +
             "depends on, or disturbs, another file's state.",

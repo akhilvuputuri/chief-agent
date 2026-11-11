@@ -38,8 +38,8 @@ Files in one process can see each other's module state, a crash takes every file
 `scripts/test-shard.mjs`:
 
 - **Mode:** a serial run shares one process (`TEST_ISOLATION=shared`). Parallel files, as in CI, keep one process each (`TEST_ISOLATION=process`). Either can be set by hand; shared with parallel files is refused.
-- **Report:** a second reporter, `scripts/test-ran-files.mjs`, writes each file as it reports a test and again when one fails.
-- **Only a clean run is believed.** If the shared process exits cleanly, any file that never reported runs again in a process of its own. If it fails, the files with a failed test and the files that never reported run again alone, and a failure there fails the run. If they pass alone, the shared failure is unexplained, so every other file runs alone too before the run may pass. If the shared run names no file at all, or dies by a signal, every file runs alone.
+- **Report:** a second reporter, `scripts/test-ran-files.mjs`, writes each file as it reports a test, again when one fails, and a completion line when node has run everything.
+- **Only a clean, complete run is believed.** If the run did not reach its completion line, whatever its exit code, every file runs alone. If the shared process completes and exits cleanly, any file that never reported runs again in a process of its own. If it fails, the files with a failed test and the files that never reported run again alone, and a failure there fails the run. If they pass alone, the shared failure is unexplained, so every other file runs alone too before the run may pass. If the shared run names no file at all, or dies by a signal, every file runs alone.
 
 **What differs from a process per file, and is not undone:**
 
@@ -56,11 +56,13 @@ Files in one process can see each other's module state, a crash takes every file
 
 The first version's header and the lessons page said a pass meant what it meant before. That was wrong, and is replaced by the list above.
 
+**Second review, `fe02407`: changes requested.** One more false pass, reproduced: a file's leftover timer called `process.exit(0)` while a later file was midway. The later file had reported a test, the exit code was 0, and its failing test never ran. The reporter now writes a completion line, and a run without it is not believed.
+
 ## Verification and outcome
 
 **Tested, same Mac, through `kite run test:ts`:** 175.6 s shared against 285.6 s with a process per file. Every file was decided in the shared run except the flaky one, which ran again alone as designed. After that test was fixed, two more shared runs took 173.9 s and 170.7 s, passed, and re-ran nothing.
 
-**Tested, a synthetic suite (`scripts/test-shard.test.mjs`):** a file that fails only beside another passes only after every file has run alone; a real failure fails from the failed files alone; a file that exits the process early cannot hide the files after it; a timer that throws after its test ended fails the run; a process killed after a file's first test fails the run.
+**Tested, a synthetic suite (`scripts/test-shard.test.mjs`):** a file that fails only beside another passes only after every file has run alone; a real failure fails from the failed files alone; a file that exits the process early cannot hide the files after it; a timer that throws after its test ended fails the run; a process killed after a file's first test fails the run; a leftover timer that exits the process with code 0 while another file is midway fails the run.
 
 **Not measured:** coding boxes, where `kite run check` runs this serially. Their gain is expected to be similar and is unproven.
 

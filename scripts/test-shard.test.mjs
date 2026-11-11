@@ -186,7 +186,7 @@ test("the reporter names each file once when it runs and once when it fails", as
   for await (const line of ranFiles(events)) written += line;
   assert.equal(
     written,
-    "ran /r/a.test.ts\nran /r/b.test.ts\nfailed /r/b.test.ts\n",
+    "ran /r/a.test.ts\nran /r/b.test.ts\nfailed /r/b.test.ts\ncomplete\n",
   );
 });
 
@@ -270,6 +270,22 @@ test("a shared run decides nothing it cannot vouch for", (t) => {
   assert.match(result.output, /Running the other 2 file\(s\) one process each/);
   remove("b", "x");
 
+  // Another file's leftover timer ends the process with code 0 while m is midway: m has
+  // reported a test, and its failing one never ran.
+  remove("a");
+  write("l", `test("l", () => { setTimeout(() => process.exit(0), 250); });`);
+  write(
+    "m",
+    `test("m1", () => {});
+     test("m2", () => new Promise((done) => setTimeout(done, 600)));
+     test("m3", () => assert.equal(1, 2));`,
+  );
+  result = run();
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /stopped before finishing/);
+  remove("l", "m");
+  write("a", `globalThis.leaked = true; test("a", () => {});`);
+
   // A crash after a file's first test: that file has reported, and must still not count.
   write(
     "k",
@@ -289,8 +305,8 @@ test("a shared run decides nothing it cannot vouch for", (t) => {
 
 test("only a clean shared run is believed", () => {
   const files = ["a", "b", "c"];
-  const plan = (undecided, code, crashed = false) =>
-    rerunPlan({ files, undecided, code, crashed });
+  const plan = (undecided, code, crashed = false, complete = true) =>
+    rerunPlan({ files, undecided, code, crashed, complete });
   assert.deepEqual(plan([], 0), { first: [], thenIfPassed: [] });
   // Clean exit, but a file never reported: only that file is in doubt.
   assert.deepEqual(plan(["c"], 0), { first: ["c"], thenIfPassed: [] });
@@ -300,4 +316,9 @@ test("only a clean shared run is believed", () => {
   assert.deepEqual(plan([], 1), { first: files, thenIfPassed: [] });
   assert.deepEqual(plan(["b"], 1, true), { first: files, thenIfPassed: [] });
   assert.deepEqual(plan([], 0, true), { first: files, thenIfPassed: [] });
+  // Exit code 0 from a run that never finished proves nothing.
+  assert.deepEqual(plan([], 0, false, false), {
+    first: files,
+    thenIfPassed: [],
+  });
 });
