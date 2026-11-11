@@ -164,7 +164,8 @@ For the latest verified release and open work, read [current work](../current-wo
 | 8 November | [155 — Text Postgres cannot store](155-text-postgres-cannot-store.md): why did one model reply pause a coding job? | Tested on synthetic jobs; release pending. Descriptive text is made storable where the host writes it; exact copies and code stay exact |
 | 9 November | [156 — Room for the whole plan](156-room-for-the-whole-plan.md): why did the planner stop while writing its plan? | Released in `fa058f9`; image pin follows. The schema allows coder and planner calls up to 128,000 output tokens, and the worker waits as long as the host allows; the profile stays at 16,000 until the next worker image pin |
 | 10 November | [157 — Nightly memory judge](157-nightly-memory-judge.md): is the memory right, and is it used? | Released 11 November in `fdff479`; first run due 12 November. A judge on another model family checks each new fact against the owner's message and each turn against the memory in its context, and changes no memory |
-| 10 November | [158 — Reused test databases](158-reused-test-databases.md): where does test time go, and can a test get a database for less? | Tested: CI's six test steps took 324 s in one run against 617 s on main; release pending |
+| 10 November | [158 — Reused test databases](158-reused-test-databases.md): where does test time go, and can a test get a database for less? | Released in `3d02997`: CI's six test steps took 324–382 s across four runs against 617 s on main |
+| 11 November | [159 — Shared-process test runs](159-shared-process-test-runs.md): what does a test file's own process cost, and can a serial run do without it? | Tested locally: a serial run fell from 285.6 s to 175.6 s; coding boxes not yet measured |
 
 ## Coding-agent learning path
 

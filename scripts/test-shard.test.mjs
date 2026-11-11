@@ -1,7 +1,23 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
-import { allTestFiles, assignShards, parseShard } from "./test-shard.mjs";
+import ranFiles from "./test-ran-files.mjs";
+import {
+  allTestFiles,
+  assignShards,
+  isolationMode,
+  parseShard,
+  undecidedFiles,
+} from "./test-shard.mjs";
 import {
   assertComplete,
   testTitles,
@@ -116,4 +132,123 @@ test("a log is refused unless every shard reached its summary", () => {
   // A whole shard missing, and a log with no shards at all.
   assert.throws(() => assertComplete(finished(1)), /Only 1 of 2/);
   assert.throws(() => assertComplete("format\tstep\tnothing"), /Only 0/);
+});
+
+test("a serial run shares one process, and parallel files keep their own", () => {
+  assert.equal(isolationMode({}), "shared");
+  assert.equal(isolationMode({ TEST_CONCURRENCY: "1" }), "shared");
+  assert.equal(isolationMode({ TEST_CONCURRENCY: "4" }), "process");
+  assert.equal(isolationMode({ TEST_ISOLATION: "process" }), "process");
+  assert.throws(() => isolationMode({ TEST_ISOLATION: "none" }), /Invalid/);
+  assert.throws(
+    () => isolationMode({ TEST_ISOLATION: "shared", TEST_CONCURRENCY: "4" }),
+    /one file at a time/,
+  );
+});
+
+test("files that failed or never reported are left undecided", () => {
+  const files = ["tests/a.test.ts", "tests/b.test.ts", "tests/c.test.ts"];
+  const report = [
+    "ran /repo/tests/a.test.ts",
+    "ran /repo/tests/b.test.ts",
+    "failed /repo/tests/b.test.ts",
+    // A test declared in a helper reports the helper's path, which names no test file.
+    "ran /repo/tests/helpers/shared.ts",
+    "",
+  ].join("\n");
+  assert.deepEqual(undecidedFiles(files, report, "/repo"), [
+    "tests/b.test.ts",
+    "tests/c.test.ts",
+  ]);
+  // No report at all, as after a crash: nothing is decided.
+  assert.deepEqual(undecidedFiles(files, "", "/repo"), files);
+  assert.deepEqual(
+    undecidedFiles(
+      files,
+      files.map((f) => `ran /repo/${f}`).join("\n"),
+      "/repo",
+    ),
+    [],
+  );
+});
+
+test("the reporter names each file once when it runs and once when it fails", async () => {
+  const events = [
+    { type: "test:start", data: { file: "/r/a.test.ts" } },
+    { type: "test:pass", data: { file: "/r/a.test.ts" } },
+    { type: "test:pass", data: { file: "/r/a.test.ts" } },
+    { type: "test:fail", data: { file: "/r/b.test.ts" } },
+    { type: "test:fail", data: { file: "/r/b.test.ts" } },
+    { type: "test:pass", data: {} },
+  ];
+  let written = "";
+  for await (const line of ranFiles(events)) written += line;
+  assert.equal(
+    written,
+    "ran /r/a.test.ts\nran /r/b.test.ts\nfailed /r/b.test.ts\n",
+  );
+});
+
+test("a shared run decides nothing it cannot vouch for", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "chief-shared-run-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, "tests"));
+  writeFileSync(join(dir, "package.json"), '{"type":"module"}');
+  const write = (name, body) =>
+    writeFileSync(
+      join(dir, "tests", `${name}.test.ts`),
+      `import test from "node:test";\nimport assert from "node:assert/strict";\n${body}\n`,
+    );
+  const script = resolve("scripts/test-shard.mjs");
+  // Whatever this test run was started with must not reach the runs below, least of all
+  // the marker that tells node it is already inside a test run.
+  const {
+    TEST_SHARD,
+    TEST_CONCURRENCY,
+    TEST_ISOLATION,
+    NODE_TEST_CONTEXT,
+    ...inherited
+  } = process.env;
+  const run = (env = {}) => {
+    const result = spawnSync(process.execPath, [script], {
+      cwd: dir,
+      encoding: "utf8",
+      env: {
+        ...inherited,
+        ...env,
+        PATH: `${resolve("node_modules/.bin")}:${process.env.PATH}`,
+      },
+    });
+    return { code: result.status, output: result.stdout + result.stderr };
+  };
+
+  write("a", `globalThis.leaked = true; test("a", () => {});`);
+  let result = run();
+  assert.equal(result.code, 0, result.output);
+  assert.doesNotMatch(result.output, /Running them one process each/);
+
+  // Fails only beside a: it runs again alone, passes, and says why.
+  write("b", `test("b", () => assert.equal(globalThis.leaked, undefined));`);
+  result = run();
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /1 test file\(s\) failed or did not report/);
+  assert.match(result.output, /They pass on their own/);
+
+  // A real failure still fails, and only the failed files run again.
+  write("d", `test("d", () => assert.equal(1, 2));`);
+  result = run();
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /2 test file\(s\) failed or did not report/);
+  assert.doesNotMatch(result.output, /They pass on their own/);
+
+  // A file that ends the process early cannot hide the files after it.
+  write("c", `test("c", () => process.exit(0));`);
+  result = run();
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /tests\/d\.test\.ts/);
+
+  // One process per file never takes the shared path.
+  result = run({ TEST_ISOLATION: "process" });
+  assert.equal(result.code, 1, result.output);
+  assert.doesNotMatch(result.output, /shared process/);
 });

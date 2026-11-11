@@ -365,3 +365,16 @@ Evidence boundary:
 - **Measured:** one paused job and the output sizes of earlier planning calls.
 - **Tested:** synthetic calls that receive each role's allowance, and a Pi run that waits for a slow reply only as long as configured.
 - **Not yet measured:** a planning report above 16,000 tokens in production.
+
+## Serial test runs share a process — 11 November 2026
+
+**What changed for a coding job.** `kite run check` runs the TypeScript tests serially, and a serial run now loads every test file into one process ([journal 159](159-shared-process-test-runs.md)). A file that fails there runs again alone before the result is decided, so a failing check costs one extra run of the failing files, and a pass means what it meant before.
+
+- When the output says a file passes on its own but failed in the shared process, the cause is state shared between test files, not the change under test alone. Fix the leak; do not retry.
+- CI runs a process per file. A test that passes in a job and fails in CI probably relies on another file's leftovers.
+
+Evidence boundary:
+
+- **Measured:** a Mac, 175.6 s against 285.6 s for the whole suite.
+- **Tested:** the fallback on a synthetic suite.
+- **Not yet measured:** a coding box's check duration before and after.
