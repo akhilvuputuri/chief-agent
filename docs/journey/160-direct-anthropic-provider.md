@@ -64,7 +64,7 @@ No latency, cache hit rate or cost comparison with OpenRouter exists, because no
 ### Release closure — 11 November 2026
 
 - **Merged:** [PR 441](https://github.com/akhilvuputuri/chief-agent/pull/441), head `867690c`, as `a7c199386c75ff8ac084d7a0e9462ca4fe810917`. Checks run 43004466110 and [release run 43004943097](https://github.com/akhilvuputuri/chief-agent/actions/runs/43004943097) succeeded. `kite run release:status` reports state success, recorded at 2026-11-11T10:37:13Z: the exact commit deployed and startup health passed at release time.
-- **Review:** recorded above up to the approval of `162bf66` and its non-blocking findings, addressed before merge. The re-review of the merged head `867690c` is not recorded in this journal.
+- **Review:** recorded above up to the approval of `162bf66` and its non-blocking findings, addressed before merge. After those fixes a fresh independent reviewer (Opus 5.5, separate context, read-only) approved the merged head `867690c02ccd4433ed188798ddab453ed1cb1478` with no blocking findings; the verdict is quoted in PR #441's description.
 - **Inert:** Compose does not pass `ANTHROPIC_API_KEY` and the host has no key, so every call still goes through OpenRouter and behaviour is unchanged. No version bump and no tag.
 - **Not shown by this release:** the direct route in production (`model.routes`, authentication, caching, fallback). Those wait for the enabling rollout and the [first live run](../model-providers.md#first-live-run) ([journal 161](161-enabling-direct-anthropic.md)).
 

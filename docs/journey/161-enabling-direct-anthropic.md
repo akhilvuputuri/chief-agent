@@ -37,6 +37,7 @@ These are owner-requested changes to model and output allocations, which AGENTS.
   - _Tests._ `tests/learning.test.ts` asserts the review pass asks for 32,000 without `requireComplete` and the procedure pass for 32,000 with it; `tests/memory-judge.test.ts` asserts each judge call asks for 32,000.
 
   Coding allowances come from the coding profile and were never the adapter default.
+
 - **What the allowance is coupled to:**
   - _Time._ A call in Chief's loop is bounded by the run's remaining time (900 s for an owner turn; 60–180 s for most agents in `plugins/core/plugin.json`), not by its allowance. A larger allowance does not lengthen a run; an agent with 90 s simply cannot produce 32,000 tokens.
   - _HTTP timeouts._ The direct adapter always streams (the SDK's 10-minute timeout covers only the wait for response headers, and the API sends pings while thinking), so a long generation is not cut off. Chief's ordinary OpenRouter calls are not streamed: a plain `fetch` whose response headers arrive only when the generation is done. Node's fetch gives up after 300 s without headers ([journal 156](156-room-for-the-whole-plan.md)), and the loop retries such a failure once. At 8,000 tokens that limit was out of reach; at 32,000 a slow generation on OpenRouter (a fallback, or after switching back) could reach it. Hypothesis, not observed; watch for `model.failed` with a fetch error after about 300 s.

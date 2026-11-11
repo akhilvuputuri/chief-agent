@@ -29,8 +29,8 @@ export const JUDGE_LIMITS = {
   /**
    * Output allowance, thinking included, of one judge call. Owner-approved 11 November 2026
    * (journal 161), matching CHIEF_MAX_OUTPUT_TOKENS; it was the adapters' 8,000 default. The
-   * learner's callMs (5 minutes) still bounds the call, which is a non-streamed OpenRouter
-   * request whose headers arrive only when the generation is done.
+   * learner's callMs (5 minutes) still bounds the call; for today's judge model it is a
+   * non-streamed OpenRouter request whose headers arrive only when the generation is done.
    */
   outputTokens: 32000,
 } as const;
