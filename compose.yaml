@@ -327,13 +327,18 @@ services:
     restart: unless-stopped
   agentwatch:
     # Trace viewer for issue #323 (github.com/akhilvuputuri/agentwatch), pinned by digest.
-    # The gateway reaches it as agentwatch:4318; the host publishes it on loopback only, for
-    # an SSH tunnel (docs/lightsail.md). The gateway does not depend on it.
-    image: ghcr.io/akhilvuputuri/agentwatch@sha256:45d4c67c1cba5637c3e31432e3bdbafaa09040e0a63ba88325d87143121a27d1
+    # The gateway reaches it as agentwatch:4318; the host publishes it on loopback only, and
+    # Caddy serves it at traces.52-77-47-24.sslip.io behind its sign-in
+    # (docs/tracing.md#viewing-traces-from-anywhere). The gateway does not depend on it.
+    image: ghcr.io/akhilvuputuri/agentwatch@sha256:4db1c29543b0100e087642105b3a707138a75119d08ef30ae9670a083cead154
     # The OpenRouter key for LLM judges (docs/tracing.md#judging-traces): read only when a
-    # switched-on judge calls a model; empty, judges pause and say why.
+    # switched-on judge calls a model; empty, judges pause and say why. The sign-in's password
+    # hash and the gateway's API key come from the host .env; agentwatch refuses to start
+    # without them.
     environment:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      AGENTWATCH_PASSWORD_HASH: ${AGENTWATCH_PASSWORD_HASH:-}
+      AGENTWATCH_API_KEY: ${AGENTWATCH_API_KEY:-}
     command:
       [
         "serve",
@@ -341,6 +346,8 @@ services:
         "0.0.0.0",
         "--allow-host",
         "agentwatch",
+        "--allow-host",
+        "traces.52-77-47-24.sslip.io",
         "--retain-days",
         "90",
         "--memory-limit",
@@ -351,6 +358,12 @@ services:
         "OPENROUTER_API_KEY",
         "--judge-max-daily",
         "50",
+        "--auth-user",
+        "owner",
+        "--api-key-env",
+        "AGENTWATCH_API_KEY",
+        "--forwarded-allow-ips",
+        "172.18.0.1",
       ]
     volumes: ["agentwatch-data:/data"]
     ports: ["127.0.0.1:4318:4318"]
