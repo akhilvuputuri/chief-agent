@@ -1,7 +1,7 @@
 # 159 — What does a test file's own process cost, and can a serial run do without it?
 
 Work dates: 10–11 November 2026. Written: 11 November 2026.
-Status: tested locally. CI is unchanged by design; coding boxes are not yet measured. The timings below are from the first version; the rule for re-running files changed in review and affects failing runs only.
+Status: released in `2b4521c`. CI is unchanged by design; coding boxes are not yet measured. The timings below are from the first version; the rule for re-running files changed in review and affects failing runs only.
 
 ## User-visible problem and preceding iteration
 
@@ -65,6 +65,13 @@ The first version's header and the lessons page said a pass meant what it meant 
 **Tested, a synthetic suite (`scripts/test-shard.test.mjs`):** a file that fails only beside another passes only after every file has run alone; a real failure fails from the failed files alone; a file that exits the process early cannot hide the files after it; a timer that throws after its test ended fails the run; a process killed after a file's first test fails the run; a leftover timer that exits the process with code 0 while another file is midway fails the run.
 
 **Not measured:** coding boxes, where `kite run check` runs this serially. Their gain is expected to be similar and is unproven.
+
+### Release closure — 11 November 2026
+
+- **Merged:** [PR 439](https://github.com/akhilvuputuri/chief-agent/pull/439), approved head `66f77db`, as `2b4521c`. Checks run 42952137531 and release run 42952550134 succeeded. Read-only host check: gateway on `2b4521c` and healthy. Tests only, so nothing in the running application changed.
+- **Final review:** the same reviewer approved `66f77db` after confirming that every cut-short case exits as a process per file does, and that a normal run with failures still writes the completion line.
+- **Known remaining false pass, needing two faults at once:** one file sets `process.exitCode = 0` in an exit handler while another leaves a timer that throws after its test ended. The shared run then completes with code 0. Nothing in `tests/` or `src/` registers an exit handler. Recording the root summary's `success` field would close it.
+- **On this version, same Mac:** the full suite passed in shared mode in 169.0 s with nothing re-run, and in 519.7 s with `TEST_DB_REUSE=0`.
 
 ## Coding-harness learning record
 

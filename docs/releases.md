@@ -2,7 +2,7 @@
 
 - **Code.** Tests only. `kite run test:ts` loads every test file into one process when it runs serially, and believes that run only if it finishes and exits cleanly: files that failed or did not report run again on their own, and an unexplained failure or a crash sends every file through a process of its own. CI's parallel runs keep a process per file. `TEST_ISOLATION=process` restores the old behaviour.
 - **Why.** Each file's own process recompiled the test database engine and reloaded the application. See [journal 159](journey/159-shared-process-test-runs.md).
-- **Deployment.** Not yet recorded as live; update this entry on release.
+- **Deployment.** [PR 439](https://github.com/akhilvuputuri/chief-agent/pull/439) merged as `2b4521c` on 11 November. Release run 42952550134 succeeded, and the host reports `2b4521c` with a healthy gateway.
 
 ## Reused test databases (10 November 2026)
 
