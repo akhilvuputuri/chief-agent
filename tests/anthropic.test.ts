@@ -116,12 +116,16 @@ function stream(
   return events;
 }
 
-function adapter(respond: (call: number) => Response | Promise<Response>) {
+function adapter(
+  respond: (call: number) => Response | Promise<Response>,
+  options: { workspaceId?: string } = {},
+) {
   const requests: { url: string; headers: Headers; body: any }[] = [];
   const model = new AnthropicDirect("test-key", {
     model: "anthropic/claude-opus-5.5",
     nativeModel: "claude-opus-5-5",
     prices,
+    ...options,
     transport: (async (url: unknown, init?: RequestInit) => {
       requests.push({
         url: String(url),
@@ -207,8 +211,9 @@ test("Chief requests translate to the Messages API with thinking, effort, betas 
   assert.equal(headers.get("authorization"), "Bearer test-key");
   assert.deepEqual(headers.get("anthropic-beta")?.split(","), [
     "thinking-binding-controls-2026-08-01",
-    "server-side-fallback-2026-07-01",
   ]);
+  // No workspace configured: no workspace header.
+  assert.equal(headers.get("anthropic-workspace-id"), null);
   assert.equal(body.model, "claude-opus-5-5");
   assert.equal(body.max_tokens, 8000);
   assert.equal(body.stream, true);
@@ -217,7 +222,8 @@ test("Chief requests translate to the Messages API with thinking, effort, betas 
     block_binding: { prefix_mismatch_behavior: "drop_block" },
   });
   assert.deepEqual(body.output_config, { effort: "high" });
-  assert.equal(body.fallbacks, "default");
+  // Server-side refusal fallbacks are never requested (they could serve above the ceilings).
+  assert.equal(body.fallbacks, undefined);
   assert.deepEqual(body.cache_control, { type: "ephemeral" });
   for (const absent of ["temperature", "top_p", "tool_choice", "metadata"])
     assert.equal(body[absent], undefined);
@@ -229,13 +235,14 @@ test("Chief requests translate to the Messages API with thinking, effort, betas 
       input_schema: { type: "object", properties: {} },
     },
   ]);
+  // The first, stable system message is marked; the per-turn summary is not.
   assert.deepEqual(body.system, [
-    { type: "text", text: "Stable instructions" },
     {
       type: "text",
-      text: "Turn summary",
+      text: "Stable instructions",
       cache_control: { type: "ephemeral" },
     },
+    { type: "text", text: "Turn summary" },
   ]);
   assert.deepEqual(body.messages, [
     {
@@ -488,52 +495,156 @@ test("a refusal is a non-transient content_filter failure and partial output is 
   );
 });
 
-test("a server-side fallback reports the served model and keeps the boundary for replay", async () => {
-  const fallback = {
-    type: "fallback",
-    from: { model: "claude-opus-5-5" },
-    to: { model: "claude-opus-5" },
-    trigger: { type: "refusal" },
-  };
-  const after = { type: "thinking", thinking: "", signature: "sig-after" };
-  const { model } = adapter(() =>
-    sse(
-      stream(
-        [
-          { type: "thinking", thinking: "", signature: "sig-before" },
-          { type: "text", text: "Part one, " },
-          { type: "tool_use", id: "toolu_cut", name: "search", input: {} },
-          fallback,
-          after,
-          { type: "text", text: "part two." },
-        ],
-        {
-          final: {
-            iterations: [
-              { type: "message", input_tokens: 1, output_tokens: 1 },
-              {
-                type: "fallback_message",
-                model: "claude-opus-5",
-                input_tokens: 1,
-                output_tokens: 1,
-                cache_read_input_tokens: 0,
-                cache_creation_input_tokens: 0,
-                cache_creation: null,
-              },
-            ],
-          },
-        },
-      ),
-    ),
-  );
-  const result = await run(model, [{ role: "user", content: "x" }]);
-  assert.equal(result.model, "anthropic/claude-opus-5.5");
-  assert.equal(result.usage!.served_model, "claude-opus-5");
-  assert.equal(result.message.content, "Part one, part two.");
-  assert.equal(result.message.tool_calls, undefined);
+test("stored fallback blocks from earlier data are ignored, never replayed", async () => {
+  const thinking = { type: "thinking", thinking: "", signature: "sig-1" };
+  const entry = (block: Block) => ({
+    type: "anthropic.thinking",
+    format: "anthropic-direct-v1",
+    block,
+  });
+  const { model, requests } = adapter(() => sse(stream(reply)));
+  await run(model, [
+    { role: "user", content: "x" },
+    {
+      role: "assistant",
+      content: "Earlier",
+      reasoning_details: [
+        entry({
+          type: "fallback",
+          from: { model: "claude-opus-5-5" },
+          to: { model: "claude-opus-5" },
+        }),
+        entry(thinking),
+      ],
+    },
+    { role: "user", content: "y" },
+  ]);
+  assert.deepEqual(requests[0]!.body.messages[1].content, [
+    thinking,
+    { type: "text", text: "Earlier" },
+  ]);
+  // And they are stripped before OpenRouter like any direct entry.
+  const [stripped] = stripAnthropicDirectReasoning([
+    {
+      role: "assistant" as const,
+      content: "a",
+      reasoning_details: [entry({ type: "fallback" })],
+    },
+  ]);
+  assert.ok(!("reasoning_details" in stripped!));
+});
+
+test("Chief's two leading system messages: only the stable first one is marked, across turns", async () => {
+  const { model, requests } = adapter(() => sse(stream(reply)));
+  // The shape src/context.ts assembles: instructions and memories, the per-turn summary,
+  // history, the owner's message, then the per-call state message.
+  const turn = (summary: string, state: string): ModelMessage[] => [
+    { role: "system", content: "Instructions\nExplicit memories: []" },
+    { role: "system", content: summary },
+    { role: "user", content: "Earlier question" },
+    { role: "assistant", content: "Earlier answer" },
+    { role: "user", content: "Current question" },
+    { role: "system", content: state },
+  ];
+  await run(model, turn("Summary of turn 1", "State 1"));
+  await run(model, turn("Summary of turn 2", "State 2"));
+  const [first, second] = requests.map((r) => r.body);
+  for (const body of [first, second]) {
+    assert.deepEqual(body.system[0].cache_control, { type: "ephemeral" });
+    assert.equal(body.system[1].cache_control, undefined);
+    assert.equal(body.messages.at(-1).role, "system");
+    assert.equal(body.messages.at(-1).content[0].cache_control, undefined);
+    // Top-level plus at most three block marks: Anthropic allows four breakpoints.
+    assert.ok(marked(body).length + 1 <= 4);
+  }
+  // The marked prefix is byte-identical across turns although the summary changed.
+  assert.deepEqual(first.system[0], second.system[0]);
+  assert.notDeepEqual(first.system[1], second.system[1]);
+});
+
+test("empty and whitespace-only tool results are sent without content", async () => {
+  const { model, requests } = adapter(() => sse(stream(reply)));
+  await run(model, [
+    { role: "user", content: "x" },
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: ["a", "b", "c"].map((id) => ({
+        id,
+        type: "function" as const,
+        function: { name: "t", arguments: "{}" },
+      })),
+    },
+    { role: "tool", tool_call_id: "a", content: "" },
+    { role: "tool", tool_call_id: "b", content: "  \n" },
+    { role: "tool", tool_call_id: "c", content: [{ type: "text", text: " " }] },
+  ]);
+  const results = requests[0]!.body.messages[2].content;
   assert.deepEqual(
-    result.message.reasoning_details!.map((e: any) => e.block),
-    [fallback, after],
+    results.map((b: Block) => [b.tool_use_id, "content" in b]),
+    [
+      ["a", false],
+      ["b", false],
+      ["c", false],
+    ],
+  );
+});
+
+test("a workspace ID is sent as the anthropic-workspace-id header and must be well formed", async () => {
+  const { model, requests } = adapter(() => sse(stream(reply)), {
+    workspaceId: "wrkspc_01AbC",
+  });
+  await run(model, [{ role: "user", content: "x" }]);
+  assert.equal(
+    requests[0]!.headers.get("anthropic-workspace-id"),
+    "wrkspc_01AbC",
+  );
+  assert.equal(requests[0]!.headers.get("authorization"), "Bearer test-key");
+  for (const workspaceId of [
+    "wrkspc_",
+    "workspace_1",
+    "wrkspc_a b",
+    "wrkspc_a\n",
+  ])
+    assert.throws(
+      () =>
+        new AnthropicDirect("k", {
+          model: "anthropic/claude-opus-5.5",
+          nativeModel: "claude-opus-5-5",
+          prices,
+          workspaceId,
+        }),
+      /Invalid Anthropic workspace ID/,
+    );
+});
+
+test("complete-response calls bound the stream's wire size", async () => {
+  const big = [{ type: "text", text: "x".repeat(2_000_000) }];
+  const { model } = adapter(() => sse(stream(big)));
+  await assert.rejects(
+    run(model, [{ role: "user", content: "x" }], {
+      requireComplete: true,
+      maxOutputTokens: 1000,
+    }),
+    (e: ModelError) =>
+      !e.transient &&
+      e.diagnostics.failureCode === "malformed" &&
+      e.diagnostics.providerFault === undefined &&
+      e.diagnostics.route === "anthropic-direct",
+  );
+  // Ordinary calls are not bounded, and the allowance grows with the output allowance.
+  assert.equal(
+    (await run(model, [{ role: "user", content: "x" }])).finishReason,
+    "stop",
+  );
+  assert.equal(
+    (
+      await run(model, [{ role: "user", content: "x" }], {
+        requireComplete: true,
+        maxOutputTokens: 4000,
+      })
+    ).finishReason,
+    "stop",
   );
 });
 
@@ -560,7 +671,8 @@ test("provider faults are classified only before any output", async () => {
     [error(529, "overloaded_error"), "unavailable", true],
     [error(500, "api_error"), "unavailable", true],
     [error(404, "not_found_error"), "not_found", false],
-    [error(400, "invalid_request_error"), undefined, false],
+    [error(400, "invalid_request_error"), "rejected", false],
+    [error(413, "request_too_large"), undefined, false],
   ];
   for (const [response, fault, transient, retry] of cases) {
     const { model } = adapter(() => response);
@@ -626,6 +738,50 @@ test("provider faults are classified only before any output", async () => {
       e.diagnostics.failureCode === "transport" &&
       e.diagnostics.providerFault === undefined &&
       e.diagnostics.route === "anthropic-direct",
+  );
+});
+
+test("a 400 is rejected; beta enrollment carries its stable code, and only enum values are kept", async () => {
+  const body = (error: Block, status = 400) =>
+    Response.json({ type: "error", error }, { status });
+  const enrolled = adapter(() =>
+    body({
+      type: "invalid_request_error",
+      message: "raw provider text",
+      details: { error_code: "organization_not_enrolled_in_beta" },
+    }),
+  );
+  await assert.rejects(
+    run(enrolled.model, [{ role: "user", content: "x" }]),
+    (e: ModelError) => {
+      assert.equal(e.diagnostics.providerFault, "rejected");
+      assert.equal(e.diagnostics.errorType, "invalid_request_error");
+      assert.equal(
+        e.diagnostics.errorCode,
+        "organization_not_enrolled_in_beta",
+      );
+      assert.equal(e.transient, false);
+      assert.ok(!JSON.stringify(e.diagnostics).includes("raw provider"));
+      return true;
+    },
+  );
+  // An unknown type or a code that is not a plain identifier is not copied.
+  const odd = adapter(() =>
+    body(
+      {
+        type: "Some free text",
+        message: "raw provider text",
+        details: { error_code: "Not An Identifier!" },
+      },
+      400,
+    ),
+  );
+  await assert.rejects(
+    run(odd.model, [{ role: "user", content: "x" }]),
+    (e: ModelError) =>
+      e.diagnostics.providerFault === "rejected" &&
+      e.diagnostics.errorType === undefined &&
+      e.diagnostics.errorCode === undefined,
   );
 });
 
@@ -707,6 +863,12 @@ test("strip helper removes only direct reasoning and the constructor refuses unk
     { role: "assistant" as const, content: "b", reasoning_details: [direct] },
   ]);
   assert.equal(stripped[0], untouched);
+  // Nothing to strip: the very same array.
+  const clean = [
+    untouched,
+    { role: "assistant" as const, content: "a", reasoning_details: [foreign] },
+  ];
+  assert.equal(stripAnthropicDirectReasoning(clean), clean);
   assert.deepEqual(stripped[1]!.reasoning_details, [foreign]);
   assert.ok(!("reasoning_details" in stripped[2]!));
   assert.throws(

@@ -36,7 +36,7 @@ APPLIED = (release.COMPOSE_ANCHOR + release.COMPOSE_ADDITION).decode()
 
 
 def repo_baseline():
-    """The repository's compose.yaml without the reviewed line, whether or not it is applied yet."""
+    """The repository's compose.yaml without the reviewed lines, whether or not they are applied yet."""
     return REPO_COMPOSE.replace(APPLIED, release.COMPOSE_ANCHOR.decode())
 
 
@@ -52,7 +52,7 @@ class AnthropicKeyRolloutTests(unittest.TestCase):
         # The rollout PR adds the Compose line; it must record the reviewed live baseline too.
         if APPLIED in REPO_COMPOSE:
             self.assertRegex(release.BASE or '', '^[0-9a-f]{40}$',
-                             'compose.yaml has ANTHROPIC_API_KEY: set BASE to the reviewed live RELEASE')
+                             'compose.yaml has the Anthropic names: set BASE to the reviewed live RELEASE')
 
     def test_unset_base_refuses_before_anything(self):
         commands = self.scenario(base=None, expected_error='BASE is unset')
@@ -60,18 +60,21 @@ class AnthropicKeyRolloutTests(unittest.TestCase):
         with patch.object(release, 'BASE', 'not-a-sha'):
             self.assertEqual(release.bases(), set())
 
-    def test_repository_compose_differs_by_exactly_the_reviewed_line(self):
+    def test_repository_compose_differs_by_exactly_the_reviewed_lines(self):
         baseline = repo_baseline()
         self.assertEqual(baseline.count(release.COMPOSE_ANCHOR.decode()), 1)
         self.assertNotIn('ANTHROPIC_API_KEY', baseline)
+        self.assertNotIn('ANTHROPIC_WORKSPACE_ID', baseline)
+        self.assertEqual(release.COMPOSE_ADDITION.decode().splitlines(), [
+            '      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}',
+            '      ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}'])
         expected = release.expected_compose(baseline.encode()).decode()
         before, after = baseline.splitlines(), expected.splitlines()
-        self.assertEqual(len(after), len(before) + 1)
-        inserted = [line for i, line in enumerate(after) if i >= len(before) or line != before[i]][0]
-        self.assertEqual(inserted + '\n', release.COMPOSE_ADDITION.decode())
-        index = after.index(inserted)
+        self.assertEqual(len(after), len(before) + 2)
+        index = next(i for i, line in enumerate(after) if i >= len(before) or line != before[i])
+        self.assertEqual('\n'.join(after[index:index + 2]) + '\n', release.COMPOSE_ADDITION.decode())
         self.assertEqual(after[index - 1] + '\n', release.COMPOSE_ANCHOR.decode())
-        self.assertEqual(after[:index] + after[index + 1:], before)
+        self.assertEqual(after[:index] + after[index + 2:], before)
         if APPLIED in REPO_COMPOSE:
             self.assertEqual(expected, REPO_COMPOSE)
         # An already-applied baseline is not the reviewed one.
@@ -227,6 +230,20 @@ class AnthropicKeyRolloutTests(unittest.TestCase):
                 commands = self.scenario(env=env, expected_error='Add ANTHROPIC_API_KEY')
                 self.assertEqual(commands, [])
 
+    def test_optional_workspace_id_is_absent_empty_or_well_formed(self):
+        for env in [KEYED_ENV + 'ANTHROPIC_WORKSPACE_ID=wrkspc_01SentinelAbc\n',
+                    KEYED_ENV + 'ANTHROPIC_WORKSPACE_ID=\n',
+                    KEYED_ENV + 'ANTHROPIC_WORKSPACE_ID="wrkspc_01SentinelAbc"\n']:
+            with self.subTest(env=env):
+                self.scenario(env=env)
+        for env in [KEYED_ENV + 'ANTHROPIC_WORKSPACE_ID=secret-sentinel-workspace\n',
+                    KEYED_ENV + 'ANTHROPIC_WORKSPACE_ID=wrkspc_\n',
+                    KEYED_ENV + 'ANTHROPIC_WORKSPACE_ID=wrkspc_ab-secret-sentinel\n',
+                    KEYED_ENV + 'ANTHROPIC_WORKSPACE_ID=wrkspc_01Abc\nANTHROPIC_WORKSPACE_ID=secret-sentinel\n']:
+            with self.subTest(env=env):
+                commands = self.scenario(env=env, expected_error='ANTHROPIC_WORKSPACE_ID')
+                self.assertEqual(commands, [])
+
     def test_running_work_and_pending_input_refuse_before_stop(self):
         for args, message in [({'running': 1}, 'Active work'), ({'pending': 1}, 'Pending conversation input'),
                               ({'coding': 1}, 'Active coding job')]:
@@ -251,15 +268,23 @@ class AnthropicKeyRolloutTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 self.scenario(changes=changes, expected_error='permits no database change')
 
-    def test_only_the_one_key_name_may_change_compose(self):
+    def test_only_the_two_reviewed_names_may_change_compose(self):
         correct = BASE_COMPOSE.replace(release.COMPOSE_ANCHOR.decode(), APPLIED)
         addition = release.COMPOSE_ADDITION.decode()
+        key_line, workspace_line = addition.splitlines(keepends=True)
         coding_anchor = '      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}\n'
         for invalid in [BASE_COMPOSE, correct.replace('read_only: true', 'read_only: false'),
                         correct + '  unreviewed: {}\n',
                         correct.replace(addition, addition * 2),
-                        # The name with a default value, or in the coding service instead.
-                        correct.replace(addition, '      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-sk-ant-x}\n'),
+                        # Only one of the two lines, or both in the other order.
+                        correct.replace(addition, key_line),
+                        correct.replace(addition, workspace_line),
+                        correct.replace(addition, workspace_line + key_line),
+                        # A name with a default value, or a required workspace ID.
+                        correct.replace(key_line, '      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-sk-ant-x}\n'),
+                        correct.replace(workspace_line,
+                                        '      ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:?Set it}\n'),
+                        # In the coding service instead.
                         BASE_COMPOSE.replace(coding_anchor, coding_anchor + addition),
                         # The right line in the wrong place.
                         BASE_COMPOSE.replace('    read_only: true\n', addition + '    read_only: true\n')]:

@@ -11,6 +11,7 @@ import {
   DirectCooldown,
   FallbackAdapter,
   ModelRouter,
+  StrippedOpenRouter,
   type ModelRouterOptions,
 } from "../src/model-router.js";
 import { AnthropicDirect } from "../src/anthropic.js";
@@ -89,12 +90,19 @@ const input = (
   reasoning: "medium" as const,
   signal: new AbortController().signal,
 });
-const fault = (providerFault: string, retryAfterSeconds?: number) => () =>
-  new ModelError("Model request failed (HTTP 401).", false, {
-    httpStatus: 401,
-    providerFault,
-    ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
-  });
+const fault =
+  (
+    providerFault: string,
+    retryAfterSeconds?: number,
+    extra: Record<string, unknown> = {},
+  ) =>
+  () =>
+    new ModelError("Model request failed (HTTP 401).", false, {
+      httpStatus: 401,
+      providerFault,
+      ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+      ...extra,
+    });
 
 function captureOps() {
   const lines: Record<string, unknown>[] = [];
@@ -121,7 +129,7 @@ test("direct only with the anthropic setting, a key, a mapped model and a price 
     );
 });
 
-test("the OpenRouter route is the plain adapter, and every adapter keeps the OpenRouter model ID", async () => {
+test("the OpenRouter route wraps the plain adapter, and every adapter keeps the OpenRouter model ID", async () => {
   const real = new ModelRouter({
     provider: "openrouter",
     openRouterKey: "or-test",
@@ -130,7 +138,8 @@ test("the OpenRouter route is the plain adapter, and every adapter keeps the Ope
     policy: policy(),
   });
   const flash = real.modelFor("google/gemini-3.8-flash");
-  assert.ok(flash instanceof OpenRouter);
+  assert.ok(flash instanceof StrippedOpenRouter);
+  assert.ok((flash as any).inner instanceof OpenRouter);
   assert.equal(flash.model, "google/gemini-3.8-flash");
   assert.equal(real.modelFor(OPUS).model, OPUS);
   const direct = new ModelRouter({
@@ -161,6 +170,7 @@ test("each provider fault falls back once on OpenRouter, marked and logged struc
     "rate_limit",
     "unavailable",
     "not_found",
+    "rejected",
   ]) {
     const ops = captureOps();
     try {
@@ -188,10 +198,18 @@ test("each provider fault falls back once on OpenRouter, marked and logged struc
   }
 });
 
-test("other failures, aborts, fallback off and a missing OpenRouter key surface the direct error", async () => {
+test("other failures, refusals, aborts, fallback off and a missing OpenRouter key surface the direct error", async () => {
   const plain = () => new ModelError("Invalid model tool calls");
+  // A refusal never falls back: it is the model's answer, not a provider fault.
+  const refusal = () =>
+    new ModelError("The model declined this request.", false, {
+      route: "anthropic-direct",
+      failureCode: "refusal",
+      finishReason: "content_filter",
+    });
   for (const [options, failure] of [
     [{}, plain],
+    [{}, refusal],
     [{ policy: policy(false) }, fault("auth")],
     [{ openRouterKey: "" }, fault("auth")],
   ] as [Partial<ModelRouterOptions>, () => unknown][]) {
@@ -253,6 +271,20 @@ test("cooldowns skip the direct pathway for a bounded time; an outage falls back
   assert.equal(DirectCooldown.seconds("rate_limit", 3600), 120);
   assert.equal(DirectCooldown.seconds("unavailable"), 0);
   assert.equal(DirectCooldown.seconds("auth"), 600);
+  // An ordinary rejected request falls back that call only; beta enrollment fails every call.
+  assert.equal(DirectCooldown.seconds("rejected"), 0);
+  assert.equal(
+    DirectCooldown.seconds("rejected", undefined, "invalid_request_error"),
+    0,
+  );
+  assert.equal(
+    DirectCooldown.seconds(
+      "rejected",
+      undefined,
+      "organization_not_enrolled_in_beta",
+    ),
+    600,
+  );
   assert.equal(DirectCooldown.seconds("permission"), 600);
   // A rate limit expires after its bounded hint.
   now = 0;
@@ -323,4 +355,103 @@ test("direct-produced reasoning never reaches OpenRouter; OpenRouter's own reaso
   ];
   await clean.r.modelFor(OPUS).generate(input(plainMessages));
   assert.equal(sent(clean.calls, "openrouter")[0], plainMessages[0]);
+});
+
+test("a rejected request falls back without a cooldown; beta enrollment cools every model, visibly", async () => {
+  let now = 0;
+  const cooldown = new DirectCooldown(() => now);
+  const ops = captureOps();
+  try {
+    const rejected = router({
+      cooldown,
+      fail: fault("rejected", undefined, {
+        httpStatus: 400,
+        errorType: "invalid_request_error",
+      }),
+    });
+    await rejected.r.modelFor(OPUS).generate(input());
+    await rejected.r.modelFor(OPUS).generate(input());
+    assert.deepEqual(
+      rejected.calls.map((c) => c.route),
+      ["direct", "openrouter", "direct", "openrouter"],
+    );
+    const line = ops.lines.find((l) => l.event === "model.provider_fallback")!;
+    assert.equal(line.reason, "rejected");
+    assert.equal(line.cooldownS, 0);
+    assert.equal(line.httpStatus, 400);
+    assert.equal(line.errorType, "invalid_request_error");
+    assert.equal(line.dropped, undefined);
+    ops.lines.length = 0;
+    const enrolled = router({
+      cooldown,
+      fail: fault("rejected", undefined, {
+        httpStatus: 400,
+        errorType: "invalid_request_error",
+        errorCode: "organization_not_enrolled_in_beta",
+      }),
+    });
+    await enrolled.r.modelFor(OPUS).generate(input());
+    const skipped = await enrolled.r.modelFor(OPUS).generate(input());
+    assert.equal(skipped.usage?.fallback_cooldown, true);
+    assert.equal(skipped.usage?.fallback_reason, "rejected");
+    assert.equal(cooldown.active("anthropic/other"), "rejected");
+    assert.deepEqual(
+      enrolled.calls.map((c) => c.route),
+      ["direct", "openrouter", "openrouter"],
+    );
+    const [warn] = ops.lines.filter(
+      (l) => l.event === "model.provider_fallback",
+    );
+    assert.equal(warn!.cooldownS, 600);
+    assert.equal(warn!.errorCode, "organization_not_enrolled_in_beta");
+    assert.equal(warn!.dropped, undefined);
+  } finally {
+    ops.restore();
+  }
+});
+
+test("every OpenRouter call strips direct reasoning, any vendor, and is unchanged without it", async () => {
+  const native = {
+    type: "anthropic.thinking",
+    format: "anthropic-direct-v1",
+    block: { type: "thinking", thinking: "x", signature: "s" },
+  };
+  const routed = { type: "reasoning.encrypted", data: "y" };
+  const history: ModelMessage[] = [
+    { role: "user", content: "hi" },
+    { role: "assistant", content: "a", reasoning_details: [native, routed] },
+    { role: "user", content: "again" },
+  ];
+  for (const slug of [
+    "google/gemini-3.8-flash",
+    "openai/gpt-6.1-sol",
+    "deepseek/deepseek-v4",
+  ]) {
+    const { r, calls } = router();
+    assert.equal(r.route(slug), "openrouter");
+    await r.modelFor(slug).generate(input(history));
+    assert.deepEqual(calls[0]!.messages[1], {
+      role: "assistant",
+      content: "a",
+      reasoning_details: [routed],
+    });
+    assert.equal(calls[0]!.messages[0], history[0]);
+  }
+  // Nothing to strip: the same input, array and message objects reach the adapter.
+  const seen: unknown[] = [];
+  const inner: ModelAdapter = {
+    model: "google/gemini-3.8-flash",
+    async generate(i) {
+      seen.push(i);
+      return { message: { role: "assistant", content: "ok" } };
+    },
+  };
+  const clean: ModelMessage[] = [
+    { role: "user", content: "hi" },
+    { role: "assistant", content: "a", reasoning_details: [routed] },
+  ];
+  const request = input(clean);
+  await new StrippedOpenRouter(inner.model!, inner).generate(request);
+  assert.equal(seen[0], request);
+  assert.equal((seen[0] as typeof request).messages, clean);
 });

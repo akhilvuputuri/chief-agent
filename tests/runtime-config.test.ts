@@ -63,6 +63,30 @@ test("MODEL_PROVIDER comes from the file unless the environment sets it; the key
   }
 });
 
+test("ANTHROPIC_WORKSPACE_ID is an optional, strictly formed environment identifier", () => {
+  assert.equal(readConfig(required, {}).ANTHROPIC_WORKSPACE_ID, "");
+  assert.equal(
+    readConfig({ ...required, ANTHROPIC_WORKSPACE_ID: "wrkspc_01Abc" }, {})
+      .ANTHROPIC_WORKSPACE_ID,
+    "wrkspc_01Abc",
+  );
+  for (const bad of ["wrkspc_", "01Abc", "wrkspc_a-b", "wrkspc_a b"])
+    assert.throws(
+      () => readConfig({ ...required, ANTHROPIC_WORKSPACE_ID: bad }, {}),
+      bad,
+    );
+  // An identifier, never a reviewed behaviour setting.
+  const f = file({
+    schemaVersion: 1,
+    settings: { ANTHROPIC_WORKSPACE_ID: "wrkspc_01Abc" },
+  });
+  try {
+    assert.throws(() => readRuntimeSettings(f.url));
+  } finally {
+    f.done();
+  }
+});
+
 test("file values apply, the environment still wins, and overrides are listed by name", () => {
   const runtime = {
     MEDIA_MODEL: "google/gemini-3.8-flash",

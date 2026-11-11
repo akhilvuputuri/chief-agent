@@ -74,6 +74,12 @@ const schema = z.object({
   // Optional Anthropic Console key (src/model-router.ts). Empty, every model call goes
   // through OpenRouter exactly as before.
   ANTHROPIC_API_KEY: z.string().default(""),
+  // Optional, not secret: an unscoped Console key needs its workspace, sent as the
+  // anthropic-workspace-id header. A workspace-scoped key needs none. An identifier, so it
+  // lives in the private environment beside the key, never in config/runtime.json.
+  ANTHROPIC_WORKSPACE_ID: z
+    .union([z.literal(""), z.string().regex(/^wrkspc_[A-Za-z0-9]+$/)])
+    .default(""),
   // "anthropic" sends models mapped in config/model-policy.json providers.anthropic direct
   // to Anthropic when ANTHROPIC_API_KEY is set, and is inert without it; "openrouter" keeps
   // every call on OpenRouter.

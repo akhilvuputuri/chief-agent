@@ -48,6 +48,8 @@ const fields: Record<string, Shape> = {
   tier: "name",
   effort: "name",
   errorCode: "code",
+  /** A provider's error category enum (Anthropic error.type), never message text. */
+  errorType: "code",
   errorCategory: "code",
   /** The name of error.cause, when present (fetch failures carry the real error there). */
   causeCategory: "code",
@@ -440,6 +442,7 @@ const projections: Record<string, Projection> = {
       // Set by the direct Anthropic adapter on its failures; OpenRouter failures omit it.
       route: d.diagnostics?.route,
       errorCode: d.diagnostics?.errorCode,
+      errorType: d.diagnostics?.errorType,
       httpStatus: d.diagnostics?.httpStatus,
       state: finishName(d.diagnostics?.finishReason),
       finishReason: finishName(d.diagnostics?.finishReason),

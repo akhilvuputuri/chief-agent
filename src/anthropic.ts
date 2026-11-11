@@ -24,24 +24,28 @@ export type AnthropicPrices = {
 };
 
 /**
- * Request choices per native model, kept in one place: Anthropic models differ in thinking,
- * effort, system-message, fallback and preserved-thinking support, so unlisted models are refused.
+ * Native models this adapter supports, kept in one place: Anthropic models differ in thinking,
+ * effort, system-message and preserved-thinking support, so unlisted models are refused.
+ * Opus 5.5: adaptive thinking only (disabled/budget_tokens are 400s), output_config.effort, no
+ * forced tool_choice or prefill, mid-conversation system messages, and the history check
+ * enforced for new accounts.
  */
-const PROFILES: Record<string, { fallbacks?: "default" }> = {
-  // Adaptive thinking only (disabled/budget_tokens are 400s), output_config.effort, no
-  // forced tool_choice or prefill, mid-conversation system messages, the history check
-  // enforced for new accounts, and server-side refusal fallback opted in by default.
-  "claude-opus-5-5": { fallbacks: "default" },
-};
-const BETAS = {
-  binding: "thinking-binding-controls-2026-08-01",
-  fallback: "server-side-fallback-2026-07-01",
-} as const;
+const PROFILES = new Set(["claude-opus-5-5"]);
+// Server-side refusal fallbacks (`fallbacks`) are deliberately never sent: they can serve Opus 5
+// or 4.8 at $5/$25, above the owner-approved $4/$20 ceilings, sticky and priced at the wrong rates.
+const BETA = "thinking-binding-controls-2026-08-01";
+/** The optional anthropic-workspace-id header value (an unscoped key needs one). */
+export const WORKSPACE_ID = /^wrkspc_[A-Za-z0-9]+$/;
+/** A 400 that fails every call until the account changes, not just this request. */
+const NOT_ENROLLED = "organization_not_enrolled_in_beta";
 
 const TAG = "anthropic.thinking";
 const FORMAT = "anthropic-direct-v1";
-/** Native blocks a direct turn stores in reasoning_details and replays verbatim. */
-const NATIVE = new Set(["thinking", "redacted_thinking", "fallback"]);
+/**
+ * Native blocks a direct turn stores in reasoning_details and replays verbatim. Entries of any
+ * other block type (such as `fallback` blocks from earlier test data) are never replayed.
+ */
+const NATIVE = new Set(["thinking", "redacted_thinking"]);
 export type AnthropicDirectReasoning = {
   type: typeof TAG;
   format: typeof FORMAT;
@@ -66,6 +70,11 @@ export function isAnthropicDirectReasoning(
 export function stripAnthropicDirectReasoning<
   T extends { reasoning_details?: unknown[] },
 >(messages: T[]): T[] {
+  // Nothing to strip: the same array and message objects, so the request is byte-identical.
+  if (
+    !messages.some((m) => m.reasoning_details?.some(isAnthropicDirectReasoning))
+  )
+    return messages;
   return messages.map((message) => {
     if (!message.reasoning_details?.some(isAnthropicDirectReasoning))
       return message;
@@ -130,8 +139,13 @@ const reminder = (text: string): Block => ({
   text: `<system-reminder>\n${text}\n</system-reminder>`,
 });
 
-/** Chief's OpenAI-style conversation as an Anthropic request (system, messages, cache marks). */
-function translate(messages: ModelMessage[]) {
+/**
+ * Chief's OpenAI-style conversation as an Anthropic request (system, messages, cache marks).
+ * With replay off, stored thinking is left out (text and tool_use stay); `replayed` says whether
+ * any native thinking block was sent.
+ */
+function translate(messages: ModelMessage[], replay = true) {
+  let replayed = false;
   let start = 0;
   const system: Block[] = [];
   for (; messages[start]?.role === "system"; start++) {
@@ -158,8 +172,9 @@ function translate(messages: ModelMessage[]) {
         {
           type: "tool_result",
           tool_use_id: m.tool_call_id ?? "",
+          // Content is optional; an empty or whitespace-only result is sent without it.
           ...(typeof m.content === "string"
-            ? m.content
+            ? m.content.trim()
               ? { content: m.content }
               : {}
             : result.length
@@ -178,13 +193,15 @@ function translate(messages: ModelMessage[]) {
         })),
       ];
       // Only this route's own blocks, verbatim and in order; others belong to another account.
-      const native = visible.length
-        ? (m.reasoning_details ?? [])
-            .filter(isAnthropicDirectReasoning)
-            .map((e) => e.block as Block)
-            .filter((b) => NATIVE.has(b.type))
-            .map((b) => ({ ...b }))
-        : [];
+      const native =
+        replay && visible.length
+          ? (m.reasoning_details ?? [])
+              .filter(isAnthropicDirectReasoning)
+              .map((e) => e.block as Block)
+              .filter((b) => NATIVE.has(b.type))
+              .map((b) => ({ ...b }))
+          : [];
+      if (native.length) replayed = true;
       content = [...native, ...visible];
     } else {
       const text = plain(m.content);
@@ -227,19 +244,23 @@ function translate(messages: ModelMessage[]) {
       role: "user",
       content: [{ type: "text", text: "(The conversation continues.)" }],
     });
-  // Port of cacheHints (journal 100/104): automatic top-level caching plus the last block
-  // before the state message, the owner's current message and the opening system prompt.
+  // Port of cacheHints (journal 100/104), three explicit marks: the last block before the
+  // per-call state message (the last block when there is none), the owner's current message
+  // and the opening system message. Chief opens with two system messages (stable instructions
+  // and memories, then a per-turn summary); only the first is stable across turns, so it is the
+  // one marked, as cacheHints marks messages[0]. No top-level automatic mark: it would land on
+  // the trailing state message and pay a cache write on it every call.
   const marks = new Set<Block>();
   const stable = merged
     .flatMap((e) => e.content)
     .findLast((b) => !volatile.has(b) && cacheable(b));
   if (stable) marks.add(stable);
   if (owner && !volatile.has(owner)) marks.add(owner);
-  if (system.length) marks.add(system.at(-1)!);
+  if (system.length) marks.add(system[0]!);
   for (const block of marks) block.cache_control = { type: "ephemeral" };
   return {
-    ...(system.length ? { system } : {}),
-    messages: merged,
+    request: { ...(system.length ? { system } : {}), messages: merged },
+    replayed,
   };
 }
 
@@ -257,7 +278,23 @@ type Fault =
   | "billing"
   | "rate_limit"
   | "unavailable"
-  | "not_found";
+  | "not_found"
+  | "rejected";
+/** The API's error types (error.type), the only values logged from a provider error. */
+const ERROR_TYPES = new Set([
+  "invalid_request_error",
+  "authentication_error",
+  "billing_error",
+  "permission_error",
+  "not_found_error",
+  "request_too_large",
+  "rate_limit_error",
+  "api_error",
+  "timeout_error",
+  "overloaded_error",
+]);
+/** A stable error code (error.details.error_code) is a short snake_case identifier. */
+const ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/;
 /** On every failure, so model.failed lines and failed spans name this pathway. */
 const ROUTE = { route: "anthropic-direct", provider: "Anthropic" } as const;
 
@@ -277,12 +314,15 @@ export class AnthropicDirect implements ModelAdapter {
   private readonly nativeModel: string;
   private readonly prices: AnthropicPrices;
   private readonly transport: typeof fetch;
+  private readonly workspaceId: string;
   constructor(
     private key: string,
     options: {
       model: string;
       nativeModel: string;
       prices: AnthropicPrices;
+      /** Sent as anthropic-workspace-id when set; a workspace-scoped key needs none. */
+      workspaceId?: string;
       transport?: typeof fetch;
     },
   ) {
@@ -293,8 +333,12 @@ export class AnthropicDirect implements ModelAdapter {
       )
     )
       throw new Error("Anthropic prices must be positive");
-    if (!PROFILES[options.nativeModel])
+    if (!PROFILES.has(options.nativeModel))
       throw new Error("Unsupported Anthropic model");
+    const workspaceId = options.workspaceId ?? "";
+    if (workspaceId && !WORKSPACE_ID.test(workspaceId))
+      throw new Error("Invalid Anthropic workspace ID");
+    this.workspaceId = workspaceId;
     this.model = options.model;
     this.nativeModel = options.nativeModel;
     this.prices = options.prices;
@@ -311,7 +355,6 @@ export class AnthropicDirect implements ModelAdapter {
       maxOutputTokens > MAX_OUTPUT_TOKENS
     )
       throw new Error("Invalid model output allowance");
-    const profile = PROFILES[this.nativeModel]!;
     const ledger = spending.getStore();
     const estimate =
       ((estimateInputBytes(input.messages) +
@@ -323,94 +366,65 @@ export class AnthropicDirect implements ModelAdapter {
       (maxOutputTokens * this.prices.output) / 1e6;
     const charge = await ledger?.begin("anthropic-main", estimate);
     // cacheKey/sessionId have no native equivalent and are not sent.
-    const body = {
-      model: this.nativeModel,
-      max_tokens: maxOutputTokens,
-      ...translate(input.messages),
-      ...(input.tools.length
-        ? {
-            // Eager input streaming stays off: the API then validates each parameter.
-            tools: input.tools.map((t) => ({
-              name: t.name,
-              description: t.description,
-              input_schema: t.parameters,
-            })),
-          }
-        : {}),
-      cache_control: { type: "ephemeral" },
-      // Chief rebuilds history each call, so mismatched thinking is dropped, not a 400.
-      thinking: {
-        type: "adaptive",
-        block_binding: { prefix_mismatch_behavior: "drop_block" },
-      },
-      output_config: { effort: input.reasoning },
-      ...(profile.fallbacks ? { fallbacks: profile.fallbacks } : {}),
-      betas: [BETAS.binding, ...(profile.fallbacks ? [BETAS.fallback] : [])],
-    } as unknown as BetaMessageStreamParams;
-    let bytes = 0;
-    let emitted = false;
-    let responseId: string | undefined;
-    const transport = this.transport;
-    const counting = (async (url: any, init?: RequestInit) => {
-      const response = await transport(url, init);
-      if (!response.body) return response;
-      const counter = new TransformStream<Uint8Array, Uint8Array>({
-        transform(chunk, controller) {
-          bytes += chunk.byteLength;
-          controller.enqueue(chunk);
+    const body = (request: ReturnType<typeof translate>["request"]) =>
+      ({
+        model: this.nativeModel,
+        max_tokens: maxOutputTokens,
+        ...request,
+        ...(input.tools.length
+          ? {
+              // Eager input streaming stays off: the API then validates each parameter.
+              tools: input.tools.map((t) => ({
+                name: t.name,
+                description: t.description,
+                input_schema: t.parameters,
+              })),
+            }
+          : {}),
+        // Chief rebuilds history each call, so mismatched thinking is dropped, not a 400.
+        thinking: {
+          type: "adaptive",
+          block_binding: { prefix_mismatch_behavior: "drop_block" },
         },
-      });
-      // The signal also ends a body whose transport ignores aborts.
-      const body = response.body.pipeThrough(counter, {
-        ...(init?.signal ? { signal: init.signal } : {}),
-      });
-      return new Response(body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers,
-      });
-    }) as typeof fetch;
-    const client = new Anthropic({
-      apiKey: this.key,
-      baseURL: "https://api.anthropic.com",
-      fetch: counting,
-      maxRetries: 0, // Callers own retries, as with OpenRouter.
-      // Bounds the wait for response headers only; input.signal bounds the whole call.
-      timeout: 10 * 60 * 1000,
-      logLevel: "off", // The SDK can log raw stream chunks; never log content.
-      openTelemetry: false, // Chief records its own model spans.
-    });
+        output_config: { effort: input.reasoning },
+        betas: [BETA],
+      }) as unknown as BetaMessageStreamParams;
+    const { request, replayed } = translate(input.messages);
     let message: BetaMessage;
+    let replayDropped = false;
     try {
-      // Always streamed, so large output allowances never meet HTTP timeouts.
-      const stream = client.beta.messages.stream(body, {
-        signal: input.signal,
-      });
-      for await (const event of stream) {
-        if (event.type === "message_start") responseId = event.message.id;
-        else if (
-          event.type === "content_block_start" ||
-          event.type === "content_block_delta"
-        ) {
-          emitted = true;
-          if (input.stream)
-            await input.onProgress?.({
-              responseId: responseId?.slice(0, 160),
-              provider: "Anthropic",
-              bytes,
-            });
-        }
-      }
-      message = await stream.finalMessage();
+      message = await this.attempt(body(request), input, maxOutputTokens);
     } catch (error) {
-      throw this.failure(error, input.signal, emitted);
+      // A rejected thinking replay (a corrupted block, or a key moved to an unlinked account)
+      // would fail every later call with that turn in history, so retry once without it. The
+      // decision is structural: a pre-output 400 on a request that replayed thinking.
+      const d = error instanceof ModelError ? error.diagnostics : undefined;
+      if (
+        !replayed ||
+        input.signal.aborted ||
+        d?.providerFault !== "rejected" ||
+        d.httpStatus !== 400 ||
+        d.errorCode === NOT_ENROLLED
+      )
+        throw error;
+      replayDropped = true;
+      try {
+        message = await this.attempt(
+          body(translate(input.messages, false).request),
+          input,
+          maxOutputTokens,
+        );
+      } catch (retryError) {
+        if (retryError instanceof ModelError)
+          retryError.diagnostics.replayDropped = true;
+        throw retryError;
+      }
     }
     const content = message.content as BetaContentBlock[];
-    const boundary = content.findLastIndex((b) => b.type === "fallback");
-    const fellBack =
-      boundary >= 0 ||
-      !!message.usage?.iterations?.some((i) => i.type === "fallback_message");
-    const usage = this.usage(message, fellBack);
+    const usage = {
+      ...this.usage(message),
+      ...(replayDropped ? { replay_dropped: true } : {}),
+    };
     if (charge) await ledger!.settle(charge, usage);
     const finishReason = message.stop_reason
       ? (FINISH[message.stop_reason] ?? String(message.stop_reason)).slice(
@@ -433,7 +447,7 @@ export class AnthropicDirect implements ModelAdapter {
         failureCode: "disconnected",
       });
     if (message.stop_reason === "refusal") {
-      // The whole fallback chain declined; partial output is discarded, as the docs require.
+      // Partial output is discarded, as the docs require. No refusal falls back anywhere.
       const category = message.stop_details?.category;
       throw new ModelError("The model declined this request.", false, {
         ...diagnostics,
@@ -443,13 +457,11 @@ export class AnthropicDirect implements ModelAdapter {
           : {}),
       });
     }
-    // After a fallback, thinking and tool_use before the final boundary are not part of the turn.
-    const after = (index: number) => index > boundary;
     const text = content
       .flatMap((b) => (b.type === "text" ? [b.text] : []))
       .join("");
-    const toolCalls: ToolCall[] = content.flatMap((b, i) =>
-      b.type === "tool_use" && after(i)
+    const toolCalls: ToolCall[] = content.flatMap((b) =>
+      b.type === "tool_use"
         ? [
             {
               id: b.id,
@@ -462,9 +474,8 @@ export class AnthropicDirect implements ModelAdapter {
           ]
         : [],
     );
-    const reasoning = content.flatMap((b, i) =>
-      b.type === "fallback" ||
-      ((b.type === "thinking" || b.type === "redacted_thinking") && after(i))
+    const reasoning = content.flatMap((b) =>
+      NATIVE.has(b.type)
         ? [
             {
               type: TAG,
@@ -510,8 +521,100 @@ export class AnthropicDirect implements ModelAdapter {
     };
   }
 
+  /** One streamed request; failures come back classified (see failure). */
+  private async attempt(
+    body: BetaMessageStreamParams,
+    input: Parameters<ModelAdapter["generate"]>[0],
+    maxOutputTokens: number,
+  ): Promise<BetaMessage> {
+    let bytes = 0;
+    // Complete-response (coding) calls bound the wire size as OpenRouter's stream reader does.
+    const maxWireBytes = input.requireComplete
+      ? Math.max(1600000, maxOutputTokens * 1024)
+      : undefined;
+    let oversized = false;
+    // Model output only (content blocks), never pings: fallback safety depends on it.
+    let emitted = false;
+    let responseId: string | undefined;
+    const progress = () =>
+      input.onProgress?.({
+        responseId: responseId?.slice(0, 160),
+        provider: "Anthropic",
+        bytes,
+      });
+    const transport = this.transport;
+    const counting = (async (url: any, init?: RequestInit) => {
+      const response = await transport(url, init);
+      if (!response.body) return response;
+      const live = response.ok && input.stream && !!input.onProgress;
+      const counter = new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          bytes += chunk.byteLength;
+          if (maxWireBytes !== undefined && bytes > maxWireBytes) {
+            oversized = true;
+            throw new Error("Model stream exceeded its wire allowance");
+          }
+          controller.enqueue(chunk);
+          // Every received chunk is a sign of life: during omitted-display thinking the API
+          // sends only pings, which the SDK drops, and a caller's idle timer must not fire.
+          // A failing progress callback never fails the call from here.
+          if (live)
+            try {
+              void Promise.resolve(progress()).catch(() => {});
+            } catch {}
+        },
+      });
+      // The signal also ends a body whose transport ignores aborts.
+      const body = response.body.pipeThrough(counter, {
+        ...(init?.signal ? { signal: init.signal } : {}),
+      });
+      return new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    }) as typeof fetch;
+    const client = new Anthropic({
+      apiKey: this.key,
+      baseURL: "https://api.anthropic.com",
+      fetch: counting,
+      maxRetries: 0, // Callers own retries, as with OpenRouter.
+      // Bounds the wait for response headers only; input.signal bounds the whole call.
+      timeout: 10 * 60 * 1000,
+      ...(this.workspaceId
+        ? { defaultHeaders: { "anthropic-workspace-id": this.workspaceId } }
+        : {}),
+      logLevel: "off", // The SDK can log raw stream chunks; never log content.
+      openTelemetry: false, // Chief records its own model spans.
+    });
+    try {
+      // Always streamed, so large output allowances never meet HTTP timeouts.
+      const stream = client.beta.messages.stream(body, {
+        signal: input.signal,
+      });
+      for await (const event of stream) {
+        if (event.type === "message_start") responseId = event.message.id;
+        else if (
+          event.type === "content_block_start" ||
+          event.type === "content_block_delta"
+        ) {
+          emitted = true;
+          if (input.stream) await progress();
+        }
+      }
+      return await stream.finalMessage();
+    } catch (error) {
+      if (oversized && !input.signal.aborted)
+        throw new ModelError("Model stream failed", false, {
+          ...ROUTE,
+          failureCode: "malformed",
+        });
+      throw this.failure(error, input.signal, emitted);
+    }
+  }
+
   /** OpenRouter-shaped usage, priced from the configured per-million rates. */
-  private usage(message: BetaMessage, fellBack: boolean) {
+  private usage(message: BetaMessage) {
     const u = message.usage;
     const uncached = u?.input_tokens ?? 0;
     const read = u?.cache_read_input_tokens ?? 0;
@@ -537,9 +640,6 @@ export class AnthropicDirect implements ModelAdapter {
       thinking_dropped: (message.input_transformations ?? []).filter(
         (t) => t.type === "thinking_dropped",
       ).length,
-      ...(fellBack && typeof message.model === "string"
-        ? { served_model: message.model.slice(0, 100) }
-        : {}),
     };
   }
 
@@ -557,7 +657,10 @@ export class AnthropicDirect implements ModelAdapter {
       const status =
         typeof error.status === "number" ? error.status : undefined;
       const type = error.type;
-      // A bad key fails every model; a permission refusal may be this model's alone.
+      const code = error.errorCode;
+      // A bad key fails every model; a permission refusal may be this model's alone. A 400
+      // (beta enrollment included) is "rejected"; a 413 stays unclassified, since OpenRouter
+      // would meet the same size limits.
       const value: Fault | undefined =
         status === 401 || type === "authentication_error"
           ? "auth"
@@ -576,7 +679,11 @@ export class AnthropicDirect implements ModelAdapter {
                   ? "unavailable"
                   : status === 404 || type === "not_found_error"
                     ? "not_found"
-                    : undefined;
+                    : status === 400 ||
+                        type === "invalid_request_error" ||
+                        code === NOT_ENROLLED
+                      ? "rejected"
+                      : undefined;
       const seconds = retryAfter(error.headers as Headers | undefined);
       return new ModelError(
         status
@@ -586,7 +693,13 @@ export class AnthropicDirect implements ModelAdapter {
         {
           ...ROUTE,
           ...(status ? { httpStatus: status } : { failureCode: "provider" }),
-          ...(typeof type === "string" ? { errorType: type.slice(0, 60) } : {}),
+          // Enum values only, never provider message text.
+          ...(typeof type === "string" && ERROR_TYPES.has(type)
+            ? { errorType: type }
+            : {}),
+          ...(typeof code === "string" && ERROR_CODE.test(code)
+            ? { errorCode: code }
+            : {}),
           ...fault(value),
           ...(seconds !== undefined ? { retryAfterSeconds: seconds } : {}),
         },

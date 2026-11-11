@@ -305,6 +305,7 @@ test("model logs name the direct pathway, its fallbacks and the startup routes",
     assert.equal(failedDirect.route, "anthropic-direct");
     assert.equal(failedDirect.provider, "anthropic");
     assert.equal(failedDirect.httpStatus, 403);
+    assert.equal(failedDirect.errorType, "permission_error");
     assert.equal("dropped" in failedDirect, false);
     assert.equal("route" in failedRouted, false);
     const routes = sanitize("model.routes", "info", {

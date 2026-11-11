@@ -94,6 +94,20 @@ test("event and run queries show delivery, routing and approval fields", () => {
   }
 });
 
+test("event and run queries show the model pathway and fallback fields", () => {
+  for (const name of ["event", "run", "errors"]) {
+    const q = QUERIES[name].query("run-1", "model.provider_fallback");
+    for (const field of [
+      "route",
+      "fallbackFrom",
+      "reason",
+      "cooldownS",
+      "errorType",
+    ])
+      assert.match(q, new RegExp(`\\b${field}\\b`), `${name} ${field}`);
+  }
+});
+
 test("the boot query shows every stage box.boot logs", () => {
   const q = QUERIES.boot.query();
   assert.match(q, /filter event = "box\.boot"/);

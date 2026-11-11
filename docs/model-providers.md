@@ -11,7 +11,7 @@ Every model the gateway builds goes through `ModelRouter.modelFor(slug)` in [`sr
 A slug goes **direct** only when all of these hold:
 
 1. `MODEL_PROVIDER` is `anthropic`. The code default and `config/runtime.json` are both `anthropic`, so this is inert until a key arrives.
-2. `ANTHROPIC_API_KEY` is set in the gateway's environment.
+2. `ANTHROPIC_API_KEY` is set in the gateway's environment. A Console key that is not scoped to a workspace also needs `ANTHROPIC_WORKSPACE_ID` (below); without it every direct call is rejected and falls back.
 3. The slug is listed in `config/model-policy.json` under `providers.anthropic.models`.
 4. Its listed input and output prices are within the effective price ceilings (`priceCeilings` in the same file, $4/$20 today).
 
@@ -19,15 +19,18 @@ Otherwise the slug uses the OpenRouter adapter exactly as before, with the same 
 
 These always stay on OpenRouter, whatever the setting: other vendors' models, web search and the search helper, embeddings (recall and mail recall), the Jev pickers and shadow decisions, the coding model catalogue check, and agentwatch's judges. `OPENROUTER_API_KEY` therefore remains required.
 
-The adapter keeps the OpenRouter slug as the model name, so journals, settings, coding jobs and logs see the same `model` either way. Conversations can move between pathways: thinking blocks produced on the direct route are stored in `reasoning_details` under their own tag (`anthropic.thinking`, format `anthropic-direct-v1`), replayed only on the direct route, and removed before any request to OpenRouter.
+The adapter keeps the OpenRouter slug as the model name, so journals, settings, coding jobs and logs see the same `model` either way. Conversations can move between pathways and models: thinking blocks produced on the direct route are stored in `reasoning_details` under their own tag (`anthropic.thinking`, format `anthropic-direct-v1`), replayed only on the direct route, and removed before every OpenRouter request, whatever the model's vendor (a conversation can continue on Gemini or GPT after a model switch). A request with no such entries reaches OpenRouter unchanged: the same message array and objects.
 
 ## The direct adapter
 
-`AnthropicDirect` in [`src/anthropic.ts`](../src/anthropic.ts) uses the official `@anthropic-ai/sdk` against `https://api.anthropic.com`, always streamed, with SDK retries off (callers own retries, as with OpenRouter) and SDK logging and telemetry off.
+`AnthropicDirect` in [`src/anthropic.ts`](../src/anthropic.ts) uses the official `@anthropic-ai/sdk` against `https://api.anthropic.com`, always streamed, with SDK retries off (callers own retries, as with OpenRouter) and SDK logging and telemetry off. The SDK also reads `ANTHROPIC_CUSTOM_HEADERS` (one `Name: value` per line) from the process environment and adds those headers to every request; the gateway does not set it, and Compose does not pass it.
 
-- **Request:** Chief's OpenAI-style messages become an Anthropic request: leading system messages become `system`, tool results become `tool_result` blocks, a mid-conversation system message that the API would reject becomes a `<system-reminder>` in a user turn, and consecutive same-role turns merge. It sends adaptive thinking, `output_config.effort` from Chief's per-message effort, the four cache marks Chief already uses for Anthropic on OpenRouter (top-level, opening system prompt, owner's current message, last block before the per-call state message), and `prefix_mismatch_behavior: "drop_block"`. Server-side refusal fallbacks are opted in for models whose profile allows it (Opus 5.5 does).
-- **Response:** an OpenRouter-shaped generation. Finish reasons map to OpenRouter's values (`refusal` to `content_filter`). Usage reports input as uncached + cache reads + cache writes, with `cached_tokens`, `cache_write_tokens`, `reasoning_tokens`, a `cost` computed from the policy's prices, `route: "anthropic-direct"`, `thinking_dropped` (how many earlier thinking blocks the API dropped) and, after a server-side fallback, `served_model`.
-- **Refusal:** a refusal from the whole fallback chain fails the call as non-transient `refusal`, discarding partial output.
+- **Request:** Chief's OpenAI-style messages become an Anthropic request: leading system messages become `system` blocks, tool results become `tool_result` blocks (an empty or whitespace-only result is sent without `content`, which the API allows), a mid-conversation system message that the API would reject becomes a `<system-reminder>` in a user turn, and consecutive same-role turns merge. It sends adaptive thinking, `output_config.effort` from Chief's per-message effort, `prefix_mismatch_behavior: "drop_block"` (beta `thinking-binding-controls-2026-08-01`, the only beta sent) and at most four cache breakpoints, matching `cacheHints` for Anthropic on OpenRouter: the top-level automatic one, the first leading system block, the owner's current message and the last block before the per-call state message. Chief opens every request with two system messages, the stable instructions and memories and then a per-turn summary ([context](../src/context.ts)); only the first is marked, so its cache entry survives a changed summary.
+- **Workspace:** with `ANTHROPIC_WORKSPACE_ID` set (`wrkspc_` followed by letters and digits, checked at startup), every request carries the `anthropic-workspace-id` header. A key that is not scoped to a workspace needs it; a workspace-scoped key does not. It is an identifier, not a secret, but lives in the private environment beside the key, not in `config/runtime.json` ([configuration](configuration.md)).
+- **No server-side refusal fallback:** the request never sets `fallbacks` or the `server-side-fallback-2026-07-01` beta. That opt-in can serve a refused call on Opus 5 or Opus 4.8 at $5/$25 per million tokens, above the owner-approved $4/$20 ceilings, keeps routing later turns there, and this adapter would price those tokens at Opus 5.5's rates. `fallback` blocks stored by earlier test data in `reasoning_details` are ignored and never replayed.
+- **Response:** an OpenRouter-shaped generation. Finish reasons map to OpenRouter's values (`refusal` to `content_filter`). Usage reports input as uncached + cache reads + cache writes, with `cached_tokens`, `cache_write_tokens`, `reasoning_tokens`, a `cost` computed from the policy's prices, `route: "anthropic-direct"` and `thinking_dropped` (how many earlier thinking blocks the API dropped).
+- **Refusal:** `stop_reason: "refusal"` fails the call as non-transient `refusal`, discarding partial output. It is not a provider fault, so it never falls back to OpenRouter.
+- **Wire size:** complete-response (coding) calls bound the stream at the larger of 1.6 MB and 1 KB per allowed output token, as OpenRouter's stream reader does; beyond that the call fails as non-transient `malformed`.
 - **Thinking continuity (known limitation):** Chief rebuilds its message array on every call, so the API usually finds that earlier thinking no longer matches and drops it (`drop_block`) instead of answering 400. That costs cache and reasoning continuity, not errors. An append-only message shape is the real fix and is deferred.
 
 ## Fallback and cooldowns
@@ -42,14 +45,16 @@ With `fallback: true` in the policy (the committed value), a direct failure clas
 | `rate_limit`  | HTTP 429, `rate_limit_error`                                                                         | `retry-after`, clamped to 5–120 s (30 s without one) | every model     |
 | `unavailable` | HTTP 5xx, `api_error`, `overloaded_error`, `timeout_error`, a transport failure with nothing emitted | none: each failing call falls back on its own        | that call       |
 | `not_found`   | HTTP 404, `not_found_error`                                                                          | 600 s                                                | that model only |
+| `rejected`    | HTTP 400, `invalid_request_error`                                                                    | none: each failing call falls back on its own        | that call       |
+| `rejected`    | HTTP 400 with error code `organization_not_enrolled_in_beta` (it would fail every call)              | 600 s                                                | every model     |
 
-During a cooldown the direct pathway is skipped and calls go straight to OpenRouter. Cooldowns are per gateway process and reset on restart. A fallback generation's usage carries `fallback_from: "anthropic-direct"`, `fallback_reason` and, when a cooldown caused it, `fallback_cooldown: true`.
+A 413 (`request_too_large`) is deliberately unclassified: OpenRouter would send the same oversized request to the same model's limits, so it surfaces as the direct error. A beta value the account is not enabled for can also return a plain 400 without that error code; it is then an ordinary `rejected` fault, falling back on every call without a cooldown, and the `model.provider_fallback` lines show it. During a cooldown the direct pathway is skipped and calls go straight to OpenRouter. Cooldowns are per gateway process and reset on restart. A fallback generation's usage carries `fallback_from: "anthropic-direct"`, `fallback_reason` and, when a cooldown caused it, `fallback_cooldown: true`.
 
 ## Observability
 
 - **Startup:** `model.routes` (info) logs `modelProvider`, `anthropicKey` (presence only, never the key) and the route of each role: `mainRoute`, `standardRoute`, `fastRoute`, `judgeRoute`, `mediaRoute`.
-- **Fallback:** `model.provider_fallback` (warn) with `model`, `reason` (the fault) and `cooldownS`. It is logged only when a direct attempt fails, not for calls skipped during a cooldown.
-- **Each call:** `model.completed` carries `route: "anthropic-direct"` on direct calls and `fallbackFrom: "anthropic-direct"` on a fallback; OpenRouter calls carry neither. Direct `model.failed` lines carry `route` too. `provider` is `anthropic` on the direct route. `thinking_dropped`, `served_model` and the fallback fields stay in the usage recorded in Postgres, not in the log line.
+- **Fallback:** `model.provider_fallback` (warn) with `model`, `reason` (the fault), `cooldownS`, `httpStatus`, and the API's `errorType` (one of its fixed error types, such as `invalid_request_error`) and `errorCode` (a stable snake_case code such as `organization_not_enrolled_in_beta`) when present. Never provider message text. It is logged only when a direct attempt fails, not for calls skipped during a cooldown. Direct `model.failed` lines carry `errorType` and `errorCode` too.
+- **Each call:** `model.completed` carries `route: "anthropic-direct"` on direct calls and `fallbackFrom: "anthropic-direct"` on a fallback; OpenRouter calls carry neither. Direct `model.failed` lines carry `route` too. `provider` is `anthropic` on the direct route. `thinking_dropped` and the fallback fields stay in the usage recorded in Postgres, not in the log line.
 - **Traces:** `gen_ai.provider.name` is `anthropic` on direct spans (completed or failed) and `openrouter` otherwise, including fallbacks.
 - **Spending:** direct calls record their charge under `anthropic-main` (OpenRouter's is `openrouter-main`). See [cost controls](cost-controls.md#direct-anthropic-route).
 
@@ -58,23 +63,23 @@ AWS_PROFILE=chief-logs kite run logs:cloudwatch -- models --since 2h
 AWS_PROFILE=chief-logs kite run logs:cloudwatch -- event --event model.provider_fallback --since 1d
 ```
 
-The `models` query groups by provider, so direct calls appear under `anthropic`. The saved queries' field lists do not include the new fields (`route`, `fallbackFrom`, `reason`, `cooldownS` and the `model.routes` fields) yet, so read those with a Logs Insights query that names them.
+The `models` query groups by provider, so direct calls appear under `anthropic`. The `event`, `run` and `errors` queries show `route`, `fallbackFrom`, `reason`, `cooldownS` and `errorType`; the `model.routes` fields still need a Logs Insights query that names them.
 
 ## Enabling it
 
-Enabling needs one Compose line, `ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}` in the gateway's environment, plus the key in the private server `.env`. The automatic release refuses Compose changes, so this ships in its own PR through a reviewed operator procedure, modelled on the [Singapore keys rollout](singapore-open-data.md#key-rollout-procedure). It is deliberately not in the change that added the adapter.
+Enabling needs two Compose lines in the gateway's environment, `ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}` and then `ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}`, plus the key (and, for an unscoped key, the workspace ID) in the private server `.env`. The automatic release refuses Compose changes, so this ships in its own PR through a reviewed operator procedure, modelled on the [Singapore keys rollout](singapore-open-data.md#key-rollout-procedure). It is deliberately not in the change that added the adapter.
 
 ### Key rollout procedure
 
-`scripts/deploy-anthropic-key.py` is the one-time reviewed operator rollout, with offline tests in `scripts/test-deploy-anthropic-key.py`. Its `BASE` is deliberately unset: the PR that adds the Compose line must set it to the live release SHA, read over SSH (`sudo cat /opt/hermes-companion/RELEASE`) just before that PR is reviewed, so the reviewer approves the exact baseline. The script refuses to run while `BASE` is unset, and the offline test fails once `compose.yaml` carries the line and `BASE` is still unset. If another release lands first, set the new live SHA after review.
+`scripts/deploy-anthropic-key.py` is the one-time reviewed operator rollout, with offline tests in `scripts/test-deploy-anthropic-key.py`. Its `BASE` is deliberately unset: the PR that adds the Compose lines must set it to the live release SHA, read over SSH (`sudo cat /opt/hermes-companion/RELEASE`) just before that PR is reviewed, so the reviewer approves the exact baseline. The script refuses to run while `BASE` is unset, and the offline test fails once `compose.yaml` carries the lines and `BASE` is still unset. If another release lands first, set the new live SHA after review.
 
 **What the script checks and does:**
 
 1. **Before anything changes:**
    - `BASE` is set and the server's `RELEASE` matches it exactly;
-   - the private `.env` sets `ANTHROPIC_API_KEY` to a non-empty value, using the last assignment as Compose does and counting `KEY=""` or a comment as empty. It checks presence only; the value is never printed, logged or written;
+   - the private `.env` sets `ANTHROPIC_API_KEY` to a non-empty value, using the last assignment as Compose does and counting `KEY=""` or a comment as empty, and `ANTHROPIC_WORKSPACE_ID`, which is optional, is either empty or well formed (`wrkspc_` followed by letters and digits, as the gateway requires). It checks presence and format only; no value is ever printed, logged or written;
    - the archive matches the exact requested commit and contains no unsafe entries (no `.env*` other than `.env.example`, `.git` or `RELEASE`);
-   - `db/` is unchanged, the trusted release handler (`scripts/cloud-release.py`) is unchanged, and `compose.yaml` differs from the live file only by `ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}` directly after the gateway's `OPENROUTER_API_KEY` line.
+   - `db/` is unchanged, the trusted release handler (`scripts/cloud-release.py`) is unchanged, and `compose.yaml` differs from the live file only by the two lines `ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}` and `ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}`, in that order, directly after the gateway's `OPENROUTER_API_KEY` line.
 2. **Then:**
    - builds the candidate image first, and checks the baseline is healthy;
    - refuses, without cancelling anything, while a run, pending conversation input, active coding job or pending coding cleanup exists; rerun it when idle;
@@ -83,8 +88,8 @@ Enabling needs one Compose line, `ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}` in 
 
 **Steps:**
 
-1. Open the Compose PR: the one line in `compose.yaml` and `BASE` set to the live release SHA. Run `python3 scripts/test-deploy-anthropic-key.py`. Get it independently reviewed.
-2. Once the PR is approved and merged, add the key to `/opt/hermes-companion/.env` (root, mode 600) through the pinned Lightsail operator connection ([lightsail.md](lightsail.md)). Pipe the value from a local private file over SSH, so it never appears in a command line, a log or the chat.
+1. Open the Compose PR: the two lines in `compose.yaml` and `BASE` set to the live release SHA. Run `python3 scripts/test-deploy-anthropic-key.py`. Get it independently reviewed.
+2. Once the PR is approved and merged, add the key to `/opt/hermes-companion/.env` (root, mode 600) through the pinned Lightsail operator connection ([lightsail.md](lightsail.md)). Pipe the value from a local private file over SSH, so it never appears in a command line, a log or the chat. If the key is not scoped to a workspace, add `ANTHROPIC_WORKSPACE_ID=wrkspc_…` the same way.
 3. Create the `git archive` of the exact merge commit, and transfer it and the reviewed script.
 4. Run:
 
@@ -105,7 +110,7 @@ Enabling needs one Compose line, `ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}` in 
 
 **Until the script runs:** a merged `compose.yaml` change makes the automatic release refuse every later merge. Run it immediately after the merge.
 
-**Rollback:** the script's own failure path restores the previous state. To turn the direct route off afterwards, see [switching back](#switching-back); the Compose line can stay, since an empty key keeps every call on OpenRouter.
+**Rollback:** the script's own failure path restores the previous state. To turn the direct route off afterwards, see [switching back](#switching-back); the Compose lines can stay, since an empty key keeps every call on OpenRouter.
 
 Never paste the key into a chat, a PR, a command line or a log. It belongs only in `/opt/hermes-companion/.env` on the host, as for every other secret ([configuration](configuration.md)).
 
@@ -117,7 +122,7 @@ Nothing below has been observed; all tests are mocked. After enabling, confirm:
 2. **Auth and effective model:** a small owner turn logs `model.completed` with `route: anthropic-direct`, `provider: anthropic` and model `anthropic/claude-opus-5.5`, and no `model.provider_fallback`.
 3. **Caching:** `cachedTokens` and `cacheWriteTokens` across the calls of one turn, compared with recent OpenRouter turns ([deployment](deployment.md#changing-the-production-model-through-a-release)).
 4. **Thinking:** how often `thinking_dropped` is non-zero in the recorded usage. Mostly non-zero is expected with today's message shape.
-5. **Refusal fallback:** that the API accepts the server-side fallback beta and opt-in on this account (a 400 here would fail every direct call without falling back).
+5. **Beta and workspace:** that the API accepts the thinking-binding beta on this account and, for an unscoped key, the workspace header. Either failing shows as `model.provider_fallback` with `reason: rejected` on every call (with `errorCode: organization_not_enrolled_in_beta` and a 600 s cooldown in the enrollment case).
 6. **Coding:** one Pi coding job whose reviewer runs direct, through to a completed review.
 7. **Rate limits:** a new Console account starts on a low tier. Watch for `rate_limit` fallbacks during busy turns and coding reviews.
 8. **Fallback:** that a fault actually falls back, for example by observing the first naturally occurring one, and that `model.provider_fallback` and `fallbackFrom` appear as described.
@@ -133,7 +138,7 @@ Each leaves the OpenRouter pathway exactly as it was. Conversations that used th
 ## Adding another Anthropic model
 
 1. **Policy entry:** add the OpenRouter slug under `providers.anthropic.models` in `config/model-policy.json`, with the native `id` (`claude-…`) and the first-party list prices in $ per million tokens: `input`, `output`, `cacheRead`, `cacheWrite` (5-minute writes). Write the prices out from Anthropic's price list; they are not derived from the slug.
-2. **Adapter profile:** add the native ID to `PROFILES` in `src/anthropic.ts`. The adapter refuses unlisted models, because models differ in thinking, effort, system-message and fallback support. The request always sends adaptive thinking, `output_config.effort` and the thinking-binding beta, so a model without those needs adapter changes, not just a profile line. Set `fallbacks: "default"` only if the model supports server-side refusal fallbacks.
+2. **Adapter profile:** add the native ID to `PROFILES` in `src/anthropic.ts`. The adapter refuses unlisted models, because models differ in thinking, effort and system-message support. The request always sends adaptive thinking, `output_config.effort` and the thinking-binding beta, so a model without those needs adapter changes, not just a profile line. Server-side refusal fallbacks stay off for every model (above).
 3. **Ceilings:** a model priced above `priceCeilings` is valid but stays on OpenRouter. Do not raise the ceilings without an explicit owner request.
 4. **Checks:** `tests/model-policy.test.ts` builds an adapter for every mapped entry and asserts its prices fit the ceilings, so a missing profile or an over-ceiling entry fails CI. Release through the normal reviewed path; this is an application release, with no Compose change once the key is live.
 
@@ -141,6 +146,7 @@ Each leaves the OpenRouter pathway exactly as it was. Conversations that used th
 
 - Thinking is mostly dropped between calls (above), and Pi's OpenAI-completions client keeps only OpenAI-style reasoning entries (`reasoning.text`, `reasoning.summary`, `reasoning.encrypted`), so it drops the direct route's `anthropic.thinking` entries between tool turns. The Python squad copies `reasoning_details` back unchanged.
 - Cooldowns are in memory and per process.
+- An ordinary rejected request (400) has no cooldown, so a request shape the API always rejects costs one failed direct request on every call before its OpenRouter fallback; the warn lines make that visible.
 - Per-call `cacheKey` and `sessionId` have no native equivalent and are not sent.
 - The pre-call spending estimate of a direct call that then falls back stays unsettled, beside the OpenRouter charge that settles.
 - Not measured: latency, cache hit rates and cost against OpenRouter on the same workload.

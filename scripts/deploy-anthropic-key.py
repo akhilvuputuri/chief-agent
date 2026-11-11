@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Reviewed one-time operator rollout: the Anthropic API key in the gateway environment.
 
-No migration. Compose gains exactly one gateway environment name, ANTHROPIC_API_KEY,
-directly after OPENROUTER_API_KEY, and the private .env must already hold its value; the
-script checks presence and never prints it. Modelled on deploy-singapore-keys.py (PR 282).
+No migration. Compose gains exactly two gateway environment names, ANTHROPIC_API_KEY and then
+ANTHROPIC_WORKSPACE_ID, directly after OPENROUTER_API_KEY. The private .env must already hold
+the key; the workspace ID is optional (an unscoped key needs one) but must be well formed when
+set. The script checks presence and format only and never prints a value. Modelled on
+deploy-singapore-keys.py (PR 282).
 """
 import fcntl
 import json
@@ -25,9 +27,15 @@ LOCK = pathlib.Path('/var/lock/companion-release.lock')
 # and BASE is still unset. If another release lands first, set the new live SHA after review.
 BASE = None
 IMAGE = 'hermes-companion-gateway'
+# Required in the private .env.
 KEYS = ('ANTHROPIC_API_KEY',)
+# Optional in the private .env; when set it must match the gateway's own check (src/config.ts).
+OPTIONAL = {'ANTHROPIC_WORKSPACE_ID': re.compile('wrkspc_[A-Za-z0-9]+')}
+# Every name the reviewed Compose change adds.
+NAMES = KEYS + tuple(OPTIONAL)
 COMPOSE_ANCHOR = b'      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?Set OPENROUTER_API_KEY}\n'
-COMPOSE_ADDITION = b'      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}\n'
+COMPOSE_ADDITION = (b'      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}\n'
+                    b'      ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}\n')
 PENDING = '.RELEASE-anthropic'
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 
@@ -93,9 +101,9 @@ def unpack(archive_path, sha, stage):
 
 
 def expected_compose(baseline_compose):
-    """The baseline with exactly the reviewed line added, or None if the baseline is not the reviewed one."""
+    """The baseline with exactly the reviewed lines added, or None if the baseline is not the reviewed one."""
     if (baseline_compose.count(COMPOSE_ANCHOR) != 1
-            or any(key.encode() in baseline_compose for key in KEYS)):
+            or any(name.encode() in baseline_compose for name in NAMES)):
         return None
     return baseline_compose.replace(COMPOSE_ANCHOR, COMPOSE_ANCHOR + COMPOSE_ADDITION)
 
@@ -124,28 +132,37 @@ def validate_changes(stage):
     if expected is None:
         raise RuntimeError('Compose baseline does not match the reviewed environment list')
     if (stage / 'compose.yaml').read_bytes() != expected:
-        raise RuntimeError('Unexpected Compose change; only the ANTHROPIC_API_KEY name is permitted')
+        raise RuntimeError('Unexpected Compose change; only the ANTHROPIC_API_KEY and ANTHROPIC_WORKSPACE_ID names are permitted')
     if (stage / 'scripts/cloud-release.py').read_bytes() != (LIVE / 'scripts/cloud-release.py').read_bytes():
         raise RuntimeError('Trusted release-handler source changed; requires separate review')
 
 
-def keys_present():
-    """True when the private .env's effective value of every key is non-empty. Values are never returned."""
+def _effective(names):
+    """The private .env's effective value of each name, '' when unset. Kept in memory only."""
     # Compose takes the last assignment of a repeated name, so a later empty line wins.
-    present = set()
+    values = {}
     for line in (LIVE / '.env').read_text().splitlines():
         name, sep, value = line.partition('=')
         # Compose reads KEY="" , KEY='' and KEY= # note as empty, so they count as missing.
         value = value.split(' #')[0].strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
             value = value[1:-1].strip()
-        if not sep or name.strip() not in KEYS:
+        if not sep or name.strip() not in names:
             continue
-        if value and not value.startswith('#'):
-            present.add(name.strip())
-        else:
-            present.discard(name.strip())
-    return present == set(KEYS)
+        values[name.strip()] = '' if value.startswith('#') else value
+    return {name: values.get(name, '') for name in names}
+
+
+def keys_present():
+    """True when the private .env's effective value of every key is non-empty. Values are never returned."""
+    return all(_effective(KEYS).values())
+
+
+def optional_valid():
+    """True when every optional name is unset or well formed. Values are never returned."""
+    values = _effective(tuple(OPTIONAL))
+    return all(not values[name] or pattern.fullmatch(values[name])
+               for name, pattern in OPTIONAL.items())
 
 
 def copy_entry(source, destination):
@@ -207,6 +224,8 @@ def main():
             raise RuntimeError('Anthropic key rollout requires the exact documented baseline; reconcile newer releases first')
         if not keys_present():
             raise RuntimeError('Add ANTHROPIC_API_KEY to the private .env first; nothing changed')
+        if not optional_valid():
+            raise RuntimeError('ANTHROPIC_WORKSPACE_ID in the private .env must be empty or wrkspc_ followed by letters and digits; nothing changed')
         with tempfile.TemporaryDirectory(prefix='companion-anthropic-') as temporary:
             stage, backup = pathlib.Path(temporary) / 'stage', pathlib.Path(temporary) / 'backup'
             stage.mkdir()

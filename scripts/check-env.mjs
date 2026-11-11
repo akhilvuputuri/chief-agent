@@ -20,6 +20,7 @@ if (missing.length) {
 }
 for (const key of [
   "ANTHROPIC_API_KEY",
+  "ANTHROPIC_WORKSPACE_ID",
   "OPENAI_API_KEY",
   "ELEVENLABS_API_KEY",
   "ELEVENLABS_VOICE_ID",

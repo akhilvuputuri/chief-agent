@@ -159,6 +159,7 @@ const models = new ModelRouter({
   provider: c.MODEL_PROVIDER,
   openRouterKey: c.OPENROUTER_API_KEY,
   anthropicKey: c.ANTHROPIC_API_KEY,
+  anthropicWorkspaceId: c.ANTHROPIC_WORKSPACE_ID,
   ceilings: priceCeilings,
 });
 const db = connect(c.DATABASE_URL);
