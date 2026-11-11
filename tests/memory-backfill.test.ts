@@ -1,3 +1,4 @@
+import { setTimeout } from "node:timers/promises";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -124,6 +125,9 @@ test("rebuilt memory spans equal what live export sent", async (t) => {
       domain: "mail",
     });
     const selection = await store.select("owner");
+    // Rows are ordered by created_at, which PGlite keeps to the millisecond: without a
+    // gap, the context and the revision after it can share one and swap places.
+    await setTimeout(2);
     await store.recordContext("owner", turn, selection);
     const ids = await store.traceIdentities(
       "owner",
@@ -138,6 +142,7 @@ test("rebuilt memory spans equal what live export sent", async (t) => {
       })),
       selection.omitted.length,
     );
+    await setTimeout(2);
     await store.retire("owner", "timezone", {
       origin: "owner",
       reason: "asked",
