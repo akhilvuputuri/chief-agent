@@ -25,7 +25,7 @@ Chief's main model runs every foreground message at one reasoning effort. Before
 - **Start of a message.** The first question starts when the turn's earlier turns are known and is awaited only after the request is built. It runs alongside the tool picker's call (median about 0.6 s), so it adds little while the picker is on. With the picker off, it can add up to its 1.5 s timeout, typically about 0.45 s.
 - **Escalation.** Scheduled questions run while the step's tools execute, so they delay the next model call only when the tools finish first. A question after a failed tool call starts when the tools finish, so it delays the recovering call by Jev's latency (typically about 0.45 s, at most the 1.5 s timeout).
 - **Cost.** Each question costs about $0.00002–0.00004, recorded in the run's provider charges.
-- **Model price.** `high` costs more main-model reasoning tokens than `medium`; `low` costs fewer. No dollar cap is added.
+- **Model price.** `high` costs more main-model reasoning tokens than `medium`; `low` costs fewer. No dollar cap is added. Reasoning counts against each call's output allowance, 32,000 tokens in Chief's loop since the owner-approved change of 11 November 2026 ([journal 161](journey/161-enabling-direct-anthropic.md)).
 
 ## Startup
 

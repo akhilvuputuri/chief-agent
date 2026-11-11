@@ -106,8 +106,18 @@ export const LEARNING_LIMITS = {
   procedureChars: 150000,
   /** The most one pass reads: newer items past this wait for the next, overlapping window. */
   procedureMaxChars: 300000,
-  /** Enough to write several procedures after reasoning over this much evidence. */
-  procedureOutputTokens: 16000,
+  /**
+   * Output allowance, thinking included, of one review-pass call (the nightly item pass).
+   * Owner-approved 11 November 2026 (journal 161), matching CHIEF_MAX_OUTPUT_TOKENS; it was
+   * the adapters' 8,000 default. callMs still bounds the call, and a reply cut off by it is
+   * lost, so an allowance a call cannot produce within callMs buys nothing.
+   */
+  reviewOutputTokens: 32000,
+  /**
+   * Room to write several procedures after reasoning over this much evidence. Raised from
+   * 16,000 with reviewOutputTokens (owner, 11 November 2026); callMs still bounds the call.
+   */
+  procedureOutputTokens: 32000,
   /** Longest and shortest cut of one message or reply in a procedure pass. */
   procedureMessageChars: 1500,
   procedureMessageFloor: 300,
@@ -1255,6 +1265,7 @@ export class Learner {
             reasoning: "medium",
             signal: AbortSignal.timeout(LEARNING_LIMITS.callMs),
             cacheKey: `judge:${user}`,
+            maxOutputTokens: JUDGE_LIMITS.outputTokens,
           }),
         adapter.model ?? this.modelNameOf(JUDGE_PROMPT_VERSION),
       );
@@ -2058,7 +2069,7 @@ export class Learner {
   private itemPass: Pass = {
     instructions: LEARNER_INSTRUCTIONS,
     tools: learnTools,
-    request: {},
+    request: { maxOutputTokens: LEARNING_LIMITS.reviewOutputTokens },
     check: (name, args, evidence, accepted, known) =>
       this.check(name, args, evidence, accepted, known),
   };

@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { Assistant } from "../src/agent.js";
 import { CustomAgent } from "../src/custom-agent.js";
 import {
+  CHIEF_MAX_OUTPUT_TOKENS,
   OpenRouter,
   ModelError,
   type ModelAdapter,
@@ -126,6 +127,9 @@ test("custom conversation persists model and tool records, observes real results
   f = await fixture({
     generate: async (input) => {
       n++;
+      // Every call of Chief's loop asks for the owner-approved allowance, not the adapter default.
+      assert.equal(input.maxOutputTokens, CHIEF_MAX_OUTPUT_TOKENS);
+      assert.equal(CHIEF_MAX_OUTPUT_TOKENS, 32000);
       if (n === 1)
         return call("memory_set", { key: "style", value: "Concise" });
       assert.equal(
