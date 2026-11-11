@@ -46,7 +46,13 @@ Measured on production on 10 November 2026, read-only, by SQL over `learner_runs
 - Tests ([tests/memory-judge.test.ts](../../tests/memory-judge.test.ts)), with a scripted model on PGlite: the checks on judgements; a full pass over facts and turns, including a fact with no source, a turn with no reply and a turn still inside the success window; the reminder and `missed`; deferral when the owner writes; a failed call keeping earlier batches; the order of a night's passes; the judge's own model; the exported evaluations; the log line; and the report queries.
 - A test caught one defect before review: a turn listed its memory IDs in the order the context was recorded, which differs between runs. They are now listed in the batch's order.
 - Design: [learning](../learning.md#nightly-judge), [tracing](../tracing.md#memory-use).
-- Independent review: pending.
+- Independent review (Claude Opus 5.5) requested changes on `a223976`, and reproduced one defect in a throwaway test.
+  - Blocking: a batch the model could not answer in the tools (no tool calls, malformed or cut-off arguments) had every item recorded `missed` and the mark moved past it, so a model that fails on the first night would have used up the backlog with no verdicts. Now a batch with no verdict at all fails the run and is read again.
+  - Items written in the same instant at a batch boundary: the mark compared time only, so the second was skipped (reproduced with 41 facts). Marks are now time and ID.
+  - A turn still running a day later was passed over without a record. It is now read as it stands, usually `skipped`.
+  - A night on which the item pass or due procedure windows are deferred three times has no judge run. Documented.
+  - docs/tracing.md said the judge's keys and reasons stay in Postgres; with message content captured, its own trace holds its prompt and reasons. Corrected, and the agent list now names `judge`.
+  - Low: message lookups compared IDs as text and could not use the primary keys; they now compare uuids, after dropping malformed IDs. The report joins revisions by owner too. "0 is the usual value" was a guess and is gone.
 
 ## Verification and outcome
 

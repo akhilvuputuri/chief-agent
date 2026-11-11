@@ -32,7 +32,7 @@ context AS (
   SELECT r.key, count(*) AS in_context FROM turns t
   JOIN memory_context c ON c.run_id::text=t.data->>'turnRunId'
   CROSS JOIN LATERAL unnest(c.selected) AS s(id)
-  JOIN memory_revisions r ON r.id=s.id GROUP BY r.key),
+  JOIN memory_revisions r ON r.user_id=c.user_id AND r.id=s.id GROUP BY r.key),
 used AS (
   SELECT u->>'key' AS key, count(*) AS relevant,
     count(*) FILTER (WHERE u->>'use'='followed') AS followed,

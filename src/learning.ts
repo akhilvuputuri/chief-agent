@@ -120,6 +120,10 @@ export const LEARNING_LIMITS = {
   procedureValueChars: 2000,
 } as const;
 
+/** Where the judge has read to: the last item's time and ID, or nothing yet. */
+type Mark = { at: string; id: string } | null;
+const NO_ID = "00000000-0000-0000-0000-000000000000";
+
 /** 03:30 in Singapore, which has no daylight saving (UTC+8). */
 const SCHEDULE_UTC_MINUTES = (3 * 60 + 30 - 8 * 60 + 1440) % 1440;
 
@@ -1049,41 +1053,44 @@ export class Learner {
     }
   }
 
-  /** How far the judge has read: the newest turn context and the newest fact it has judged. */
+  /**
+   * How far the judge has read: the last turn context and the last fact it judged, each as
+   * (time, ID), so items written in the same instant are neither skipped nor read twice.
+   */
   private async judgeMarks(user: string) {
-    const row = (
-      await this.db.query(
-        `SELECT max((summary->>'through')::timestamptz)::text AS through,
-         max((summary->>'factsThrough')::timestamptz)::text AS facts
-         FROM learner_runs WHERE user_id=$1 AND prompt_version LIKE 'judge-%'`,
-        [user],
-      )
-    ).rows[0] as { through: string | null; facts: string | null } | undefined;
-    return { through: row?.through ?? null, factsThrough: row?.facts ?? null };
+    const mark = async (at: string, id: string): Promise<Mark> =>
+      ((
+        await this.db.query(
+          `SELECT summary->>'${at}' AS at,summary->>'${id}' AS id FROM learner_runs
+           WHERE user_id=$1 AND prompt_version LIKE 'judge-%' AND summary ? '${at}'
+           ORDER BY (summary->>'${at}')::timestamptz DESC,summary->>'${id}' DESC LIMIT 1`,
+          [user],
+        )
+      ).rows[0] as Mark | undefined) ?? null;
+    return {
+      turns: await mark("through", "throughId"),
+      facts: await mark("factsThrough", "factsThroughId"),
+    };
   }
 
   /** Whether the judge has anything to read, so a quiet night opens no run. */
   private async judgeDue(user: string, now: Date) {
     const marks = await this.judgeMarks(user);
     return (
-      (await this.judgeFactRows(user, marks.factsThrough, 1)).length > 0 ||
-      (await this.judgeTurnRows(user, marks.through, now, 1)).length > 0
+      (await this.judgeFactRows(user, marks.facts, 1)).length > 0 ||
+      (await this.judgeTurnRows(user, marks.turns, now, 1)).length > 0
     );
   }
 
-  private async judgeFactRows(
-    user: string,
-    after: string | null,
-    limit: number,
-  ) {
+  private async judgeFactRows(user: string, after: Mark, limit: number) {
     return (
       await this.db.query(
         `SELECT r.id,r.key,r.value,r.source,r.created_at::text AS at FROM memory_heads h
          JOIN memory_revisions r ON r.user_id=h.user_id AND r.id=h.revision_id
          WHERE h.user_id=$1 AND r.status='active' AND r.kind='fact' AND r.origin='learned'
-         AND ($2::timestamptz IS NULL OR r.created_at>$2::timestamptz)
-         ORDER BY r.created_at,r.id LIMIT $3`,
-        [user, after, limit],
+         AND ($2::timestamptz IS NULL OR (r.created_at,r.id)>($2::timestamptz,$3::uuid))
+         ORDER BY r.created_at,r.id LIMIT $4`,
+        [user, after?.at ?? null, after?.id ?? NO_ID, limit],
       )
     ).rows as Array<{
       id: string;
@@ -1096,11 +1103,12 @@ export class Learner {
 
   /**
    * The owner's turns whose memory context the judge has not read, oldest first: past the
-   * success window, so the learner's label and any correction are in.
+   * success window, so the learner's label and any correction are in. A turn still running a
+   * day later is read as it stands (usually with no reply, so skipped), since the mark passes it.
    */
   private async judgeTurnRows(
     user: string,
-    after: string | null,
+    after: Mark,
     now: Date,
     limit: number,
   ) {
@@ -1110,16 +1118,17 @@ export class Learner {
          (SELECT l.label FROM learning_reviews l WHERE l.user_id=c.user_id AND l.task_id=c.run_id) AS label
          FROM memory_context c JOIN runtime_runs r ON r.user_id=c.user_id AND r.id=c.run_id
          WHERE c.user_id=$1 AND c.created_at<=$3 AND c.created_at>=$4
-         AND ($2::timestamptz IS NULL OR c.created_at>$2::timestamptz)
-         AND cardinality(c.selected)>0 AND r.state='stopped'
+         AND ($2::timestamptz IS NULL OR (c.created_at,c.run_id)>($2::timestamptz,$6::uuid))
+         AND cardinality(c.selected)>0
          AND EXISTS (SELECT 1 FROM conversation_inputs i WHERE i.user_id=c.user_id AND i.run_id=c.run_id)
          ORDER BY c.created_at,c.run_id LIMIT $5`,
         [
           user,
-          after,
+          after?.at ?? null,
           new Date(now.getTime() - LEARNING_LIMITS.quietMs),
           new Date(now.getTime() - LEARNING_LIMITS.maxAgeMs),
           limit,
+          after?.id ?? NO_ID,
         ],
       )
     ).rows as Array<{
@@ -1137,17 +1146,20 @@ export class Learner {
    * the whole message, which also shows whose words they were.
    */
   private async ownerTexts(user: string, ids: string[]) {
+    // Only well-formed IDs reach the query, so it can compare uuids and use the primary keys.
+    const uuid = (id: string) => z.string().uuid().safeParse(id).success;
     const tasks = ids
       .filter((id) => id.startsWith("request:"))
-      .map((id) => id.slice("request:".length));
-    const others = ids.filter((id) => !id.startsWith("request:"));
+      .map((id) => id.slice("request:".length))
+      .filter(uuid);
+    const others = ids.filter((id) => !id.startsWith("request:") && uuid(id));
     const rows = (
       await this.db.query(
-        `SELECT request AS said FROM work_tasks WHERE user_id=$1 AND id::text=ANY($2::text[])
-         UNION ALL SELECT message FROM conversation_inputs WHERE user_id=$1 AND id::text=ANY($3::text[])
+        `SELECT request AS said FROM work_tasks WHERE user_id=$1 AND id=ANY($2::uuid[])
+         UNION ALL SELECT message FROM conversation_inputs WHERE user_id=$1 AND id=ANY($3::uuid[])
          UNION ALL SELECT mc.payload->>'content' FROM conversation_messages cm
          JOIN message_contents mc ON mc.user_id=cm.user_id AND mc.hash=cm.hash
-         WHERE cm.user_id=$1 AND cm.id::text=ANY($3::text[]) AND mc.payload->>'role'='user'`,
+         WHERE cm.user_id=$1 AND cm.id=ANY($3::uuid[]) AND mc.payload->>'role'='user'`,
         [user, tasks, others],
       )
     ).rows as Array<{ said: string | null }>;
@@ -1310,12 +1322,14 @@ export class Learner {
       unclear: 0,
       missed: 0,
     };
-    let through: string | undefined;
-    let factsThrough: string | undefined;
+    let turnsMark: Mark = null;
+    let factsMark: Mark = null;
     const summary = () => ({
       ...progress,
-      ...(through ? { through } : {}),
-      ...(factsThrough ? { factsThrough } : {}),
+      ...(turnsMark ? { through: turnsMark.at, throughId: turnsMark.id } : {}),
+      ...(factsMark
+        ? { factsThrough: factsMark.at, factsThroughId: factsMark.id }
+        : {}),
     });
     const save = () =>
       this.db.query(
@@ -1336,7 +1350,7 @@ export class Learner {
       const facts: Array<JudgeFact & { at: string }> = [];
       for (const r of await this.judgeFactRows(
         user,
-        marks.factsThrough,
+        marks.facts,
         JUDGE_LIMITS.facts,
       ))
         facts.push({
@@ -1367,6 +1381,10 @@ export class Learner {
             )
           : { deferred: false as const, done: newJudgements() };
         if (outcome.deferred) return await deferred();
+        // No verdict at all means the model could not answer in the tools (malformed or cut-off
+        // calls), not that it skipped an item: the run fails here and the batch is read again.
+        if (sourced.length && !outcome.done.facts.size)
+          throw new Error("The judge returned no verdict for a batch of facts");
         for (const f of chunk) {
           const judged = outcome.done.facts.get(f.id);
           const verdict = !f.messages.length
@@ -1388,13 +1406,13 @@ export class Learner {
             ...(judged ? { reason: judged.reason } : {}),
           });
         }
-        factsThrough = chunk.at(-1)!.at;
+        factsMark = { at: chunk.at(-1)!.at, id: chunk.at(-1)!.revisionId };
         await save();
       }
       const turns: Array<JudgeTurn & { at: string; selected: string[] }> = [];
       for (const row of await this.judgeTurnRows(
         user,
-        marks.through,
+        marks.turns,
         now,
         JUDGE_LIMITS.turns,
       ))
@@ -1436,6 +1454,8 @@ export class Learner {
             )
           : { deferred: false as const, done: newJudgements() };
         if (outcome.deferred) return await deferred();
+        if (judgeable.length && !outcome.done.turns.size)
+          throw new Error("The judge returned no verdict for a batch of turns");
         for (const t of chunk) {
           const relevant = outcome.done.turns.get(t.id);
           const state = !judgeable.includes(t)
@@ -1470,7 +1490,7 @@ export class Learner {
             }),
           });
         }
-        through = chunk.at(-1)!.at;
+        turnsMark = { at: chunk.at(-1)!.at, id: chunk.at(-1)!.runId };
         await save();
       }
       return await finish("completed", summary());

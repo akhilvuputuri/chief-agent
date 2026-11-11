@@ -637,7 +637,7 @@ test("a failed model call fails the run and keeps the batches before it", async 
   assert.equal(result.state, "failed");
   assert.equal(result.error, "judge_failed");
   assert.equal(result.supported, 1);
-  assert.ok(result.factsThrough);
+  assert.ok(result.factsThrough && result.factsThroughId);
   assert.equal(result.through, undefined);
   // The fact is not judged twice; the turns are read again.
   const retry = model(() => [["judge_turn", { turn: "t1", relevant: [] }]]);
@@ -793,4 +793,62 @@ test("a judged turn is exported as evaluations on the turn's own trace, and the 
     [1, 1, 1, 0],
   );
   assert.doesNotMatch(JSON.stringify(line), /aisle|seat/i);
+});
+
+test("a batch with no verdict at all fails the run and is read again, instead of being marked read", async (t) => {
+  const db = await setup(t);
+  const seat = await learned(db, "seat", "Prefers aisle seats", []);
+  await turn(db, {
+    says: "Book a flight",
+    reply: "Booked",
+    selected: [seat.id],
+  });
+  // No tool calls, then a malformed one: nothing the host can record.
+  const silent = model((_input, n) =>
+    n === 1 ? [] : [["judge_turn", { turn: "the first one" }]],
+  );
+  const result = await judge(db, silent.adapter);
+  assert.equal(result.state, "failed");
+  assert.equal(result.through, undefined);
+  assert.deepEqual(await events(db, "judge.turn"), []);
+  const retry = model(() => [["judge_turn", { turn: "t1", relevant: [] }]]);
+  assert.equal((await judge(db, retry.adapter)).turns, 1);
+});
+
+test("facts written in the same instant across a batch boundary are each judged once", async (t) => {
+  const db = await setup(t);
+  for (let i = 0; i < JUDGE_LIMITS.facts + 1; i++)
+    await learned(
+      db,
+      `fact_${String.fromCharCode(97 + (i % 26))}_${i}`,
+      `Fact ${i}`,
+      [],
+    );
+  await db.query(
+    "UPDATE memory_revisions SET created_at='2026-11-20T00:00:00Z' WHERE origin='learned'",
+  );
+  const { adapter } = model(() => [["judge_finish", {}]]);
+  assert.equal((await judge(db, adapter)).noSource, JUDGE_LIMITS.facts);
+  assert.equal((await judge(db, adapter)).noSource, 1);
+  assert.equal((await judge(db, adapter)).noSource, 0);
+  const judged = (await events(db, "judge.fact")).map((e) => e.revisionId);
+  assert.equal(judged.length, JUDGE_LIMITS.facts + 1);
+  assert.equal(new Set(judged).size, judged.length);
+});
+
+test("a turn still running a day later is read as it stands, not passed over", async (t) => {
+  const db = await setup(t);
+  const seat = await learned(db, "seat", "Prefers aisle seats", []);
+  const stuck = await turn(db, { says: "Book a flight", selected: [seat.id] });
+  await db.query("UPDATE runtime_runs SET state='running' WHERE id=$1", [
+    stuck.run,
+  ]);
+  const { adapter, inputs } = model(() => [["judge_finish", {}]]);
+  const result = await judge(db, adapter);
+  assert.equal(inputs.length, 0);
+  assert.equal(result.skippedTurns, 1);
+  assert.deepEqual(
+    (await events(db, "judge.turn")).map((e) => [e.turnRunId, e.state]),
+    [[stuck.run, "skipped"]],
+  );
 });
