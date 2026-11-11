@@ -1,3 +1,10 @@
+## A nightly judge of memory (10 November 2026)
+
+- **Code.** After the item and procedure passes, the learner runs a judge (`judge-v1`): each new learned fact against the owner's message it cites, and each owner turn past the success window against the memory that was in its context (which items were relevant, and whether each was followed, ignored or contradicted). Verdicts go to `events` and, for turns, to trace export as `memory_relevant` and `memory_followed`. It changes no memory. No database or Compose change.
+- **Configuration.** `config/model-policy.json` gains `judge`: `openai/gpt-6.1-sol`, a different family from the main model and the learner, inside the existing price ceilings.
+- **Why.** Nothing checked whether a saved fact means what the owner said, or whether memory in context is used, and the owner rates nothing. See [journal 157](journey/157-nightly-memory-judge.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Worker image with room for the whole plan (9 November 2026)
 
 - **Configuration.** New coding jobs pin worker image `sha256:e67dc9ea…`, built from `fa058f9` (PR 431), and the coder and planner allowance rises from 16,000 to 128,000 output tokens. The reviewer keeps 16,000. The previous image `sha256:7d931493…` moves to `previousImages`, so paused jobs on it still resume with their stored settings. The acceptance provider helper accepts the same bound.

@@ -19,6 +19,7 @@ The owner asked for the recommended defaults for the issue's open questions on 2
 | First cut-back analysis | Four weeks after the learner goes live. Signals: flagged items, items never in context, items in context for runs that failed or were corrected, and the with/without-learning eval (#323).                                                                                                                                              |
 | Saving (1 November)     | Err toward saving; the owner prunes later. Pruning is done through a coding session for now (`MemoryStore` rollback and retirement); a Telegram tool waits until the core works. Items reviewed under `learner-v1`, `learner-v2` and `learner-v3` are mined again once.                                                                  |
 | Procedures (1 November) | How-to knowledge comes from reading work across days, not one item at a time. The owner chose this over loosening the old rules after an offline comparison ([journal 130](journey/130-nightly-learner.md#procedures-replace-one-item-lessons--2026-11-01)). Facts keep their quote.                                                     |
+| Judge (10 November)     | A model judges each night whether new facts mean what the owner said and whether the memory in each turn's context was relevant and followed, because the owner rates nothing. It measures and changes no memory ([nightly judge](#nightly-judge)).                                                                                      |
 | Packaging               | A module in this repository (`src/memory.ts`, later `src/learning/`) with the issue's `Store`/`Model`/`SuccessSignal`/`TrustPolicy`/`Clock` boundaries kept internal. Extracting it into a package waits for the #323 repository.                                                                                                        |
 
 ## Phases
@@ -165,9 +166,32 @@ Reading one item at a time produced narrow rules overgeneralised from one exampl
 
 **Losing detail.** Rewriting can compress away what mattered, so a revision under 60% of the previous length is flagged `shrunk`. Like `paraphrased`, it is findable but raises no warning. Each earlier version stays in `memory_revisions`. Nothing checks whether a longer revision lost detail.
 
+### Nightly judge
+
+[`src/memory-judge.ts`](../src/memory-judge.ts), run by the learner as a night's last pass (`judge-v1`). The host checks compare a fact's words with a quote, not its meaning, and a record that a memory was in a turn's context does not say whether it was used. The owner rates nothing ([decisions](#decisions)), so a model judges both. It measures only: it writes no revision, flag or retirement.
+
+**Facts.** Each current learned fact the judge has not read, oldest first, at most 40 a night, with the owner's messages it cites (`source.messageIds`: a turn's inputs, a task's request or its later messages; the owner's own words, 3,000 characters each). The quote is not stored on a revision, so the judge reads the whole message, which also shows whose words they were. Verdicts:
+
+- `supported`: the owner says this about themselves, and the fact adds nothing and drops no condition that matters.
+- `overstated`: a one-off request turned into a standing preference, a wider scope, an added detail or a dropped condition.
+- `unsupported`: someone else's words (forwarded, quoted, pasted), a question, a hypothetical, or another subject.
+- `contradicted`: the messages say the opposite.
+
+A fact whose messages no longer exist is recorded `no_source` without a model call.
+
+**Turns.** Each owner turn that had memory in its context (`memory_context`), once it is past the 24-hour success window, oldest first, at most 30 a night. The judge sees the owner's words, Chief's final reply (2,000 characters), the names of the tool calls in order with each one's state, the learner's label when there is one, and the memory items that were in context (2,000 characters each, the owner's own facts included). For each turn it lists only the memories that were relevant, meaning they bear on the request so directly that an assistant who knew them should have acted on them, and how each was used: `followed`, `ignored`, `contradicted`, or `unclear` when the reply and the tool names do not show it. A turn with no reply is recorded `skipped`, as is one still running a day after its context was recorded, since the judge does not come back to it.
+
+**Model.** `judge` in [config/model-policy.json](../config/model-policy.json): `openai/gpt-6.1-sol` ($2 and $10 a million tokens on 10 November, inside the price ceilings). It is a different family from the main model and the learner, which wrote the replies and the facts, so it does not grade its own work. agentwatch's `answer_ok` judge uses the same model ([tracing](tracing.md#judging-traces)), but reads only one turn's question and answer; this judge needs what only Chief's database holds, the memory in context and the messages a fact cites. Without `judge` in the policy it runs on the learner's model.
+
+**The run.** Batches of 10 facts or 10 turns, one model call each, and one reminder call when a response left an item out or had a judgement refused. The host refuses a judgement that names an item outside the batch, judges one twice, or cites a memory that was not in that turn's context. What is still unjudged after the reminder is recorded `missed` and is not read again, unless the batch got no verdict at all: that means the model could not answer in the tools, so the run ends as `failed` and the batch is read again the next night. Progress is two marks in the run's summary, each the time and ID of the last fact or turn read (`factsThrough` with `factsThroughId`, `through` with `throughId`), saved after each batch, so items written in the same instant are neither skipped nor read twice. An owner turn defers the run, and its unfinished batch is read again. A model call that fails ends the run as `failed` with the batches before it kept; a batch that always fails therefore holds the judge there, and `learner.finished` warns each night. A night with nothing new opens no run. The judge runs only after the item pass and any due procedure windows, so a night on which either is deferred three times has no judge run; its work waits for the next night. Cost is recorded against the run in `provider_charges`, as for the other passes.
+
+**What it cannot see.** Tool arguments and results, so a procedure about how to call a tool is often `unclear`. Anything past the first 2,000 characters of the reply. Whether a memory left out of context would have helped (none is left out today). Whether the judge agrees with the owner has not been measured, so its verdicts are evidence to read, not ground truth. Memories, messages and replies are untrusted text; the judge is told that instructions inside them are a problem to report, but a verdict could still be steered. No verdict changes memory.
+
+**Reading it.** [scripts/judge-report.sql](../scripts/judge-report.sql) is four read-only queries: current facts by verdict; the facts not found supported, with the reason; each memory key with the judged turns it was in context for, how often it was relevant and how it was used; and the last runs. The output holds keys and reasons, so it stays on the host.
+
 ### Telemetry and the private record
 
-`learner.finished` logs the state and counts (tasks reviewed, successes, pitfalls, facts, retirements, refusals, flagged, model calls; its flagged counts items written with any flag, routine ones included, while `memory.selected` counts warning flags only), and for a procedure pass the procedures written, lessons absorbed, windows read and items left unread. `lessonCount` remains for older records. `learner.failed` and `learner.item_refused` log the error class only.
+`learner.finished` logs the state and counts (tasks reviewed, successes, pitfalls, facts, retirements, refusals, flagged, model calls; its flagged counts items written with any flag, routine ones included, while `memory.selected` counts warning flags only), and for a procedure pass the procedures written, lessons absorbed, windows read and items left unread. For a judge pass it logs the facts judged and found supported, the turns judged, the memories found relevant, followed, ignored and contradicted, and the items missed. `lessonCount` remains for older records. `learner.failed` and `learner.item_refused` log the error class only.
 
 Each run also keeps a private record in the Postgres `events` table, under the run's `runtime_runs` ID, with credentials scrubbed. These event types are not in the ops-log projection, so their text never leaves the host:
 
@@ -176,8 +200,10 @@ Each run also keeps a private record in the Postgres `events` table, under the r
 - `learner.proposal`: each tool call as the model sent it, with the host's verdict and refusal reason.
 - `learner.retry`: a response that finished with refusals, and how many, when it earned another turn.
 - `learner.applied`: what finally happened to each accepted item (`written` with its revision ID, `unchanged`, `absorbed`, `retired`, `skipped_owner_fact`, `skipped_not_learned`, `failed`).
+- `judge.fact`: a judged fact's revision ID and key, the verdict and the judge's one-sentence reason.
+- `judge.turn`: a judged turn's run ID, its state (`judged`, `skipped` or `missed`), how many memories were in context, and each relevant one with its revision ID, key, use and reason.
 
-With trace export on, each run is also a trace in agentwatch, on the same host: its model calls with tokens and cost, and the memory changes it applied, linked to the turns they came from. With message content captured (on in production), the trace also holds the prompts the learner read and its replies. See [tracing](tracing.md#memory).
+With trace export on, each run is also a trace in agentwatch, on the same host: its model calls with tokens and cost, and the memory changes it applied, linked to the turns they came from. A judged turn gets two scores on its own trace ([tracing](tracing.md#memory-use)). With message content captured (on in production), the trace also holds the prompts the learner read and its replies. See [tracing](tracing.md#memory).
 
 A pre-empted run keeps its record, so a deferred attempt can be read too. The record is best effort: the memory tables are the ledger, so a failed insert logs `learner.trace_failed` and learning carries on. A model call that throws leaves no `learner.model_call`, only the failed run and its error class. Runs before this record existed left counts only. To read the latest run's proposals on the host:
 
