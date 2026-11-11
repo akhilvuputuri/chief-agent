@@ -169,6 +169,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 11 November | [160 — Direct Anthropic provider](160-direct-anthropic-provider.md): can Chief call Anthropic directly, alongside OpenRouter, and switch between them? | Released in `a7c1993` (PR #441), inert in production (no key on the host); verified live locally with a temporary key on 11 November; enabling follows in journal 161 |
 | 11 November | [161 — Enabling the direct Anthropic route](161-enabling-direct-anthropic.md): what does it take to switch Chief to the direct Anthropic route? | Prepared and tested offline; awaiting review, merge and the operator rollout. Owner-approved: Compose passes the key, Chief asks for 32,000 output tokens, every Pi coding role on Opus 5.5 with a 64,000-token reviewer; the nightly learner and judge ask for 32,000 too |
 | 11 November | [162 — Advisories in the dependency tree](162-advisories-in-the-dependency-tree.md): which published advisories reach Chief, and which can be fixed without a major upgrade? | Tested; release pending. Six packages updated in range and the Pi runtime's undici moved to 8.12.4; zod, minimatch and `pi-coding-agent`'s pinned undici stay open |
+| 11 November | [163 — Browser errors reach the agent](163-browser-errors-reach-the-agent.md): why did the browser agent's clicks fail, and why couldn't it tell? |
 
 ## Coding-agent learning path
 

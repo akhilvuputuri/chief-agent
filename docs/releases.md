@@ -1,3 +1,9 @@
+## Browser errors reach the agent (11 November 2026)
+
+- **Code.** A command the public browser refuses now reaches the browser agent as `BROWSER_REFUSED`, with the browser's reason cut to 300 characters and marked untrusted, instead of the generic `TOOL_FAILED`. Gateway only; the browser service and images are unchanged, so no refresh is needed. No database or Compose change.
+- **Why.** The first real tasks ran on 8, 9 and 11 November. On 11 November 6 of 13 clicks failed on SingPost, and neither the agent nor the journal kept the reason. See [journal 163](journey/163-browser-errors-reach-the-agent.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Dependency updates for published advisories (11 November 2026)
 
 - **Code.** Lockfiles and one pin; no source change. Root lockfile: body-parser 2.4.0, qs 6.17.1, ip-address 10.7.6, fast-uri 3.1.9 and 4.2.3, fastify 5.12.8 (with find-my-way 9.10.0, ret 0.5.1 and safe-regex2 5.1.2). Pi runtime: `undici` pinned at 8.12.4 instead of 8.10.2. No database or Compose change.
