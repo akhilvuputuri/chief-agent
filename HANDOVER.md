@@ -1,9 +1,9 @@
 # Dependency advisories — tested, release pending, 11 November 2026
 
 - **Changed:** lockfile updates within declared ranges (body-parser, qs, ip-address, fast-uri, fastify) and the Pi runtime's `undici` pin, 8.10.2 to 8.12.4. No source change. See [journal 162](docs/journey/162-advisories-in-the-dependency-tree.md) for which advisory reaches what.
-- **Still flagged by OSV, deliberately:** zod 3.25.76 (no 3.x fix), minimatch 10.2.6 (fixed in 11.0.1) and `pi-coding-agent` 1.1.0's own undici 8.10.2. Kite refuses `overrides`, so the last two change only with `pi-coding-agent` 1.5.x.
-- **Measured exposure:** zod keeps one issue per failing array element even past `.max()`: 22 MB of heap for a 120 kB body, 1.1 GB for an 8 MB worker request. Bodies over 400 kB are accepted only on coding worker routes with a job's token.
-- **Pending:** a worker image built from this change, then its pin; the owner's decisions on `pi-coding-agent` 1.5.x and on zod 4 or a length check ahead of zod on worker routes.
+- **Still flagged by OSV, deliberately:** zod 3.25.76 (no 3.x fix), minimatch 10.2.6 (fixed in 11.0.1) and `pi-coding-agent` 1.1.0's own undici 8.10.2. Kite refuses `overrides`, so the last two change only with `pi-coding-agent` 1.5.x (minimatch 11.0.3, undici 8.12.3). In a worker that pinned copy loads first and is the default dispatcher of built-in `fetch` (measured), so only the model calls, through `patientFetch`, use 8.12.4.
+- **Measured exposure:** zod keeps one issue per failing array element even past `.max()`: 22 MB of heap for a 120 kB body, 1.1 GB for an 8 MB worker request. Bodies over 400 kB are allowed only on coding worker routes, and zod parses them only after the job's token is checked.
+- **Pending:** a worker image built from this change, then its pin; the owner's decisions on `pi-coding-agent` 1.5.x or setting the worker's default dispatcher from the 8.12.4 copy, and on zod 4 or a length check ahead of zod on worker routes.
 
 # Direct Anthropic provider — built and verified live locally, not released or enabled, 11 November 2026
 
