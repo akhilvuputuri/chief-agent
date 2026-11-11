@@ -1,6 +1,6 @@
 # Four test shards in CI — in review, 11 November 2026
 
-CI jobs were queueing for runners: no more than 20 were seen running at once across the account, and one pull request run wants 13. With tests about twice as fast, CI now splits them four ways instead of six, which should keep each test job under the image job's length. See [journal 163](journey/163-four-test-shards.md).
+CI jobs were queueing for runners: no more than 20 were seen running at once across the account, and one pull request run wants 13. With tests about twice as fast, CI now splits them four ways instead of six, which should keep each test job under the image job's length. See [journal 164](journey/164-four-test-shards.md).
 
 # Dependency advisories — live in `1335f6d`, 11 November 2026
 
@@ -39,6 +39,8 @@ agentwatch can now say a metric moved between two windows, on a Drift page and a
 # Public browser agent — live, no real task yet, 2 November 2026
 
 The owner asked for an open `agent-browser` for Chief. It runs as a separate agent with one tool, no logins and its own container, so a hostile page has little to reach. The operator rollout and one real refresh passed on the host, including the confinement probe. No real task has run, so no model has received the tool's schema yet. The refresh stays manual, about monthly. See [the release record](releases.md) and [journal 148](journey/148-public-browser-agent.md).
+
+> **Update, 11 November 2026 ([journal 163](journey/163-browser-errors-reach-the-agent.md)):** real tasks have run since 8 November: seven browser runs, all parcel tracking, five of them on 11 November. On SingPost 6 of 13 clicks failed, and the agent saw only a generic "the tool failed". A refused browser command now reaches the agent with the browser's own reason, bounded and marked untrusted. The cause of the failed clicks is still unproven.
 
 # Mail recall on pgvector — live in `d58a9ca`, 1 November 2026
 

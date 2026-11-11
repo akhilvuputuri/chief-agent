@@ -42,6 +42,8 @@ The model reaches a typed command list (`src/public-browser/commands.ts`): `open
 - **Evidence.** `read` stores the page as an owner `research_source` and returns 8,000 characters at a time, with `nextOffset`. The address is `location.href`, which a page cannot redefine, read before and after the text, and the read is refused if it changed or is not HTTPS. After any `eval` in the session, `read` returns text with no `sourceId`, because a script could have rewritten the page. A hostile site can still say what it likes about itself, and `fill` on an editable element or a reflected search term can change page text, as a URL can with `web_read`. A checked quote proves the page showed it, not that it is true.
 - **Classification.** `public_browser` is a read operation, because it acts only anonymously and an unknown outcome must not stop the owner's writes. The loop's read assumptions do not all hold, so it is excepted from three: it is never retried, because its error text is page-controlled and the call may be a click; a success clears earlier refusals, because pages change; and repeat-failure counting is per command.
 
+> **Update, 11 November 2026 ([journal 163](journey/163-browser-errors-reach-the-agent.md)):** a refused command reaches the agent as `BROWSER_REFUSED`, with the browser's reason cut to 300 characters and marked as coming from the browser and the page. Before this, the gateway turned it into the generic `TOOL_FAILED`, so the agent never saw why a click failed.
+
 The agent's instructions also stop it at login walls, CAPTCHAs and payment steps, and from posting, sending, booking or buying. That is guidance, not a host check.
 
 ## What it will not do

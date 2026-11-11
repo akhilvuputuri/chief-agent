@@ -1,7 +1,13 @@
 ## Four test shards in CI (11 November 2026)
 
 - **Code.** CI splits the TypeScript tests four ways instead of six, with re-recorded shard weights. Nothing in the running application changes.
-- **Why.** Jobs were waiting for runners: a run wants 13 jobs, and no more than 20 were seen running at once across the account. See [journal 163](journey/163-four-test-shards.md).
+- **Why.** Jobs were waiting for runners: a run wants 13 jobs, and no more than 20 were seen running at once across the account. See [journal 164](journey/164-four-test-shards.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
+## Browser errors reach the agent (11 November 2026)
+
+- **Code.** A command the public browser refuses now reaches the browser agent as `BROWSER_REFUSED`, with the browser's reason cut to 300 characters and marked untrusted, instead of the generic `TOOL_FAILED`. Gateway only; the browser service and images are unchanged, so no refresh is needed. No database or Compose change.
+- **Why.** The first real tasks ran on 8, 9 and 11 November. On 11 November 6 of 13 clicks failed on SingPost, and neither the agent nor the journal kept the reason. See [journal 163](journey/163-browser-errors-reach-the-agent.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
 
 ## Dependency updates for published advisories (11 November 2026)
