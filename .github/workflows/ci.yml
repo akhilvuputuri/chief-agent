@@ -51,8 +51,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Four shards: with reused databases each takes about as long as the image job, and
-        # every job fewer leaves room under the account's 20 concurrent jobs (journal 163).
+        # Four shards: with reused databases a shard's job still finishes before the image
+        # job, and jobs were seen queueing once 20 ran at a time (journal 163).
         shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4

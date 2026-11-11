@@ -1,7 +1,7 @@
 # 163 — How many test shards does CI need now that tests are faster?
 
 Work date: 11 November 2026. Written: 11 November 2026.
-Status: tested in one CI run on the pull request. Not yet released.
+Status: measured in one CI run on the pull request. Not yet released.
 
 ## User-visible problem and preceding iteration
 
@@ -30,9 +30,16 @@ Most of the queue that day came from Kite's CI, which built the same binary in 3
 
 ## Verification and outcome
 
-Pending: the pull request's own run, which is the first with four shards.
+**Measured, the pull request's own run (43053167239, `7b9a479`), the first with four shards:**
+
+- The four `test:ts` steps took 92, 99, 94 and 78 s, inside the 70–130 s expected. The test jobs took 96–117 s.
+- The image job took 152 s, and the whole run 172 s, from 15:55:29 to 15:58:21 UTC. Journal 158's runs took about as long with six shards.
+- The run had 11 jobs besides the skipped image publish, against 13 before.
+
+This is one run. Runner speeds varied by up to two times between shards in earlier measurements ([journal 138](138-faster-ci-checks.md)).
+
+**Review (Claude Opus 5.5), `7b9a479`: changes requested, on the records only.** The index row for this entry was in the wrong table, the status said tested before any four-shard run had finished, and three places stated the 20-job limit as a known fact. The reviewer confirmed the shard split (157 files, each in exactly one shard, none without a weight) and the figures above from the run itself.
 
 ## Follow-up and next iteration
 
-- Record the four shards' times and the run's length here.
 - Reconsider three shards if the image job gets faster.

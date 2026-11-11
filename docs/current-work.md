@@ -1,6 +1,6 @@
 # Four test shards in CI — in review, 11 November 2026
 
-CI jobs were queueing for runners: the account runs 20 jobs at once and one pull request run wanted 13. With tests about twice as fast, CI now splits them four ways instead of six, which should keep each test job under the image job's length. See [journal 163](journey/163-four-test-shards.md).
+CI jobs were queueing for runners: no more than 20 were seen running at once across the account, and one pull request run wants 13. With tests about twice as fast, CI now splits them four ways instead of six, which should keep each test job under the image job's length. See [journal 163](journey/163-four-test-shards.md).
 
 # Dependency advisories — live in `1335f6d`, 11 November 2026
 

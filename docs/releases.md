@@ -1,7 +1,7 @@
 ## Four test shards in CI (11 November 2026)
 
 - **Code.** CI splits the TypeScript tests four ways instead of six, with re-recorded shard weights. Nothing in the running application changes.
-- **Why.** Jobs were waiting for runners: a run wanted 13 of the account's 20 concurrent jobs. See [journal 163](journey/163-four-test-shards.md).
+- **Why.** Jobs were waiting for runners: a run wants 13 jobs, and no more than 20 were seen running at once across the account. See [journal 163](journey/163-four-test-shards.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
 
 ## Dependency updates for published advisories (11 November 2026)
