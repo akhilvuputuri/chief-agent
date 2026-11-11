@@ -3,6 +3,8 @@
 Work date: 11 November 2026. Written: 11 November 2026.
 Status: tested offline, and the request shape verified live for Sonnet 5.5 and Haiku 5.5; not merged. Revised the same day after the owner's second set of decisions (below). PR 442's rollout ran first.
 
+> **Update, 12 November 2026:** live in `8ccbe34` (PR 445, release run 43055693795). `model.routes` at startup: `mainRoute`, `standardRoute`, `fastRoute`, `judgeRoute` and `mediaRoute` all `anthropic-direct`. One call each through the released router inside the gateway returned `pong` direct with no fallback: Haiku 5.5 (1.6 s, $0.0000046), Sonnet 5.5 (1.4 s, $0.000092), Opus 5.5 (1.2 s, $0.000184). No `model.provider_fallback` in the first 20 minutes. Not yet observed: a real fallback message, the first Opus judge night, and Haiku on real agent work.
+
 ## User-visible problem and preceding iteration
 
 [Journal 161](161-enabling-direct-anthropic.md) prepared the switch to the direct Anthropic route for Opus 5.5: Chief's main model, the `standard` agent tier (which the learner uses) and every Pi coding role. The owner then said Chief now has $200 a month of Claude credits, more than the OpenRouter budget, and asked for a full scan of Chief so every model moves to Claude: Opus for Chief, coding and review, Sonnet where a cheaper model is used, Haiku where Gemini Flash is used. Jev stays on OpenRouter.

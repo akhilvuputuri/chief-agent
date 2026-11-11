@@ -1,5 +1,7 @@
 ## Claude models everywhere (11 November 2026)
 
+> **Update, 12 November 2026:** live in `8ccbe34` (PR 445, release run 43055693795). `model.routes` at startup: `mainRoute`, `standardRoute`, `fastRoute`, `judgeRoute` and `mediaRoute` all `anthropic-direct`. One call each through the released router inside the gateway returned `pong` direct with no fallback: Haiku 5.5 (1.6 s, $0.0000046), Sonnet 5.5 (1.4 s, $0.000092), Opus 5.5 (1.2 s, $0.000184). No `model.provider_fallback` in the first 20 minutes.
+
 - **Configuration.** `config/model-policy.json`: the `fast` agent tier (the default) moves from `google/gemini-3.8-flash` to `anthropic/claude-haiku-5.5`, the judge from `openai/gpt-6.1-sol` to `anthropic/claude-opus-5.5`, and Sonnet 5.5 and Haiku 5.5 join the direct Anthropic map. Opus 5.5 stays the main model and the `standard` tier. Jev, embeddings, speech and the search helper are unchanged.
 - **Code.** The direct adapter accepts Sonnet 5.5 and Haiku 5.5; a rate limit cools only the model that hit it; each fallback to OpenRouter sends the owner a Telegram message (at most one per fault an hour). Haiku's recorded cost uses its under-100,000-token price. No database or Compose change; releases normally, after PR 442's rollout.
 - **Why.** The owner asked for every model to move to Claude, using monthly Claude credits. See [journal 164](journey/164-claude-models-everywhere.md).
