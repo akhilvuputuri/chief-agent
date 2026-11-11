@@ -1,3 +1,7 @@
+# Four test shards in CI — in review, 11 November 2026
+
+CI jobs were queueing for runners: the account runs 20 jobs at once and one pull request run wanted 13. With tests about twice as fast, CI now splits them four ways instead of six, which should keep each test job under the image job's length. See [journal 163](journey/163-four-test-shards.md).
+
 # Dependency advisories — live in `1335f6d`, 11 November 2026
 
 Published advisories (OSV, read 11 November) flagged nine package versions in the root lockfile and two in the Pi runtime's. Updated within their ranges, lockfiles only: body-parser 2.4.0, qs 6.17.1, ip-address 10.7.6, fast-uri 3.1.9 and 4.2.3, fastify 5.12.8. The Pi runtime's own undici moves from 8.10.2 to 8.12.4: with the next pinned worker image the worker's model calls use it, while its other requests, to the gateway and GitHub's API, stay on the 8.10.2 copy `pi-coding-agent` 1.1.0 pins, which loads first and becomes the default dispatcher (measured). Read from source, Chief does not reach the affected behaviour of the updated packages; only the worker's undici copies serve requests, to its own gateway and GitHub's API. Still flagged, and not forced: zod 3.25.76 (fixed only in 4.6.6; measured, an 8 MB worker request of failing array elements grows the heap by 1.1 GB), minimatch 10.2.6 (fixed only in 11.0.1) and that pinned undici 8.10.2; an upgrade to `pi-coding-agent` 1.5.x brings minimatch 11.0.3 and undici 8.12.3. See [journal 162](journey/162-advisories-in-the-dependency-tree.md).

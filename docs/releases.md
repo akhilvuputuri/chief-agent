@@ -1,3 +1,9 @@
+## Four test shards in CI (11 November 2026)
+
+- **Code.** CI splits the TypeScript tests four ways instead of six, with re-recorded shard weights. Nothing in the running application changes.
+- **Why.** Jobs were waiting for runners: a run wanted 13 of the account's 20 concurrent jobs. See [journal 163](journey/163-four-test-shards.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Dependency updates for published advisories (11 November 2026)
 
 - **Code.** Lockfiles and one pin; no source change. Root lockfile: body-parser 2.4.0, qs 6.17.1, ip-address 10.7.6, fast-uri 3.1.9 and 4.2.3, fastify 5.12.8 (with find-my-way 9.10.0, ret 0.5.1 and safe-regex2 5.1.2). Pi runtime: `undici` pinned at 8.12.4 instead of 8.10.2. No database or Compose change.
