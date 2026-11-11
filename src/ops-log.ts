@@ -79,6 +79,8 @@ const fields: Record<string, Shape> = {
   route: "code",
   /** model.completed after a direct Anthropic failure: the pathway it fell back from. */
   fallbackFrom: "code",
+  /** A direct call that retried once without its rejected thinking replay. */
+  replayDropped: "bool",
   /** model.provider_fallback: seconds the direct pathway stays off. */
   cooldownS: "count",
   /** model.routes at startup: MODEL_PROVIDER, key presence and each role's pathway. */
@@ -359,6 +361,7 @@ function usageFields(usage: unknown): OpsFields {
     costUsd: num(u.cost) ?? null,
     route: u.route,
     fallbackFrom: u.fallback_from,
+    replayDropped: u.replay_dropped,
   };
 }
 
@@ -443,6 +446,7 @@ const projections: Record<string, Projection> = {
       route: d.diagnostics?.route,
       errorCode: d.diagnostics?.errorCode,
       errorType: d.diagnostics?.errorType,
+      replayDropped: d.diagnostics?.replayDropped,
       httpStatus: d.diagnostics?.httpStatus,
       state: finishName(d.diagnostics?.finishReason),
       finishReason: finishName(d.diagnostics?.finishReason),

@@ -8,7 +8,7 @@ Issue [#143](https://github.com/akhilvuputuri/chief-agent/issues/143) separates 
 | Personal identifiers | Private environment (the repository is public)                        | allowed Telegram IDs, owner IDs, email addresses, spreadsheet IDs, Mini App origin                   |
 | Secrets              | Private environment today; a secret store is planned (#143)           | bot token, API keys, Google client secret and refresh tokens, `LIBRARY_IDENTITY_KEY`, `DATABASE_URL` |
 
-A secret or identifier reaches the production gateway only if `compose.yaml` passes it. `ANTHROPIC_API_KEY` is not passed yet, so a value in the server `.env` has no effect until the reviewed Compose rollout in [model providers](model-providers.md#enabling-it).
+A secret or identifier reaches the production gateway only if `compose.yaml` passes it. `ANTHROPIC_API_KEY` and the optional `ANTHROPIC_WORKSPACE_ID` (the Console workspace, `wrkspc_…`, that a key not scoped to a workspace needs; an identifier, not a secret) are not passed yet, so values in the server `.env` have no effect until the reviewed Compose rollout in [model providers](model-providers.md#enabling-it). The workspace ID is an environment value, not a `config/runtime.json` setting, because that file refuses identifiers.
 
 Other reviewed policy files already in the repo:
 

@@ -276,7 +276,14 @@ test("model logs name the direct pathway, its fallbacks and the startup routes",
       provider: "Claude Platform on AWS",
       usage: { cost: 0.002, fallback_from: "anthropic-direct" },
     });
-    const [direct, fallback] = log.parsed();
+    projectEvent("model.completed", randomUUID(), {
+      model: "anthropic/claude-opus-5.5",
+      provider: "Anthropic",
+      usage: { cost: 0.001, route: "anthropic-direct", replay_dropped: true },
+    });
+    const [direct, fallback, replayed] = log.parsed();
+    assert.equal(replayed.replayDropped, true);
+    assert.equal("dropped" in replayed, false);
     assert.equal(direct.provider, "anthropic");
     assert.equal(direct.route, "anthropic-direct");
     assert.equal(direct.cachedTokens, 4);
@@ -300,7 +307,7 @@ test("model logs name the direct pathway, its fallbacks and the startup routes",
       transient: true,
       diagnostics: { httpStatus: 502 },
     });
-    const [, , failedDirect, failedRouted] = log.parsed();
+    const [, , , failedDirect, failedRouted] = log.parsed();
     assert.equal(failedDirect.event, "model.failed");
     assert.equal(failedDirect.route, "anthropic-direct");
     assert.equal(failedDirect.provider, "anthropic");

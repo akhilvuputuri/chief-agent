@@ -224,7 +224,8 @@ test("Chief requests translate to the Messages API with thinking, effort, betas 
   assert.deepEqual(body.output_config, { effort: "high" });
   // Server-side refusal fallbacks are never requested (they could serve above the ceilings).
   assert.equal(body.fallbacks, undefined);
-  assert.deepEqual(body.cache_control, { type: "ephemeral" });
+  // No top-level automatic mark: it would land on the volatile state message.
+  assert.equal(body.cache_control, undefined);
   for (const absent of ["temperature", "top_p", "tool_choice", "metadata"])
     assert.equal(body[absent], undefined);
   assert.ok(!JSON.stringify(body).includes("private-"));
@@ -286,7 +287,8 @@ test("Chief requests translate to the Messages API with thinking, effort, betas 
       content: [{ type: "text", text: "Current state: 10:00" }],
     },
   ]);
-  assert.equal(marked(body).length + 1, 4);
+  // Three explicit marks: stable system block, owner's message, last block before the state.
+  assert.equal(marked(body).length, 3);
   // The caller's messages are not modified.
   assert.deepEqual((messages[2]!.content as any)[0].cache_control, {
     type: "ephemeral",
@@ -554,8 +556,10 @@ test("Chief's two leading system messages: only the stable first one is marked, 
     assert.equal(body.system[1].cache_control, undefined);
     assert.equal(body.messages.at(-1).role, "system");
     assert.equal(body.messages.at(-1).content[0].cache_control, undefined);
-    // Top-level plus at most three block marks: Anthropic allows four breakpoints.
-    assert.ok(marked(body).length + 1 <= 4);
+    // No top-level mark; the owner's message is also the last block before the state,
+    // so two distinct marks (stable system block, owner's message).
+    assert.equal(body.cache_control, undefined);
+    assert.equal(marked(body).length, 2);
   }
   // The marked prefix is byte-identical across turns although the summary changed.
   assert.deepEqual(first.system[0], second.system[0]);
@@ -795,12 +799,12 @@ test("streaming reports progress and abort rethrows the signal's reason", async 
     },
   });
   assert.ok(progress.length >= 2);
+  assert.ok(progress.every((p) => p.provider === "Anthropic" && p.bytes > 0));
+  // Wire progress can precede message_start; event progress names the response.
+  assert.ok(progress.some((p) => p.responseId === "msg_fixture"));
   assert.ok(
     progress.every(
-      (p) =>
-        p.responseId === "msg_fixture" &&
-        p.provider === "Anthropic" &&
-        p.bytes > 0,
+      (p) => p.responseId === undefined || p.responseId === "msg_fixture",
     ),
   );
   const quiet: any[] = [];
@@ -821,6 +825,181 @@ test("streaming reports progress and abort rethrows the signal's reason", async 
       onProgress: () => controller.abort(reason),
     }),
     (error) => error === reason,
+  );
+});
+
+test("pings during a long thinking phase still report progress, without counting as output", async () => {
+  const events = stream([{ type: "thinking", thinking: "", signature: "s" }]);
+  const head = [events[0]!, events[1]!]; // message_start, thinking content_block_start
+  const pings = Array.from({ length: 4 }, () => ({ type: "ping" }));
+  const { model } = adapter(() => sse([...head, ...pings], { close: false }));
+  const controller = new AbortController();
+  const reason = new Error("stop waiting");
+  const progress: any[] = [];
+  setTimeout(() => controller.abort(reason), 200);
+  await assert.rejects(
+    run(model, [{ role: "user", content: "x" }], {
+      signal: controller.signal,
+      stream: true,
+      onProgress: (value) => void progress.push(value),
+    }),
+    (error) => error === reason,
+  );
+  const wire = [...head, ...pings].reduce(
+    (n, e) =>
+      n +
+      encoder.encode(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`)
+        .byteLength,
+    0,
+  );
+  // One report per received chunk, pings included, up to every byte received.
+  assert.ok(progress.length >= head.length + pings.length);
+  assert.equal(progress.at(-1).bytes, wire);
+  // A failing progress callback on the wire path never fails the call. Wire reports of
+  // the first chunk precede message_start, so they carry no responseId; those reject here.
+  const ok = adapter(() => sse(stream(reply)));
+  let rejectedReports = 0;
+  const result = await run(ok.model, [{ role: "user", content: "x" }], {
+    stream: true,
+    onProgress: async (p) => {
+      if (p.responseId === undefined) {
+        rejectedReports++;
+        throw new Error("telemetry down");
+      }
+    },
+  });
+  assert.ok(rejectedReports >= 1);
+  assert.equal(result.message.content, "Done.");
+  // A ping-only failure before any content stays a provider fault (no output was emitted).
+  const early = adapter(() =>
+    sse([
+      events[0]!,
+      { type: "ping" },
+      { type: "error", error: { type: "overloaded_error", message: "raw" } },
+    ]),
+  );
+  await assert.rejects(
+    run(early.model, [{ role: "user", content: "x" }], {
+      stream: true,
+      onProgress: () => {},
+    }),
+    (e: ModelError) => e.diagnostics.providerFault === "unavailable",
+  );
+});
+
+test("without a trailing state message the last block still carries a mark", async () => {
+  const { model, requests } = adapter(() => sse(stream(reply)));
+  await run(model, [
+    { role: "system", content: "Stable" },
+    { role: "user", content: "Question" },
+    { role: "assistant", content: "Answer" },
+    { role: "user", content: "Follow-up" },
+  ]);
+  const { body } = requests[0]!;
+  assert.equal(body.cache_control, undefined);
+  assert.deepEqual(body.messages.at(-1).content.at(-1), {
+    type: "text",
+    text: "Follow-up",
+    cache_control: { type: "ephemeral" },
+  });
+  assert.deepEqual(body.system[0].cache_control, { type: "ephemeral" });
+});
+
+test("a rejected thinking replay retries once without it, marked; otherwise no retry", async () => {
+  const thinking = { type: "thinking", thinking: "", signature: "bad-sig" };
+  const history: ModelMessage[] = [
+    { role: "user", content: "x" },
+    {
+      role: "assistant",
+      content: "Earlier",
+      tool_calls: [
+        {
+          id: "toolu_1",
+          type: "function",
+          function: { name: "t", arguments: "{}" },
+        },
+      ],
+      reasoning_details: [
+        {
+          type: "anthropic.thinking",
+          format: "anthropic-direct-v1",
+          block: thinking,
+        },
+      ],
+    },
+    { role: "tool", tool_call_id: "toolu_1", content: "result" },
+  ];
+  const rejected = () =>
+    Response.json(
+      {
+        type: "error",
+        error: { type: "invalid_request_error", message: "raw provider text" },
+      },
+      { status: 400 },
+    );
+  const types = (body: any) =>
+    body.messages[1].content.map((b: Block) => b.type);
+  // First 400, then 200: success with the marker; the retry has no thinking blocks.
+  const healed = adapter((call) =>
+    call === 1 ? rejected() : sse(stream(reply)),
+  );
+  const result = await run(healed.model, history);
+  assert.equal(result.usage!.replay_dropped, true);
+  assert.equal(healed.requests.length, 2);
+  assert.deepEqual(types(healed.requests[0]!.body), [
+    "thinking",
+    "text",
+    "tool_use",
+  ]);
+  assert.deepEqual(types(healed.requests[1]!.body), ["text", "tool_use"]);
+  // Both 400: the rejected fault surfaces, so the router can fall back.
+  const broken = adapter(() => rejected());
+  await assert.rejects(run(broken.model, history), (e: ModelError) => {
+    assert.equal(e.diagnostics.providerFault, "rejected");
+    assert.equal(e.diagnostics.replayDropped, true);
+    assert.ok(!JSON.stringify(e.diagnostics).includes("raw provider"));
+    return true;
+  });
+  assert.equal(broken.requests.length, 2);
+  // No replayed blocks: no retry.
+  const plain = adapter(() => rejected());
+  await assert.rejects(
+    run(plain.model, [{ role: "user", content: "x" }]),
+    (e: ModelError) =>
+      e.diagnostics.providerFault === "rejected" &&
+      e.diagnostics.replayDropped === undefined,
+  );
+  assert.equal(plain.requests.length, 1);
+  // Other faults with replayed blocks do not retry either.
+  const busy = adapter(() =>
+    Response.json(
+      { type: "error", error: { type: "overloaded_error", message: "x" } },
+      { status: 529 },
+    ),
+  );
+  await assert.rejects(run(busy.model, history), ModelError);
+  assert.equal(busy.requests.length, 1);
+  // Nor does beta enrollment, which no replay change can fix.
+  const enrolled = adapter(() =>
+    Response.json(
+      {
+        type: "error",
+        error: {
+          type: "invalid_request_error",
+          message: "x",
+          details: { error_code: "organization_not_enrolled_in_beta" },
+        },
+      },
+      { status: 400 },
+    ),
+  );
+  await assert.rejects(run(enrolled.model, history), ModelError);
+  assert.equal(enrolled.requests.length, 1);
+  // A successful first call carries no marker.
+  const fine = adapter(() => sse(stream(reply)));
+  assert.equal(
+    (await run(fine.model, history)).usage!.replay_dropped,
+    undefined,
   );
 });
 
