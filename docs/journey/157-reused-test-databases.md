@@ -1,7 +1,7 @@
 # 157 — Where does test time go, and can a test get a database for less?
 
 Work date: 10 November 2026. Written: 10 November 2026.
-Status: tested locally and in one CI run. Release is pending.
+Status: tested locally and in CI. Release is pending.
 
 ## User-visible problem and preceding iteration
 
@@ -37,12 +37,12 @@ Most of a test's time goes to restoring a database snapshot into PGlite's in-mem
 
 `migratedPGlite` in `tests/helpers/pglite.ts` now returns a handle over a pooled database. No test changed.
 
-- **Close:** `close()` resets the database and keeps it for the next caller with the same migration list. The old handle then refuses every method call with `PGlite is closed`, and its listeners are removed, so late work from a finished test does not reach the next one through it.
+- **Close:** `close()` resets the database and keeps it for the next caller with the same migration list. The old handle then refuses every method call with `PGlite is closed`, and listeners registered through it are removed, so late work from a finished test does not reach the next one through it.
 - **Reset:** roll back any open transaction, delete from the tables that hold rows (with triggers and foreign keys off), vacuum them, put back the rows the migrations inserted, restart every sequence, then `DISCARD ALL`.
 - **Never reused:** a database whose schema changed, or that gained a role or a large object. Event triggers record every schema change in a table, so a rolled-back change is rolled back in the record too, and they keep firing in replica mode. A table that vacuum did not return to zero size is not reused either.
 - **Off switch:** `TEST_DB_REUSE=0` restores the snapshot for every call, as before.
 
-**Known limits:** a test that deliberately drops or disables the `test_pool` triggers defeats the check. A value on the handle that is not a method, such as an extension's namespace, is not refused after close. `ALTER DATABASE ... SET` is not undone. No test does any of these.
+**Known limits:** a test that deliberately drops or disables the `test_pool` triggers defeats the check. A listener registered on a transaction object (`tx.listen`) is not removed on close, and was shown firing in the next test. A value on the handle that is not a method, such as an extension's namespace, is not refused after close. `ALTER DATABASE ... SET` is not undone. No test does any of these.
 
 **Review (Claude Opus 5.5), `7ee516c`: changes requested.** All findings were reproduced by experiment:
 
@@ -60,7 +60,11 @@ Most of a test's time goes to restoring a database snapshot into PGlite's in-mem
 
 **Measured, CI, the first version (`7ee516c`, run 42826457304):** the six `test:ts` steps took 74, 55, 41, 59, 88 and 65 s, 382 s in all. Their medians over six runs on main sum to 617 s, so this one run is 38% lower. The shards are now uneven because their weights were recorded before the change.
 
-**Not measured:** the reviewed version in CI, and more than one run.
+**Measured, CI, the reviewed version (`4d61f07`, run 42842523056):** 57, 47, 43, 64, 64 and 49 s, 324 s in all, 47% below main's 617 s. This is one run.
+
+**Review closure:** the same reviewer approved `4d61f07`, having confirmed that the row-order test fails against the first version, that vacuum returned tables to zero size with a held cursor open and with large rows, and that closing during a running transaction waits for it.
+
+**Not measured:** more than one CI run of each version, and coding boxes.
 
 ## Follow-up and next iteration
 
