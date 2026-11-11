@@ -51,6 +51,14 @@ export type AnthropicDirectReasoning = {
   type: typeof TAG;
   format: typeof FORMAT;
   block: Record<string, unknown>;
+  /**
+   * Where the block stood among the turn's visible blocks as Chief stores them: the index, in
+   * [text (when non-empty), tool_calls[0], tool_calls[1], ...], of the visible block it preceded
+   * (the length of that list when it came last). Text counts as preceding the block when any
+   * text block came before it in the response. Entries without it (stored before it existed)
+   * replay before every visible block.
+   */
+  position?: number;
 };
 /** True for reasoning entries produced by the direct Anthropic route (bound to that account). */
 export function isAnthropicDirectReasoning(
@@ -95,9 +103,11 @@ const cacheable = (block: Block) => !NATIVE.has(block.type);
  * The trailing state message each thinking block was generated after, so a replay can rebuild
  * the block's prefix exactly. Chief rebuilds its per-call state message every call (src/context.ts),
  * so without it the API drops every replayed in-turn block (prefix_binding_mismatch). Keys are
- * hashes of the block's signature or data; values are the exact state text, held only in this
- * process (bounded by entries and characters, least recently used first) and never logged. After a
- * restart the map is empty and replayed blocks are dropped, as before.
+ * hashes of the caller's scope (see callScope) and the block's signature or data, so a state
+ * recorded in one owner's run is never inserted into another's request, even one that carries a
+ * copied block; values are the exact state text, held only in this process (bounded by entries
+ * and characters, least recently used first) and never logged. After a restart the map is empty
+ * and replayed blocks are dropped, as before.
  */
 export class ThinkingStates {
   private map = new Map<string, string[]>();
@@ -106,7 +116,8 @@ export class ThinkingStates {
     private maxEntries = 2000,
     private maxChars = 8_000_000,
   ) {}
-  static key(block: Block) {
+  /** A hash of the scope and the block's signature (or data); undefined without either. */
+  static key(scope: string, block: Block) {
     const value =
       block.type === "thinking"
         ? block.signature
@@ -114,11 +125,13 @@ export class ThinkingStates {
           ? block.data
           : undefined;
     return typeof value === "string" && value
-      ? createHash("sha256").update(`${block.type}:${value}`).digest("hex")
+      ? createHash("sha256")
+          .update(JSON.stringify([scope, block.type, value]))
+          .digest("hex")
       : undefined;
   }
-  get(block: Block) {
-    const key = ThinkingStates.key(block);
+  get(scope: string | undefined, block: Block) {
+    const key = scope ? ThinkingStates.key(scope, block) : undefined;
     const value = key ? this.map.get(key) : undefined;
     if (key && value) {
       this.map.delete(key);
@@ -126,8 +139,9 @@ export class ThinkingStates {
     }
     return value;
   }
-  remember(block: Block, texts: string[]) {
-    const key = ThinkingStates.key(block);
+  /** Without a scope nothing is kept (see callScope). */
+  remember(scope: string | undefined, block: Block, texts: string[]) {
+    const key = scope ? ThinkingStates.key(scope, block) : undefined;
     const chars = texts.reduce((n, t) => n + t.length, 0);
     if (!key || !texts.length || chars > this.maxChars / 4) return;
     this.forget(key);
@@ -156,10 +170,65 @@ export class ThinkingStates {
 export const thinkingStates = new ThinkingStates();
 
 /**
+ * Replayed blocks the API rejected: when a request that replayed thinking got a 400 and the same
+ * request without thinking then succeeded, every block replayed in the rejected request is
+ * remembered here (by scope and signature hash, bounded, least recently used first) and is not
+ * replayed again, so a permanently rejected block costs one failed request, not one per call.
+ * Calls without a scope share one unscoped namespace, apart from every scoped one.
+ */
+export class RejectedReplays {
+  private keys = new Set<string>();
+  constructor(private max = 1000) {}
+  has(scope: string | undefined, block: Block) {
+    const key = ThinkingStates.key(scope ?? "", block);
+    if (!key || !this.keys.has(key)) return false;
+    this.keys.delete(key);
+    this.keys.add(key);
+    return true;
+  }
+  add(scope: string | undefined, block: Block) {
+    const key = ThinkingStates.key(scope ?? "", block);
+    if (!key) return;
+    this.keys.delete(key);
+    this.keys.add(key);
+    for (const oldest of this.keys) {
+      if (this.keys.size <= this.max) break;
+      this.keys.delete(oldest);
+    }
+  }
+  clear() {
+    this.keys.clear();
+  }
+  get entries() {
+    return this.keys.size;
+  }
+}
+export const rejectedReplays = new RejectedReplays();
+
+/**
+ * The owner and run a call belongs to: the host's spending scope (src/spending.ts), set for every
+ * owner run, agent and research child run and learner run, and consecutive calls of one run share
+ * it. Coding calls (whose messages come from a sandbox) and other calls without one get
+ * undefined, so no thinking state is recorded for them or inserted into their requests.
+ */
+function callScope() {
+  const store = spending.getStore();
+  return typeof store?.user === "string" &&
+    store.user &&
+    typeof store.run === "string" &&
+    store.run
+    ? JSON.stringify(["run", store.user, store.run])
+    : undefined;
+}
+
+/**
  * The API requires tool_use ids matching ^[a-zA-Z0-9_-]+$; other providers (through OpenRouter)
  * return ids such as `functions.memory_set:0` that stay in history. Those are mapped, the same way
  * for tool_use.id and tool_result.tool_use_id, to a sanitized prefix and a hash (at most 57
- * characters). Valid ids, including every id this API returns, are sent unchanged.
+ * characters). Valid ids, including every id this API returns, are sent unchanged. An id that
+ * recurs in later assistant turns (per-turn ids such as `functions.memory_set:0`) stays the same:
+ * measured 11 November 2026, the API accepts the same tool_use id in different assistant turns,
+ * mapped or native, and rejects it only twice within one turn, which a mapping cannot introduce.
  */
 const TOOL_ID = /^[A-Za-z0-9_-]{1,64}$/;
 export function anthropicToolId(id: string) {
@@ -228,11 +297,14 @@ const reminder = (text: string): Block => ({
 
 /**
  * Chief's OpenAI-style conversation as an Anthropic request (system, messages, cache marks).
- * With replay off, stored thinking is left out (text and tool_use stay); `replayed` says whether
- * any native thinking block was sent.
+ * With replay off, stored thinking is left out (text and tool_use stay), as are blocks the API
+ * rejected before; `replayed` lists the native thinking blocks sent.
  */
-function translate(messages: ModelMessage[], replay = true) {
-  let replayed = false;
+function translate(
+  messages: ModelMessage[],
+  { replay = true, scope }: { replay?: boolean; scope?: string } = {},
+) {
+  const replayed: Block[] = [];
   let start = 0;
   const system: Block[] = [];
   for (; messages[start]?.role === "system"; start++) {
@@ -279,20 +351,25 @@ function translate(messages: ModelMessage[], replay = true) {
           input: toolInput(call.function.arguments),
         })),
       ];
-      // Only this route's own blocks, verbatim and in order; others belong to another account.
-      const native =
+      // Only this route's own blocks, verbatim; others belong to another account.
+      const stored =
         replay && visible.length
           ? (m.reasoning_details ?? [])
               .filter(isAnthropicDirectReasoning)
-              .map((e) => e.block as Block)
-              .filter((b) => NATIVE.has(b.type))
-              .map((b) => ({ ...b }))
+              .filter(
+                (e) =>
+                  NATIVE.has((e.block as Block).type) &&
+                  !rejectedReplays.has(scope, e.block as Block),
+              )
           : [];
+      const native = stored.map((e) => ({ ...(e.block as Block) }));
       if (native.length) {
-        replayed = true;
+        replayed.push(...native);
         // Rebuild the block's prefix: the state message that ended the request it came from,
         // exactly as sent, unless that message is still in place.
-        const before = native.map((b) => thinkingStates.get(b)).find(Boolean);
+        const before = native
+          .map((b) => thinkingStates.get(scope, b))
+          .find(Boolean);
         const previous = messages[i - 1];
         if (
           before &&
@@ -307,7 +384,16 @@ function translate(messages: ModelMessage[], replay = true) {
             content: before.map((text) => ({ type: "text", text })),
           });
       }
-      content = [...native, ...visible];
+      // Each block back where it stood (interleaved thinking before each tool call, say);
+      // entries without a position lead, as before.
+      const at = stored.map(({ position: p }) =>
+        Number.isSafeInteger(p) && p! >= 0 ? Math.min(p!, visible.length) : 0,
+      );
+      content = [];
+      for (let slot = 0; slot <= visible.length; slot++) {
+        native.forEach((b, j) => at[j] === slot && content.push(b));
+        if (slot < visible.length) content.push(visible[slot]!);
+      }
     } else {
       const text = plain(m.content);
       content = text.trim() ? [{ type: "text", text }] : [];
@@ -502,7 +588,10 @@ export class AnthropicDirect implements ModelAdapter {
         output_config: { effort: input.reasoning },
         betas: [BETA],
       }) as unknown as BetaMessageStreamParams;
-    const { request, replayed, trailing } = translate(input.messages);
+    const scope = callScope();
+    const first = translate(input.messages, { scope });
+    const { request, replayed } = first;
+    let { trailing } = first;
     let message: BetaMessage;
     let rawInputs: Map<number, string>;
     let replayDropped = false;
@@ -518,7 +607,7 @@ export class AnthropicDirect implements ModelAdapter {
       // decision is structural: a pre-output 400 on a request that replayed thinking.
       const d = error instanceof ModelError ? error.diagnostics : undefined;
       if (
-        !replayed ||
+        !replayed.length ||
         input.signal.aborted ||
         d?.providerFault !== "rejected" ||
         d.httpStatus !== 400 ||
@@ -526,9 +615,10 @@ export class AnthropicDirect implements ModelAdapter {
       )
         throw error;
       replayDropped = true;
+      const retry = translate(input.messages, { replay: false, scope });
       try {
         ({ message, rawInputs } = await this.attempt(
-          body(translate(input.messages, false).request),
+          body(retry.request),
           input,
           maxOutputTokens,
         ));
@@ -537,6 +627,11 @@ export class AnthropicDirect implements ModelAdapter {
           retryError.diagnostics.replayDropped = true;
         throw retryError;
       }
+      // The same request without thinking succeeded, so the replay was what failed: never
+      // replay those blocks again. Later requests then skip exactly the blocks this retry left
+      // out, so the blocks it returns share its prefix and their states can be kept.
+      for (const b of replayed) rejectedReplays.add(scope, b);
+      trailing = retry.trailing;
     }
     const content = message.content as BetaContentBlock[];
     const usage = {
@@ -606,17 +701,22 @@ export class AnthropicDirect implements ModelAdapter {
           ]
         : [],
     );
-    const reasoning = content.flatMap((b) =>
-      NATIVE.has(b.type)
-        ? [
-            {
-              type: TAG,
-              format: FORMAT,
-              block: JSON.parse(JSON.stringify(b)),
-            } satisfies AnthropicDirectReasoning,
-          ]
-        : [],
-    );
+    // Each block's position among the visible blocks as stored (see AnthropicDirectReasoning).
+    const textSlot = text.trim() ? 1 : 0;
+    let textSeen = false;
+    let toolsSeen = 0;
+    const reasoning: AnthropicDirectReasoning[] = [];
+    for (const b of content) {
+      if (b.type === "text") textSeen = true;
+      else if (b.type === "tool_use") toolsSeen++;
+      else if (NATIVE.has(b.type))
+        reasoning.push({
+          type: TAG,
+          format: FORMAT,
+          block: JSON.parse(JSON.stringify(b)),
+          position: (textSeen ? textSlot : 0) + toolsSeen,
+        });
+    }
     if (input.requireComplete && !["stop", "tool_calls"].includes(finishReason))
       throw new ModelError(
         "The model response did not finish completely; no output was accepted.",
@@ -642,11 +742,12 @@ export class AnthropicDirect implements ModelAdapter {
         ...ROUTE,
         usage,
       });
-    // Remember the state each new thinking block followed (see ThinkingStates).
-    if (trailing && !replayDropped)
+    // Remember the state each new thinking block followed (see ThinkingStates), for this
+    // call's scope only.
+    if (trailing && scope)
       for (const b of content)
         if (NATIVE.has(b.type))
-          thinkingStates.remember(b as unknown as Block, trailing);
+          thinkingStates.remember(scope, b as unknown as Block, trailing);
     return {
       message: {
         role: "assistant",

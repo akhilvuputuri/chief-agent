@@ -5,9 +5,12 @@ import {
   anthropicToolId,
   isAnthropicDirectReasoning,
   stripAnthropicDirectReasoning,
+  rejectedReplays,
+  RejectedReplays,
   thinkingStates,
   ThinkingStates,
 } from "../src/anthropic.js";
+import { z } from "zod";
 import { ModelError, type ModelMessage } from "../src/model.js";
 import { spending, type Spending } from "../src/spending.js";
 
@@ -154,6 +157,17 @@ const run = (
     ...extra,
   });
 const reply = [{ type: "text", text: "Done." }];
+/** Runs fn inside a spending scope like the gateway's (owner and run), without a database. */
+const scoped = <T>(user: string, runId: string, fn: () => Promise<T>) =>
+  spending.run(
+    {
+      user,
+      run: runId,
+      begin: async () => undefined,
+      settle: async () => {},
+    } as unknown as Spending,
+    fn,
+  );
 
 function marked(body: any) {
   const blocks = [
@@ -388,11 +402,13 @@ test("text, usage, cost and thinking normalize to OpenRouter's shape and replay 
       type: "anthropic.thinking",
       format: "anthropic-direct-v1",
       block: thinking,
+      position: 0,
     },
     {
       type: "anthropic.thinking",
       format: "anthropic-direct-v1",
       block: redacted,
+      position: 0,
     },
   ]);
   assert.deepEqual(first.usage, {
@@ -910,6 +926,7 @@ test("without a trailing state message the last block still carries a mark", asy
 });
 
 test("a rejected thinking replay retries once without it, marked; otherwise no retry", async () => {
+  rejectedReplays.clear();
   const thinking = { type: "thinking", thinking: "", signature: "bad-sig" };
   const history: ModelMessage[] = [
     { role: "user", content: "x" },
@@ -956,6 +973,8 @@ test("a rejected thinking replay retries once without it, marked; otherwise no r
     "tool_use",
   ]);
   assert.deepEqual(types(healed.requests[1]!.body), ["text", "tool_use"]);
+  // That rejection is remembered (see the rejection-memory test); start the rest afresh.
+  rejectedReplays.clear();
   // Both 400: the rejected fault surfaces, so the router can fall back.
   const broken = adapter(() => rejected());
   await assert.rejects(run(broken.model, history), (e: ModelError) => {
@@ -1223,14 +1242,16 @@ test("each replayed thinking block gets the exact state message it followed, reb
     thinkingTurn(`sig-${call}`, `toolu_${call}`),
   );
   const turn: ModelMessage[] = [];
-  for (let call = 1; call <= 3; call++) {
-    const result = await run(model, chiefCall(turn, `State ${call}`));
-    turn.push(result.message, {
-      role: "tool",
-      tool_call_id: result.message.tool_calls![0]!.id,
-      content: `result ${call}`,
-    });
-  }
+  await scoped("owner-1", "run-1", async () => {
+    for (let call = 1; call <= 3; call++) {
+      const result = await run(model, chiefCall(turn, `State ${call}`));
+      turn.push(result.message, {
+        role: "tool",
+        tool_call_id: result.message.tool_calls![0]!.id,
+        content: `result ${call}`,
+      });
+    }
+  });
   const text = (m: Block) =>
     m.content.map((b: Block) =>
       b.type === "text" ? `${m.role}:${b.text}` : `${m.role}:${b.type}`,
@@ -1266,14 +1287,16 @@ test("each replayed thinking block gets the exact state message it followed, reb
     [{ role: "system", content: "State 1" }, ...turn.slice(0, 2)],
     "State 9",
   );
-  await run(model, kept);
+  await scoped("owner-1", "run-1", () => run(model, kept));
   assert.equal(
     requests[3]!.body.messages.filter((m: Block) => m.role === "system").length,
     2,
   );
   // After a restart (an empty map) nothing is inserted, as before.
   thinkingStates.clear();
-  await run(model, chiefCall(turn, "State 4"));
+  await scoped("owner-1", "run-1", () =>
+    run(model, chiefCall(turn, "State 4")),
+  );
   assert.deepEqual(
     requests[4]!.body.messages
       .filter((m: Block) => m.role === "system")
@@ -1283,10 +1306,57 @@ test("each replayed thinking block gets the exact state message it followed, reb
   thinkingStates.clear();
 });
 
+test("thinking states are scoped to the owner and run that recorded them", async () => {
+  thinkingStates.clear();
+  const { model, requests } = adapter((call) =>
+    thinkingTurn(`sig-scope-${call}`, `toolu_s${call}`),
+  );
+  const first = await scoped("owner-1", "run-1", () =>
+    run(model, chiefCall([], "Private state of owner 1")),
+  );
+  assert.equal(thinkingStates.entries, 1);
+  // Another owner's request carrying a copy of that block (a sandbox can send arbitrary
+  // reasoning_details): the block is replayed, but owner 1's state is never inserted.
+  const copied: ModelMessage[] = [
+    first.message,
+    { role: "tool", tool_call_id: "toolu_s1", content: "r" },
+  ];
+  const systems = (n: number) =>
+    requests[n]!.body.messages.flatMap((m: Block) =>
+      m.role === "system" ? m.content.map((b: Block) => b.text) : [],
+    );
+  await scoped("owner-2", "run-9", () =>
+    run(model, chiefCall(copied, "State of owner 2")),
+  );
+  assert.deepEqual(systems(1), ["State of owner 2"]);
+  assert.ok(!JSON.stringify(requests[1]!.body).includes("owner 1"));
+  // The same owner in another run does not get it either.
+  await scoped("owner-1", "run-2", () =>
+    run(model, chiefCall(copied, "Another run")),
+  );
+  assert.deepEqual(systems(2), ["Another run"]);
+  // No scope at all (a coding call from a sandbox): nothing inserted...
+  await run(model, chiefCall(copied, "Unscoped"));
+  assert.deepEqual(systems(3), ["Unscoped"]);
+  // ...and nothing recorded, even with a trailing system message.
+  const before = thinkingStates.entries;
+  await run(model, chiefCall([], "Unscoped state"));
+  assert.equal(thinkingStates.entries, before);
+  // The recording scope still gets it back.
+  await scoped("owner-1", "run-1", () =>
+    run(model, chiefCall(copied, "Next call")),
+  );
+  assert.deepEqual(systems(5), ["Private state of owner 1", "Next call"]);
+  thinkingStates.clear();
+});
+
 test("a replay retried without thinking re-inserts no states; requests without a state remember none", async () => {
   thinkingStates.clear();
+  rejectedReplays.clear();
   const first = adapter(() => thinkingTurn("sig-r", "toolu_r"));
-  const generated = await run(first.model, chiefCall([], "State A"));
+  const generated = await scoped("owner-1", "run-1", () =>
+    run(first.model, chiefCall([], "State A")),
+  );
   const turn: ModelMessage[] = [
     generated.message,
     { role: "tool", tool_call_id: "toolu_r", content: "r" },
@@ -1299,7 +1369,9 @@ test("a replay retried without thinking re-inserts no states; requests without a
   const retried = adapter((call) =>
     call === 1 ? rejected() : sse(stream(reply)),
   );
-  await run(retried.model, chiefCall(turn, "State B"));
+  await scoped("owner-1", "run-1", () =>
+    run(retried.model, chiefCall(turn, "State B")),
+  );
   const roles = (body: any) => body.messages.map((m: Block) => m.role);
   assert.deepEqual(roles(retried.requests[0]!.body), [
     "user",
@@ -1316,35 +1388,291 @@ test("a replay retried without thinking re-inserts no states; requests without a
   ]);
   // No trailing state message (the coding loop, the learner): nothing is remembered.
   thinkingStates.clear();
+  rejectedReplays.clear();
   const bare = adapter(() => thinkingTurn("sig-bare", "toolu_bare"));
-  await run(bare.model, [{ role: "user", content: "x" }]);
+  await scoped("owner-1", "run-1", () =>
+    run(bare.model, [{ role: "user", content: "x" }]),
+  );
   assert.equal(thinkingStates.entries, 0);
+});
+
+test("a rejected replay is remembered: later calls skip those blocks instead of failing again", async () => {
+  thinkingStates.clear();
+  rejectedReplays.clear();
+  const reasoning = (signature: string, position?: number) => ({
+    type: "anthropic.thinking",
+    format: "anthropic-direct-v1",
+    block: { type: "thinking", thinking: "", signature },
+    ...(position === undefined ? {} : { position }),
+  });
+  const history = (signatures: string[]): ModelMessage[] =>
+    signatures.flatMap((signature, i) => [
+      {
+        role: "assistant" as const,
+        content: null,
+        tool_calls: [
+          {
+            id: `toolu_${i}`,
+            type: "function" as const,
+            function: { name: "t", arguments: "{}" },
+          },
+        ],
+        reasoning_details: [reasoning(signature)],
+      },
+      { role: "tool" as const, tool_call_id: `toolu_${i}`, content: "r" },
+    ]);
+  const rejected = () =>
+    Response.json(
+      { type: "error", error: { type: "invalid_request_error", message: "x" } },
+      { status: 400 },
+    );
+  // Any request that replays the bad block is rejected; others succeed.
+  const { model, requests } = adapter((call) =>
+    JSON.stringify(requests[call - 1]!.body).includes("sig-bad")
+      ? rejected()
+      : thinkingTurn(`sig-new-${call}`, `toolu_new${call}`),
+  );
+  const signatures = (n: number) =>
+    requests[n]!.body.messages.flatMap((m: Block) =>
+      Array.isArray(m.content)
+        ? m.content.flatMap((b: Block) =>
+            b.type === "thinking" ? [b.signature] : [],
+          )
+        : [],
+    );
+  const owner = (messages: ModelMessage[]) =>
+    scoped("owner-1", "run-1", () => run(model, chiefCall(messages, "S")));
+  const turn = history(["sig-good", "sig-bad"]);
+  const healed = await owner(turn);
+  assert.equal(healed.usage!.replay_dropped, true);
+  assert.equal(requests.length, 2);
+  assert.equal(rejectedReplays.entries, 2);
+  // Next call: both blocks of the rejected request are skipped, so one request, no retry;
+  // the block the retry returned is replayed.
+  turn.push(healed.message, {
+    role: "tool",
+    tool_call_id: healed.message.tool_calls![0]!.id,
+    content: "r",
+  });
+  const next = await owner(turn);
+  assert.equal(requests.length, 3);
+  assert.equal(next.usage!.replay_dropped, undefined);
+  assert.deepEqual(signatures(2), ["sig-new-2"]);
+  // Its state was kept, since its prefix (the retry's request) is what is sent now.
+  assert.deepEqual(
+    requests[2]!.body.messages
+      .filter((m: Block) => m.role === "system")
+      .map((m: Block) => m.content[0].text),
+    ["S", "S"],
+  );
+  // The memory is per scope: another run still replays (and is rejected and retried).
+  await scoped("owner-1", "run-2", () =>
+    run(model, chiefCall(history(["sig-bad"]), "S")),
+  );
+  assert.equal(requests.length, 5);
+  // Bounded, least recently used first.
+  const memory = new RejectedReplays(2);
+  const block = (signature: string) => ({ type: "thinking", signature });
+  memory.add("s", block("a"));
+  memory.add("s", block("b"));
+  assert.ok(memory.has("s", block("a")));
+  memory.add("s", block("c"));
+  assert.equal(memory.entries, 2);
+  assert.ok(!memory.has("s", block("b")));
+  assert.ok(memory.has("s", block("a")) && memory.has("s", block("c")));
+  assert.ok(!memory.has("t", block("a")));
+  assert.ok(!memory.has(undefined, block("a")));
+  memory.add(undefined, { type: "thinking", signature: "" });
+  assert.equal(memory.entries, 2);
+  thinkingStates.clear();
+  rejectedReplays.clear();
+});
+
+test("interleaved thinking keeps its position on replay; entries without one lead", async () => {
+  const thinking = (signature: string) => ({
+    type: "thinking",
+    thinking: "",
+    signature,
+  });
+  const use = (id: string) => ({
+    type: "tool_use",
+    id,
+    name: "t",
+    input: {},
+  });
+  const responses: Block[][] = [
+    // Progress-update thinking before each tool call.
+    [thinking("t1"), use("toolu_a"), thinking("t2"), use("toolu_b")],
+    // Text first, then thinking, a call, and thinking at the very end.
+    [
+      { type: "text", text: "Checking." },
+      thinking("t3"),
+      use("toolu_c"),
+      thinking("t4"),
+    ],
+    // Thinking before text that follows a call: text is stored first, so it counts as slot 0.
+    [
+      thinking("t5"),
+      use("toolu_d"),
+      { type: "text", text: "Then" },
+      thinking("t6"),
+      use("toolu_e"),
+    ],
+  ];
+  // A fresh request (the owner's message alone) gets the next response; a replay gets text.
+  let fresh = 0;
+  const { model, requests } = adapter((call) =>
+    sse(
+      requests[call - 1]!.body.messages.length === 1
+        ? stream(responses[fresh++]!, { stop: "tool_use" })
+        : stream(reply),
+    ),
+  );
+  const order = (blocks: Block[]) =>
+    blocks.map((b) =>
+      b.type === "thinking"
+        ? b.signature
+        : b.type === "tool_use"
+          ? b.id
+          : b.text,
+    );
+  for (const [i, expected, positions] of [
+    [0, ["t1", "toolu_a", "t2", "toolu_b"], [0, 1]],
+    [1, ["Checking.", "t3", "toolu_c", "t4"], [1, 2]],
+    [2, ["t5", "Then", "toolu_d", "t6", "toolu_e"], [0, 2]],
+  ] as const) {
+    const result = await run(model, [{ role: "user", content: "x" }]);
+    assert.deepEqual(
+      result.message.reasoning_details!.map((e: any) => e.position),
+      positions,
+    );
+    await run(model, [
+      { role: "user", content: "x" },
+      result.message,
+      ...result.message.tool_calls!.map((c) => ({
+        role: "tool" as const,
+        tool_call_id: c.id,
+        content: "r",
+      })),
+    ]);
+    assert.deepEqual(
+      order(requests.at(-1)!.body.messages[1].content),
+      expected,
+      `response ${i + 1}`,
+    );
+  }
+  // Older entries (no position) lead; a position past the end or invalid is clamped.
+  const stored = (signature: string, position?: unknown) => ({
+    type: "anthropic.thinking",
+    format: "anthropic-direct-v1",
+    block: thinking(signature),
+    ...(position === undefined ? {} : { position }),
+  });
+  await run(model, [
+    { role: "user", content: "x" },
+    {
+      role: "assistant",
+      content: "Text",
+      tool_calls: [
+        {
+          id: "toolu_x",
+          type: "function",
+          function: { name: "t", arguments: "{}" },
+        },
+      ],
+      reasoning_details: [
+        stored("old"),
+        stored("late", 9),
+        stored("bad", -1),
+        stored("mid", 1),
+      ],
+    },
+    { role: "tool", tool_call_id: "toolu_x", content: "r" },
+  ]);
+  assert.deepEqual(order(requests.at(-1)!.body.messages[1].content), [
+    "old",
+    "bad",
+    "Text",
+    "mid",
+    "toolu_x",
+    "late",
+  ]);
+  // The stored entry still passes the coding API's reasoning_details shape and the tag check.
+  const entry = stored("x", 2);
+  assert.ok(isAnthropicDirectReasoning(entry));
+  assert.ok(z.array(z.record(z.unknown())).safeParse([entry]).success);
+});
+
+test("an id recurring in later assistant turns is sent unchanged in each (the API accepts it)", async () => {
+  // Measured 11 November 2026: the same tool_use id in two assistant turns, mapped-style or
+  // native-style (`call_1`), got HTTP 200; the same id twice within one turn got a 400.
+  const turns = (id: string): ModelMessage[] =>
+    [1, 2].flatMap((n) => [
+      {
+        role: "assistant" as const,
+        content: null,
+        tool_calls: [
+          {
+            id,
+            type: "function" as const,
+            function: { name: "t", arguments: "{}" },
+          },
+        ],
+      },
+      { role: "tool" as const, tool_call_id: id, content: String(n) },
+    ]);
+  const { model, requests } = adapter(() => sse(stream(reply)));
+  for (const id of ["functions.memory_set:0", "call_1"]) {
+    await run(model, [{ role: "user", content: "x" }, ...turns(id)]);
+    const messages = requests.at(-1)!.body.messages;
+    const uses = messages.flatMap((m: Block) =>
+      m.content
+        .filter((b: Block) => b.type === "tool_use")
+        .map((b: Block) => b.id),
+    );
+    const results = messages.flatMap((m: Block) =>
+      m.content
+        .filter((b: Block) => b.type === "tool_result")
+        .map((b: Block) => b.tool_use_id),
+    );
+    assert.deepEqual(uses, [anthropicToolId(id), anthropicToolId(id)]);
+    assert.deepEqual(results, uses);
+  }
 });
 
 test("the state memory is bounded by entries and characters, least recently used first", () => {
   const states = new ThinkingStates(2, 100);
   const block = (signature: string) => ({ type: "thinking", signature });
-  states.remember(block("a"), ["A"]);
-  states.remember(block("b"), ["B"]);
-  assert.deepEqual(states.get(block("a")), ["A"]);
-  states.remember(block("c"), ["C"]);
+  states.remember("s", block("a"), ["A"]);
+  states.remember("s", block("b"), ["B"]);
+  assert.deepEqual(states.get("s", block("a")), ["A"]);
+  states.remember("s", block("c"), ["C"]);
   // b was least recently used.
-  assert.equal(states.get(block("b")), undefined);
-  assert.deepEqual(states.get(block("a")), ["A"]);
-  states.remember(block("d"), ["x".repeat(20)]);
-  states.remember(block("e"), ["y".repeat(20)]);
+  assert.equal(states.get("s", block("b")), undefined);
+  assert.deepEqual(states.get("s", block("a")), ["A"]);
+  states.remember("s", block("d"), ["x".repeat(20)]);
+  states.remember("s", block("e"), ["y".repeat(20)]);
   assert.equal(states.entries, 2);
-  // Too large for the memory, or without a signature: not kept.
-  states.remember(block("f"), ["z".repeat(30)]);
-  states.remember({ type: "thinking", signature: "" }, ["S"]);
-  assert.equal(states.get(block("f")), undefined);
+  // Too large for the memory, without a signature or without a scope: not kept.
+  states.remember("s", block("f"), ["z".repeat(30)]);
+  states.remember("s", { type: "thinking", signature: "" }, ["S"]);
+  states.remember(undefined, block("g"), ["G"]);
+  assert.equal(states.get("s", block("f")), undefined);
   assert.equal(states.entries, 2);
+  // Another scope never reads a state, and no scope reads nothing.
+  assert.equal(states.get("t", block("e")), undefined);
+  assert.equal(states.get(undefined, block("e")), undefined);
   // Redacted blocks are keyed by their data; keys are hashes, never the signature itself.
-  states.remember({ type: "redacted_thinking", data: "opaque" }, ["R"]);
-  assert.deepEqual(states.get({ type: "redacted_thinking", data: "opaque" }), [
-    "R",
-  ]);
-  assert.doesNotMatch(ThinkingStates.key(block("secret-sig"))!, /secret/);
+  states.remember("s", { type: "redacted_thinking", data: "opaque" }, ["R"]);
+  assert.deepEqual(
+    states.get("s", { type: "redacted_thinking", data: "opaque" }),
+    ["R"],
+  );
+  assert.doesNotMatch(ThinkingStates.key("s", block("secret-sig"))!, /secret/);
+  assert.notEqual(
+    ThinkingStates.key("s", block("a")),
+    ThinkingStates.key("t", block("a")),
+  );
 });
 
 test("failures after a complete, billed response carry its normalized usage", async () => {

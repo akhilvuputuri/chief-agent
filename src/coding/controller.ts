@@ -1758,7 +1758,9 @@ export class CodingController {
       Math.max(
         1,
         Math.min(
-          // The idle timeout still stops a stalled stream after 90 seconds.
+          // Bounds the whole call. The 90-second idle timeout stops a silent stream, but any
+          // received bytes re-arm it (on the direct route, the API's thinking-phase pings do), so
+          // a stream that only keeps sending pings is stopped by this limit alone.
           enhanced ? modelCallTimeoutMs(allowance) : 120000,
           new Date(job.attempt_deadline).getTime() - this.clock().getTime(),
         ),
@@ -1976,6 +1978,8 @@ export class CodingController {
               ),
             ],
           )
+          // Best-effort accounting: a failed insert must not replace the model error being
+          // handled here, which is still classified and recorded below.
           .catch(() => {});
       if (admitted && !received) {
         let code: CodingFailureCode | undefined;

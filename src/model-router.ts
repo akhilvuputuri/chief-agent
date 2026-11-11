@@ -124,8 +124,10 @@ export class StrippedOpenRouter implements ModelAdapter {
 
 /**
  * The direct Anthropic adapter with a one-call OpenRouter fallback for the same model. Only
- * a failure before any output (a ModelError with providerFault) falls back, and never once
- * the caller has aborted, so no output or progress is ever repeated.
+ * a failure before any model output (a ModelError with providerFault) falls back, and never once
+ * the caller has aborted, so no output is ever repeated. Progress can be: the direct adapter
+ * reports progress on received wire bytes (pings included) before any output, so a caller may
+ * see progress from the failed direct attempt and then from the fallback.
  */
 export class FallbackAdapter implements ModelAdapter {
   constructor(
