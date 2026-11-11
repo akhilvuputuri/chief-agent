@@ -3,7 +3,7 @@
 - **Code.** Lockfiles and one pin; no source change. Root lockfile: body-parser 2.4.0, qs 6.17.1, ip-address 10.7.6, fast-uri 3.1.9 and 4.2.3, fastify 5.12.8 (with find-my-way 9.10.0, ret 0.5.1 and safe-regex2 5.1.2). Pi runtime: `undici` pinned at 8.12.4 instead of 8.10.2. No database or Compose change.
 - **Why.** The OSV database listed advisories against these versions. Read from source, Chief does not reach the affected behaviour of the updated packages; only the worker's undici copies serve requests, to its own gateway and GitHub's API. See [journal 162](journey/162-advisories-in-the-dependency-tree.md).
 - **Not fixed.** zod 3.25.76 (fixed only in 4.6.6), minimatch 10.2.6 (fixed only in 11.0.1) and the undici 8.10.2 that `pi-coding-agent` 1.1.0 pins exactly. That copy loads first in a worker and serves every request except the model calls. Each needs a major upgrade or a `pi-coding-agent` upgrade to 1.5.x, and waits for the owner's decision.
-- **Deployment.** Not yet recorded as live; update this entry on release. A worker's model calls use undici 8.12.4 only with a worker image built from this change.
+- **Deployment.** [PR 444](https://github.com/akhilvuputuri/chief-agent/pull/444) merged as `1335f6d` on 11 November. Release run 43049608684 succeeded, and the host reports `1335f6d` with a healthy gateway on fastify 5.12.8. A worker's model calls use undici 8.12.4 only with a worker image built from this change; none has been built.
 
 ## A direct Anthropic pathway beside OpenRouter, inert until enabled (11 November 2026)
 

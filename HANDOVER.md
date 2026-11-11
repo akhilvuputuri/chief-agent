@@ -1,4 +1,4 @@
-# Dependency advisories — tested, release pending, 11 November 2026
+# Dependency advisories — live in `1335f6d`, 11 November 2026
 
 - **Changed:** lockfile updates within declared ranges (body-parser, qs, ip-address, fast-uri, fastify) and the Pi runtime's `undici` pin, 8.10.2 to 8.12.4. No source change. See [journal 162](docs/journey/162-advisories-in-the-dependency-tree.md) for which advisory reaches what.
 - **Still flagged by OSV, deliberately:** zod 3.25.76 (no 3.x fix), minimatch 10.2.6 (fixed in 11.0.1) and `pi-coding-agent` 1.1.0's own undici 8.10.2. Kite refuses `overrides`, so the last two change only with `pi-coding-agent` 1.5.x (minimatch 11.0.3, undici 8.12.3). In a worker that pinned copy loads first and is the default dispatcher of built-in `fetch` (measured), so only the model calls, through `patientFetch`, use 8.12.4.
