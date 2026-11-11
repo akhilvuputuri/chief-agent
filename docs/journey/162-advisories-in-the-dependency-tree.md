@@ -1,7 +1,7 @@
 # 162 — Which published advisories reach Chief, and which can be fixed without a major upgrade?
 
 Work date: 2026-11-11. Written: 2026-11-11.
-Status: tested; release pending. Six packages are updated within their ranges. Three findings stay open, each named below: zod (fixed only in 4.x), minimatch (fixed only in 11.x) and the copy of undici that `pi-coding-agent` 1.1.0 pins. A worker image built from this change moves only the worker's model calls to undici 8.12.4; its other requests keep going through the pinned 8.10.2 copy.
+Status: released in `1335f6d`; the gateway runs the updated packages. Six packages are updated within their ranges. Three findings stay open, each named below: zod (fixed only in 4.x), minimatch (fixed only in 11.x) and the copy of undici that `pi-coding-agent` 1.1.0 pins. A worker image built from this change moves only the worker's model calls to undici 8.12.4; its other requests keep going through the pinned 8.10.2 copy.
 
 ## User-visible problem and preceding iteration
 
@@ -42,7 +42,7 @@ Node's own `fetch`, which the gateway uses throughout, runs the undici bundled w
 
 The same 4 MB and 8 MB bodies on zod 4.6.7, installed in a scratch directory, returned one issue in 2 ms with no heap growth.
 
-Bodies over 400 kB are allowed only on coding worker routes. zod parses them only after the job's bearer token is checked. Checkpoint and finish check the token before reading the body; the other worker routes read and JSON-parse up to 8 MB first. Checkpoint and finish uploads go up to 64 MB and were not measured. Whether a command the coding model runs in its sandbox can read that token was not traced. The production host's free memory was not read.
+Bodies over 400 kB are allowed only on coding worker routes. zod parses them only after the job's bearer token is checked. Checkpoint and finish check the token before reading the body; the other worker routes read and JSON-parse up to 8 MB first. Checkpoint and finish uploads go up to 64 MB and were not measured. Whether a command the coding model runs in its sandbox can read that token was not traced. The production host had 1,906 MB of memory with 781 MB available when read after the release (`free -m`, 11 November), less than the 8 MB case's growth.
 
 ## Diagnosis and alternatives
 
@@ -61,13 +61,17 @@ Bodies over 400 kB are allowed only on coding worker routes. zod parses them onl
 
 All versions were changed with Kite (`kite update …` in the root, `kite install undici@8.12.4 -E` in the Pi runtime). Kite sorted the Pi runtime's dependency keys; the original order was restored by hand and Kite kept the lockfile unchanged.
 
-**Independent review (Claude Opus 5.5), 11 November, on `74940ba`: changes requested, all in the records.** It checked every entry of both lockfiles by script and found the ranges satisfied and nothing unrelated changed. It found this entry wrong about undici: the first version said `pi-coding-agent`'s copy was never used to dispatch, when that copy is the worker's default dispatcher. Checking that correction found the worker also calls GitHub's API through it, not only the gateway. The review also corrected the count of high advisories (six, not four), the wording about when large worker bodies are authenticated, and the statement that OSV did not hold the 8.12.4 advisories. All four are corrected above, and it approved `c584c58`. Its remaining note was a loose sentence in the release notes and work index, which said Chief reaches no affected path with outside input although fast-uri does receive an MCP server's schema; the sentence was reworded afterwards.
+**Independent review (Claude Opus 5.5), 11 November, on `74940ba`: changes requested, all in the records.** It checked every entry of both lockfiles by script and found the ranges satisfied and nothing unrelated changed. It found this entry wrong about undici: the first version said `pi-coding-agent`'s copy was never used to dispatch, when that copy is the worker's default dispatcher. Checking that correction found the worker also calls GitHub's API through it, not only the gateway. The review also corrected the count of high advisories (six, not four), the wording about when large worker bodies are authenticated, and the statement that OSV did not hold the 8.12.4 advisories. All four are corrected above, and it approved `c584c58`. Its remaining note was a loose sentence in the release notes and work index, which said Chief reaches no affected path with outside input although fast-uri does receive an MCP server's schema; the sentence was reworded afterwards. It then approved `df1a6b7`, and `c823b25`, the merge of main after PR 442 landed, in which this change was byte-identical to `df1a6b7`.
 
 ## Verification and outcome
 
 - **Measured after the change:** the same OSV query flags three versions in the root lockfile (undici 8.10.2, zod 3.25.76, minimatch 10.2.6) and two in the Pi lockfile (`pi-coding-agent`'s undici 8.10.2, minimatch 10.2.6), down from nine and two.
 - **Tested, 11 November, a Mac on Node 22.23.4:** after a clean `kite ci`, `kite run check` exited 0 in 6 min 19 s with no failing test, and `kite run format:check` passed. The Pi runtime's 123 tests, which include the patient-fetch tests, ran on undici 8.12.4.
 - **Not verified:** the gateway under real traffic on fastify 5.12.8, and a worker's model call on undici 8.12.4. Workers run the pinned image built from `fa058f9`, which has undici 8.10.2 throughout. The release notes of fastify 5.12.6 to 5.12.8 and find-my-way 9.10.0 were read, not their diffs: the changes that touch behaviour (error status codes outside 400 to 599 become 500, throws from custom content-type parsers are contained, stream trailers are sent after the stream ends) concern features Chief's source does not use.
+
+### Release closure — 2026-11-11
+
+[PR 444](https://github.com/akhilvuputuri/chief-agent/pull/444), approved at head `c823b25` with hosted CI passing, merged as `1335f6db500cf26eac6b05b55906f9b345281a38`. Main's checks and the [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/43049608684) succeeded, and `kite run release:status` reports that commit deployed with startup health passing at 15:41 UTC. Read on the host afterwards: the gateway container healthy, its logs carrying release `1335f6d` with no warn or error line in its first minutes, and its installed fastify 5.12.8, body-parser 2.4.0, qs 6.17.1, ip-address 10.7.6, fast-uri 4.2.3 and find-my-way 9.10.0. No request through the updated fastify was exercised deliberately. The gateway image does not include the Pi runtime's undici 8.12.4, because its `coding_runtime_pi/node_modules` is not copied in; it carries `pi-coding-agent`'s 8.10.2 in `node_modules` (read in the container), which the gateway does not load. The worker image is unchanged, so 8.12.4 is not running anywhere yet. The first version of this closure said the gateway image had no undici 8; the reviewer caught that from the Dockerfile.
 
 ## Follow-up and next iteration
 
