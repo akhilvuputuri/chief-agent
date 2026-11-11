@@ -7,6 +7,8 @@ const modelId = z
 export const MODEL_TIERS = ["fast", "standard", "strong"] as const;
 export type ModelTier = (typeof MODEL_TIERS)[number];
 const tier = z.enum(MODEL_TIERS);
+// First-party list price, $ per million tokens.
+const listPrice = z.number().positive().finite().max(400);
 
 const schema = z
   .object({
@@ -36,6 +38,33 @@ const schema = z
         input: z.number().positive().finite().max(100),
         output: z.number().positive().finite().max(400),
       })
+      .strict()
+      .optional(),
+    // Direct provider pathways (src/model-router.ts). Each listed OpenRouter model ID maps to
+    // the provider's own ID and first-party list prices, written out rather than derived from
+    // the slug. An unlisted model, or one priced above priceCeilings, stays on OpenRouter.
+    providers: z
+      .object({
+        anthropic: z
+          .object({
+            // Retry once on OpenRouter when the direct call fails before any output.
+            fallback: z.boolean(),
+            models: z.record(
+              modelId.refine((m) => m.startsWith("anthropic/")),
+              z
+                .object({
+                  id: z.string().regex(/^claude-[a-z0-9-]{1,80}$/),
+                  input: listPrice,
+                  output: listPrice,
+                  cacheRead: listPrice,
+                  cacheWrite: listPrice,
+                })
+                .strict(),
+            ),
+          })
+          .strict(),
+      })
+      .partial()
       .strict()
       .optional(),
   })
@@ -100,4 +129,26 @@ export function configuredTiers(policy: ModelPolicy = readModelPolicy()) {
   return policy.agents
     ? MODEL_TIERS.filter((t) => policy.agents!.tiers[t])
     : ([...MODEL_TIERS] as ModelTier[]);
+}
+
+export type AnthropicRoute = {
+  nativeModel: string;
+  prices: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+  };
+  fallback: boolean;
+};
+
+/** The reviewed direct Anthropic mapping for an OpenRouter model ID, if the policy lists one. */
+export function resolveAnthropicModel(
+  model: string,
+  policy: ModelPolicy = readModelPolicy(),
+): AnthropicRoute | undefined {
+  const section = policy.providers?.anthropic;
+  if (!section || !Object.hasOwn(section.models, model)) return undefined;
+  const { id, ...prices } = section.models[model]!;
+  return { nativeModel: id, prices, fallback: section.fallback };
 }

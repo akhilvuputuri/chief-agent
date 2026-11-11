@@ -34,8 +34,35 @@ test("the committed runtime config is valid and matches the code defaults", () =
   const withFile = readConfig(required);
   const codeDefaults = readConfig(required, {});
   for (const key of RUNTIME_SETTINGS)
-    assert.equal(withFile[key], codeDefaults[key], key);
+    if (key !== "MODEL_PROVIDER")
+      assert.equal(withFile[key], codeDefaults[key], key);
   assert.deepEqual(withFile.overridden, []);
+  // The one reviewed difference: the code default keeps OpenRouter, and the file prefers
+  // Anthropic direct, which applies only once ANTHROPIC_API_KEY is set.
+  assert.equal(codeDefaults.MODEL_PROVIDER, "openrouter");
+  assert.equal(withFile.MODEL_PROVIDER, "anthropic");
+  assert.equal(withFile.ANTHROPIC_API_KEY, "");
+});
+
+test("MODEL_PROVIDER comes from the file unless the environment sets it; the key never can", () => {
+  assert.equal(
+    readConfig({ ...required, ANTHROPIC_API_KEY: "sk-ant-test" })
+      .MODEL_PROVIDER,
+    "anthropic",
+  );
+  const forced = readConfig({ ...required, MODEL_PROVIDER: "openrouter" });
+  assert.equal(forced.MODEL_PROVIDER, "openrouter");
+  assert.deepEqual(forced.overridden, ["MODEL_PROVIDER"]);
+  assert.throws(() => readConfig(required, { MODEL_PROVIDER: "bedrock" }));
+  const f = file({
+    schemaVersion: 1,
+    settings: { ANTHROPIC_API_KEY: "sk-ant-x" },
+  });
+  try {
+    assert.throws(() => readRuntimeSettings(f.url));
+  } finally {
+    f.done();
+  }
 });
 
 test("file values apply, the environment still wins, and overrides are listed by name", () => {

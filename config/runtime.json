@@ -8,6 +8,7 @@
     "AGENT_BUDGET_TOOL_CALLS": 100,
     "OPENROUTER_MAX_INPUT_PRICE": 2,
     "OPENROUTER_MAX_OUTPUT_PRICE": 10,
+    "MODEL_PROVIDER": "anthropic",
     "SEARCH_MODEL": "google/gemini-3.8-flash",
     "MEDIA_MODEL": "",
     "TOOL_PICKER": "all",

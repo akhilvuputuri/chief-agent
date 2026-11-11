@@ -950,7 +950,12 @@ export function modelSpan(s: ModelSpanInput): ExportSpan {
     error: failed,
     attributes: {
       "gen_ai.operation.name": "chat",
-      "gen_ai.provider.name": "openrouter",
+      // The direct pathway marks its usage (src/model-router.ts); a fallback is OpenRouter's.
+      "gen_ai.provider.name":
+        usage?.route === "anthropic-direct" ||
+        (failed && diagnostics?.route === "anthropic-direct")
+          ? "anthropic"
+          : "openrouter",
       "gen_ai.request.model": requested ?? served,
       "gen_ai.response.model": served,
       "gen_ai.usage.input_tokens": finiteCount(usage?.prompt_tokens),

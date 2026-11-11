@@ -257,6 +257,48 @@ test("model.completed projects model, latency, tokens and reported cost", () => 
   }
 });
 
+test("model logs name the direct pathway, its fallbacks and the startup routes", () => {
+  const log = capture();
+  try {
+    projectEvent("model.completed", randomUUID(), {
+      model: "anthropic/claude-opus-5.5",
+      provider: "Anthropic",
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 5,
+        prompt_tokens_details: { cached_tokens: 4, cache_write_tokens: 2 },
+        cost: 0.001,
+        route: "anthropic-direct",
+      },
+    });
+    projectEvent("model.completed", randomUUID(), {
+      model: "anthropic/claude-opus-5.5",
+      provider: "Claude Platform on AWS",
+      usage: { cost: 0.002, fallback_from: "anthropic-direct" },
+    });
+    const [direct, fallback] = log.parsed();
+    assert.equal(direct.provider, "anthropic");
+    assert.equal(direct.route, "anthropic-direct");
+    assert.equal(direct.cachedTokens, 4);
+    assert.equal(direct.costUsd, 0.001);
+    assert.equal(fallback.fallbackFrom, "anthropic-direct");
+    assert.equal(fallback.provider, "claude-aws");
+    const routes = sanitize("model.routes", "info", {
+      modelProvider: "anthropic",
+      anthropicKey: false,
+      mainRoute: "openrouter",
+      fastRoute: "openrouter",
+      judgeRoute: "anthropic-direct",
+    })!;
+    assert.equal(routes.anthropicKey, false);
+    assert.equal(routes.judgeRoute, "anthropic-direct");
+    assert.equal("dropped" in routes, false);
+    assert.equal("dropped" in direct, false);
+  } finally {
+    log.restore();
+  }
+});
+
 test("finish reasons are logged only as fixed names", () => {
   const log = capture();
   try {

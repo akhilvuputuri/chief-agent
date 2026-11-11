@@ -12,6 +12,7 @@ import {
   encodeEvaluations,
   logsEndpoint,
   modelContent,
+  modelSpan,
   runContent,
   runConversation,
   runEvent,
@@ -807,4 +808,31 @@ test("large spans are sent in batches under the byte limit, and the queue is bou
   exporter.enqueue(big(11)); // room again once sent
   assert.equal(exporter.pending, 1);
   await exporter.shutdown(100);
+});
+
+test("the provider name follows the pathway that served the call", () => {
+  const span = (data: Record<string, unknown>, failed = false) =>
+    modelSpan({
+      traceId: "0".repeat(32),
+      spanId: "1".repeat(16),
+      parentSpanId: "2".repeat(16),
+      data: { model: "anthropic/claude-opus-5.5", latencyMs: 10, ...data },
+      failed,
+      endNs: 1_000_000_000n,
+    }).attributes["gen_ai.provider.name"];
+  assert.equal(
+    span({ usage: { route: "anthropic-direct", cost: 0.1 } }),
+    "anthropic",
+  );
+  assert.equal(span({ usage: { cost: 0.1 } }), "openrouter");
+  // A fallback is served by OpenRouter, whatever it fell back from.
+  assert.equal(
+    span({ usage: { cost: 0.1, fallback_from: "anthropic-direct" } }),
+    "openrouter",
+  );
+  assert.equal(
+    span({ diagnostics: { route: "anthropic-direct" } }, true),
+    "anthropic",
+  );
+  assert.equal(span({ diagnostics: { httpStatus: 500 } }, true), "openrouter");
 });

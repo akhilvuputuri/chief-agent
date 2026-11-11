@@ -19,6 +19,7 @@ if (missing.length) {
   );
 }
 for (const key of [
+  "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "ELEVENLABS_API_KEY",
   "ELEVENLABS_VOICE_ID",

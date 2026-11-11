@@ -73,6 +73,20 @@ const fields: Record<string, Shape> = {
   /** Prompt tokens written to the provider's cache (OpenRouter prompt_tokens_details). */
   cacheWriteTokens: "count",
   reasoningTokens: "count",
+  /** Which pathway served a call (src/model-router.ts): anthropic-direct or openrouter. */
+  route: "code",
+  /** model.completed after a direct Anthropic failure: the pathway it fell back from. */
+  fallbackFrom: "code",
+  /** model.provider_fallback: seconds the direct pathway stays off. */
+  cooldownS: "count",
+  /** model.routes at startup: MODEL_PROVIDER, key presence and each role's pathway. */
+  modelProvider: "name",
+  anthropicKey: "bool",
+  mainRoute: "code",
+  standardRoute: "code",
+  fastRoute: "code",
+  judgeRoute: "code",
+  mediaRoute: "code",
   /** The model the host asked for; `model` on model.completed is the one that served. */
   requestedModel: "model",
   /** Why the model stopped, mapped to a fixed name (see finishName). */
@@ -341,6 +355,8 @@ function usageFields(usage: unknown): OpsFields {
     cacheWriteTokens: num(u.prompt_tokens_details?.cache_write_tokens),
     reasoningTokens: num(u.completion_tokens_details?.reasoning_tokens),
     costUsd: num(u.cost) ?? null,
+    route: u.route,
+    fallbackFrom: u.fallback_from,
   };
 }
 
