@@ -157,9 +157,8 @@ class AgentwatchUpdateTests(unittest.TestCase):
                     raise subprocess.CalledProcessError(22, args)
                 if args[0] == 'curl' and '--config' in args:
                     self.assertEqual(kwargs.get('input'), 'header = "authorization: Bearer ' + KEY + '"\n')
-                elif (args[0] == 'curl' and '--auth-user' in staged_compose and not open_without_key
-                        and ('/v1/traces' in args[-1] or '/api/traces/' in args[-1])):
-                    raise subprocess.CalledProcessError(22, args)
+                elif args[0] == 'curl' and '--write-out' in args and '%{http_code}' in args:
+                    return subprocess.CompletedProcess(args, 0, stdout='200' if open_without_key else '401')
                 return subprocess.CompletedProcess(args, 0, stdout='')
 
             def compose(*args, **kwargs):
@@ -317,8 +316,7 @@ class AgentwatchUpdateTests(unittest.TestCase):
     def test_signing_in_sends_the_key_on_stdin_and_checks_it_is_required(self):
         commands = self.scenario(staged_compose=SIGNED_COMPOSE, env=SIGNED_ENV)
         keyed = [c for c in commands if c[0] == 'curl' and '--config' in c]
-        bare = [c for c in commands if c[0] == 'curl' and '--config' not in c and ':4318/' in c[-1]
-                and ('/v1/traces' in c[-1] or '/api/traces/' in c[-1])]
+        bare = [c for c in commands if c[0] == 'curl' and '%{http_code}' in c]
         self.assertEqual(len(keyed), 2)
         self.assertEqual(len(bare), 2)
         self.assertLess(commands.index(keyed[-1]), commands.index(bare[0]))
@@ -334,6 +332,20 @@ class AgentwatchUpdateTests(unittest.TestCase):
                 commands = self.scenario(staged_compose=SIGNED_COMPOSE, env=env,
                                          expected_error='private .env first')
                 self.assertFalse(any(c[:2] == ('docker', 'pull') for c in commands))
+
+    def test_a_comment_cannot_stand_in_for_the_trusted_proxy(self):
+        spoofed = SIGNED_COMPOSE.replace(
+            '    command:\n',
+            '    # Was "--forwarded-allow-ips" "172.18.0.1".\n    command:\n').replace(
+            '"172.18.0.1"', '"0.0.0.0/0"').replace(
+            '# Was "--forwarded-allow-ips" "0.0.0.0/0".', '# Was "--forwarded-allow-ips" "172.18.0.1".')
+        self.assertIn('"0.0.0.0/0"', spoofed)
+        self.scenario(staged_compose=spoofed, env=SIGNED_ENV, expected_error='must be the Compose network gateway')
+
+    def test_private_host_names_need_no_signing_in(self):
+        _, block, _ = update.split_compose(STAGED_COMPOSE.replace(
+            '"90",\n', '"90",\n        "--allow-host",\n        "agentwatch",\n').encode(), 'Staged')
+        self.assertEqual(update.validate_block(block), NEW_IMAGE)
 
     def test_the_trusted_proxy_must_be_the_network_gateway(self):
         for gateway in ('172.19.0.1 ', '172.18.0.1 172.20.0.1 ', ''):
@@ -373,6 +385,9 @@ class AgentwatchUpdateTests(unittest.TestCase):
             (STAGED_COMPOSE.replace('${OPENROUTER_API_KEY:-}\n', '${OPENROUTER_API_KEY:-}\n' + key_line),
              'only when signing in'),
             (STAGED_COMPOSE.replace('"50",\n', '"50",\n' + keys), 'only with --auth-user'),
+            # A public name needs signing in, so a later update cannot switch it off under the site.
+            (STAGED_COMPOSE.replace('"90",\n', '"90",\n        "--allow-host",\n        "traces.52-77-47-24.sslip.io",\n'),
+             'public host name only with signing in'),
             # The hash may not come from another variable.
             (SIGNED_COMPOSE.replace(hash_line, '      AGENTWATCH_PASSWORD_HASH: ${OTHER_HASH:-}\n'),
              'only pass through reviewed variables'),

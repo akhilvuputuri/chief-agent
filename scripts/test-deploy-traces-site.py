@@ -148,6 +148,16 @@ class TracesSiteTests(unittest.TestCase):
         text, _, _ = self.scenario(argv=['--remove'], expected_error='does not hold the reviewed traces site')
         self.assertEqual(text, LIVE)
 
+    def test_remove_needs_no_check_first_and_never_puts_the_site_back(self):
+        text, calls, output = self.scenario(live=LIVE + site.SITE, argv=['--remove'], agentwatch=None,
+                                            existing=(502, ''))
+        self.assertEqual(text, LIVE)
+        self.assertIn('inspect it', json.loads(output)['state'])
+        self.assertEqual(calls.count(('systemctl', 'reload', 'caddy')), 1)
+        text, _, _ = self.scenario(live=LIVE + site.SITE, argv=['--remove'], reload_failure=True,
+                                   expected_error='did not reload')
+        self.assertEqual(text, LIVE)
+
     def test_usage(self):
         self.scenario(argv=['--force'], expected_error='Usage')
 

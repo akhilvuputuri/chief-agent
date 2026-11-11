@@ -8,7 +8,8 @@ ingest never needs the internet. It refuses unless agentwatch on 127.0.0.1:4318 
 requires signing in, so the site never serves traces without it. The candidate is validated
 beside the live file, Caddy is reloaded, and the site is checked through Caddy (with the
 certificate Caddy obtains for the name); the existing site is checked too. On any failure the
-previous Caddyfile is restored and reloaded. `--remove` takes the site down the same way.
+previous Caddyfile is restored and reloaded. `--remove` takes the site down: it needs no
+check first, and once the site is gone it never puts it back, even if a later check fails.
 
 No application, Compose or database change. Run from a checkout of the reviewed main:
     sudo python3 scripts/deploy-traces-site.py [--remove]
@@ -145,13 +146,25 @@ def main():
             validate(text)
         except Exception:
             raise RuntimeError('The candidate Caddyfile failed validation; nothing changed') from None
-        if not existing_site_serves():
+        if not remove and not existing_site_serves():
             raise RuntimeError('The existing site is not answering as expected; inspect before changing Caddy')
+        if remove:
+            # A takedown: restoring on a failed check would put the traces back on the internet.
+            BACKUP.write_text(original)
+            CADDYFILE.write_text(text)
+            try:
+                run(['systemctl', 'reload', 'caddy'])
+            except Exception:
+                raise RuntimeError('The site is out of the Caddyfile but Caddy did not reload; '
+                                   'run systemctl reload caddy and inspect') from None
+            state = 'removed' if existing_site_serves() else 'removed; the existing site is not answering, inspect it'
+            print(json.dumps({'site': HOST, 'state': state}))
+            return
         try:
             BACKUP.write_text(original)
             CADDYFILE.write_text(text)
             run(['systemctl', 'reload', 'caddy'])
-            if not remove and not site_serves():
+            if not site_serves():
                 raise RuntimeError('site check failed')
             if not existing_site_serves():
                 raise RuntimeError('existing site check failed')
@@ -163,7 +176,7 @@ def main():
                 raise RuntimeError('The change failed and restoring the previous Caddyfile also failed; '
                                    'inspect /etc/caddy/Caddyfile and ' + BACKUP.name) from None
             raise RuntimeError('The change failed its checks; the previous Caddyfile was restored') from None
-        print(json.dumps({'site': HOST, 'state': 'removed' if remove else 'serving'}))
+        print(json.dumps({'site': HOST, 'state': 'serving'}))
 
 
 if __name__ == '__main__':

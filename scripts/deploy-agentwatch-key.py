@@ -3,7 +3,7 @@
 
 No migration. Compose gains exactly one gateway environment name, AGENTWATCH_API_KEY, directly
 after the trace content switch. The gateway sends it as `Authorization: Bearer` with trace
-export and alert polls (docs/tracing.md#signing-in); agentwatch ignores it until signing in is
+export and alert polls (docs/tracing.md#viewing-traces-from-anywhere); agentwatch ignores it until signing in is
 switched on there, which is a separate agentwatch update. The private .env must already hold
 the key, 32 to 256 URL-safe characters (`openssl rand -hex 32`). The script checks presence and
 format only and never prints a value. Modelled on deploy-anthropic-key.py (PR 442).
@@ -22,8 +22,9 @@ import time
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
 # The reviewed live baseline: the host's RELEASE (sudo cat /opt/hermes-companion/RELEASE) when
-# this rollout PR was reviewed. The script refuses any other RELEASE, and refuses to run while BASE is None. If
-# another release lands first, BASE must be changed to that live SHA through review.
+# this rollout PR was reviewed. The script refuses any other RELEASE, and refuses to run while
+# BASE is None. If another release lands first, BASE must be changed to that live SHA through
+# review.
 BASE = 'dcb7ea37bce3a5539dc630cf10570271b70e2d2a'
 IMAGE = 'hermes-companion-gateway'
 # Required in the private .env, in this form: agentwatch takes keys of 32 characters or more, and
