@@ -1034,12 +1034,12 @@ test("approved long scope must be read completely before edits or completion", a
   };
   const builder = new CodingRuntime({
     store: f.store,
+    // A plan is at most 32,000 characters, one read_document page (journal 167): an edit and a
+    // completion before that page is read are both refused.
     model: scripted([
       [edit],
-      [{ name: "read_document", arguments: { id: "approved_plan", page: 0 } }],
       [report("done", "Premature completion")],
-      [{ name: "read_document", arguments: { id: "approved_plan", page: 1 } }],
-      [{ name: "read_document", arguments: { id: "approved_plan", page: 2 } }],
+      [{ name: "read_document", arguments: { id: "approved_plan", page: 0 } }],
       [edit],
       [report("done", "Complete approved change implemented.")],
     ]),
@@ -1086,7 +1086,7 @@ test("independent long-plan formatting recovery permits reference rereads and fi
   const bad = report("done", "x".repeat(32001));
   const builder = new CodingRuntime({
     store: f.store,
-    model: scripted([[docread(0)], [docread(1)], [docread(2)], [bad], [bad]]),
+    model: scripted([[docread(0)], [bad], [bad]]),
     executor: (t) => localExecutor(t.workspace, join(f.root, "home")),
   });
   const failed = await builder.run(task.id);
@@ -1096,12 +1096,7 @@ test("independent long-plan formatting recovery permits reference rereads and fi
   const resumed = new CodingRuntime({
     store: f.store,
     model: scripted(
-      [
-        [docread(0)],
-        [docread(1)],
-        [docread(2)],
-        [report("done", "Complete retained result")],
-      ],
+      [[docread(0)], [report("done", "Complete retained result")]],
       undefined,
       (prompt) => {
         recoveryPrompts.push(prompt);

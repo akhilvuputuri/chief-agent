@@ -1,4 +1,5 @@
 import { reviewDocumentReader } from "./helpers/pi-review-documents.js";
+import { documentPageChars } from "@chief-agent/pi-runtime";
 import { reportDocument } from "@chief-agent/pi-runtime/report";
 import { execFileSync } from "node:child_process";
 import {
@@ -359,7 +360,9 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
           documentLength < 0 ? "界\n" : " Evidence retained.",
         )
         .slice(0, Math.abs(documentLength) || 62);
-    const pages = documentLength ? Math.ceil(fullPlan.length / 4000) : 0;
+    const pages = documentLength
+      ? Math.ceil(fullPlan.length / documentPageChars)
+      : 0;
     let recovered = false;
     const readEvidence = reviewDocumentReader();
     const turns = new Map<string, number>();

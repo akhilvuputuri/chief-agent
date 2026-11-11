@@ -6,9 +6,21 @@ export function reviewDocumentReader() {
   return (input: any, key: string) => {
     const system =
       input.messages.find((m: any) => m.role === "system")?.content ?? "";
-    const pages = ["candidate_inventory", "candidate_diff"].flatMap((id) => {
-      const match = system.match(new RegExp(`${id}: [^\\n]*; (\\d+) pages`));
+    const pages = [
+      "candidate_inventory",
+      "candidate_diff",
+      // A later round in the same run also gets these (journal 167).
+      "review_delta",
+      "previous_findings",
+    ].flatMap((id) => {
+      const match = system.match(
+        new RegExp(`${id}: [^\\n]*; (\\d+) pages[^\\n]*`),
+      );
+      if (!match && ["review_delta", "previous_findings"].includes(id))
+        return [];
       assert(match, `Missing ${id} metadata`);
+      // An optional document is not required reading, so a verdict must work without it.
+      if (match[0].includes("optional reference")) return [];
       return Array.from({ length: Number(match[1]) }, (_, page) => ({
         id,
         page,

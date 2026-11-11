@@ -13,6 +13,7 @@ export { serveRpc } from "./rpc.js";
 export {
   reportLimits,
   referenceLimits,
+  documentPageChars,
   reportDocument,
   documentHash,
   type ReportDocument,

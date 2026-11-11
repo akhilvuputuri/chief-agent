@@ -1,10 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { documents } from "../src/documents.js";
-import { reportDocument } from "../src/report.js";
+import { documentPageChars, reportDocument } from "../src/report.js";
 
 test("reference documents require every valid page and start unread in a replacement attempt", async () => {
-  const text = "字".repeat(3999) + "😀" + "tail".repeat(3000);
+  // A surrogate pair sits across the first page boundary.
+  const text =
+    "字".repeat(documentPageChars - 1) +
+    "😀" +
+    "tail".repeat(documentPageChars);
   const d = documents([{ id: "approved_plan", title: "Exact scope", text }]);
   assert.deepEqual(d.unread(), ["approved_plan"]);
   await assert.rejects(
@@ -32,7 +36,11 @@ test("reference documents require every valid page and start unread in a replace
   await read(0);
   assert.deepEqual(d.unread(), ["approved_plan"]);
   const result: string[] = [];
-  for (let page = 0; page < Math.ceil(text.length / 4000); page++) {
+  for (
+    let page = 0;
+    page < Math.ceil(text.length / documentPageChars);
+    page++
+  ) {
     const chunk = await read(page);
     assert(!chunk.text.includes("�"));
     for (let i = chunk.from; i < chunk.to; i++)
@@ -66,11 +74,15 @@ test("report identity binds full content and verdict independently of summary pr
 });
 
 test("complete maximum-size immutable evidence is paged without relaxing report bounds", async () => {
-  const text = "a".repeat(3999) + "😀" + "b".repeat(500000 - 4001);
+  const text =
+    "a".repeat(documentPageChars - 1) +
+    "😀" +
+    "b".repeat(500000 - documentPageChars - 1);
+  const pages = Math.ceil(500000 / documentPageChars);
   const input = [{ id: "candidate_diff", title: "Bound candidate diff", text }];
   const evidence = documents(input);
   const restored: string[] = [];
-  for (let page = 0; page < 125; page++) {
+  for (let page = 0; page < pages; page++) {
     const result = await evidence.tool.execute(
       "read",
       { id: "candidate_diff", page },
@@ -79,8 +91,8 @@ test("complete maximum-size immutable evidence is paged without relaxing report 
       {} as any,
     );
     const chunk = JSON.parse((result.content[0] as any).text);
-    assert.equal(chunk.pages, 125);
-    assert(chunk.text.length <= 4002);
+    assert.equal(chunk.pages, pages);
+    assert(chunk.text.length <= documentPageChars + 2);
     assert(!chunk.text.includes("�"));
     for (let i = chunk.from; i < chunk.to; i++)
       restored[i] = chunk.text[i - chunk.from];
@@ -91,7 +103,7 @@ test("complete maximum-size immutable evidence is paged without relaxing report 
   assert.throws(() => documents([{ ...input[0]!, text: text + "X" }]));
   assert.throws(() =>
     documents(
-      Array.from({ length: 5 }, (_, i) => ({
+      Array.from({ length: 6 }, (_, i) => ({
         id: `doc_${i}`,
         title: "Bound",
         text: "x",
@@ -106,4 +118,27 @@ test("complete maximum-size immutable evidence is paged without relaxing report 
       verdict: "APPROVE",
     }),
   );
+});
+
+test("an optional document can be read but is not required before work or a verdict", async () => {
+  const d = documents([
+    { id: "review_delta", title: "Changed since review", text: "delta" },
+    {
+      id: "candidate_diff",
+      title: "Complete diff",
+      text: "x".repeat(documentPageChars * 3),
+      optional: true,
+    },
+  ]);
+  assert.match(d.description, /candidate_diff: .*3 pages; optional reference/);
+  assert.doesNotMatch(d.description, /review_delta: .*optional/);
+  assert.deepEqual(d.unread(), ["review_delta"]);
+  const read = (id: string, page: number) =>
+    d.tool.execute("call", { id, page }, undefined, undefined, {} as any);
+  await read("candidate_diff", 1);
+  assert.deepEqual(d.unread(), ["review_delta"]);
+  await read("review_delta", 0);
+  assert.deepEqual(d.unread(), []);
+  // One page now carries what took eight: a 300,000-character diff is 10 pages, not 75.
+  assert.equal(documentPageChars, 32000);
 });
