@@ -1,7 +1,7 @@
 # 158 — Where does test time go, and can a test get a database for less?
 
 Work date: 10 November 2026. Written: 10 November 2026.
-Status: tested locally and in CI. Release is pending.
+Status: released in `3d02997`. Coding boxes are not yet measured.
 
 ## User-visible problem and preceding iteration
 
@@ -69,6 +69,12 @@ Most of a test's time goes to restoring a database snapshot into PGlite's in-mem
 ### A test that depended on the millisecond — 11 November 2026
 
 **Measured, a quiet Mac:** `tests/memory-backfill.test.ts` failed 3 of 3 runs with reuse on and 3 of 8 with it off. It orders rows by `created_at`, which PGlite keeps to the millisecond, and two of its writes could land in the same one. The flake predates reuse; a faster run makes the tie more likely. The test now waits 2 ms before each of those writes and passed 12 of 12 runs. CI had not failed on it.
+
+### Release closure — 11 November 2026
+
+- **Merged:** [PR 435](https://github.com/akhilvuputuri/chief-agent/pull/435), approved head `91e3938`, as `3d02997`. Its four PR runs' `test:ts` steps summed to 382, 324, 379 and 354 s, and main's own run (42945594612) to 397 s, against 617 s before.
+- **Deployed:** tests only, so nothing in the running application changed. A read-only host check after the next release showed the gateway on `b2cb9e4`, which contains it, and healthy.
+- **Flaky test:** [PR 438](https://github.com/akhilvuputuri/chief-agent/pull/438) merged as `ed4801e`.
 
 ## Follow-up and next iteration
 

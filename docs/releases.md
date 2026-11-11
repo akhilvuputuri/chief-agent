@@ -1,8 +1,14 @@
+## Serial test runs share one process (11 November 2026)
+
+- **Code.** Tests only. `kite run test:ts` loads every test file into one process when it runs serially, and believes that run only if it finishes and exits cleanly: files that failed or did not report run again on their own, and an unexplained failure or a crash sends every file through a process of its own. CI's parallel runs keep a process per file. `TEST_ISOLATION=process` restores the old behaviour.
+- **Why.** Each file's own process recompiled the test database engine and reloaded the application. See [journal 159](journey/159-shared-process-test-runs.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Reused test databases (10 November 2026)
 
 - **Code.** Tests only. A database a test closes is emptied and handed to the next test, instead of each test restoring a snapshot. `TEST_DB_REUSE=0` turns it off. No migration, and nothing in the running application changes.
 - **Why.** Creating databases took most of a test run's time. See [journal 158](journey/158-reused-test-databases.md).
-- **Deployment.** Not yet recorded as live; update this entry on release.
+- **Deployment.** [PR 435](https://github.com/akhilvuputuri/chief-agent/pull/435) merged as `3d02997` on 11 November; the host later reported `b2cb9e4`, which contains it, with a healthy gateway. CI's six test steps took 324–397 s across five runs, against 617 s before.
 
 ## A nightly judge of memory (10 November 2026)
 

@@ -1,6 +1,6 @@
-# Reused test databases — tested, 10 November 2026
+# Faster test runs — database reuse live, shared-process runs tested, 11 November 2026
 
-A profile showed tests spend most of their time creating PGlite databases, not in Chief's code. A closed test database is now emptied and reused. In one CI run the six test steps took 324 s against 617 s on main. `TEST_DB_REUSE=0` turns it off. See [journal 158](journey/158-reused-test-databases.md).
+Tests spent most of their time creating PGlite databases and starting a process per file, not in Chief's code. A closed test database is now emptied and reused (live in `3d02997`): CI's six test steps take 324–397 s against 617 s before. A serial `kite run test:ts` now also loads every file into one process, falling back to a process per file for anything that fails: 175.6 s against 285.6 s on a Mac, not yet measured on a coding box. CI keeps a process per file. See journals [158](journey/158-reused-test-databases.md) and [159](journey/159-shared-process-test-runs.md).
 
 # A nightly judge of memory — live in `fdff479`, 11 November 2026
 

@@ -1,13 +1,34 @@
-// Runs the TypeScript tests, or one CI shard of them (TEST_SHARD=i/n). Node's own
+// Runs the TypeScript tests, or one CI shard of them (TEST_SHARD=i/n).
+//
+// A serial run loads every file into one process (TEST_ISOLATION=shared), which takes about
+// a third less time than a process per file: each process otherwise compiles the test
+// database engine and loads the application again (journal 159). The shared run's passes
+// are used only if its process exits cleanly: a file that fails there or never reports
+// runs again in a process of its own, and a failure the shared run cannot attribute, or a
+// crash, sends every file through a process of its own (see rerunPlan). CI runs files in
+// parallel, one process each (TEST_ISOLATION=process), and is the reference.
+//
+// In the shared process node imports every file before running any test, and a hook at
+// the top of one file runs around every file's tests.
+//
+// Node's own
 // --test-shard splits by file count, which left shards from 83 s to 182 s (journal 138), so
 // shards are balanced using each file's recorded time in tests/test-weights.json.
 // Refresh it with scripts/update-test-weights.mjs; a stale or missing entry only makes
 // the balance a little worse.
 import { spawn } from "node:child_process";
-import { readdirSync, readFileSync, realpathSync } from "node:fs";
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Each file also starts its own process.
+// Each file also starts its own process in CI, where shards are used.
 const STARTUP_SECONDS = 1;
 
 export function assignShards(files, weights, count) {
@@ -43,6 +64,134 @@ export function allTestFiles(dir = "tests") {
     .map((f) => `${dir}/${f}`);
 }
 
+/** "shared" for a serial run unless told otherwise; parallel files need their own processes. */
+export function isolationMode(env) {
+  const concurrency = env.TEST_CONCURRENCY ?? "1";
+  const mode =
+    env.TEST_ISOLATION ?? (concurrency === "1" ? "shared" : "process");
+  if (mode !== "shared" && mode !== "process")
+    throw new Error(`Invalid TEST_ISOLATION: ${mode}`);
+  if (mode === "shared" && concurrency !== "1")
+    throw new Error("TEST_ISOLATION=shared runs one file at a time");
+  return mode;
+}
+
+/**
+ * The files a shared-process run leaves undecided: those with a failed test, and those
+ * that never reported one, because the process died or exited before reaching them.
+ * `report` is what scripts/test-ran-files.mjs wrote.
+ */
+export function undecidedFiles(files, report, cwd = process.cwd()) {
+  const ran = new Set();
+  const failed = new Set();
+  for (const line of report.split("\n")) {
+    const [kind, ...rest] = line.split(" ");
+    const file = relative(cwd, resolve(cwd, rest.join(" ")));
+    if (kind === "ran") ran.add(file);
+    if (kind === "failed") failed.add(file);
+  }
+  return files.filter((file) => failed.has(file) || !ran.has(file));
+}
+
+/**
+ * What must still run, one process per file, after a shared-process run. `first` decides
+ * the result if it fails; `thenIfPassed` runs only when `first` passed.
+ *
+ * A shared run is believed only when it ran to its end and exited cleanly. A run cut
+ * short can stop a file halfway after it has reported a test, whether by a crash or by
+ * another file's leftover timer calling process.exit(0). And node can fail a run without
+ * naming a file (a timer that throws after its test ended, a failing global hook). So
+ * after a run that did not complete every file runs again, and a failed run that its
+ * named failures do not explain is not passed until every other file has run on its own
+ * too.
+ */
+export function rerunPlan({ files, undecided, code, crashed, complete }) {
+  if (crashed || !complete) return { first: files, thenIfPassed: [] };
+  if (code === 0) return { first: undecided, thenIfPassed: [] };
+  if (!undecided.length) return { first: files, thenIfPassed: [] };
+  return {
+    first: undecided,
+    thenIfPassed: files.filter((file) => !undecided.includes(file)),
+  };
+}
+
+const run = (args) =>
+  new Promise((done) => {
+    const child = spawn("tsx", args, { stdio: "inherit" });
+    child.on("error", (error) => {
+      console.error(error);
+      done({ code: 1, crashed: true });
+    });
+    child.on("exit", (code, signal) =>
+      done({ code: signal ? 1 : (code ?? 1), crashed: Boolean(signal) }),
+    );
+  });
+
+const perFile = async (files, concurrency) =>
+  (await run(["--test", `--test-concurrency=${concurrency}`, ...files])).code;
+
+const list = (files) => files.map((file) => `  ${file}`).join("\n");
+
+async function shared(files) {
+  const dir = mkdtempSync(join(tmpdir(), "chief-test-run-"));
+  const report = join(dir, "ran");
+  try {
+    const { code, crashed } = await run([
+      "--test",
+      "--experimental-test-isolation=none",
+      // Naming a second reporter drops the default one, so it is named too.
+      `--test-reporter=${process.stdout.isTTY ? "spec" : "tap"}`,
+      "--test-reporter-destination=stdout",
+      `--test-reporter=${fileURLToPath(new URL("test-ran-files.mjs", import.meta.url))}`,
+      `--test-reporter-destination=${report}`,
+      ...files,
+    ]);
+    let written = "";
+    try {
+      written = readFileSync(report, "utf8");
+    } catch {
+      // No report at all: every file is undecided.
+    }
+    const undecided = undecidedFiles(files, written);
+    const complete = written.split("\n").includes("complete");
+    const { first, thenIfPassed } = rerunPlan({
+      files,
+      undecided,
+      code,
+      crashed,
+      complete,
+    });
+    if (!first.length) return code;
+    console.log(
+      (crashed || !complete
+        ? "\nThe shared process stopped before finishing, so its results are not used. "
+        : code !== 0 && !undecided.length
+          ? "\nThe shared process failed without naming a test file. "
+          : `\n${first.length} test file(s) failed or did not report in the shared process. `) +
+        `Running ${first.length === files.length ? "every file" : "them"} one process each, which decides the result:\n` +
+        list(first),
+    );
+    const decided = await perFile(first, "1");
+    if (decided !== 0) return decided;
+    if (!thenIfPassed.length) {
+      // Only a failed shared run says anything about files disturbing each other.
+      if (complete && !crashed && code !== 0)
+        console.log(
+          "\nThey pass on their own. A file that fails only in the shared process " +
+            "depends on, or disturbs, another file's state.",
+        );
+      return 0;
+    }
+    console.log(
+      "\nThey pass on their own, which leaves the shared run's failure unexplained. " +
+        `Running the other ${thenIfPassed.length} file(s) one process each before deciding.`,
+    );
+    return perFile(thenIfPassed, "1");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 if (
   process.argv[1] &&
   realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])
@@ -56,14 +205,9 @@ if (
   // Serial unless asked: coding boxes run this too, and only CI has measured parallel files
   // for the SIGSEGV in journal 123 (journal 141).
   const concurrency = process.env.TEST_CONCURRENCY ?? "1";
-  const child = spawn(
-    "tsx",
-    ["--test", `--test-concurrency=${concurrency}`, ...files],
-    { stdio: "inherit" },
+  process.exit(
+    isolationMode(process.env) === "shared"
+      ? await shared(files)
+      : await perFile(files, concurrency),
   );
-  child.on("error", (error) => {
-    console.error(error);
-    process.exit(1);
-  });
-  child.on("exit", (code, signal) => process.exit(signal ? 1 : (code ?? 1)));
 }
