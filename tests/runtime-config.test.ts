@@ -38,6 +38,55 @@ test("the committed runtime config is valid and matches the code defaults", () =
   assert.deepEqual(withFile.overridden, []);
 });
 
+test("MODEL_PROVIDER comes from the file unless the environment sets it; the key never can", () => {
+  // Anthropic by default, inert until ANTHROPIC_API_KEY is set.
+  const defaults = readConfig(required, {});
+  assert.equal(defaults.MODEL_PROVIDER, "anthropic");
+  assert.equal(defaults.ANTHROPIC_API_KEY, "");
+  assert.equal(
+    readConfig({ ...required, ANTHROPIC_API_KEY: "sk-ant-test" })
+      .MODEL_PROVIDER,
+    "anthropic",
+  );
+  const forced = readConfig({ ...required, MODEL_PROVIDER: "openrouter" });
+  assert.equal(forced.MODEL_PROVIDER, "openrouter");
+  assert.deepEqual(forced.overridden, ["MODEL_PROVIDER"]);
+  assert.throws(() => readConfig(required, { MODEL_PROVIDER: "bedrock" }));
+  const f = file({
+    schemaVersion: 1,
+    settings: { ANTHROPIC_API_KEY: "sk-ant-x" },
+  });
+  try {
+    assert.throws(() => readRuntimeSettings(f.url));
+  } finally {
+    f.done();
+  }
+});
+
+test("ANTHROPIC_WORKSPACE_ID is an optional, strictly formed environment identifier", () => {
+  assert.equal(readConfig(required, {}).ANTHROPIC_WORKSPACE_ID, "");
+  assert.equal(
+    readConfig({ ...required, ANTHROPIC_WORKSPACE_ID: "wrkspc_01Abc" }, {})
+      .ANTHROPIC_WORKSPACE_ID,
+    "wrkspc_01Abc",
+  );
+  for (const bad of ["wrkspc_", "01Abc", "wrkspc_a-b", "wrkspc_a b"])
+    assert.throws(
+      () => readConfig({ ...required, ANTHROPIC_WORKSPACE_ID: bad }, {}),
+      bad,
+    );
+  // An identifier, never a reviewed behaviour setting.
+  const f = file({
+    schemaVersion: 1,
+    settings: { ANTHROPIC_WORKSPACE_ID: "wrkspc_01Abc" },
+  });
+  try {
+    assert.throws(() => readRuntimeSettings(f.url));
+  } finally {
+    f.done();
+  }
+});
+
 test("file values apply, the environment still wins, and overrides are listed by name", () => {
   const runtime = {
     MEDIA_MODEL: "google/gemini-3.8-flash",

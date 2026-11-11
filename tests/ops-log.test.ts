@@ -257,6 +257,119 @@ test("model.completed projects model, latency, tokens and reported cost", () => 
   }
 });
 
+test("model logs name the direct pathway, its fallbacks and the startup routes", () => {
+  const log = capture();
+  try {
+    projectEvent("model.completed", randomUUID(), {
+      model: "anthropic/claude-opus-5.5",
+      provider: "Anthropic",
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 5,
+        prompt_tokens_details: { cached_tokens: 4, cache_write_tokens: 2 },
+        cost: 0.001,
+        route: "anthropic-direct",
+      },
+    });
+    projectEvent("model.completed", randomUUID(), {
+      model: "anthropic/claude-opus-5.5",
+      provider: "Claude Platform on AWS",
+      usage: { cost: 0.002, fallback_from: "anthropic-direct" },
+    });
+    projectEvent("model.completed", randomUUID(), {
+      model: "anthropic/claude-opus-5.5",
+      provider: "Anthropic",
+      usage: { cost: 0.001, route: "anthropic-direct", replay_dropped: true },
+    });
+    const [direct, fallback, replayed] = log.parsed();
+    assert.equal(replayed.replayDropped, true);
+    assert.equal("dropped" in replayed, false);
+    assert.equal(direct.provider, "anthropic");
+    assert.equal(direct.route, "anthropic-direct");
+    assert.equal(direct.cachedTokens, 4);
+    assert.equal(direct.costUsd, 0.001);
+    assert.equal(fallback.fallbackFrom, "anthropic-direct");
+    assert.equal(fallback.provider, "claude-aws");
+    // A direct failure (AnthropicDirect diagnostics) names its pathway; OpenRouter's do not.
+    projectEvent("model.failed", randomUUID(), {
+      model: "anthropic/claude-opus-5.5",
+      transient: false,
+      diagnostics: {
+        route: "anthropic-direct",
+        provider: "Anthropic",
+        httpStatus: 403,
+        errorType: "permission_error",
+        providerFault: "permission",
+      },
+    });
+    projectEvent("model.failed", randomUUID(), {
+      model: "anthropic/claude-opus-5.5",
+      transient: true,
+      diagnostics: { httpStatus: 502 },
+    });
+    const [, , , failedDirect, failedRouted] = log.parsed();
+    assert.equal(failedDirect.event, "model.failed");
+    assert.equal(failedDirect.route, "anthropic-direct");
+    assert.equal(failedDirect.provider, "anthropic");
+    assert.equal(failedDirect.httpStatus, 403);
+    assert.equal(failedDirect.errorType, "permission_error");
+    assert.equal("dropped" in failedDirect, false);
+    assert.equal("route" in failedRouted, false);
+    // Failures without usage add no token or cost fields.
+    for (const line of [failedDirect, failedRouted])
+      for (const field of ["inputTokens", "outputTokens", "costUsd"])
+        assert.equal(field in line, false);
+    // A billed response refused afterwards carries its usage: numbers only.
+    projectEvent("model.failed", randomUUID(), {
+      model: "anthropic/claude-opus-5.5",
+      transient: false,
+      diagnostics: {
+        route: "anthropic-direct",
+        provider: "Anthropic",
+        finishReason: "content_filter",
+        failureCode: "refusal",
+        refusalCategory: "cyber",
+        usage: {
+          prompt_tokens: 1300,
+          completion_tokens: 50,
+          prompt_tokens_details: {
+            cached_tokens: 1000,
+            cache_write_tokens: 200,
+          },
+          completion_tokens_details: { reasoning_tokens: 20 },
+          cost: 0.0025,
+          route: "anthropic-direct",
+          thinking_dropped: 0,
+        },
+      },
+    });
+    const refused = log.parsed().at(-1);
+    assert.equal(refused.event, "model.failed");
+    assert.equal(refused.inputTokens, 1300);
+    assert.equal(refused.outputTokens, 50);
+    assert.equal(refused.cachedTokens, 1000);
+    assert.equal(refused.cacheWriteTokens, 200);
+    assert.equal(refused.reasoningTokens, 20);
+    assert.equal(refused.costUsd, 0.0025);
+    assert.equal(refused.route, "anthropic-direct");
+    assert.equal(refused.finishReason, "content_filter");
+    assert.equal("dropped" in refused, false);
+    const routes = sanitize("model.routes", "info", {
+      modelProvider: "anthropic",
+      anthropicKey: false,
+      mainRoute: "openrouter",
+      fastRoute: "openrouter",
+      judgeRoute: "anthropic-direct",
+    })!;
+    assert.equal(routes.anthropicKey, false);
+    assert.equal(routes.judgeRoute, "anthropic-direct");
+    assert.equal("dropped" in routes, false);
+    assert.equal("dropped" in direct, false);
+  } finally {
+    log.restore();
+  }
+});
+
 test("finish reasons are logged only as fixed names", () => {
   const log = capture();
   try {

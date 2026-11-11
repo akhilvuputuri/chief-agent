@@ -932,10 +932,10 @@ export function modelSpan(s: ModelSpanInput): ExportSpan {
     latency === undefined ? end : end - BigInt(latency) * 1_000_000n;
   const requested = modelName(failed ? data.model : data.requestedModel);
   const served = failed ? undefined : modelName(data.model);
-  const usage = failed
-    ? undefined
-    : (data.usage as Record<string, any> | null | undefined);
   const diagnostics = data.diagnostics as Record<string, unknown> | undefined;
+  // A failed call has usage only when a complete response was billed and then refused.
+  const usage = (failed ? diagnostics?.usage : data.usage) as
+    Record<string, any> | null | undefined;
   const finish = finishName(
     failed ? diagnostics?.finishReason : data.finishReason,
   );
@@ -950,7 +950,12 @@ export function modelSpan(s: ModelSpanInput): ExportSpan {
     error: failed,
     attributes: {
       "gen_ai.operation.name": "chat",
-      "gen_ai.provider.name": "openrouter",
+      // The direct pathway marks its usage (src/model-router.ts); a fallback is OpenRouter's.
+      "gen_ai.provider.name":
+        usage?.route === "anthropic-direct" ||
+        (failed && diagnostics?.route === "anthropic-direct")
+          ? "anthropic"
+          : "openrouter",
       "gen_ai.request.model": requested ?? served,
       "gen_ai.response.model": served,
       "gen_ai.usage.input_tokens": finiteCount(usage?.prompt_tokens),

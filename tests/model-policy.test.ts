@@ -9,8 +9,10 @@ import {
   resolveAgentModel,
   resolveJudgeModel,
   resolveMainModel,
+  resolveAnthropicModel,
   resolvePriceCeilings,
 } from "../src/model-policy.js";
+import { AnthropicDirect } from "../src/anthropic.js";
 
 test("a tracked model overrides an injected production environment value", () => {
   assert.equal(
@@ -97,6 +99,102 @@ test("reviewed policy price ceilings replace the environment's, and stay bounded
       assert.throws(() => readModelPolicy(pathToFileURL(file)), {
         message: "Invalid bundled model policy",
       });
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("the reviewed Anthropic map lists native IDs and first-party prices, and nothing is derived", () => {
+  const bundled = readModelPolicy();
+  assert.deepEqual(
+    resolveAnthropicModel("anthropic/claude-opus-5.5", bundled),
+    {
+      nativeModel: "claude-opus-5-5",
+      prices: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
+      fallback: true,
+    },
+  );
+  assert.equal(
+    resolveAnthropicModel("anthropic/claude-sonnet-5.5", bundled),
+    undefined,
+  );
+  assert.equal(
+    resolveAnthropicModel("google/gemini-3.8-flash", bundled),
+    undefined,
+  );
+  assert.equal(resolveAnthropicModel("anthropic/toString", bundled), undefined);
+  assert.equal(
+    resolveAnthropicModel("anthropic/claude-opus-5.5", {
+      schemaVersion: 1,
+      main: null,
+    }),
+    undefined,
+  );
+  // Every mapped model is one the direct adapter supports, so a key never fails startup,
+  // and its list price fits the reviewed ceilings, so it would actually route direct.
+  for (const [slug, entry] of Object.entries(
+    bundled.providers!.anthropic!.models,
+  )) {
+    const { id, ...prices } = entry;
+    assert.doesNotThrow(
+      () =>
+        new AnthropicDirect("test", { model: slug, nativeModel: id, prices }),
+      slug,
+    );
+    assert.ok(prices.input <= bundled.priceCeilings!.input, slug);
+    assert.ok(prices.output <= bundled.priceCeilings!.output, slug);
+  }
+  const directory = mkdtempSync(join(tmpdir(), "chief-model-policy-"));
+  const file = join(directory, "model-policy.json");
+  const entry = {
+    id: "claude-opus-5-5",
+    input: 4,
+    output: 20,
+    cacheRead: 0.2,
+    cacheWrite: 5,
+  };
+  try {
+    for (const providers of [
+      { anthropic: { models: { "anthropic/claude-opus-5.5": entry } } },
+      {
+        anthropic: {
+          fallback: true,
+          models: { "google/gemini-3.8-flash": entry },
+        },
+      },
+      {
+        anthropic: {
+          fallback: true,
+          models: { "anthropic/claude-opus-5.5": { ...entry, id: "Opus" } },
+        },
+      },
+      {
+        anthropic: {
+          fallback: true,
+          models: { "anthropic/claude-opus-5.5": { ...entry, cacheWrite: 0 } },
+        },
+      },
+      {
+        anthropic: {
+          fallback: true,
+          models: { "anthropic/claude-opus-5.5": { ...entry, batch: 2 } },
+        },
+      },
+      { anthropic: { fallback: "yes", models: {} } },
+      { openai: { fallback: true, models: {} } },
+    ]) {
+      writeFileSync(
+        file,
+        JSON.stringify({ schemaVersion: 1, main: null, providers }),
+      );
+      assert.throws(
+        () => readModelPolicy(pathToFileURL(file)),
+        {
+          message: "Invalid bundled model policy",
+        },
+        JSON.stringify(providers),
+      );
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });

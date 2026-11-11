@@ -50,7 +50,7 @@ import {
 import { PublicFeedFetcher } from "./news-feed.js";
 import { run as runTelegram, type RunnerHandle } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
-import { OpenRouter } from "./model.js";
+import { ModelRouter } from "./model-router.js";
 import {
   resolveAgentModel,
   resolveJudgeModel,
@@ -152,6 +152,15 @@ const mainModel = resolveMainModel(c.AGENT_MODEL);
 const priceCeilings = resolvePriceCeilings({
   input: c.OPENROUTER_MAX_INPUT_PRICE,
   output: c.OPENROUTER_MAX_OUTPUT_PRICE,
+});
+// Every model call's provider: OpenRouter, or Anthropic direct for policy-mapped models
+// once ANTHROPIC_API_KEY is set (src/model-router.ts).
+const models = new ModelRouter({
+  provider: c.MODEL_PROVIDER,
+  openRouterKey: c.OPENROUTER_API_KEY,
+  anthropicKey: c.ANTHROPIC_API_KEY,
+  anthropicWorkspaceId: c.ANTHROPIC_WORKSPACE_ID,
+  ceilings: priceCeilings,
 });
 const db = connect(c.DATABASE_URL);
 await db.query("SELECT 1");
@@ -599,13 +608,7 @@ if (c.CODING_RUNTIME === "on") {
     c.CODING_AUTH_KEY,
     c.CODING_PUBLIC_ORIGIN,
     (user) => owners.has(user),
-    (model) =>
-      new OpenRouter(
-        c.OPENROUTER_API_KEY,
-        model,
-        priceCeilings.input,
-        priceCeilings.output,
-      ),
+    (model) => models.modelFor(model),
     undefined,
     async () => {
       const response = await fetch("https://openrouter.ai/api/v1/models", {
@@ -798,30 +801,14 @@ if (mcpMigrated) {
 const assistant = new Assistant(
   db,
   new CustomAgent(
-    new OpenRouter(
-      c.OPENROUTER_API_KEY,
-      mainModel,
-      priceCeilings.input,
-      priceCeilings.output,
-    ),
+    models.modelFor(mainModel),
     // Optional task-specific vision/document model; the main model is used when unset.
     c.MEDIA_MODEL
       ? {
-          media: new OpenRouter(
-            c.OPENROUTER_API_KEY,
-            c.MEDIA_MODEL,
-            priceCeilings.input,
-            priceCeilings.output,
-          ),
+          media: models.modelFor(c.MEDIA_MODEL),
         }
       : {},
-    (model) =>
-      new OpenRouter(
-        c.OPENROUTER_API_KEY,
-        model,
-        priceCeilings.input,
-        priceCeilings.output,
-      ),
+    (model) => models.modelFor(model),
   ),
   new JobTools(
     db,
@@ -1409,20 +1396,10 @@ workTimer.unref();
 const learnerModel = resolveAgentModel("standard", mainModel).model;
 const judgeModel = resolveJudgeModel(mainModel);
 const learner = new Learner(db, {
-  model: new OpenRouter(
-    c.OPENROUTER_API_KEY,
-    learnerModel,
-    priceCeilings.input,
-    priceCeilings.output,
-  ),
+  model: models.modelFor(learnerModel),
   modelName: learnerModel,
   judge: {
-    model: new OpenRouter(
-      c.OPENROUTER_API_KEY,
-      judgeModel,
-      priceCeilings.input,
-      priceCeilings.output,
-    ),
+    model: models.modelFor(judgeModel),
     modelName: judgeModel,
   },
   enabled: c.LEARNING === "on",
@@ -1563,6 +1540,25 @@ opsLog("gateway.started", "info", { nodeVersion: process.version });
 // Which repo-config settings this environment still overrides (names only, issue #143).
 opsLog("config.loaded", "info", {
   envSettings: c.overridden,
+});
+// The effective provider per model role, and whether an Anthropic key is present (never it).
+const tierModel = (tier: "fast" | "standard") => {
+  try {
+    return resolveAgentModel(tier, mainModel).model;
+  } catch {
+    return undefined;
+  }
+};
+const routeOf = (model: string | undefined) =>
+  model ? models.route(model) : undefined;
+opsLog("model.routes", "info", {
+  modelProvider: c.MODEL_PROVIDER,
+  anthropicKey: !!c.ANTHROPIC_API_KEY,
+  mainRoute: routeOf(mainModel),
+  standardRoute: routeOf(tierModel("standard")),
+  fastRoute: routeOf(tierModel("fast")),
+  judgeRoute: routeOf(judgeModel),
+  mediaRoute: routeOf(c.MEDIA_MODEL || mainModel),
 });
 // Low-rate liveness record: its absence in CloudWatch means the gateway or the
 // log path stopped, not that nothing happened.

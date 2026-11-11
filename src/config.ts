@@ -71,6 +71,19 @@ const schema = z.object({
   LIBRARY_HOLD_EMAIL: z.union([z.literal(""), z.string().email()]).default(""),
   DAILY_SPREADSHEET_ID: z.string().default(""),
   OPENROUTER_API_KEY: z.string().default(""),
+  // Optional Anthropic Console key (src/model-router.ts). Empty, every model call goes
+  // through OpenRouter exactly as before.
+  ANTHROPIC_API_KEY: z.string().default(""),
+  // Optional, not secret: an unscoped Console key needs its workspace, sent as the
+  // anthropic-workspace-id header. A workspace-scoped key needs none. An identifier, so it
+  // lives in the private environment beside the key, never in config/runtime.json.
+  ANTHROPIC_WORKSPACE_ID: z
+    .union([z.literal(""), z.string().regex(/^wrkspc_[A-Za-z0-9]+$/)])
+    .default(""),
+  // "anthropic" sends models mapped in config/model-policy.json providers.anthropic direct
+  // to Anthropic when ANTHROPIC_API_KEY is set, and is inert without it; "openrouter" keeps
+  // every call on OpenRouter.
+  MODEL_PROVIDER: z.enum(["openrouter", "anthropic"]).default("anthropic"),
   AGENT_MODEL: z.string().default("openai/gpt-5.6-sol"),
   // Jev picks the tool domains per message; "off" uses the deterministic cues; "all" offers
   // every available domain on every call, so the cached tool list never changes (journal 107).
@@ -176,6 +189,7 @@ export const RUNTIME_SETTINGS = [
   "AGENT_BUDGET_TOOL_CALLS",
   "OPENROUTER_MAX_INPUT_PRICE",
   "OPENROUTER_MAX_OUTPUT_PRICE",
+  "MODEL_PROVIDER",
   "SEARCH_MODEL",
   "MEDIA_MODEL",
   "TOOL_PICKER",

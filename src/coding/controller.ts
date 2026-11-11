@@ -515,7 +515,8 @@ export class CodingController {
       responseId?: string;
       finishReason?: "length" | "content_filter";
       providerStatus?: number;
-      providerFailure?: "empty" | "malformed";
+      providerFailure?: "empty" | "malformed" | "refusal";
+      refusalCategory?: string;
     },
   ) {
     opsLog("coding.request_rejected", "warn", {
@@ -1744,6 +1745,12 @@ export class CodingController {
     let admitted = false;
     let received = false;
     const started = Date.now();
+    const requestedModel =
+      input.role === "reviewer"
+        ? job.settings.reviewerModel
+        : input.role === "leader"
+          ? (job.settings.leaderModel ?? job.settings.model)
+          : job.settings.model;
     const enhanced =
       job.settings.harnessVersion === 2 || job.settings.runtime === "pi";
     const allowance = outputAllowance(job.settings, input.role);
@@ -1751,7 +1758,9 @@ export class CodingController {
       Math.max(
         1,
         Math.min(
-          // The idle timeout still stops a stalled stream after 90 seconds.
+          // Bounds the whole call. The 90-second idle timeout stops a silent stream, but any
+          // received bytes re-arm it (on the direct route, the API's thinking-phase pings do), so
+          // a stream that only keeps sending pings is stopped by this limit alone.
           enhanced ? modelCallTimeoutMs(allowance) : 120000,
           new Date(job.attempt_deadline).getTime() - this.clock().getTime(),
         ),
@@ -1833,13 +1842,7 @@ export class CodingController {
         !this.allowed(job.user_id)
       )
         throw new Error("Coding request cancelled before model dispatch");
-      const result = await this.models(
-        input.role === "reviewer"
-          ? job.settings.reviewerModel
-          : input.role === "leader"
-            ? (job.settings.leaderModel ?? job.settings.model)
-            : job.settings.model,
-      ).generate({
+      const result = await this.models(requestedModel).generate({
         messages: input.messages,
         tools: input.tools,
         reasoning: job.settings.effort,
@@ -1944,6 +1947,40 @@ export class CodingController {
         "UPDATE coding_model_calls SET state='uncertain' WHERE id=$1 AND state='pending'",
         [input.callId],
       );
+      // A complete response that the adapter then refused (a refusal, an incomplete or empty
+      // answer) was still billed: record its usage, marked incomplete, like a completed call's.
+      const billed =
+        error instanceof ModelError &&
+        error.diagnostics.usage &&
+        typeof error.diagnostics.usage === "object"
+          ? error.diagnostics
+          : undefined;
+      if (admitted && !received && billed)
+        await this.db
+          .query(
+            "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,$2,$3::jsonb,'suppressed')",
+            [
+              job.id,
+              `${job.attempt_id}:model:${randomUUID()}`,
+              JSON.stringify(
+                storable({
+                  kind: "model_usage",
+                  role: input.role,
+                  ...(input.purpose ? { purpose: input.purpose } : {}),
+                  model: requestedModel,
+                  usage: billed.usage,
+                  provider: billed.provider,
+                  incomplete: true,
+                  ...(typeof billed.failureCode === "string"
+                    ? { failureCode: billed.failureCode.slice(0, 40) }
+                    : {}),
+                }),
+              ),
+            ],
+          )
+          // Best-effort accounting: a failed insert must not replace the model error being
+          // handled here, which is still classified and recorded below.
+          .catch(() => {});
       if (admitted && !received) {
         let code: CodingFailureCode | undefined;
         if (cancellation.signal.aborted) code = "model_cancelled";
@@ -1978,8 +2015,16 @@ export class CodingController {
             callId: input.callId,
             ...(error instanceof ModelError &&
             (error.diagnostics.failureCode === "empty" ||
-              error.diagnostics.failureCode === "malformed")
+              error.diagnostics.failureCode === "malformed" ||
+              error.diagnostics.failureCode === "refusal")
               ? { providerFailure: error.diagnostics.failureCode }
+              : {}),
+            // So a paused job can say the model declined, and in which category.
+            ...(error instanceof ModelError &&
+            error.diagnostics.failureCode === "refusal" &&
+            typeof error.diagnostics.refusalCategory === "string" &&
+            /^[a-z][a-z0-9_]{0,59}$/.test(error.diagnostics.refusalCategory)
+              ? { refusalCategory: error.diagnostics.refusalCategory }
               : {}),
             ...(code === "model_timeout" ? { timeoutKind } : {}),
             ...(responseId ? { responseId } : {}),

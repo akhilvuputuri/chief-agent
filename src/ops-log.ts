@@ -48,6 +48,8 @@ const fields: Record<string, Shape> = {
   tier: "name",
   effort: "name",
   errorCode: "code",
+  /** A provider's error category enum (Anthropic error.type), never message text. */
+  errorType: "code",
   errorCategory: "code",
   /** The name of error.cause, when present (fetch failures carry the real error there). */
   causeCategory: "code",
@@ -73,6 +75,22 @@ const fields: Record<string, Shape> = {
   /** Prompt tokens written to the provider's cache (OpenRouter prompt_tokens_details). */
   cacheWriteTokens: "count",
   reasoningTokens: "count",
+  /** Which pathway served a call (src/model-router.ts): anthropic-direct or openrouter. */
+  route: "code",
+  /** model.completed after a direct Anthropic failure: the pathway it fell back from. */
+  fallbackFrom: "code",
+  /** A direct call that retried once without its rejected thinking replay. */
+  replayDropped: "bool",
+  /** model.provider_fallback: seconds the direct pathway stays off. */
+  cooldownS: "count",
+  /** model.routes at startup: MODEL_PROVIDER, key presence and each role's pathway. */
+  modelProvider: "name",
+  anthropicKey: "bool",
+  mainRoute: "code",
+  standardRoute: "code",
+  fastRoute: "code",
+  judgeRoute: "code",
+  mediaRoute: "code",
   /** The model the host asked for; `model` on model.completed is the one that served. */
   requestedModel: "model",
   /** Why the model stopped, mapped to a fixed name (see finishName). */
@@ -341,6 +359,9 @@ function usageFields(usage: unknown): OpsFields {
     cacheWriteTokens: num(u.prompt_tokens_details?.cache_write_tokens),
     reasoningTokens: num(u.completion_tokens_details?.reasoning_tokens),
     costUsd: num(u.cost) ?? null,
+    route: u.route,
+    fallbackFrom: u.fallback_from,
+    replayDropped: u.replay_dropped,
   };
 }
 
@@ -420,8 +441,16 @@ const projections: Record<string, Projection> = {
       attempt: d.attempt,
       latencyMs: d.latencyMs,
       transient: d.transient,
+      // A complete response refused after it was billed (the direct adapter's refusal,
+      // incomplete or empty response) carries its usage: tokens and cost, numbers only.
+      ...(d.diagnostics?.usage ? usageFields(d.diagnostics.usage) : {}),
       provider: providerName(d.diagnostics?.provider),
+      // Set by the direct Anthropic adapter on its failures; OpenRouter failures omit it.
+      route: d.diagnostics?.route,
       errorCode: d.diagnostics?.errorCode,
+      errorType: d.diagnostics?.errorType,
+      replayDropped:
+        d.diagnostics?.replayDropped ?? d.diagnostics?.usage?.replay_dropped,
       httpStatus: d.diagnostics?.httpStatus,
       state: finishName(d.diagnostics?.finishReason),
       finishReason: finishName(d.diagnostics?.finishReason),

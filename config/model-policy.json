@@ -9,5 +9,19 @@
       "fast": "google/gemini-3.8-flash",
       "standard": "anthropic/claude-opus-5.5"
     }
+  },
+  "providers": {
+    "anthropic": {
+      "fallback": true,
+      "models": {
+        "anthropic/claude-opus-5.5": {
+          "id": "claude-opus-5-5",
+          "input": 4,
+          "output": 20,
+          "cacheRead": 0.2,
+          "cacheWrite": 5
+        }
+      }
+    }
   }
 }

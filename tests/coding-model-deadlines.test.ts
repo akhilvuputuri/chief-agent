@@ -169,6 +169,92 @@ test("empty provider answers permit a fresh generation but never replay the unce
     "malformed",
   );
 });
+test("a refusal says the model declined, with its category, and records the billed usage", async (t) => {
+  const f = await fixture(t);
+  const job: any = await f.start("refused-model", "plan");
+  await f.c.tick();
+  await f.db.query(
+    'UPDATE coding_jobs SET settings=settings || \'{"harnessVersion":2,"squad":true}\'::jsonb WHERE id=$1',
+    [job.id],
+  );
+  const active = await f.row(job.id);
+  const token = (f.c as any).token(job.id, active.attempt_id);
+  const usage = {
+    prompt_tokens: 1300,
+    completion_tokens: 50,
+    prompt_tokens_details: { cached_tokens: 1000, cache_write_tokens: 200 },
+    cost: 0.0025,
+    route: "anthropic-direct",
+  };
+  f.failModel(
+    new ModelError("The model declined this request.", false, {
+      route: "anthropic-direct",
+      provider: "Anthropic",
+      finishReason: "content_filter",
+      failureCode: "refusal",
+      refusalCategory: "cyber",
+      usage,
+    }),
+  );
+  const app = await server({} as any);
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const failed = await app.inject({
+    method: "POST",
+    url: `/coding/worker/${job.id}/model`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: {
+      callId: randomUUID(),
+      role: "leader",
+      messages: [{ role: "user", content: "Synthetic task" }],
+      tools: [],
+    },
+  });
+  // The existing code (no new code crosses the worker boundary), with the reason stored.
+  assert.equal(failed.json().code, "model_provider_failed");
+  const status: any = await f.c.status("a", job.id);
+  assert.equal(status.lastFailure.providerFailure, "refusal");
+  assert.equal(status.lastFailure.refusalCategory, "cyber");
+  assert.equal(status.lastFailure.finishReason, "content_filter");
+  const events = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND payload->>'kind'='model_usage'",
+      [job.id],
+    )
+  ).rows.map((r: any) => r.payload);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].incomplete, true);
+  assert.equal(events[0].failureCode, "refusal");
+  assert.equal(events[0].provider, "Anthropic");
+  assert.equal(events[0].role, "leader");
+  assert.deepEqual(events[0].usage, usage);
+  // Failures without usage record none.
+  f.failModel(
+    new ModelError("private malformed response", false, {
+      failureCode: "malformed",
+    }),
+  );
+  await app.inject({
+    method: "POST",
+    url: `/coding/worker/${job.id}/model`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: {
+      callId: randomUUID(),
+      role: "leader",
+      messages: [{ role: "user", content: "Synthetic task" }],
+      tools: [],
+    },
+  });
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT count(*)::int AS n FROM coding_events WHERE job_id=$1 AND payload->>'kind'='model_usage'",
+        [job.id],
+      )
+    ).rows[0].n,
+    1,
+  );
+});
 test("new harness exposes a bounded transient model category without provider error text", async (t) => {
   const f = await fixture(t);
   const job: any = await f.start("transient-model", "plan");

@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""Reviewed one-time operator rollout: the Anthropic API key in the gateway environment.
+
+No migration. Compose gains exactly two gateway environment names, ANTHROPIC_API_KEY and then
+ANTHROPIC_WORKSPACE_ID, directly after OPENROUTER_API_KEY. The private .env must already hold
+the key; the workspace ID is optional (an unscoped key needs one) but must be well formed when
+set. The script checks presence and format only and never prints a value. Modelled on
+deploy-singapore-keys.py (PR 282).
+"""
+import fcntl
+import json
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+
+LIVE = pathlib.Path('/opt/hermes-companion')
+LOCK = pathlib.Path('/var/lock/companion-release.lock')
+# UNSET ON PURPOSE. The PR that adds the Compose line must set BASE to the live release SHA,
+# read over SSH (sudo cat /opt/hermes-companion/RELEASE) just before that PR is reviewed, so
+# the reviewer approves the exact baseline, as for the Singapore keys. The script refuses
+# to run while it is None, and the offline test fails once compose.yaml carries the line
+# and BASE is still unset. If another release lands first, set the new live SHA after review.
+BASE = None
+IMAGE = 'hermes-companion-gateway'
+# Required in the private .env.
+KEYS = ('ANTHROPIC_API_KEY',)
+# Optional in the private .env; when set it must match the gateway's own check (src/config.ts).
+OPTIONAL = {'ANTHROPIC_WORKSPACE_ID': re.compile('wrkspc_[A-Za-z0-9]+')}
+# Every name the reviewed Compose change adds.
+NAMES = KEYS + tuple(OPTIONAL)
+COMPOSE_ANCHOR = b'      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?Set OPENROUTER_API_KEY}\n'
+COMPOSE_ADDITION = (b'      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}\n'
+                    b'      ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}\n')
+PENDING = '.RELEASE-anthropic'
+MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
+
+
+def bases():
+    """The reviewed baselines; empty until BASE is set, so the rollout refuses."""
+    return {BASE} if isinstance(BASE, str) and re.fullmatch('[0-9a-f]{40}', BASE) else set()
+
+
+def run(args, **kwargs):
+    # Never echo expanded Compose environment or raw subprocess diagnostics.
+    kwargs.setdefault('capture_output', True)
+    return subprocess.run(args, check=True, **kwargs)
+
+
+def compose(*args, **kwargs):
+    return run(['docker', 'compose', '--project-directory', str(LIVE),
+                '-p', 'hermes-companion', *args], **kwargs)
+
+
+def sql(statement):
+    return run(['docker', 'exec', '-i', 'hermes-companion-postgres-1',
+                'psql', '-X', '-U', 'companion', '-d', 'companion',
+                '-v', 'ON_ERROR_STOP=1', '-tA'],
+               input=statement, text=True).stdout.strip()
+
+
+def healthy():
+    for _ in range(30):
+        result = subprocess.run(
+            ['curl', '--fail', '--silent', '--max-time', '3',
+             'http://127.0.0.1:3000/healthz'], capture_output=True)
+        if result.returncode == 0:
+            time.sleep(3)
+            state = compose('ps', '--format', 'json', 'gateway', text=True).stdout
+            if 'healthy' in state and 'unhealthy' not in state:
+                return True
+        time.sleep(2)
+    return False
+
+
+def unpack(archive_path, sha, stage):
+    path = pathlib.Path(archive_path)
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_ARCHIVE_BYTES:
+        raise RuntimeError('Expected a bounded regular git archive')
+    with tarfile.open(path) as archive:
+        if archive.pax_headers.get('comment') != sha:
+            raise RuntimeError('Archive commit does not match requested SHA')
+        members = archive.getmembers()
+        if len(members) > 10000 or sum(m.size for m in members) > MAX_ARCHIVE_BYTES:
+            raise RuntimeError('Expanded archive exceeds the supported size')
+        seen = set()
+        for member in members:
+            relative = pathlib.PurePosixPath(member.name)
+            if (not relative.parts or relative.is_absolute() or '..' in relative.parts
+                    or not (member.isfile() or member.isdir())
+                    or relative.parts[0] in {'RELEASE', '.git', PENDING}
+                    or any(p.startswith('.env') and p != '.env.example' for p in relative.parts)
+                    or relative in seen):
+                raise RuntimeError('Unsafe archive entry')
+            seen.add(relative)
+        archive.extractall(stage, members=members, filter='data')
+
+
+def expected_compose(baseline_compose):
+    """The baseline with exactly the reviewed lines added, or None if the baseline is not the reviewed one."""
+    if (baseline_compose.count(COMPOSE_ANCHOR) != 1
+            or any(name.encode() in baseline_compose for name in NAMES)):
+        return None
+    return baseline_compose.replace(COMPOSE_ANCHOR, COMPOSE_ANCHOR + COMPOSE_ADDITION)
+
+
+def validate_changes(stage):
+    for name in ['Dockerfile', 'package.json', 'package-lock.json', 'compose.yaml',
+                 'src/main.ts', 'scripts/cloud-release.py']:
+        if not (stage / name).is_file():
+            raise RuntimeError('Incomplete source archive')
+
+    def files(directory):
+        if not directory.is_dir() or directory.is_symlink():
+            raise RuntimeError('Migration directory unavailable')
+        result = {}
+        for path in directory.rglob('*'):
+            if path.is_symlink() or not (path.is_file() or path.is_dir()):
+                raise RuntimeError('Unsafe migration file')
+            if path.is_file():
+                result[str(path.relative_to(directory))] = path.read_bytes()
+        return result
+
+    # A missing db/ in the candidate is a database change too.
+    if not (stage / 'db').exists() or files(LIVE / 'db') != files(stage / 'db'):
+        raise RuntimeError('Migration set changed; this rollout permits no database change')
+    expected = expected_compose((LIVE / 'compose.yaml').read_bytes())
+    if expected is None:
+        raise RuntimeError('Compose baseline does not match the reviewed environment list')
+    if (stage / 'compose.yaml').read_bytes() != expected:
+        raise RuntimeError('Unexpected Compose change; only the ANTHROPIC_API_KEY and ANTHROPIC_WORKSPACE_ID names are permitted')
+    if (stage / 'scripts/cloud-release.py').read_bytes() != (LIVE / 'scripts/cloud-release.py').read_bytes():
+        raise RuntimeError('Trusted release-handler source changed; requires separate review')
+
+
+def _effective(names):
+    """The private .env's effective value of each name, '' when unset. Kept in memory only."""
+    # Compose takes the last assignment of a repeated name, so a later empty line wins.
+    values = {}
+    for line in (LIVE / '.env').read_text().splitlines():
+        name, sep, value = line.partition('=')
+        # Compose reads KEY="" , KEY='' and KEY= # note as empty, so they count as missing.
+        value = value.split(' #')[0].strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
+            value = value[1:-1].strip()
+        if not sep or name.strip() not in names:
+            continue
+        values[name.strip()] = '' if value.startswith('#') else value
+    return {name: values.get(name, '') for name in names}
+
+
+def keys_present():
+    """True when the private .env's effective value of every key is non-empty. Values are never returned."""
+    return all(_effective(KEYS).values())
+
+
+def optional_valid():
+    """True when every optional name is unset or well formed. Values are never returned."""
+    values = _effective(tuple(OPTIONAL))
+    return all(not values[name] or pattern.fullmatch(values[name])
+               for name, pattern in OPTIONAL.items())
+
+
+def copy_entry(source, destination):
+    if destination.is_symlink():
+        raise RuntimeError('Source destination must not be a symlink')
+    if destination.exists():
+        if destination.is_dir():
+            shutil.rmtree(destination)
+        else:
+            destination.unlink()
+    if source is not None:
+        if source.is_dir():
+            shutil.copytree(source, destination)
+        else:
+            shutil.copy2(source, destination)
+
+
+def backup_source(stage, backup):
+    original = {}
+    for item in stage.iterdir():
+        destination = LIVE / item.name
+        if destination.is_symlink():
+            raise RuntimeError('Source destination must not be a symlink')
+        original[item.name] = destination.exists()
+        if original[item.name]:
+            copy_entry(destination, backup / item.name)
+    return original
+
+
+def publish_source(stage):
+    for item in stage.iterdir():
+        copy_entry(item, LIVE / item.name)
+
+
+def restore_source(backup, original):
+    for name, existed in original.items():
+        copy_entry(backup / name if existed else None, LIVE / name)
+
+
+def write_release(content):
+    pending = LIVE / PENDING
+    try:
+        pending.write_bytes(content)
+        pending.replace(LIVE / 'RELEASE')
+    finally:
+        pending.unlink(missing_ok=True)
+
+
+def main():
+    if len(sys.argv) != 3 or not re.fullmatch('[0-9a-f]{40}', sys.argv[2]):
+        raise RuntimeError('Usage: deploy-anthropic-key.py <git-archive.tar> <exact reviewed main SHA>')
+    archive_path, sha = sys.argv[1:]
+    if not bases():
+        raise RuntimeError('BASE is unset; the reviewed rollout PR must record the live baseline SHA')
+    with open(LOCK, 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        old_release = (LIVE / 'RELEASE').read_bytes()
+        if old_release.decode().strip() not in bases():
+            raise RuntimeError('Anthropic key rollout requires the exact documented baseline; reconcile newer releases first')
+        if not keys_present():
+            raise RuntimeError('Add ANTHROPIC_API_KEY to the private .env first; nothing changed')
+        if not optional_valid():
+            raise RuntimeError('ANTHROPIC_WORKSPACE_ID in the private .env must be empty or wrkspc_ followed by letters and digits; nothing changed')
+        with tempfile.TemporaryDirectory(prefix='companion-anthropic-') as temporary:
+            stage, backup = pathlib.Path(temporary) / 'stage', pathlib.Path(temporary) / 'backup'
+            stage.mkdir()
+            backup.mkdir()
+            unpack(archive_path, sha, stage)
+            validate_changes(stage)
+            original = backup_source(stage, backup)
+            candidate = IMAGE + ':' + sha
+            try:
+                run(['docker', 'build', '--build-arg', 'RELEASE_SHA=' + sha, '-t', candidate, str(stage)])
+            except Exception:
+                raise RuntimeError('Candidate build failed; live application unchanged') from None
+            if not healthy():
+                raise RuntimeError('Baseline application is not healthy; inspect before rollout')
+            if sql("SELECT count(*) FROM runtime_runs WHERE state='running'") != '0':
+                raise RuntimeError('Active work; retry when idle without cancelling it')
+            if sql("SELECT count(*) FROM conversation_inputs WHERE state IN ('queued','running')") != '0':
+                raise RuntimeError('Pending conversation input; retry after scheduled work and execution finish')
+            # The same coding states the automatic merge guard treats as busy (src/coding/automation.ts).
+            if sql("SELECT count(*) FROM coding_jobs WHERE state IN ('queued','provisioning','running','publishing') OR cleanup='pending'") != '0':
+                raise RuntimeError('Active coding job or pending cleanup; retry when idle without cancelling it')
+            previous = compose('images', '-q', 'gateway', text=True).stdout.strip()
+            if not previous:
+                raise RuntimeError('Previous image unavailable')
+            old_compose = (LIVE / 'compose.yaml').read_bytes()
+            run(['docker', 'tag', previous, IMAGE + ':rollback'])
+            source_changed = False
+            try:
+                compose('stop', 'gateway')
+                (LIVE / 'compose.yaml').write_bytes((stage / 'compose.yaml').read_bytes())
+                run(['docker', 'tag', candidate, IMAGE + ':latest'])
+                compose('up', '-d', '--no-deps', '--no-build', 'gateway')
+                if not healthy():
+                    raise RuntimeError('Candidate failed startup health')
+                source_changed = True
+                publish_source(stage)
+                write_release((sha + '\n').encode())
+            except Exception:
+                try:
+                    compose('stop', 'gateway')
+                    if source_changed:
+                        restore_source(backup, original)
+                    (LIVE / 'compose.yaml').write_bytes(old_compose)
+                    run(['docker', 'tag', previous, IMAGE + ':latest'])
+                    compose('up', '-d', '--no-deps', '--no-build', 'gateway')
+                    if not healthy():
+                        raise RuntimeError('Rollback health failed')
+                    write_release(old_release)
+                except Exception:
+                    raise RuntimeError('Rollback needs operator inspection; no database reversal or task replay was attempted') from None
+                raise RuntimeError('Candidate failed; previous application healthy') from None
+            # The trusted /usr/local/sbin release command is unchanged and is not installed here.
+            print(json.dumps({'deployed': sha, 'healthy': True, 'anthropicKey': 'configured'}))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        print(str(error) if isinstance(error, RuntimeError) else 'Rollout failed; inspect the reviewed procedure locally', file=sys.stderr)
+        sys.exit(1)

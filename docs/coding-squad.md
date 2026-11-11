@@ -1,6 +1,6 @@
 # Three-member Python coding squad
 
-Chief is the TypeScript conversation and durable control service. The independent Python executor contains exactly three model roles: leader, coder and reviewer. All use the job-scoped OpenRouter gateway; provider, GitHub and production credentials remain on Chief. The leader is Chief’s only task-facing squad member. Role histories are independent and the members run sequentially in one disposable CodeBuild environment.
+Chief is the TypeScript conversation and durable control service. The independent Python executor contains exactly three model roles: leader, coder and reviewer. All use the job-scoped model gateway on Chief (the `ChiefOpenRouter` protocol); provider, GitHub and production credentials remain on Chief. The host serves each call through OpenRouter, or directly through Anthropic for a model mapped for direct use once the gateway has a key ([model providers](model-providers.md)); the squad's loop returns `reasoning_details` unchanged either way. The leader is Chief’s only task-facing squad member. Role histories are independent and the members run sequentially in one disposable CodeBuild environment.
 
 ## Roles and flow
 
