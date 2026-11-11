@@ -1,3 +1,16 @@
+## Claude models everywhere (11 November 2026)
+
+- **Configuration.** `config/model-policy.json`: the `fast` agent tier (the default) moves from `google/gemini-3.8-flash` to `anthropic/claude-haiku-5.5`, the judge from `openai/gpt-6.1-sol` to `anthropic/claude-opus-5.5`, and Sonnet 5.5 and Haiku 5.5 join the direct Anthropic map. Opus 5.5 stays the main model and the `standard` tier. Jev, embeddings, speech and the search helper are unchanged.
+- **Code.** The direct adapter accepts Sonnet 5.5 and Haiku 5.5; a rate limit cools only the model that hit it; each fallback to OpenRouter sends the owner a Telegram message (at most one per fault an hour). Haiku's recorded cost uses its under-100,000-token price. No database or Compose change; releases normally, after PR 442's rollout.
+- **Why.** The owner asked for every model to move to Claude, using monthly Claude credits. See [journal 164](journey/164-claude-models-everywhere.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
+## Direct Anthropic route enabled: live in `ef825c4` (11 November 2026)
+
+- **Change.** PR 442: the gateway receives `ANTHROPIC_API_KEY` and `ANTHROPIC_WORKSPACE_ID`; Chief's loop, the learner and the judge send 32,000-token output allowances; Pi coding uses Opus 5.5 for every role with a 64,000-token reviewer allowance.
+- **Rollout.** Merged as `ef825c4`; the automatic release refused the Compose change as designed; the operator rollout (`scripts/deploy-anthropic-key.py`) deployed it, healthy, with the key configured. See [journal 161](journey/161-enabling-direct-anthropic.md).
+- **Verified live.** `model.routes` shows the main, standard and media roles on `anthropic-direct`; a live Opus 5.5 call went direct with no fallback.
+
 ## Browser errors reach the agent (11 November 2026)
 
 - **Code.** A command the public browser refuses now reaches the browser agent as `BROWSER_REFUSED`, with the browser's reason cut to 300 characters and marked untrusted, instead of the generic `TOOL_FAILED`. Gateway only; the browser service and images are unchanged, so no refresh is needed. No database or Compose change.

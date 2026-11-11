@@ -4,7 +4,11 @@ Chief has two model pathways: OpenRouter, which every call used until November 2
 
 **State (11 November 2026):** the adapter merged as `a7c1993` (PR #441), tested with mocked requests and verified live against the real API with a temporary key on 11 November 2026 ([live verification](#live-verification-11-november-2026)); it is inert in production. The owner decided on 11 November 2026 to switch to the direct route, and the enabling change is prepared ([journal 161](journey/161-enabling-direct-anthropic.md)): the two Compose lines, `BASE` set in the rollout script, Chief's 32,000-token output allowance (also for the nightly learner and the judge), and Opus 5.5 for every Pi coding role with a 64,000-token reviewer. Not merged or rolled out yet: production has no `ANTHROPIC_API_KEY`, so every call still goes through OpenRouter. The live runs used a stand-in for OpenRouter and no Docker sandbox, so the real OpenRouter fallback and the production role mix remain unverified.
 
+> **Update, 11 November 2026, live:** the direct route is on in production from `ef825c4` (PR 442), and a live Opus 5.5 call went direct with no fallback. Details in [journal 161](journey/161-enabling-direct-anthropic.md).
+
 ## How a model is routed
+
+> **Update, 11 November 2026 ([journal 164](journey/164-claude-models-everywhere.md)):** Sonnet 5.5 and Haiku 5.5 are mapped as well. The `fast` agent tier (the default) is `anthropic/claude-haiku-5.5` and the judge is `anthropic/claude-opus-5.5`, so with a key every model in the policy goes direct. The search helper (`SEARCH_MODEL`, set by Compose) and the Python squad stay on OpenRouter. Text below this note describes the state before it.
 
 Every model the gateway builds goes through `ModelRouter.modelFor(slug)` in [`src/model-router.ts`](../src/model-router.ts): the main model, the media model, agents and research specialists, the nightly learner and judge, and the coding controller's model factory. The coding factory is the whole coding pathway: Pi and the Python squad sandboxes never hold a provider key and send every model call to the host proxy, which uses that factory.
 
@@ -41,6 +45,8 @@ The adapter keeps the OpenRouter slug as the model name, so journals, settings, 
 - **Thinking order:** Opus 5.5 can return thinking between visible blocks, such as a short thinking block before each tool call. Each stored entry records `position`, the index of the visible block it preceded in the list Chief stores, `[text (when non-empty), tool_calls[0], tool_calls[1], …]` (the list's length when it came last; text counts as preceding it when any text block came before it in the response). Replay rebuilds the assistant turn in that order. Entries stored before the field existed, or with an invalid value, replay before every visible block, as before; a position past the end is clamped to the end. The entry keeps its tag and format, and still passes the coding API's `reasoning_details` shape. Chief keeps one joined text and the tool calls after it, so a response with text after a tool call cannot be rebuilt exactly; the text then goes first. In 15 live high- and max-effort responses with parallel tool calls on 11 November 2026, the API never interleaved: every response was one thinking block, then text, then the calls. Measured result in [live verification](#live-verification-11-november-2026): no drops, with cache reads unchanged or better. A tool list that changes within a turn (a child's final call offers only its report tool) still drops every block on that call, because the tools are part of the prefix.
 
 ## Fallback and cooldowns
+
+> **Update, 11 November 2026 ([journal 164](journey/164-claude-models-everywhere.md)):** a fallback is no longer silent. Each direct failure that falls back sends the owner a Telegram message naming the fault, the model and when Chief tries Claude directly again; at most one message per fault an hour, the next counting the fallbacks it held back. Calls skipped during a cooldown send nothing. A rate limit now cools only the model that hit it, since Anthropic limits each model separately; the table's "every model" for `rate_limit` is out of date. To fail instead of falling back, set `"fallback": false` under `providers.anthropic`. A gateway that starts with `MODEL_PROVIDER=anthropic` while the main model is not direct (no key, or a price above the ceilings) also tells the owner, once per start.
 
 With `fallback: true` in the policy (the committed value), a direct failure classified **before any output** retries once on OpenRouter for the same slug. A failure after output has started, any other error, or a call the caller has aborted surfaces as the direct error, and the caller's normal retry rules apply. If `OPENROUTER_API_KEY` were empty there would be nothing to fall back to.
 
@@ -157,6 +163,8 @@ The key must be a long-lived Claude Console key for the account that will pay fo
 Never paste the key into a chat, a PR, a command line or a log. It belongs only in `/opt/hermes-companion/.env` on the host, as for every other secret ([configuration](configuration.md)).
 
 ### First live run
+
+> **Update, 11 November 2026 ([journal 164](journey/164-claude-models-everywhere.md)):** expect `fastRoute` and `judgeRoute` to be `anthropic-direct` too, the `fast`-tier agent call in item 9 to run on Haiku 5.5 direct, and the judge in item 10 to run on Opus 5.5 direct. A fallback in any item also arrives as a Telegram message.
 
 None of this has been verified on the enabled production gateway; the [live verification](#live-verification-11-november-2026) ran the same code locally against the real API. After enabling, confirm:
 

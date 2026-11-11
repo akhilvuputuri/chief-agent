@@ -8,6 +8,8 @@ import {
   type ModelMessage,
 } from "../src/model.js";
 import {
+  FallbackAlerts,
+  type FallbackNotice,
   DirectCooldown,
   FallbackAdapter,
   ModelRouter,
@@ -15,7 +17,7 @@ import {
   type ModelRouterOptions,
 } from "../src/model-router.js";
 import { AnthropicDirect } from "../src/anthropic.js";
-import type { ModelPolicy } from "../src/model-policy.js";
+import { readModelPolicy, type ModelPolicy } from "../src/model-policy.js";
 import { setOpsSink } from "../src/ops-log.js";
 
 const OPUS = "anthropic/claude-opus-5.5";
@@ -291,7 +293,8 @@ test("cooldowns skip the direct pathway for a bounded time; an outage falls back
   const limited = new DirectCooldown(() => now);
   limited.remember(OPUS, "rate_limit", 10);
   assert.equal(limited.active(OPUS), "rate_limit");
-  assert.equal(limited.active("anthropic/other"), "rate_limit");
+  // Anthropic limits each model separately: Opus's limit leaves Haiku direct (journal 164).
+  assert.equal(limited.active("anthropic/other"), undefined);
   now = 10_000;
   assert.equal(limited.active(OPUS), undefined);
   // An unknown model cools only that model; an outage never cools.
@@ -454,4 +457,140 @@ test("every OpenRouter call strips direct reasoning, any vendor, and is unchange
   await new StrippedOpenRouter(inner.model!, inner).generate(request);
   assert.equal(seen[0], request);
   assert.equal((seen[0] as typeof request).messages, clean);
+});
+
+test("with the bundled policy and a key, every Claude model Chief uses goes direct; the rest stay on OpenRouter", () => {
+  const bundled = readModelPolicy();
+  const { r } = router({ policy: bundled });
+  for (const slug of [
+    bundled.main!,
+    bundled.judge!,
+    ...Object.values(bundled.agents!.tiers),
+    "anthropic/claude-opus-5.5",
+    "anthropic/claude-sonnet-5.5",
+    "anthropic/claude-haiku-5.5",
+  ])
+    assert.equal(r.route(slug), "anthropic-direct", slug);
+  // Jev, embeddings and other vendors stay on OpenRouter (journal 164).
+  for (const slug of [
+    "typesafe/jev-1.13-20260917",
+    "openai/text-embedding-3-small",
+    "google/gemini-3.8-flash",
+    "anthropic/claude-sonnet-5",
+  ])
+    assert.equal(r.route(slug), "openrouter", slug);
+  // Each direct model builds a real adapter: the adapter accepts every mapped native model.
+  for (const [slug, mapped] of Object.entries(
+    bundled.providers!.anthropic!.models,
+  ))
+    assert.doesNotThrow(
+      () =>
+        new AnthropicDirect("k", {
+          model: slug,
+          nativeModel: mapped.id,
+          prices: mapped,
+        }),
+      slug,
+    );
+});
+
+test("every direct failure that falls back is reported, and a failing report never changes the call", async () => {
+  let now = 0;
+  const cooldown = new DirectCooldown(() => now);
+  const notices: FallbackNotice[] = [];
+  const ops = captureOps();
+  try {
+    const { r, calls } = router({
+      cooldown,
+      fail: fault("billing"),
+      onFallback: (n) => notices.push(n),
+    });
+    const model = r.modelFor(OPUS);
+    await model.generate(input());
+    // In the cooldown the call goes straight to OpenRouter: no second notice.
+    await model.generate(input());
+    assert.deepEqual(
+      calls.map((c) => c.route),
+      ["direct", "openrouter", "openrouter"],
+    );
+    assert.deepEqual(notices, [
+      { model: OPUS, reason: "billing", cooldownS: 600, httpStatus: 401 },
+    ]);
+    // A success reports nothing.
+    const ok = router({ onFallback: (n) => notices.push(n) });
+    await ok.r.modelFor(OPUS).generate(input());
+    assert.equal(notices.length, 1);
+    // A notifier that throws: the fallback answer still arrives.
+    const throwing = router({
+      cooldown: new DirectCooldown(() => now),
+      fail: fault("unavailable"),
+      onFallback: () => {
+        throw new Error("telegram down");
+      },
+    });
+    const result = await throwing.r.modelFor(OPUS).generate(input());
+    assert.equal(result.usage?.fallback_from, "anthropic-direct");
+  } finally {
+    ops.restore();
+  }
+});
+
+test("the owner is told about a fallback at most once an hour per fault, with what was held back", async () => {
+  let now = 0;
+  const sent: string[] = [];
+  const alerts = new FallbackAlerts(() => now);
+  alerts.send = async (text) => {
+    sent.push(text);
+  };
+  const billing: FallbackNotice = {
+    model: OPUS,
+    reason: "billing",
+    cooldownS: 600,
+    httpStatus: 402,
+  };
+  alerts.notice(billing);
+  alerts.notice(billing);
+  alerts.notice({
+    ...billing,
+    reason: "unavailable",
+    cooldownS: 0,
+    httpStatus: 529,
+  });
+  now = 3_600_000 - 1;
+  alerts.notice(billing);
+  assert.equal(sent.length, 2);
+  assert.match(
+    sent[0]!,
+    /a billing or credit limit was reached \(HTTP 402\), model anthropic\/claude-opus-5\.5/,
+  );
+  assert.match(sent[0]!, /retrying it through OpenRouter/);
+  assert.match(
+    sent[0]!,
+    /For the next 10 min this model's calls go straight to OpenRouter/,
+  );
+  assert.match(sent[0]!, /"fallback": false in config\/model-policy\.json/);
+  assert.match(sent[1]!, /Anthropic was unavailable \(HTTP 529\)/);
+  assert.match(sent[1]!, /next call tries Claude directly again/);
+  now = 3_600_000;
+  alerts.notice(billing);
+  assert.equal(sent.length, 3);
+  assert.match(
+    sent[2]!,
+    /2 more direct attempts for this model failed the same way in the hour before/,
+  );
+  // Another model's rate limit is told even while this one's is held back.
+  alerts.notice({ ...billing, reason: "rate_limit", httpStatus: 429 });
+  alerts.notice({
+    ...billing,
+    reason: "rate_limit",
+    httpStatus: 429,
+    model: "anthropic/claude-haiku-5.5",
+  });
+  assert.equal(sent.length, 5);
+  assert.match(sent[4]!, /model anthropic\/claude-haiku-5\.5/);
+  // A failing send is swallowed.
+  alerts.send = async () => {
+    throw new Error("telegram down");
+  };
+  alerts.notice({ ...billing, reason: "auth" });
 });

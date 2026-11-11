@@ -71,13 +71,10 @@ test("reviewed policy price ceilings replace the environment's, and stay bounded
   // The bundled policy names a main model whose listed price fits its own ceilings.
   const bundled = readModelPolicy();
   assert.equal(bundled.main, "anthropic/claude-opus-5.5");
-  // The judge is another family than the main and learner models, so it does not grade its
-  // own work; without one in the policy it falls back to the standard tier.
-  assert.equal(resolveJudgeModel("main/model"), "openai/gpt-6.1-sol");
-  assert.notEqual(
-    resolveJudgeModel("main/model").split("/")[0],
-    bundled.main!.split("/")[0],
-  );
+  // The judge was another family so it would not grade its own work. On 11 November 2026 the
+  // owner chose Opus 5.5, the main and learner model, for its judgement (journal 164). Without
+  // one in the policy it uses the standard tier.
+  assert.equal(resolveJudgeModel("main/model"), "anthropic/claude-opus-5.5");
   assert.equal(
     resolveJudgeModel("main/model", { ...bundled, judge: undefined }),
     resolveAgentModel("standard", "main/model").model,
@@ -115,10 +112,29 @@ test("the reviewed Anthropic map lists native IDs and first-party prices, and no
       fallback: true,
     },
   );
-  assert.equal(
+  assert.deepEqual(
     resolveAnthropicModel("anthropic/claude-sonnet-5.5", bundled),
-    undefined,
+    {
+      nativeModel: "claude-sonnet-5-5",
+      prices: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+      fallback: true,
+    },
   );
+  assert.deepEqual(
+    resolveAnthropicModel("anthropic/claude-haiku-5.5", bundled),
+    {
+      nativeModel: "claude-haiku-5-5",
+      prices: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+      fallback: true,
+    },
+  );
+  // Every Claude model the policy uses is mapped, so it can go direct.
+  for (const slug of [
+    bundled.main!,
+    bundled.judge!,
+    ...Object.values(bundled.agents!.tiers),
+  ])
+    assert(resolveAnthropicModel(slug, bundled), slug);
   assert.equal(
     resolveAnthropicModel("google/gemini-3.8-flash", bundled),
     undefined,

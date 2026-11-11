@@ -50,12 +50,14 @@ import {
 import { PublicFeedFetcher } from "./news-feed.js";
 import { run as runTelegram, type RunnerHandle } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
-import { ModelRouter } from "./model-router.js";
+import { FallbackAlerts, ModelRouter } from "./model-router.js";
 import {
   resolveAgentModel,
   resolveJudgeModel,
   resolveMainModel,
   resolvePriceCeilings,
+  readModelPolicy,
+  resolveAnthropicModel,
 } from "./model-policy.js";
 import { recoverRuntime } from "./execution.js";
 import { TelegramViews } from "./telegram-views.js";
@@ -155,7 +157,10 @@ const priceCeilings = resolvePriceCeilings({
 });
 // Every model call's provider: OpenRouter, or Anthropic direct for policy-mapped models
 // once ANTHROPIC_API_KEY is set (src/model-router.ts).
+// Tells the owner when a Claude call falls back to OpenRouter; Telegram is wired in below.
+const fallbackAlerts = new FallbackAlerts();
 const models = new ModelRouter({
+  onFallback: (notice) => fallbackAlerts.notice(notice),
   provider: c.MODEL_PROVIDER,
   openRouterKey: c.OPENROUTER_API_KEY,
   anthropicKey: c.ANTHROPIC_API_KEY,
@@ -932,6 +937,7 @@ notifyOwner = async (text) => {
   for (const user of c.TELEGRAM_ALLOWED_USER_IDS.split(","))
     await bot.api.sendMessage(user, text).catch(() => {});
 };
+fallbackAlerts.send = notifyOwner;
 const views = new TelegramViews(db, bot.api, undefined, c.MINIAPP_ORIGIN);
 const allowed = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
 const responsibilityWorker = responsibilities
@@ -1560,6 +1566,16 @@ opsLog("model.routes", "info", {
   judgeRoute: routeOf(judgeModel),
   mediaRoute: routeOf(c.MEDIA_MODEL || mainModel),
 });
+// The direct route meant to be on but off for the main model is a silent switch to OpenRouter
+// (owner request, journal 164): say so once per start, without the key or its absence detail.
+if (
+  c.MODEL_PROVIDER === "anthropic" &&
+  resolveAnthropicModel(mainModel, readModelPolicy()) &&
+  routeOf(mainModel) !== "anthropic-direct"
+)
+  void notifyOwner(
+    `Chief started without the direct Claude route for ${mainModel}: ${c.ANTHROPIC_API_KEY ? "its list price is above the price ceilings" : "the gateway has no Anthropic API key"}. Every Claude call is going through OpenRouter, which uses OpenRouter credit.`,
+  );
 // Low-rate liveness record: its absence in CloudWatch means the gateway or the
 // log path stopped, not that nothing happened.
 setInterval(
