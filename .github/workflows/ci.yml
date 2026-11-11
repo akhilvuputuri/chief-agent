@@ -52,7 +52,7 @@ jobs:
       fail-fast: false
       matrix:
         # Four shards: with reused databases a shard's job still finishes before the image
-        # job, and jobs were seen queueing once 20 ran at a time (journal 164).
+        # job, and jobs were seen queueing once 20 ran at a time (journal 165).
         shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4

@@ -125,7 +125,7 @@ test("model tiers map to reviewed model IDs and fall back to the main model with
   assert.equal(policy.agents?.default, "fast");
   assert.deepEqual(resolveAgentModel(undefined, "main/model", policy), {
     tier: "fast",
-    model: "google/gemini-3.8-flash",
+    model: "anthropic/claude-haiku-5.5",
   });
   assert.deepEqual(resolveAgentModel("standard", "main/model", policy), {
     tier: "standard",

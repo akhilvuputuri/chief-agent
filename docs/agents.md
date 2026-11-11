@@ -16,6 +16,8 @@ In the six days of production logs before this change, Chief made about 190 tool
 
 With agents, Chief is offered 34 tools (about 22,000 characters) before domain selection, and the domain agents run on Gemini 3.8 Flash by default. These are offline counts from `runtimeContext`; production numbers belong in the journal once measured.
 
+> **Update, 11 November 2026 ([journal 164](journey/164-claude-models-everywhere.md)):** the default tier is Claude Haiku 5.5, not Gemini 3.8 Flash.
+
 ## The tool
 
 ```text
@@ -144,6 +146,8 @@ Nothing unchecked is passed on as a quote, link or ref. A salvaged finding keeps
   "tiers": { "fast": "google/gemini-3.8-flash", "standard": "anthropic/claude-opus-5.5" }
 }
 ```
+
+> **Update, 11 November 2026 ([journal 164](journey/164-claude-models-everywhere.md)):** `fast` is `anthropic/claude-haiku-5.5`; domain agents, research and media reading run on Haiku 5.5 by default, on the direct Anthropic route once the key is live.
 
 - A call's tier, else the definition's tier, else the policy default, picks the model. An unconfigured tier is refused with the tiers that exist.
 - A host `model` pinned on a registry entry wins over any tier.

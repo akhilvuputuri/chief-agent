@@ -27,8 +27,9 @@ const schema = z
       .strict()
       .refine((a) => !!a.tiers[a.default], "the default tier needs a model")
       .optional(),
-    // The nightly memory judge (docs/learning.md#nightly-judge): a different family from the
-    // main and learner models, so it does not grade its own work. Unset, it uses the standard tier.
+    // The nightly memory judge (docs/learning.md#nightly-judge). It was a different family from
+    // the main and learner models so it would not grade their work; on 11 November 2026 the owner
+    // chose Opus 5.5 for it, the same model (journal 164). Unset, it uses the standard tier.
     judge: modelId.optional(),
     // Provider price ceilings ($ per million tokens) for every OpenRouter caller. When set, this
     // reviewed value replaces OPENROUTER_MAX_INPUT_PRICE/OPENROUTER_MAX_OUTPUT_PRICE; raising it
