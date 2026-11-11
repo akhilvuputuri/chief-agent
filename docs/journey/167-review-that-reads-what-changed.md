@@ -3,6 +3,8 @@
 Work date: 2026-11-10. Written: 2026-11-10.
 Status: tested on synthetic jobs; release and worker image pin pending.
 
+> **Update, 12 November 2026:** released in `f6df014` (PR 453); worker image `sha256:33639fbe…` built from it and pinned in the following change. Takes effect for coding jobs created after that pin is live.
+
 > **Update, 12 November 2026:** rebuilt on `dcb7ea3` from this session's recorded edits after the uncommitted working copy was lost, and renumbered from 158 (taken by [158 — Reused test databases](158-reused-test-databases.md)). Since [journal 161](161-enabling-direct-anthropic.md) the coder and planner are Opus 5.5 too, so the larger pages also cut coder calls that read the plan, check failures and review findings. Two Pi runtime tests scripted reads of pages 1 and 2 of a 9,357-character plan; a plan is at most 32,000 characters, one page now, so they read page 0 and still check that an edit and a completion before it are refused.
 
 ## User-visible problem and preceding iteration
