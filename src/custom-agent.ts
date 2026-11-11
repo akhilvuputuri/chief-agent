@@ -12,6 +12,7 @@ import type { AgentRequest, AgentResponse } from "./protocol.js";
 import type { Agent } from "./agent.js";
 import { context, contextBudget, ContextLimitError } from "./context.js";
 import {
+  CHIEF_MAX_OUTPUT_TOKENS,
   ModelError,
   type ModelAdapter,
   type Message,
@@ -492,6 +493,7 @@ export class CustomAgent implements Agent {
               messages: input.messages,
               tools: offered,
               reasoning: effort,
+              maxOutputTokens: CHIEF_MAX_OUTPUT_TOKENS,
               sessionId: req.runId,
               ...(req.cacheKey ? { cacheKey: req.cacheKey } : {}),
               signal: AbortSignal.any([

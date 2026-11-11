@@ -1,7 +1,7 @@
 # 160 — Can Chief call Anthropic directly, alongside OpenRouter, and switch between them?
 
 Work date: 11 November 2026. Written: 11 November 2026.
-Status: built on branch `claude/gifted-mccarthy-gond93`, tested with mocked requests and verified live with a temporary key on 11 November 2026 (local runs, not production; the OpenRouter fallback target and the sandbox were stand-ins); first independent review requested changes (addressed); a later independent review approved head `162bf66` with non-blocking findings, addressed in the working tree and awaiting re-review; not released or enabled. Enabling needs a separate Compose change through a reviewed operator procedure.
+Status: merged as `a7c1993` (PR #441), inert in production until enabled; tested with mocked requests and verified live with a temporary key on 11 November 2026 (local runs, not production; the OpenRouter fallback target and the sandbox were stand-ins). Release closure pending. Enabling, owner-approved on 11 November 2026, is a separate Compose change through a reviewed operator procedure ([journal 161](161-enabling-direct-anthropic.md)).
 
 ## User-visible problem and preceding iteration
 
@@ -73,6 +73,6 @@ Updated in [coding-agent lessons](coding-agent-lessons.md). Direct calls report 
 
 - Review, merge and release the adapter; then the Compose PR and key rollout ([model providers](../model-providers.md#enabling-it)).
 - First live run checklist, recorded here with dated evidence.
-- Owner decisions pending: output allowances (Chief's default 8,000 tokens including thinking failed 3 of 6 deliberately hard prompts at medium and high effort as an empty response; the coding coder's 128k allowance let one trivial call spend 91k output tokens, $1.82; the reviewer is capped at 16k).
+- Output allowances, decided by the owner on 11 November 2026 in [journal 161](161-enabling-direct-anthropic.md): Chief 32,000, coding reviewer 64,000, Opus 5.5 for the Pi planner and coder. (Chief's default 8,000 tokens including thinking failed 3 of 6 deliberately hard prompts at medium and high effort as an empty response; the coding coder's 128k allowance let one trivial call spend 91k output tokens, $1.82; the reviewer was capped at 16k.)
 - Deferred candidates found during the live run, predating this change: a host notice appended to the turn as a user message invalidates the cache from that point; a child's final call narrows the tool list, missing the cache and dropping its thinking blocks.
 - Deferred: persistent cooldowns; thinking continuity across a gateway restart; a same-workload cost and cache comparison against OpenRouter.

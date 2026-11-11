@@ -20,12 +20,11 @@ import time
 
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
-# UNSET ON PURPOSE. The PR that adds the Compose line must set BASE to the live release SHA,
-# read over SSH (sudo cat /opt/hermes-companion/RELEASE) just before that PR is reviewed, so
-# the reviewer approves the exact baseline, as for the Singapore keys. The script refuses
-# to run while it is None, and the offline test fails once compose.yaml carries the line
-# and BASE is still unset. If another release lands first, set the new live SHA after review.
-BASE = None
+# The reviewed live baseline: the merge commit of PR 441 (the direct Anthropic adapter), whose
+# automatic release must be the host's RELEASE (sudo cat /opt/hermes-companion/RELEASE) when
+# this runs. The script refuses any other RELEASE, and refuses to run while BASE is None. If
+# another release lands first, BASE must be changed to that live SHA through review.
+BASE = 'a7c199386c75ff8ac084d7a0e9462ca4fe810917'
 IMAGE = 'hermes-companion-gateway'
 # Required in the private .env.
 KEYS = ('ANTHROPIC_API_KEY',)

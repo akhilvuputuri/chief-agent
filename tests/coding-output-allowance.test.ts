@@ -58,6 +58,13 @@ test("the shipped profile leaves room for the largest report plus heavy reasonin
       outputAllowance(shipped, role) >= needed,
       `${role} allowance ${outputAllowance(shipped, role)} is below ${needed}`,
     );
+  // Owner-approved 11 November 2026 (journal 161): a 64,000-token reviewer, so a call may run
+  // for up to about 10.7 minutes on the host.
+  assert.equal(outputAllowance(shipped, "reviewer"), 64000);
+  assert.equal(
+    modelCallTimeoutMs(outputAllowance(shipped, "reviewer")),
+    640000,
+  );
 });
 
 test("each role's model call is sent its own allowance", async (t) => {

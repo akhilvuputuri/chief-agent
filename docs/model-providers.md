@@ -2,7 +2,7 @@
 
 Chief has two model pathways: OpenRouter, which every call used until November 2026, and the Anthropic Messages API called directly with a Claude Console key. Both stay supported. Which one serves a call is decided per model when the gateway starts, from reviewed configuration and the presence of a key. See [journal 160](journey/160-direct-anthropic-provider.md) for why and what is still unverified.
 
-**State (11 November 2026):** built on branch `claude/gifted-mccarthy-gond93`, tested with mocked requests and verified live against the real API with a temporary key on 11 November 2026 ([live verification](#live-verification-11-november-2026)). Not released and not enabled: production has no `ANTHROPIC_API_KEY`, and Compose does not pass one to the gateway yet, so every call still goes through OpenRouter. The live runs used a stand-in for OpenRouter and no Docker sandbox, so the real OpenRouter fallback and the production role mix remain unverified.
+**State (11 November 2026):** the adapter merged as `a7c1993` (PR #441), tested with mocked requests and verified live against the real API with a temporary key on 11 November 2026 ([live verification](#live-verification-11-november-2026)); it is inert in production. The owner decided on 11 November 2026 to switch to the direct route, and the enabling change is prepared ([journal 161](journey/161-enabling-direct-anthropic.md)): the two Compose lines, `BASE` set in the rollout script, Chief's 32,000-token output allowance, and Opus 5.5 for every Pi coding role with a 64,000-token reviewer. Not merged or rolled out yet: production has no `ANTHROPIC_API_KEY`, so every call still goes through OpenRouter. The live runs used a stand-in for OpenRouter and no Docker sandbox, so the real OpenRouter fallback and the production role mix remain unverified.
 
 ## How a model is routed
 
@@ -15,7 +15,7 @@ A slug goes **direct** only when all of these hold:
 3. The slug is listed in `config/model-policy.json` under `providers.anthropic.models`.
 4. Its listed input and output prices are within the effective price ceilings (`priceCeilings` in the same file, $4/$20 today).
 
-Otherwise the slug uses the OpenRouter adapter exactly as before, with the same `max_price` ceilings. Today only `anthropic/claude-opus-5.5` is mapped. With a key it would serve the main model, the `standard` agent tier (which the learner uses) and the coding reviewer (`reviewerModel` in `config/coding.json` and `config/coding-pi.json`). The `fast` tier (Gemini), the judge (GPT-6.1 Sol) and the DeepSeek coders stay on OpenRouter.
+Otherwise the slug uses the OpenRouter adapter exactly as before, with the same `max_price` ceilings. Today only `anthropic/claude-opus-5.5` is mapped. With a key it would serve the main model, the `standard` agent tier (which the learner uses) and the coding reviewer (`reviewerModel` in `config/coding.json` and `config/coding-pi.json`); from the enabling change, also the Pi planner and coder (`leaderModel` and `model` in `config/coding-pi.json`). The `fast` tier (Gemini), the judge (GPT-6.1 Sol) and the Python squad's DeepSeek leader and coder (`config/coding.json`, not used by new jobs) stay on OpenRouter.
 
 These always stay on OpenRouter, whatever the setting: other vendors' models, web search and the search helper, embeddings (recall and mail recall), the Jev pickers and shadow decisions, the coding model catalogue check, and agentwatch's judges. `OPENROUTER_API_KEY` therefore remains required.
 
@@ -77,9 +77,13 @@ The `models` query groups by provider, so direct calls appear under `anthropic`.
 
 Enabling needs two Compose lines in the gateway's environment, `ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}` and then `ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}`, plus the key (and, for an unscoped key, the workspace ID) in the private server `.env`. The automatic release refuses Compose changes, so this ships in its own PR through a reviewed operator procedure, modelled on the [Singapore keys rollout](singapore-open-data.md#key-rollout-procedure). It is deliberately not in the change that added the adapter.
 
+The enabling PR ([journal 161](journey/161-enabling-direct-anthropic.md)) carries the two lines, `BASE`, and the owner's settings for the switch: `CHIEF_MAX_OUTPUT_TOKENS` (32,000) on every call of Chief's agent loop, and Opus 5.5 planner and coder with `reviewerMaxOutputTokens: 64000` in `config/coding-pi.json`. The rollout script permits those `config/` and `src/` changes, as an ordinary release would; it refuses any `db/` change, any change to `scripts/cloud-release.py` and any Compose change beyond the two lines.
+
+The key must be a long-lived Claude Console key for the account that will pay for production. The keys used for the 11 November tests were temporary; they are not for production and should be revoked in the Console.
+
 ### Key rollout procedure
 
-`scripts/deploy-anthropic-key.py` is the one-time reviewed operator rollout, with offline tests in `scripts/test-deploy-anthropic-key.py`. Its `BASE` is deliberately unset: the PR that adds the Compose lines must set it to the live release SHA, read over SSH (`sudo cat /opt/hermes-companion/RELEASE`) just before that PR is reviewed, so the reviewer approves the exact baseline. The script refuses to run while `BASE` is unset, and the offline test fails once `compose.yaml` carries the lines and `BASE` is still unset. If another release lands first, set the new live SHA after review.
+`scripts/deploy-anthropic-key.py` is the one-time reviewed operator rollout, with offline tests in `scripts/test-deploy-anthropic-key.py`. Its `BASE` is `a7c199386c75ff8ac084d7a0e9462ca4fe810917`, the merge commit of PR #441 (the adapter). The rollout is valid only while the host's `RELEASE` equals that SHA; the script refuses any other. If any other release lands before the rollout, `BASE` must be changed to that live SHA in a reviewed PR. The script refuses to run while `BASE` is unset, and the offline test fails if `compose.yaml` carries the lines while `BASE` is unset.
 
 **What the script checks and does:**
 
@@ -94,27 +98,57 @@ Enabling needs two Compose lines in the gateway's environment, `ANTHROPIC_API_KE
    - tags the previous image `:rollback`, stops the gateway, switches `compose.yaml` and the image, starts the gateway, checks health, then publishes the source and writes `RELEASE`.
 3. **On failure:** restores the previous application, source and Compose file and checks health; if that fails too, it stops and asks for operator inspection. It neither cancels nor replays owner work, and leaves the database alone.
 
-**Steps:**
+**Steps.** `HOST` is the pinned Lightsail operator SSH alias ([lightsail.md](lightsail.md)) and `MERGE_SHA` the full merge commit of the enabling PR. Run from an up-to-date local checkout, except where marked "on the host".
 
-1. Open the Compose PR: the two lines in `compose.yaml` and `BASE` set to the live release SHA. Run `python3 scripts/test-deploy-anthropic-key.py`. Get it independently reviewed.
-2. Once the PR is approved and merged, add the key to `/opt/hermes-companion/.env` (root, mode 600) through the pinned Lightsail operator connection ([lightsail.md](lightsail.md)). Pipe the value from a local private file over SSH, so it never appears in a command line, a log or the chat. If the key is not scoped to a workspace, add `ANTHROPIC_WORKSPACE_ID=wrkspc_…` the same way.
-3. Create the `git archive` of the exact merge commit, and transfer it and the reviewed script.
-4. Run:
+1. **Before merging the enabling PR,** confirm that the PR #441 release is live and healthy. Once the enabling PR is merged, no other release can land until the rollout has run, so a missing baseline cannot be fixed by an ordinary release afterwards.
 
    ```sh
-   sudo python3 /tmp/deploy-anthropic-key.py /tmp/anthropic-release.tar FULL_REVIEWED_MAIN_SHA
+   kite run release:status -- a7c199386c75ff8ac084d7a0e9462ca4fe810917
+   ssh HOST 'sudo cat /opt/hermes-companion/RELEASE'   # must print a7c199386c75ff8ac084d7a0e9462ca4fe810917
+   ```
+
+2. Run `python3 scripts/test-deploy-anthropic-key.py`, get the PR independently approved, and merge it. Its automatic release refuses the Compose change; that is expected and changes nothing.
+3. Add the key to `/opt/hermes-companion/.env` (root, mode 600) from a local private file holding `ANTHROPIC_API_KEY=…` and, for a key not scoped to a workspace, `ANTHROPIC_WORKSPACE_ID=wrkspc_…`. The value travels over SSH standard input, never on a command line, in a log or in the chat. The leading newline guards against a `.env` without a final newline; Compose takes the last assignment, so remove any older `ANTHROPIC_*` lines first if there are any.
+
+   ```sh
+   { printf '\n'; cat ~/private/anthropic.env; } | ssh HOST 'sudo sh -c "umask 077; cat >> /opt/hermes-companion/.env"'
+   ssh HOST 'sudo stat -c "%U %a" /opt/hermes-companion/.env'   # root 600
+   ```
+
+4. Archive the exact merge commit and transfer it with the reviewed script:
+
+   ```sh
+   git fetch origin
+   git archive --format=tar -o /tmp/anthropic-release.tar MERGE_SHA
+   git show MERGE_SHA:scripts/deploy-anthropic-key.py > /tmp/deploy-anthropic-key.py
+   scp /tmp/anthropic-release.tar /tmp/deploy-anthropic-key.py HOST:/tmp/
+   ```
+
+5. Run it when Chief is idle (it refuses, without cancelling anything, during a run, pending input or an active coding job; rerun it later):
+
+   ```sh
+   ssh HOST 'sudo python3 /tmp/deploy-anthropic-key.py /tmp/anthropic-release.tar MERGE_SHA'
    ```
 
    On success it prints `{"deployed": "<sha>", "healthy": true, "anthropicKey": "configured"}`.
 
-5. Verify the exact `RELEASE` and health. Then check that the key reached the gateway, printing only the word "present":
+6. Verify the exact `RELEASE`, health, and that the key reached the gateway, printing only the word "present". On the host (`ssh HOST`):
 
    ```sh
+   sudo cat /opt/hermes-companion/RELEASE
+   curl -fsS http://127.0.0.1:3000/healthz
    sudo docker compose --project-directory /opt/hermes-companion -p hermes-companion exec -T gateway sh -c 'test -n "$ANTHROPIC_API_KEY" && echo present'
+   sudo rm /tmp/anthropic-release.tar /tmp/deploy-anthropic-key.py
    ```
 
-6. Dispatch the normal release for the same commit, which should be a no-op redeploy. That confirms later automatic releases accept the installed Compose file.
-7. Run the [first live run](#first-live-run) checks.
+7. Dispatch the normal release for the same commit, which should be a no-op redeploy. That confirms later automatic releases accept the installed Compose file.
+
+   ```sh
+   gh workflow run deploy.yml --ref main
+   kite run release:status -- MERGE_SHA
+   ```
+
+8. Run the [first live run](#first-live-run) checks, and revoke the temporary test keys in the Console.
 
 **Until the script runs:** a merged `compose.yaml` change makes the automatic release refuse every later merge. Run it immediately after the merge.
 
@@ -131,9 +165,10 @@ None of this has been verified on the enabled production gateway; the [live veri
 3. **Caching:** `cachedTokens` and `cacheWriteTokens` across the calls of one turn, compared with recent OpenRouter turns ([deployment](deployment.md#changing-the-production-model-through-a-release)).
 4. **Thinking:** `thinking_dropped` in the recorded usage should be 0 on later calls of a turn; expect drops only on the first calls after a gateway restart and on a child's final, report-only call.
 5. **Beta and workspace:** that the API accepts the thinking-binding beta on this account and, for an unscoped key, the workspace header. Either failing shows as `model.provider_fallback` with `reason: rejected` on every call (with `errorCode: organization_not_enrolled_in_beta` and a 600 s cooldown in the enrollment case).
-6. **Coding:** one Pi coding job whose reviewer runs direct, through to a completed review.
+6. **Coding:** `coding_models` shows `anthropic/claude-opus-5.5` for the planner, coder and reviewer. A role the owner once set with `coding_model_set` keeps that stored choice over `config/coding-pi.json`; reset it with `coding_model_set` if it differs. Then one Pi coding job with every role direct, through to a completed review; record its cost from its `model_usage` events.
 7. **Rate limits:** a new Console account starts on a low tier. Watch for `rate_limit` fallbacks during busy turns and coding reviews.
 8. **Fallback:** that a fault actually falls back, for example by observing the first naturally occurring one, and that `model.provider_fallback` and `fallbackFrom` appear as described.
+9. **Output allowance:** a hard owner turn at high effort completes without an empty-response failure, and a `fast`-tier agent call (Gemini, on OpenRouter) completes with the 32,000 allowance.
 
 ## Switching back
 
@@ -173,7 +208,7 @@ Measured on 11 November 2026 with a temporary Claude Console key, running the co
 - **Review follow-up (measured 11 November 2026, temporary key, local runs, US$0.91 in all):** the API accepts the same `tool_use` id in different assistant turns (mapped-style `dup_1` and native-style `call_1`, HTTP 200) and rejects it twice within one assistant turn (HTTP 400); a prompt of 5.2M tokens got HTTP 400 `invalid_request_error` with no `error_code`. With the scoped state memory, the Chief-shaped loop run inside a spending scope dropped 0 of 9 replayed blocks over 6 calls at high effort ($0.12, cold cache), and Chief's real runtime (the `tools` scenario, 22 direct calls, owner and child agent runs) dropped 0 of 11, with 11 states re-inserted, 70.9% of prompt tokens read from cache ($0.56, starting from a cold cache). Interleaved thinking could not be elicited: 9 dedicated parallel-tool prompts at high and max effort and the loop's 6 calls each returned one thinking block before all visible blocks (two prompts that asked the model to think before each call were refused with `reasoning_extraction`); replaying those responses dropped nothing.
 - **Still unverified:** the real OpenRouter fallback; interleaved thinking on the live API (its ordering is tested with mocks only); live 429, 5xx, 402 and 403 responses (the coding faults above were injected); the beta-not-enrolled 400; and the production role mix and workload.
 
-## Owner decisions pending
+## Owner decisions
 
-- **Output allowances.** Chief's default allowance of 8,000 output tokens includes thinking: in the live runs it failed 3 of 6 deliberately hard prompts at medium and high effort as an "empty response" (all tokens spent thinking). The coding coder's 128k allowance let one trivial call spend 91k output tokens ($1.82); the reviewer is capped at 16k. Changing either is an owner decision; nothing is changed here.
-- **Two cache-cost behaviours in the runtime, found during the live run and deferred** (they predate the direct route and affect OpenRouter too): a host notice appended to the turn as a user message invalidates the cache from that point; and a child's final call, which offers only its report tool, changes the tool list and so misses the cache (and drops every thinking block) on that call.
+- **Decided 11 November 2026 ([journal 161](journey/161-enabling-direct-anthropic.md)):** switch to the direct route; Chief's output allowance 32,000 tokens (it was 8,000, which in the live runs failed 3 of 6 deliberately hard prompts as an empty response, every token spent thinking); the coding reviewer 64,000 (was 16,000); Opus 5.5 for the Pi planner and coder too (the coder's 128,000 allowance is unchanged; in the live runs one trivial call under it spent 91k output tokens, $1.82). The nightly learner's review pass and the judge keep 8,000, and the Python squad profile is unchanged.
+- **Pending: two cache-cost behaviours in the runtime, found during the live run and deferred** (they predate the direct route and affect OpenRouter too): a host notice appended to the turn as a user message invalidates the cache from that point; and a child's final call, which offers only its report tool, changes the tool list and so misses the cache (and drops every thinking block) on that call.

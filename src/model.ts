@@ -6,6 +6,13 @@ import {
 } from "./openrouter-stream.js";
 /** The largest output allowance one model call may request (Opus 5.5 allows 128,000). */
 export const MAX_OUTPUT_TOKENS = 128000;
+/**
+ * Output allowance, thinking included, of every call in Chief's agent loop: the main model,
+ * agents, research specialists and media reading (owner-approved 11 November 2026, journal
+ * 161; it was the adapters' 8,000 default, which failed hard prompts by spending it all on
+ * thinking). The run's time allocation still bounds each call.
+ */
+export const CHIEF_MAX_OUTPUT_TOKENS = 32000;
 export type Message = {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
@@ -67,7 +74,10 @@ export interface ModelAdapter {
     cacheKey?: string;
     /** Coding opt-in: accept only confirmed complete provider responses. */
     requireComplete?: boolean;
-    /** Trusted per-request output allowance; ordinary callers retain 8,000. */
+    /**
+     * Trusted per-request output allowance. Omitted, it is 8,000 (the learner's review pass and
+     * the judge); Chief's agent loop sends CHIEF_MAX_OUTPUT_TOKENS.
+     */
     maxOutputTokens?: number;
     /** Coding-only opt-in. Ordinary assistant requests keep their existing path. */
     stream?: boolean;
