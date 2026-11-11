@@ -15,7 +15,7 @@
 
 - **Code.** A command the public browser refuses now reaches the browser agent as `BROWSER_REFUSED`, with the browser's reason cut to 300 characters and marked untrusted, instead of the generic `TOOL_FAILED`. Gateway only; the browser service and images are unchanged, so no refresh is needed. No database or Compose change.
 - **Why.** The first real tasks ran on 8, 9 and 11 November. On 11 November 6 of 13 clicks failed on SingPost, and neither the agent nor the journal kept the reason. See [journal 163](journey/163-browser-errors-reach-the-agent.md).
-- **Deployment.** Not yet recorded as live; update this entry on release.
+- **Deployment.** [PR 447](https://github.com/akhilvuputuri/chief-agent/pull/447) merged as `1cb516b`, and the automatic [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/43054717193) succeeded at 16:06 UTC on 11 November. The host reports `1cb516b` with a healthy gateway, and the running build contains `BROWSER_REFUSED`. No browser call has run since, so no reason has been recorded yet.
 
 ## Dependency updates for published advisories (11 November 2026)
 
