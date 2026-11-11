@@ -411,6 +411,12 @@ test("the judge checks a new fact against the message it cites, and a turn again
     inputs[1].tools.map((tool: any) => tool.name),
     ["judge_fact", "judge_turn", "judge_finish"],
   );
+  // Each judge call asks for its own allowance (owner, 11 November 2026), not the default.
+  assert.equal(JUDGE_LIMITS.outputTokens, 32000);
+  assert.deepEqual(
+    inputs.map((i) => i.maxOutputTokens),
+    [32000, 32000],
+  );
   assert.deepEqual(
     (await events(db, "judge.fact")).map((e) => [
       e.key,

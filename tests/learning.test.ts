@@ -1507,6 +1507,16 @@ test("the learner reviews items in batches, each saw its date and earlier batche
     inputs.map((i) => batchIds(i).length),
     [LEARNING_LIMITS.batch, 3],
   );
+  // The review pass asks for its own allowance (owner, 11 November 2026), and a cut-off
+  // response is not required to fail, unlike the procedure pass.
+  assert.equal(LEARNING_LIMITS.reviewOutputTokens, 32000);
+  assert.deepEqual(
+    inputs.map((i) => [i.maxOutputTokens, i.requireComplete]),
+    [
+      [32000, undefined],
+      [32000, undefined],
+    ],
+  );
   const shown = JSON.parse(inputs[0].messages[1].content);
   assert.equal(shown.tasks[0].date, "2026-11-25");
   const later = JSON.parse(inputs[1].messages[1].content);
@@ -2462,8 +2472,9 @@ test("a response that stops in plain text is reminded once, keeps its proposals 
   assert.match(requests[2].messages.at(-1).content, /learn_finish/);
   assert.deepEqual(
     [requests[0].requireComplete, requests[0].maxOutputTokens],
-    [true, LEARNING_LIMITS.procedureOutputTokens],
+    [true, 32000],
   );
+  assert.equal(LEARNING_LIMITS.procedureOutputTokens, 32000);
 });
 
 test("a model error applies nothing from that window, and the window is tried again", async (t) => {

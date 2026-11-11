@@ -75,8 +75,9 @@ export interface ModelAdapter {
     /** Coding opt-in: accept only confirmed complete provider responses. */
     requireComplete?: boolean;
     /**
-     * Trusted per-request output allowance. Omitted, it is 8,000 (the learner's review pass and
-     * the judge); Chief's agent loop sends CHIEF_MAX_OUTPUT_TOKENS.
+     * Trusted per-request output allowance. Omitted, it is 8,000. Chief's agent loop sends
+     * CHIEF_MAX_OUTPUT_TOKENS; the learner and the judge send their own (LEARNING_LIMITS,
+     * JUDGE_LIMITS), and coding calls send their profile's.
      */
     maxOutputTokens?: number;
     /** Coding-only opt-in. Ordinary assistant requests keep their existing path. */

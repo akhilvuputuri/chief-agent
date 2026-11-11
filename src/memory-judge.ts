@@ -26,6 +26,13 @@ export const JUDGE_LIMITS = {
   replyChars: 2000,
   /** Tool calls of a turn listed, in order. */
   calls: 40,
+  /**
+   * Output allowance, thinking included, of one judge call. Owner-approved 11 November 2026
+   * (journal 161), matching CHIEF_MAX_OUTPUT_TOKENS; it was the adapters' 8,000 default. The
+   * learner's callMs (5 minutes) still bounds the call, which is a non-streamed OpenRouter
+   * request whose headers arrive only when the generation is done.
+   */
+  outputTokens: 32000,
 } as const;
 
 export const FACT_VERDICTS = [
