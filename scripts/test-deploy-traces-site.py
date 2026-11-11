@@ -66,7 +66,8 @@ class TracesSiteTests(unittest.TestCase):
             def fetch(url, *extra, host=site.HOST):
                 calls.append(('fetch', url))
                 if host == site.EXISTING:
-                    return existing_after if existing_after and state['reloads'] else existing
+                    answer = existing_after if existing_after and state['reloads'] else existing
+                    return answer if url.endswith('.sslip.io/') else (404, 'HTTP/2 404\r\n\r\nNot found')
                 path = url.split(host, 1)[1]
                 return answers.get(path, (0, ''))
 
@@ -116,6 +117,16 @@ class TracesSiteTests(unittest.TestCase):
         self.assertEqual(text, LIVE)
         self.assertFalse(any(c[0] == 'systemctl' for c in calls))
 
+    def test_the_live_root_as_it_is_counts_as_answering(self):
+        # The host's root answers an empty 200 (journal 124's fix is not installed there).
+        text, _, _ = self.scenario(existing=(200, 'HTTP/2 200\r\ncontent-length: 0\r\n\r\n'))
+        self.assertEqual(text, LIVE + site.SITE)
+
+    def test_a_changed_answer_from_the_existing_site_restores(self):
+        text, _, _ = self.scenario(existing_after=(302, 'HTTP/2 302\r\nlocation: /elsewhere\r\n\r\n'),
+                                   expected_error='previous Caddyfile was restored')
+        self.assertEqual(text, LIVE)
+
     def test_an_existing_site_already_failing_stops_before_changing(self):
         text, calls, _ = self.scenario(existing=(502, ''), expected_error='existing site is not answering')
         self.assertEqual(text, LIVE)
@@ -153,7 +164,7 @@ class TracesSiteTests(unittest.TestCase):
         text, calls, output = self.scenario(live=LIVE + site.SITE, argv=['--remove'], agentwatch=None,
                                             existing=(502, ''), answers={})
         self.assertEqual(text, LIVE)
-        self.assertIn('inspect it', json.loads(output)['state'])
+        self.assertEqual(json.loads(output)['state'], 'removed')
         self.assertEqual(calls.count(('systemctl', 'reload', 'caddy')), 1)
         text, _, _ = self.scenario(live=LIVE + site.SITE, argv=['--remove'], reload_failure=True,
                                    expected_error='did not reload')

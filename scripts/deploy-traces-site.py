@@ -7,7 +7,8 @@ loopback and answers OTLP ingest (/v1/*) with 404: Chief exports over the Compos
 ingest never needs the internet. It refuses unless agentwatch on 127.0.0.1:4318 already
 requires signing in, so the site never serves traces without it. The candidate is validated
 beside the live file, Caddy is reloaded, and the site is checked through Caddy (with the
-certificate Caddy obtains for the name); the existing site is checked too. On any failure the
+certificate Caddy obtains for the name); the existing site must answer a few paths after the
+change exactly as it did before. On any failure the
 previous Caddyfile is restored and reloaded. `--remove` takes the site down: it needs no
 check first, and once the site is gone it never puts it back, even if a later check fails.
 
@@ -104,10 +105,25 @@ def site_serves():
             and 'referrer-policy: same-origin' in head)
 
 
-def existing_site_serves():
-    """The Mini App's site still redirects its root, as before."""
-    status, text = fetch('https://' + EXISTING + '/', host=EXISTING)
-    return status == 302 and 'location: /miniapp/' in text.lower()
+# Answered by the existing site's own routes, its catch-all, and its root. The live root returns
+# an empty 200, not the redirect journal 124 fixed in the repository's copy, so the check is
+# that nothing changes, not a particular answer.
+EXISTING_PATHS = ('/', '/miniapp/', '/about', '/no-such-page')
+
+
+def existing_site_answers():
+    """The existing site's status and redirect target on each of EXISTING_PATHS."""
+    seen = []
+    for path in EXISTING_PATHS:
+        status, text = fetch('https://' + EXISTING + path, host=EXISTING)
+        location = next((line.split(':', 1)[1].strip() for line in text.lower().splitlines()
+                         if line.startswith('location:')), '')
+        seen.append((path, status, location))
+    return tuple(seen)
+
+
+def answering(answers):
+    return all(0 < status < 500 for _, status, _ in answers)
 
 
 def candidate(original, remove):
@@ -146,8 +162,9 @@ def main():
             validate(text)
         except Exception:
             raise RuntimeError('The candidate Caddyfile failed validation; nothing changed') from None
-        if not remove and not existing_site_serves():
-            raise RuntimeError('The existing site is not answering as expected; inspect before changing Caddy')
+        before = existing_site_answers()
+        if not remove and not answering(before):
+            raise RuntimeError('The existing site is not answering; inspect before changing Caddy')
         if remove:
             # A takedown: restoring on a failed check would put the traces back on the internet.
             BACKUP.write_text(original)
@@ -161,7 +178,7 @@ def main():
             if gone:
                 raise RuntimeError('The site is out of the Caddyfile but still answers (HTTP ' + str(gone) +
                                    '); inspect Caddy')
-            state = 'removed' if existing_site_serves() else 'removed; the existing site is not answering, inspect it'
+            state = 'removed' if existing_site_answers() == before else 'removed; the existing site now answers differently, inspect it'
             print(json.dumps({'site': HOST, 'state': state}))
             return
         try:
@@ -170,7 +187,7 @@ def main():
             run(['systemctl', 'reload', 'caddy'])
             if not site_serves():
                 raise RuntimeError('site check failed')
-            if not existing_site_serves():
+            if existing_site_answers() != before:
                 raise RuntimeError('existing site check failed')
         except Exception:
             try:
