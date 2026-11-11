@@ -141,16 +141,17 @@ class TracesSiteTests(unittest.TestCase):
         self.assertEqual(text, LIVE)
 
     def test_remove_takes_exactly_the_site_away(self):
-        text, calls, output = self.scenario(live=LIVE + site.SITE, argv=['--remove'], agentwatch=None)
+        text, calls, output = self.scenario(live=LIVE + site.SITE, argv=['--remove'], agentwatch=None, answers={})
         self.assertEqual(text, LIVE)
         self.assertEqual(json.loads(output)['state'], 'removed')
-        self.assertFalse(any(c == ('fetch', 'https://' + site.HOST + '/healthz') for c in calls))
+        self.assertEqual(calls.count(('fetch', 'https://' + site.HOST + '/healthz')), 1)
+        _, _, _ = self.scenario(live=LIVE + site.SITE, argv=['--remove'], expected_error='still answers')
         text, _, _ = self.scenario(argv=['--remove'], expected_error='does not hold the reviewed traces site')
         self.assertEqual(text, LIVE)
 
     def test_remove_needs_no_check_first_and_never_puts_the_site_back(self):
         text, calls, output = self.scenario(live=LIVE + site.SITE, argv=['--remove'], agentwatch=None,
-                                            existing=(502, ''))
+                                            existing=(502, ''), answers={})
         self.assertEqual(text, LIVE)
         self.assertIn('inspect it', json.loads(output)['state'])
         self.assertEqual(calls.count(('systemctl', 'reload', 'caddy')), 1)

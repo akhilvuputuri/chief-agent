@@ -225,7 +225,7 @@ The rollout, each step by the operator, with the owner's approval:
 
 To take the site down: `sudo python3 scripts/deploy-traces-site.py --remove`; it checks nothing first and never puts the site back. To change the password: make a new hash, replace the `.env` line, and recreate agentwatch (`sudo -n docker compose -p hermes-companion up -d --no-deps agentwatch`), which also signs every session out.
 
-Once agentwatch answers a public name, the update procedure refuses any later block without signing in, so an update cannot switch it off while the site serves; removing the site comes first. Through the SSH tunnel the sign-in is the same, but its cookie is `Secure` and the tunnel is plain HTTP on `localhost`; whether a browser keeps it there is untested. The key goes wherever `CHIEF_TRACE_ENDPOINT` points, so pointing export at another collector sends it the key.
+Once agentwatch answers a public name, the update procedure refuses a later block that keeps the public name without signing in, so an update cannot switch it off while the site serves (a block dropping both leaves agentwatch refusing the site's name). Through the SSH tunnel the sign-in is the same, but its cookie is `Secure` and the tunnel is plain HTTP on `localhost`; whether a browser keeps it there is untested. The key goes wherever `CHIEF_TRACE_ENDPOINT` points, so pointing export at another collector sends it the key.
 
 ## What leaves the process
 

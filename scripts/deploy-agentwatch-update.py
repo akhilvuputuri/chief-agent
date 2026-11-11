@@ -260,6 +260,9 @@ def validate_command(command, environment):
         raise RuntimeError('agentwatch signing in needs --api-key-env AGENTWATCH_API_KEY, and only with --auth-user')
     if (API_KEY_ENV in environment) != signing_in:
         raise RuntimeError('agentwatch passes AGENTWATCH_API_KEY through only when signing in')
+    # agentwatch also answers the name it binds to, so that is held to the same rule.
+    if values.get(b'--host', [b'0.0.0.0'])[0] not in {b'0.0.0.0', b'::', *PRIVATE_HOSTS}:
+        raise RuntimeError('agentwatch --host must be 0.0.0.0, :: or loopback')
     if not signing_in and any(host not in PRIVATE_HOSTS for host in values.get(b'--allow-host', [])):
         raise RuntimeError('agentwatch may answer a public host name only with signing in on')
     proxies = values.get(b'--forwarded-allow-ips', [])

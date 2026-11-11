@@ -157,6 +157,10 @@ def main():
             except Exception:
                 raise RuntimeError('The site is out of the Caddyfile but Caddy did not reload; '
                                    'run systemctl reload caddy and inspect') from None
+            gone, _ = fetch('https://' + HOST + '/healthz')
+            if gone:
+                raise RuntimeError('The site is out of the Caddyfile but still answers (HTTP ' + str(gone) +
+                                   '); inspect Caddy')
             state = 'removed' if existing_site_serves() else 'removed; the existing site is not answering, inspect it'
             print(json.dumps({'site': HOST, 'state': state}))
             return

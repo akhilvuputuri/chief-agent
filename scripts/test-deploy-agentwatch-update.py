@@ -385,6 +385,8 @@ class AgentwatchUpdateTests(unittest.TestCase):
             (STAGED_COMPOSE.replace('${OPENROUTER_API_KEY:-}\n', '${OPENROUTER_API_KEY:-}\n' + key_line),
              'only when signing in'),
             (STAGED_COMPOSE.replace('"50",\n', '"50",\n' + keys), 'only with --auth-user'),
+            (SIGNED_COMPOSE.replace('"--auth-user"', '"--host",\n        "traces.52-77-47-24.sslip.io",\n        "--auth-user"'),
+             '--host must be'),
             # A public name needs signing in, so a later update cannot switch it off under the site.
             (STAGED_COMPOSE.replace('"90",\n', '"90",\n        "--allow-host",\n        "traces.52-77-47-24.sslip.io",\n'),
              'public host name only with signing in'),
