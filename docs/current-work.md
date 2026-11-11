@@ -1,8 +1,14 @@
+# Every model on Claude, and fallbacks reported — prepared, 11 November 2026
+
+Branch `claude-models-on-main`; PR 442's rollout is done, so it releases normally. The `fast` agent tier (the default) moves to Haiku 5.5 and the nightly judge to Opus 5.5, both on the direct route; Sonnet 5.5 is mapped but unused. Jev, the search helper (set by Compose), embeddings and speech stay. Each fallback to OpenRouter sends the owner a Telegram message (at most one per fault and model an hour), a start without the direct route for the main model sends one too, and a rate limit cools only the model that hit it. `AGENTS.md` now treats docs as a dated log. See [journal 164](journey/164-claude-models-everywhere.md). Next: after the rollout, merge, then check `model.routes` and the first direct Haiku calls and judge night.
+
 # Dependency advisories — live in `1335f6d`, 11 November 2026
 
 Published advisories (OSV, read 11 November) flagged nine package versions in the root lockfile and two in the Pi runtime's. Updated within their ranges, lockfiles only: body-parser 2.4.0, qs 6.17.1, ip-address 10.7.6, fast-uri 3.1.9 and 4.2.3, fastify 5.12.8. The Pi runtime's own undici moves from 8.10.2 to 8.12.4: with the next pinned worker image the worker's model calls use it, while its other requests, to the gateway and GitHub's API, stay on the 8.10.2 copy `pi-coding-agent` 1.1.0 pins, which loads first and becomes the default dispatcher (measured). Read from source, Chief does not reach the affected behaviour of the updated packages; only the worker's undici copies serve requests, to its own gateway and GitHub's API. Still flagged, and not forced: zod 3.25.76 (fixed only in 4.6.6; measured, an 8 MB worker request of failing array elements grows the heap by 1.1 GB), minimatch 10.2.6 (fixed only in 11.0.1) and that pinned undici 8.10.2; an upgrade to `pi-coding-agent` 1.5.x brings minimatch 11.0.3 and undici 8.12.3. See [journal 162](journey/162-advisories-in-the-dependency-tree.md).
 
 # Switching to the direct Anthropic route — enabling change prepared, 11 November 2026
+
+> **Update, 11 November 2026:** merged as `ef825c4` and rolled out; the direct route is live for Opus 5.5 ([journal 161](journey/161-enabling-direct-anthropic.md)).
 
 Branch `claude/gifted-mccarthy-gond93`. The direct Anthropic adapter merged as `a7c1993` (PR #441) and was deployed on 11 November (release run 43004943097); it is inert in production, with no key on the host ([journal 160](journey/160-direct-anthropic-provider.md)). On 11 November 2026 the owner decided to switch to it, raise output allowances and use Opus 5.5 for coding. The enabling change ([journal 161](journey/161-enabling-direct-anthropic.md)) is prepared and tested offline, awaiting independent review:
 

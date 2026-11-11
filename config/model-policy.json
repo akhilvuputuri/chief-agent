@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "main": "anthropic/claude-opus-5.5",
-  "judge": "openai/gpt-6.1-sol",
+  "judge": "anthropic/claude-opus-5.5",
   "priceCeilings": { "input": 4, "output": 20 },
   "agents": {
     "default": "fast",
     "tiers": {
-      "fast": "google/gemini-3.8-flash",
+      "fast": "anthropic/claude-haiku-5.5",
       "standard": "anthropic/claude-opus-5.5"
     }
   },
@@ -20,6 +20,20 @@
           "output": 20,
           "cacheRead": 0.2,
           "cacheWrite": 5
+        },
+        "anthropic/claude-sonnet-5.5": {
+          "id": "claude-sonnet-5-5",
+          "input": 2,
+          "output": 10,
+          "cacheRead": 0.1,
+          "cacheWrite": 2.5
+        },
+        "anthropic/claude-haiku-5.5": {
+          "id": "claude-haiku-5-5",
+          "input": 0.1,
+          "output": 0.5,
+          "cacheRead": 0.01,
+          "cacheWrite": 0.125
         }
       }
     }

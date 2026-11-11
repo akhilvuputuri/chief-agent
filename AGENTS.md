@@ -83,6 +83,14 @@ For the owned fixed Python coding squad, the owner-authorized automatic workflow
 - Each new machine needs its own authorized GitHub login. Repository read access alone does not prove merge or Actions permission. Use the shared GitHub deployment path from local and cloud tasks alike.
 - Current work and checkpoint branches are indexed in docs/current-work.md. Use draft PRs for work in progress; a checkpoint is not a tested release. Push resumable work with exact remaining checks instead of leaving the only copy on one laptop.
 
+## Documentation is a dated log
+
+Docs record how Chief got to where it is; they are not the source of truth for how it works now. The code and `config/` are. Check them before relying on any statement in a doc, a handover or a journal.
+
+- When behaviour changes, do not rewrite earlier text. Add a dated note next to it, `> **Update, <day> <month> <year> ([journal N](...)):** what changed.`, and leave the earlier text as the record of its time. Correct a statement in place only when it was wrong at the time it was written, and say so.
+- The newest dated note wins over older text; anything without a note describes the state when it was written.
+- Journal entries, `docs/releases.md` and `docs/current-work.md` are logs already: add entries, do not edit old ones.
+
 ## Documentation scope
 
 Keep repository documentation specific to application behavior, architecture, technical decisions, incidents, tests and operations. Exclude the owner’s career goals, interview preparation narratives, portfolio positioning and personal motivations for technology choices. Conversation alignment is not repository content. Apply this rule to README, handovers, journal entries, templates and pending task documents.

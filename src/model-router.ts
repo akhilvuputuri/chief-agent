@@ -45,14 +45,22 @@ export function providerFault(error: unknown): ProviderFault | undefined {
     : undefined;
 }
 
-/** Faults that say nothing about other models, so they cool only the failing one. */
-const MODEL_ONLY = new Set<ProviderFault>(["not_found", "permission"]);
+/**
+ * Faults that say nothing about other models, so they cool only the failing one. Anthropic
+ * limits each model separately, so a rate limit on Haiku must not send Opus to OpenRouter
+ * (journal 164).
+ */
+const MODEL_ONLY = new Set<ProviderFault>([
+  "not_found",
+  "permission",
+  "rate_limit",
+]);
 
 /**
  * Per-process memory of a failing direct pathway, so a dead key or exhausted credits costs
- * one failed request per window rather than one on every call. Key, billing, rate-limit and
- * beta-enrollment faults apply to every model; an unknown or refused (permission) model to
- * that model only. An outage or an ordinary rejected request (400) falls back that call only.
+ * one failed request per window rather than one on every call. Key, billing and
+ * beta-enrollment faults apply to every model; a rate limit, an unknown model or a refused
+ * (permission) model to that model only. An outage or an ordinary rejected request (400) falls back that call only.
  */
 export class DirectCooldown {
   private until = new Map<string, { at: number; fault: ProviderFault }>();
@@ -100,6 +108,59 @@ export class DirectCooldown {
 }
 const sharedCooldown = new DirectCooldown();
 
+/** One direct failure that fell back to OpenRouter: structural fields only, never provider text. */
+export type FallbackNotice = {
+  model: string;
+  reason: ProviderFault;
+  cooldownS: number;
+  httpStatus?: unknown;
+};
+
+const REASONS: Record<ProviderFault, string> = {
+  auth: "the API key was refused",
+  permission: "the key may not use this model",
+  billing: "a billing or credit limit was reached",
+  rate_limit: "a rate limit was reached",
+  unavailable: "Anthropic was unavailable",
+  not_found: "the model was not found",
+  rejected: "the request was rejected",
+};
+
+/**
+ * Tells the owner when Chief falls back from Claude to OpenRouter, so a fallback is never silent
+ * (owner request, 11 November 2026, journal 164). At most one message per fault an hour; the
+ * next one counts the fallbacks it held back. `send` is set once Telegram is ready.
+ */
+export class FallbackAlerts {
+  send: (text: string) => Promise<void> = async () => {};
+  private last = new Map<string, { at: number; held: number }>();
+  constructor(
+    private now: () => number = Date.now,
+    private intervalMs = 3_600_000,
+  ) {}
+  notice(n: FallbackNotice) {
+    // Per fault and model: a rate limit cools one model, so another model's must still be told.
+    const key = `${n.reason}:${n.model}`;
+    const previous = this.last.get(key);
+    if (previous && this.now() - previous.at < this.intervalMs) {
+      previous.held++;
+      return;
+    }
+    this.last.set(key, { at: this.now(), held: 0 });
+    const status =
+      typeof n.httpStatus === "number" ? ` (HTTP ${n.httpStatus})` : "";
+    const retry = n.cooldownS
+      ? `For the next ${Math.max(1, Math.round(n.cooldownS / 60))} min this model's calls go straight to OpenRouter.`
+      : "The next call tries Claude directly again.";
+    const held = previous?.held
+      ? ` ${previous.held} more direct ${previous.held === 1 ? "attempt" : "attempts"} for this model failed the same way in the hour before.`
+      : "";
+    void this.send(
+      `A direct Claude call failed: ${REASONS[n.reason]}${status}, model ${n.model}. Chief is retrying it through OpenRouter, which uses OpenRouter credit. ${retry}${held} To stop falling back, set "fallback": false in config/model-policy.json; to use OpenRouter for everything, set MODEL_PROVIDER to openrouter in config/runtime.json.`,
+    ).catch(() => {});
+  }
+}
+
 // Direct-produced reasoning is bound to the Anthropic account, so OpenRouter never gets it;
 // OpenRouter's own entries stay, and messages without direct entries pass as the same objects.
 const forOpenRouter = (messages: ModelMessage[]) =>
@@ -135,6 +196,7 @@ export class FallbackAdapter implements ModelAdapter {
     private direct: ModelAdapter,
     private openRouter: ModelAdapter | undefined,
     private cooldown: DirectCooldown = sharedCooldown,
+    private onFallback?: (notice: FallbackNotice) => void,
   ) {}
   async generate(input: Parameters<Generate>[0]): Promise<Generation> {
     const cooling = this.openRouter && this.cooldown.active(this.model);
@@ -161,6 +223,16 @@ export class FallbackAdapter implements ModelAdapter {
         errorType: diagnostics.errorType,
         errorCode: diagnostics.errorCode,
       });
+      try {
+        this.onFallback?.({
+          model: this.model,
+          reason: fault,
+          cooldownS,
+          httpStatus: diagnostics.httpStatus,
+        });
+      } catch {
+        // A failing notice never changes the call.
+      }
       return this.fallback(input, fault, false);
     }
   }
@@ -195,6 +267,8 @@ export type ModelRouterOptions = {
   ceilings: { input: number; output: number };
   policy?: ModelPolicy;
   cooldown?: DirectCooldown;
+  /** Called once for each direct failure that falls back (not for calls skipped in a cooldown). */
+  onFallback?: (notice: FallbackNotice) => void;
   /** Test seams; production builds the real adapters. */
   openRouter?: (model: string) => ModelAdapter;
   anthropic?: (model: string, route: AnthropicRoute) => ModelAdapter;
@@ -253,6 +327,7 @@ export class ModelRouter {
       direct,
       o.openRouterKey ? this.openRouter(model) : undefined,
       o.cooldown ?? sharedCooldown,
+      o.onFallback,
     );
   }
 }

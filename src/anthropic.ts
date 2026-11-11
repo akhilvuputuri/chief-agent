@@ -27,11 +27,17 @@ export type AnthropicPrices = {
 /**
  * Native models this adapter supports, kept in one place: Anthropic models differ in thinking,
  * effort, system-message and preserved-thinking support, so unlisted models are refused.
- * Opus 5.5: adaptive thinking only (disabled/budget_tokens are 400s), output_config.effort, no
- * forced tool_choice or prefill, mid-conversation system messages, and the history check
- * enforced for new accounts.
+ * Opus 5.5, Sonnet 5.5 and Haiku 5.5 share what this adapter relies on: adaptive thinking
+ * (a disabled setting or budget_tokens is a 400 on Opus and Sonnet), output_config.effort at
+ * low to max, no prefill (the adapter never forces tool_choice), mid-conversation system messages, and
+ * preserved thinking with the history check. Sonnet and Haiku were added on 11 November 2026
+ * (journal 164) from Anthropic's model documentation; neither has been called live.
  */
-const PROFILES = new Set(["claude-opus-5-5"]);
+const PROFILES = new Set([
+  "claude-opus-5-5",
+  "claude-sonnet-5-5",
+  "claude-haiku-5-5",
+]);
 // Server-side refusal fallbacks (`fallbacks`) are deliberately never sent: they can serve Opus 5
 // or 4.8 at $5/$25, above the owner-approved $4/$20 ceilings, sticky and priced at the wrong rates.
 const BETA = "thinking-binding-controls-2026-08-01";

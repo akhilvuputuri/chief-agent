@@ -186,7 +186,7 @@ export class CustomAgent implements Agent {
   async run(req: AgentRequest): Promise<AgentResponse> {
     if (req.childModel && !req.specialist)
       throw new Error("Only agent runs can select a model");
-    // A child uses its host-resolved model, or the default agent tier (Flash when configured).
+    // A child uses its host-resolved model, or the default agent tier (Haiku 5.5 in the bundled policy).
     // A runtime built without a model factory runs every agent on its one model.
     const childModel = !this.modelFor
       ? undefined

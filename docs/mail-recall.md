@@ -79,6 +79,9 @@ ssh -F "$OPS/ssh_config" chief-lightsail "sudo -n docker exec hermes-companion-g
 ```
 
 - It reads the gateway's stored index without changing it, samples indexed messages, reads each sampled body from Gmail and has `google/gemini-3.8-flash` write a question for each. The question must not reuse the subject's or sender's words; questions that reuse two subject words or any sender word are dropped.
+
+> **Update, 11 November 2026 ([journal 164](journey/164-claude-models-everywhere.md)):** the eval writes its questions with `anthropic/claude-haiku-5.5`, sends no temperature and accepts JSON inside a code fence.
+
 - For each question it compares two retrieval conditions:
   - **keyword:** up to three Gmail searches the model writes, as the email agent does today;
   - **recall:** the same searches plus `gmail_recall`'s top eight results.
