@@ -25,7 +25,7 @@ LOCK = pathlib.Path('/var/lock/companion-release.lock')
 # this rollout PR was reviewed. The script refuses any other RELEASE, and refuses to run while
 # BASE is None. If another release lands first, BASE must be changed to that live SHA through
 # review.
-BASE = 'dcb7ea37bce3a5539dc630cf10570271b70e2d2a'
+BASE = '7aac85f0d8f0698f24db61277081add46dc9bae5'
 IMAGE = 'hermes-companion-gateway'
 # Required in the private .env, in this form: agentwatch takes keys of 32 characters or more, and
 # a header value must not hold spaces or control characters.
