@@ -1,4 +1,11 @@
+## Worker image with re-review on the delta (12 November 2026)
+
+- **Configuration.** New coding jobs pin worker image `sha256:33639fbe…`, built from `f6df014` (PR 453): 32,000-character document pages, and a review round after a repair reads the earlier findings and the diff since the reviewed candidate. The image also carries undici 8.12.4 from PR 444. The previous image `sha256:e67dc9ea…` moves to `previousImages`, so paused jobs on it still resume. See [journal 167](journey/167-review-that-reads-what-changed.md).
+- **Deployment.** Not yet recorded as live; a dated note follows on release.
+
 ## Review that reads what changed (10 November 2026)
+
+> **Update, 12 November 2026:** merged as `f6df014` (PR 453); release run 43067976394 succeeded and the gateway was healthy. Worker image `sha256:33639fbe…` built from it (run 43068218098) and pinned in the entry above.
 
 - **Code.** Worker only. `read_document` pages are 32,000 characters instead of 4,000, and a review round after a repair in the same run reads the earlier findings and the diff since the reviewed candidate, with the complete diff as optional reading. No host, database or Compose change; it takes effect when a worker image built from this change is pinned.
 - **Why.** The reviewer cost $16.06 of about $17 on job `4ba7fa41`, with 97% of its prompt tokens already read from cache. See [journal 167](journey/167-review-that-reads-what-changed.md).
