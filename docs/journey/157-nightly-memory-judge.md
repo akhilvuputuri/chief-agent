@@ -1,7 +1,7 @@
 # 157 — Is the memory right, and is it used?
 
 Work date: 2026-11-10 (Singapore). Written: 2026-11-10.
-Status: tested on synthetic data; not released. No production judge run exists yet, so nothing below says how good the memory is.
+Status: released on 11 November 2026 (`fdff479`). No production judge run exists yet, so nothing below says how good the memory is.
 
 ## User-visible problem and preceding iteration
 
@@ -60,9 +60,9 @@ Tested only. The scripted model returns whatever the test tells it to, so the te
 
 The first night has a backlog: 20 facts and about 54 turns, so 30 turns on the first night and the rest on the second.
 
-### Release closure
+### Release closure — 2026-11-11
 
-Not released. Pending: independent review, merge, the automatic release, and the first judge run.
+[PR 436](https://github.com/akhilvuputuri/chief-agent/pull/436) merged at the approved head `e3c1248` as `fdff479`, after CI passed. The [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/42945250105) finished at 10:20 SGT, and the gateway reported `RELEASE_SHA` `fdff479` and healthy, with no errors in its first minutes of logs. Pending: the first judge run, due on the night of 12 November SGT, and a first read of its verdicts.
 
 ## Follow-up and next iteration
 

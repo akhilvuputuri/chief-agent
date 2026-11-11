@@ -1,6 +1,6 @@
-# A nightly judge of memory — not yet released, 10 November 2026
+# A nightly judge of memory — live in `fdff479`, 11 November 2026
 
-Issue #326. The learner now ends each night with a judge on another model family (`openai/gpt-6.1-sol`): it checks each new learned fact against the owner's message it cites, and each owner turn against the memory that was in its context, and records which memories were relevant and whether they were followed. It changes no memory. Nothing is measured until its first production nights; the first has a backlog of 20 facts and about 54 turns. See [learning](learning.md#nightly-judge) and [journal 157](journey/157-nightly-memory-judge.md). Next: read the first week with `scripts/judge-report.sql`, then decide whether verdicts should flag anything.
+Issue #326. The learner now ends each night with a judge on another model family (`openai/gpt-6.1-sol`): it checks each new learned fact against the owner's message it cites, and each owner turn against the memory that was in its context, and records which memories were relevant and whether they were followed. It changes no memory. Nothing is measured until its first production nights, from 12 November; the first has a backlog of 20 facts and about 54 turns. See [learning](learning.md#nightly-judge) and [journal 157](journey/157-nightly-memory-judge.md). Next: read the first week with `scripts/judge-report.sql`, then decide whether verdicts should flag anything.
 
 # Memory in agentwatch — live in `4e8f886`, 5 November 2026
 
