@@ -181,6 +181,8 @@ None of this has been verified on the enabled production gateway; the [live veri
 11. **Reasoning budget on OpenRouter:** a larger `max_tokens` may enlarge the reasoning budget OpenRouter derives from the effort level, so `fast`-tier agents (and any fallback call) with short time budgets may run slower or end `budget_exhausted`. Compare `fast`-tier agent latency with the days before (independent reviewer, non-blocking).
 12. **Long calls:** a non-streamed OpenRouter call can reach Node's 300 s header wait at the larger allowance; Chief's loop retries it once and the provider may bill both attempts. One 32,000-token call can use much of a 900 s owner turn. Opus is slower per token than the previous coder while the coding job's time limit (150 minutes) is unchanged, so watch coding jobs for time-limit pauses (independent reviewer, non-blocking).
 
+    > **Update, 12 November 2026 ([journal 169](journey/169-three-hour-coding-attempts.md)):** the first Opus job, `9600af57`, paused on the time limit during its first review; new jobs now get 180 minutes.
+
 ## Switching back
 
 - **Through a release (preferred):** set `"MODEL_PROVIDER": "openrouter"` in `config/runtime.json` in an ordinary reviewed PR. Compose does not pass `MODEL_PROVIDER`, so the file is authoritative and the next release applies it. A `MODEL_PROVIDER` line in the server `.env` has no effect for the same reason.

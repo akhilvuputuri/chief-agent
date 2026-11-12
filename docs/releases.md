@@ -1,3 +1,9 @@
+## Coding attempts may run three hours (12 November 2026)
+
+- **Configuration.** New Pi coding jobs get 180 minutes per attempt instead of 150, the most one attempt may run. Model and tool-call limits, models and effort are unchanged. No code, migration or Compose change.
+- **Why.** The first Opus 5.5 job, `9600af57`, spent 102 minutes implementing and ran out of time 40 minutes into its first review. See [journal 169](journey/169-three-hour-coding-attempts.md).
+- **Deployment.** Not yet recorded as live; a dated note follows on release.
+
 ## Chief builds with `kite build`; worker image with Kite 0.2.0 (12 November 2026)
 
 - **Code.** `kite run build` compiles both projects with `kite build` instead of `tsc`, and the gateway image builds use it instead of the esbuild script, which is removed with the direct `esbuild` dependency. Type checking is unchanged. No migration.

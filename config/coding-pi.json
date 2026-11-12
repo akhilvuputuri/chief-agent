@@ -7,7 +7,7 @@
   "reviewerModel": "anthropic/claude-opus-5.5",
   "effort": "high",
   "limits": {
-    "ms": 9000000,
+    "ms": 10800000,
     "models": 1500,
     "tools": 4000
   },
