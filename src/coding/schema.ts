@@ -4,6 +4,8 @@ import { z } from "zod";
 import { MAX_OUTPUT_TOKENS } from "../model.js";
 import { reportLimits, reportDocument } from "@chief-agent/pi-runtime/report";
 
+/** The header a reviewer request names its round's candidate in (journal 192). */
+export const candidateHeader = "x-chief-candidate";
 const id = z.string().uuid();
 export const codingStart = z
   .object({
@@ -109,6 +111,11 @@ export const checkpoint = z
             base: z.string().regex(/^[a-f0-9]{40}$/),
             patch: z.string().max(10_000_000),
             verdict: z.enum(["APPROVE", "REQUEST_CHANGES"]).optional(),
+            /** A hash of that round's findings: the owner decides only when they repeat. */
+            findings: z
+              .string()
+              .regex(/^[a-f0-9]{64}$/)
+              .optional(),
           })
           .strict()
           .optional(),
@@ -133,7 +140,14 @@ export const checkpoint = z
             verdict: z.enum(["APPROVE", "REQUEST_CHANGES"]).optional(),
             ask: z.string().max(reportLimits.ask).optional(),
             options: z
-              .array(z.string().min(1).max(reportLimits.option))
+              .array(
+                z
+                  .string()
+                  .min(1)
+                  .max(reportLimits.option)
+                  // One line, as a button shows it.
+                  .regex(/^[^\n\r]*$/),
+              )
               .max(reportLimits.options)
               .optional(),
           })
@@ -177,7 +191,14 @@ export const outcome = z
     question: z.string().max(2000).default(""),
     /** Answers the owner can tap for a Pi ask (journal 192). */
     options: z
-      .array(z.string().min(1).max(reportLimits.option))
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(reportLimits.option)
+          // One line, as a button shows it.
+          .regex(/^[^\n\r]*$/),
+      )
       .max(reportLimits.options)
       .optional(),
     /** Which session asked the question, so the owner's answer goes back to it. */

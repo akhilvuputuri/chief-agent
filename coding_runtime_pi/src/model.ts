@@ -60,6 +60,8 @@ export function anthropicModel(config: ModelConfig): ModelFactory {
             // model's output limit and compaction its own reserve (journal 192).
             [purposeHeader]:
               options?.maxTokens === 1 ? "cache_warm" : requestPurpose,
+            // Caller-chosen headers, such as the candidate a review round is about.
+            ...config.headers?.(),
           },
         }),
     });

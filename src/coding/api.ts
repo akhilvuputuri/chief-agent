@@ -9,6 +9,7 @@ import type { CodingController } from "./controller.js";
 import { ModelError } from "../model.js";
 import { CodingModelFailure } from "./model-failure.js";
 import { purposeHeader } from "@chief-agent/pi-runtime";
+import { candidateHeader } from "./schema.js";
 
 const message = z
   .object({
@@ -85,6 +86,7 @@ export async function codingApi(
         ["POST", "progress"],
         ["POST", "checkpoint"],
         ["POST", "finish"],
+        ["POST", "publish"],
         ["POST", "model"],
         ["POST", "logs"],
         ["POST", "github-token"],
@@ -101,7 +103,9 @@ export async function codingApi(
             ? "checkpoint"
             : messages
               ? "model"
-              : path;
+              : path === "publish"
+                ? "finish"
+                : path;
         api.route({
           method,
           url: `/:id/${path}`,
@@ -109,14 +113,20 @@ export async function codingApi(
           // Worst-case JSON escaping of every allowed string fits within 64 MB.
           // Messages requests may be as large as Anthropic's own 32 MB request limit.
           bodyLimit:
-            path === "checkpoint" || path === "finish"
+            path === "checkpoint" || path === "finish" || path === "publish"
               ? 64_000_000
               : messages
                 ? 32 * 1024 * 1024
                 : 8_000_000,
           // Authenticate the larger routes before parsing their bodies.
           onRequest: async (req, reply) => {
-            if (path !== "checkpoint" && path !== "finish" && !messages) return;
+            if (
+              path !== "checkpoint" &&
+              path !== "finish" &&
+              path !== "publish" &&
+              !messages
+            )
+              return;
             if (
               !z
                 .string()
@@ -234,6 +244,7 @@ export async function codingApi(
                     betas: req.headers["anthropic-beta"],
                     version: req.headers["anthropic-version"],
                     purpose: req.headers[purposeHeader],
+                    candidate: req.headers[candidateHeader],
                     signal: gone.signal,
                   },
                 );
@@ -252,6 +263,8 @@ export async function codingApi(
                 return await controller.save(job, req.body);
               if (path === "finish")
                 return await controller.finish(job, req.body);
+              if (path === "publish")
+                return await controller.approvePublication(job, req.body);
               if (path === "logs") return await controller.logs(job, req.body);
               if (path === "github-token")
                 return await controller.githubToken(job);

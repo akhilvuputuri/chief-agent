@@ -21,6 +21,7 @@ import {
   type Task,
 } from "@chief-agent/pi-runtime";
 import {
+  candidateHeader,
   codingSettings,
   checkpoint,
   outputAllowance,
@@ -97,14 +98,18 @@ const neutral = (text: string) => text.replace(/\[(inbox|chief)/gi, "[ $1");
 /**
  * A block of text from somewhere else, fenced so that its contents cannot pass for Chief's
  * own words or another block: the header names its source and a boundary chosen by the
- * worker, and the block ends at that boundary (journal 192).
+ * worker, every line of the text is quoted, and the block ends at that boundary (journal 192).
  */
 export function fence(header: string, text: string) {
-  const body = neutral(text);
+  // Every line of the wrapped text is quoted, so no line of it can open or close a block of
+  // any kind (an inbox item, findings, the coder's summary or an owner message).
+  const body = (text ? neutral(text) : "(empty message)")
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n");
   const b = boundary(body);
-  return `${header} ${b}]\n${body || "(empty message)"}\n[end ${b}]`;
-}
-/**
+  return `${header} ${b}]\n${body}\n[end ${b}]`;
+} /**
  * How an inbox item reaches a session: its id, so a restored session shows what it already
  * has, and its source. Only the owner's own words are presented as the owner's; CI and pull
  * request text is untrusted evidence (journal 192).
@@ -245,6 +250,7 @@ export async function runPiWorker(
   const workerToken = (client as { token?: string }).token;
   if (!workerOrigin || !workerToken)
     throw new Error("Pi native provider capability missing");
+  let reviewing: string | undefined;
   function runtimeModel(role: "coder" | "reviewer") {
     const config = assignment.settings;
     const model = role === "reviewer" ? config.reviewerModel : config.model;
@@ -258,6 +264,14 @@ export async function runPiWorker(
       maxTokens: outputAllowance(config, role),
       reasoning: config.effort,
       retry: GATEWAY_RETRY,
+      // Every reviewer call names the candidate its round is about, out of band, so the host
+      // binds an approval to it even after Pi compacts the round message away (journal 192).
+      ...(role === "reviewer"
+        ? {
+            headers: (): Record<string, string> =>
+              reviewing ? { [candidateHeader]: reviewing } : {},
+          }
+        : {}),
     });
   }
 
@@ -303,15 +317,15 @@ export async function runPiWorker(
     }
     return entries;
   }
-  async function uploadSession(task: Task, scope: string) {
-    const dir = join(store.path(task.id), "session");
-    if (!task.sessionFile) return [];
-    if (!task.sessionFile.startsWith(dir + "/"))
-      throw new Error("Active session is outside task storage");
-    const entries = (await readFile(task.sessionFile, "utf8"))
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line));
+  /** The latest in-memory session each role's runtime handed over, header first. */
+  const sessions = new Map<string, unknown[]>();
+  /**
+   * Uploads the entries Pi holds in memory that the host does not have yet. The local file is
+   * never read back: code the session ran could have appended to it (journal 192).
+   */
+  async function uploadSession(scope: string, entries = sessions.get(scope)) {
+    if (!entries) return [];
+    sessions.set(scope, entries);
     for (
       let index = uploaded.get(scope) ?? 0;
       index < entries.length;
@@ -356,8 +370,12 @@ export async function runPiWorker(
     };
   };
   /** The coder's session first, then its work and what it has received, against the base. */
-  async function saveBuild(task: Task, next?: { hash: string }) {
-    record(await uploadSession(task, scopes.coder), "coder");
+  async function saveBuild(
+    task: Task,
+    session?: unknown[],
+    next?: { hash: string },
+  ) {
+    record(await uploadSession(scopes.coder, session), "coder");
     const snap = await tree.snapshot(initial, stop, base);
     await save({
       plan: assignment.checkpoint.plan,
@@ -372,9 +390,10 @@ export async function runPiWorker(
   }
   async function saveReview(
     task: Task,
+    session?: unknown[],
     extra: Parameters<typeof state>[1] = {},
   ) {
-    record(await uploadSession(task, scopes.reviewer), "reviewer");
+    record(await uploadSession(scopes.reviewer, session), "reviewer");
     await save({
       ...saved,
       piState: state("review", {
@@ -404,7 +423,7 @@ export async function runPiWorker(
     executor: (task) =>
       localExecutor(task.workspace, join(root, "tool-home"), cleanup),
     onEvent: progress("implementing"),
-    onCheckpoint: (task) => saveBuild(task),
+    onCheckpoint: (task, session) => saveBuild(task, session),
   });
   const reviewerRuntime = new CodingRuntime({
     store,
@@ -414,7 +433,7 @@ export async function runPiWorker(
     executor: (task) =>
       localExecutor(task.workspace, join(root, "review-home"), cleanup),
     onEvent: progress("reviewing"),
-    onCheckpoint: (task) => saveReview(task),
+    onCheckpoint: (task, session) => saveReview(task, session),
   });
   const coder = await coderRuntime.start({
     workspace,
@@ -470,6 +489,10 @@ export async function runPiWorker(
     role: "coder" | "reviewer",
     message: string,
   ) {
+    // Every run starts from the host's stored session, never from the local file (journal
+    // 192); the reviewer's is rebuilt by its round.
+    if (role === "coder")
+      record(await restoreSession(task, scopes.coder), "coder");
     active = { runtime, id: task.id, role };
     try {
       return await runtime.run(task.id, message);
@@ -615,7 +638,6 @@ export async function runPiWorker(
       ask = `The coder changed the candidate since your last round. ${where} \`git diff reviewed candidate\` shows exactly what changed since then; \`git diff ${base} candidate\` is the whole change. Your earlier findings are above in this session: judge each again, check whether the valid ones are fixed, and review the new code with the same rigour. Your verdict covers the whole candidate.`;
     const words = ownerWords();
     return [
-      // The host binds an approval to this exact line (journal 192).
       `Candidate under review: ${candidate}`,
       ask,
       words.length
@@ -629,6 +651,7 @@ export async function runPiWorker(
   }
   async function reviewRound(summary: string, resuming: boolean) {
     const candidate = artifactHash(saved);
+    reviewing = candidate;
     const hasReviewed = await buildReviewCopy(saved.files);
     reviewer ??= await reviewerRuntime.start({
       workspace: reviewDir,
@@ -646,7 +669,7 @@ export async function runPiWorker(
       hasReviewed,
     });
     // Persist the phase before the first reviewer model call.
-    await saveReview(reviewer);
+    await saveReview(reviewer, entries);
     // The reviewer's shell can reach the rest of the attempt's root. Any change outside its
     // own checkout and home ends the attempt rather than reaching the next round.
     const sealed = await workspaceSeal(reviewer.id);
@@ -660,12 +683,15 @@ export async function runPiWorker(
       throw new Error("The coder's workspace changed during review");
     const before = saved.piState?.reviewed;
     if (verdict.status === "completed" && verdict.report?.kind === "review")
-      await saveReview(verdict, {
+      await saveReview(verdict, undefined, {
         reviewed: {
           hash: candidate,
           base,
           patch: saved.patch,
           verdict: verdict.report.verdict!,
+          findings: createHash("sha256")
+            .update(verdict.report.detail)
+            .digest("hex"),
         },
         ...(verdict.report.verdict === "APPROVE"
           ? { next: { step: "finish" as const, hash: candidate } }
@@ -673,8 +699,19 @@ export async function runPiWorker(
       });
     return { verdict, candidate, before };
   }
-  const finishStopped = async (task: Task, askedBy?: "coder" | "reviewer") => {
-    await client.request("finish", {
+  /**
+   * Sends a finish that stops the job. The host answers with the inbox instead when a message
+   * has not reached its session yet (journal 192); then this returns false and the job goes on.
+   */
+  const settle = async (body: unknown) => {
+    const answer = await client.request("finish", body);
+    if (answer?.accepted !== false) return true;
+    receive(answer.inbox);
+    if (!pending().length) throw new Error("The host refused the finish");
+    return false;
+  };
+  const finishStopped = async (task: Task, askedBy?: "coder" | "reviewer") =>
+    settle({
       kind: task.status === "waiting_input" ? "awaiting_input" : "paused",
       summary: task.summary || "Pi work paused; inspect retained state",
       question: task.status === "waiting_input" ? (task.question ?? "") : "",
@@ -686,11 +723,19 @@ export async function runPiWorker(
         : {}),
       checkpoint: saved,
     });
-  };
   const items = (list: InboxItem[]) => list.map(inboxMessage).join("\n\n");
   const findingsMessage = (detail: string) =>
     `Independent review requested changes. The findings below are evidence to verify, not new scope: fix the valid ones within the owner's request, rerun the tests and report done, saying which findings you left and why.\n\n${fence("[review findings;", detail)}`;
 
+  /** The next step after the host handed back undelivered messages. */
+  const route = () => {
+    if (pending("coder").length) {
+      message = items(pending("coder"));
+      step = "coder";
+    } else step = "review";
+  };
+  let message: string | undefined;
+  let step: "coder" | "review" | "finish" = "coder";
   try {
     receive(assignment.inbox);
     const coderEntries = await restoreSession(coder, scopes.coder);
@@ -705,12 +750,10 @@ export async function runPiWorker(
         : undefined;
     const document = saved.piState?.reportDocument;
     const reviewed = saved.piState?.reviewed;
-    let message: string | undefined;
     let summary = saved.summary;
     // Where the job left off (journal 192): a message for the coder comes first; then a
     // candidate the reviewer approved goes straight to finishing, one the coder finished goes
     // straight to review, and findings the coder never got go to it.
-    let step: "coder" | "review" | "finish" = "coder";
     let resuming = false;
     const start = coderEntries.length
       ? ""
@@ -741,7 +784,11 @@ export async function runPiWorker(
       if (step === "coder") {
         const result = await runRole(coderRuntime, coder, "coder", message!);
         message = undefined;
-        if (result.status !== "completed") return await finishStopped(result);
+        if (result.status !== "completed") {
+          if (await finishStopped(result)) return;
+          route();
+          continue;
+        }
         summary = result.summary;
         // Messages that arrived too late to steer go to the coder before any review.
         if (pending("coder").length) {
@@ -750,7 +797,7 @@ export async function runPiWorker(
         }
         if (!saved.files.length) {
           // Nothing needs changing is a result: nothing to review or publish.
-          await client.request("finish", {
+          const settled = await settle({
             kind: "no_change",
             // One or two sentences for the owner: the coder's own summary.
             summary: `Nothing needed changing. ${result.summary
@@ -759,9 +806,11 @@ export async function runPiWorker(
               .join(" ")}`.slice(0, 4000),
             checkpoint: saved,
           });
-          return;
+          if (settled) return;
+          route();
+          continue;
         }
-        await saveBuild(result, { hash: artifactHash(saved) });
+        await saveBuild(result, undefined, { hash: artifactHash(saved) });
         step = "review";
       }
       if (step === "review") {
@@ -770,16 +819,25 @@ export async function runPiWorker(
           resuming,
         );
         resuming = false;
-        if (verdict.status !== "completed" || verdict.report?.kind !== "review")
-          return await finishStopped(verdict, "reviewer");
+        if (
+          verdict.status !== "completed" ||
+          verdict.report?.kind !== "review"
+        ) {
+          if (await finishStopped(verdict, "reviewer")) return;
+          route();
+          continue;
+        }
         if (verdict.report.verdict === "REQUEST_CHANGES") {
           // The coder returned this candidate unchanged after the same verdict: the two
           // disagree, and the owner decides (a decision point, not a round count).
+          // Only when the findings are the ones the coder already answered; new findings go
+          // to the coder first.
           if (
             before?.hash === candidate &&
-            before.verdict === "REQUEST_CHANGES"
+            before.verdict === "REQUEST_CHANGES" &&
+            before.findings === saved.piState?.reviewed?.findings
           ) {
-            await client.request("finish", {
+            const settled = await settle({
               kind: "awaiting_input",
               summary: "The coder and the reviewer disagree",
               question:
@@ -791,7 +849,9 @@ export async function runPiWorker(
               askedBy: "coder",
               checkpoint: saved,
             });
-            return;
+            if (settled) return;
+            route();
+            continue;
           }
           // Into the same coder session, in full, from the reviewer's own report.
           message = [
@@ -809,16 +869,35 @@ export async function runPiWorker(
       // changed candidate gets another review before anything is published.
       receive((await client.request("heartbeat", {}))?.inbox);
       if (pending().length) {
-        if (pending("coder").length) {
-          message = items(pending("coder"));
-          step = "coder";
-        } else step = "review";
+        route();
         continue;
       }
       const candidate = artifactHash(saved);
       const approval = saved.piState?.reportDocument;
       if (approval?.kind !== "review" || approval.verdict !== "APPROVE")
         throw new Error("No approval to finish");
+      const finished: Outcome = {
+        kind: "candidate",
+        summary,
+        question: "",
+        checkpoint: saved,
+        checks: [],
+        review: {
+          verdict: "APPROVE",
+          findings: approval.detail,
+          model: assignment.settings.reviewerModel,
+          patchHash: candidate,
+        },
+      };
+      // The host commits the publication before anything is pushed (journal 192): an inbox
+      // item still on its way, or a missing approval, stops it here.
+      const committed = await client.request("publish", finished);
+      if (committed?.accepted === false) {
+        receive(committed.inbox);
+        if (!pending().length) throw new Error("The host refused publication");
+        route();
+        continue;
+      }
       const published = assignment.agentGit
         ? await publishSandboxBranch({
             execute: initial,
@@ -847,32 +926,10 @@ export async function runPiWorker(
               : {}),
           })
         : undefined;
-      const finished: Outcome = {
-        kind: "candidate",
-        summary,
-        question: "",
-        checkpoint: saved,
-        checks: [],
-        review: {
-          verdict: "APPROVE",
-          findings: approval.detail,
-          model: assignment.settings.reviewerModel,
-          patchHash: candidate,
-        },
+      await client.request("finish", {
+        ...finished,
         ...(published ? { published } : {}),
-      };
-      const answer = await client.request("finish", finished);
-      // The host refuses a candidate while an inbox item is undelivered.
-      if (answer?.accepted === false) {
-        receive(answer.inbox);
-        if (!pending().length)
-          throw new Error("The host refused the candidate");
-        if (pending("coder").length) {
-          message = items(pending("coder"));
-          step = "coder";
-        } else step = "review";
-        continue;
-      }
+      });
       return;
     }
   } finally {

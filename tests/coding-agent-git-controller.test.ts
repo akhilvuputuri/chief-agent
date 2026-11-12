@@ -203,8 +203,15 @@ test("agent tokens are issued only to a running, approved implementation attempt
     c.finish(job, candidate),
     /independent review of the exact artifact/,
   );
+  // The host commits the publication before the worker pushes (journal 192).
+  assert.deepEqual(await c.approvePublication(job, candidate), {
+    accepted: true,
+  });
+  const fresh = (
+    await f.db.query("SELECT * FROM coding_jobs WHERE id=$1", [job.id])
+  ).rows[0];
   const accepted = await c.finish(
-    job,
+    fresh,
     outcome.parse({
       ...candidate,
       published: {

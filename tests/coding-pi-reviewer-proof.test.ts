@@ -4,7 +4,6 @@ import { randomUUID } from "node:crypto";
 import { fixture, settings } from "./helpers/coding-fixture.js";
 import { seal } from "../src/secret-box.js";
 import { artifactHash } from "../src/coding/github.js";
-import { reviewedCandidate } from "../src/coding/controller.js";
 
 const detail = "The candidate implements the request exactly.";
 const checkpoint = (content: string) => ({
@@ -103,32 +102,33 @@ test("an approval is proof only for the exact candidate its round named, and a l
   assert.equal(await proof(forged, "Forged"), false);
 });
 
-test("the host reads the candidate from the last round message of Chief's own text", () => {
-  const h1 = "1".repeat(64),
-    h2 = "2".repeat(64);
-  assert.equal(
-    reviewedCandidate({
-      messages: [
-        {
-          role: "user",
-          content: `Candidate under review: ${h1}\n\nReview it.`,
-        },
-        { role: "assistant", content: [{ type: "text", text: "ok" }] },
-        { role: "user", content: `Candidate under review: ${h2}\n\nAgain.` },
-        {
-          role: "user",
-          content: [
-            {
-              type: "tool_result",
-              tool_use_id: "t",
-              content: `Candidate under review: ${h1}`,
-            },
-          ],
-        },
-        { role: "user", content: "Call report now." },
-      ],
-    }),
-    h2,
+test("an approval older than the owner's latest message is not proof until a new round approves", async (t) => {
+  const { f, job, record, proof } = await proofFixture(t);
+  const one = checkpoint("one\n");
+  const approve = {
+    kind: "review",
+    verdict: "APPROVE",
+    summary: "Yes",
+    detail,
+  };
+  await record(approve, artifactHash(one));
+  assert.equal(await proof(one), true);
+  // The owner sends a message after that approval.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'inbox:reply:later',$2::jsonb,'suppressed')",
+    [
+      job.id,
+      JSON.stringify({ kind: "inbox", source: "owner", text: "Also do X" }),
+    ],
   );
-  assert.equal(reviewedCandidate({ messages: [] }), undefined);
+  assert.equal(await proof(one), false);
+  // CI text does not count as the owner's word.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await record(approve, artifactHash(one));
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'inbox:gh:ci:1',$2::jsonb,'suppressed')",
+    [job.id, JSON.stringify({ kind: "inbox", source: "ci", text: "failed" })],
+  );
+  assert.equal(await proof(one), true);
 });

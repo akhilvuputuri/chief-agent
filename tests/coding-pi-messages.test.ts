@@ -1170,16 +1170,16 @@ test("requests for one job queue for the slot, and Pi's cache warming is recorde
       },
     });
   const before = (await f.row(job.id)).used_models;
-  // A real request and a warm one together, then two more: none is refused.
+  assert.equal((await send({})).statusCode, 200);
+  // A warm replay of that request and two real ones together: none is refused.
   const replies = await Promise.all([
-    send({}),
     send({ max_tokens: 1 }, "cache_warm"),
     send({}),
     send({}),
   ]);
   assert.deepEqual(
     replies.map((r) => r.statusCode),
-    [200, 200, 200, 200],
+    [200, 200, 200],
   );
   await settled();
   const recorded = await calls();
@@ -1193,10 +1193,91 @@ test("requests for one job queue for the slot, and Pi's cache warming is recorde
   );
   // The warm request is not counted as an agent call.
   assert.equal((await f.row(job.id)).used_models, before + 3);
-  // Only a one-token replay may claim the warming purpose.
-  const forged = await send({ max_tokens: 100 }, "cache_warm");
-  assert.equal(forged.statusCode, 400);
+  // A warm request must replay the role's previous request: a one-token cap is not enough.
+  const other = await send(
+    { max_tokens: 1, messages: [{ role: "user", content: "Something else" }] },
+    "cache_warm",
+  );
+  assert.equal(other.statusCode, 400);
+  assert.match(
+    other.json().error.message,
+    /replay the role's previous request/,
+  );
+  // Nor does a different cap pass as warming.
+  assert.equal((await send({ max_tokens: 100 }, "cache_warm")).statusCode, 400);
 });
+
+test("a claim that fails once does not hold the job's place, and waiting is bounded", async (t) => {
+  const { f, app, headers, url, settled } = await piJob(t);
+  const query = f.db.query.bind(f.db);
+  let failOnce = true;
+  let hold: Promise<void> | undefined;
+  (f.db as any).query = async (sql: string, params?: unknown[]) => {
+    if (sql.includes("WITH claimed AS") && failOnce) {
+      failOnce = false;
+      throw new Error("Synthetic database failure");
+    }
+    if (sql.startsWith("UPDATE coding_jobs SET model_busy=false")) await hold;
+    return query(sql, params as any);
+  };
+  const send = () =>
+    app.inject({ method: "POST", url: url(), payload: request(), headers });
+  assert.notEqual((await send()).statusCode, 200);
+  // The next call proceeds instead of waiting behind the failed one forever.
+  assert.equal((await send()).statusCode, 200);
+  await settled();
+  // Four requests may hold or wait for the slot; a fifth gets a retryable refusal.
+  let open!: () => void;
+  hold = new Promise<void>((resolve) => (open = resolve));
+  const first = send();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const waiting = [send(), send(), send()];
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const fifth = await send();
+  assert.equal(fifth.statusCode, 503);
+  assert.notEqual(fifth.headers["x-should-retry"], "false");
+  open();
+  assert.deepEqual(
+    (await Promise.all([first, ...waiting])).map((r) => r.statusCode),
+    [200, 200, 200, 200],
+  );
+});
+
+test("a reviewer call records the candidate from its header, even when compaction removed the round message", async (t) => {
+  const { f, job, app, headers, url, settled, calls } = await piJob(t);
+  const candidate = "c".repeat(64);
+  const reply = await app.inject({
+    method: "POST",
+    url: url("reviewer"),
+    payload: request({
+      model: (f.c as any).anthropic.route(
+        (await f.row(job.id)).settings.reviewerModel,
+      ).nativeModel,
+      messages: [{ role: "user", content: "Summary of the review so far." }],
+    }),
+    headers: { ...headers, "x-chief-candidate": candidate },
+  });
+  assert.equal(reply.statusCode, 200);
+  await settled();
+  const role = async (r: string) =>
+    (await calls()).filter((c) => c.role === r).at(-1);
+  assert.equal((await role("reviewer")).input.candidate, candidate);
+  // The coder's calls carry no candidate.
+  const coder = await app.inject({
+    method: "POST",
+    url: url(),
+    payload: request({
+      model: (f.c as any).anthropic.route((await f.row(job.id)).settings.model)
+        .nativeModel,
+    }),
+    headers: { ...headers, "x-chief-candidate": candidate },
+  });
+  assert.equal(coder.statusCode, 200, coder.body);
+  await settled();
+  assert.equal((await role("coder")).input.candidate, undefined);
+  void f;
+});
+
 test("a request sent right after the previous stream ends waits for the slot instead of being refused", async (t) => {
   const { f, app, headers, url, settled, calls } = await piJob(t);
   // Recording the first call is slow; the next request arrives meanwhile.

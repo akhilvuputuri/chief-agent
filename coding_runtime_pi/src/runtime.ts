@@ -23,8 +23,12 @@ export type RuntimeOptions = {
   /** Runs the session's shell commands; it builds an environment that holds no secrets. */
   executor: (task: Task) => Executor;
   onEvent?: (task: Task, event: RuntimeEvent) => Promise<void>;
-  /** Called whenever no tool is running, and when a run ends: the moment to save the work. */
-  onCheckpoint?: (task: Task) => Promise<void>;
+  /**
+   * Called whenever no tool is running, and when a run ends: the moment to save the work. It
+   * gets the session as Pi holds it in memory (header first, then every entry), never as
+   * re-read from the file, which a command could have appended to (journal 192).
+   */
+  onCheckpoint?: (task: Task, session: unknown[]) => Promise<void>;
 };
 
 /**
@@ -273,6 +277,7 @@ export class CodingRuntime {
           )
         : SessionManager.create(task.workspace, sessionDir);
       task.sessionFile = manager.getSessionFile();
+      const entries = () => [manager.getHeader(), ...manager.getEntries()];
       await this.options.store.save(task);
       const created = await createAgentSession({
         cwd: task.workspace,
@@ -294,7 +299,7 @@ export class CodingRuntime {
           agentsFiles,
           async () => {
             try {
-              await this.options.onCheckpoint?.(task);
+              await this.options.onCheckpoint?.(task, entries());
             } catch (error) {
               saveFailure ??= error;
               stop.abort();
@@ -375,7 +380,7 @@ export class CodingRuntime {
         }
       }
       await this.event(task, "state", task.status);
-      await this.options.onCheckpoint?.(task);
+      await this.options.onCheckpoint?.(task, entries());
       return task;
     } catch (error) {
       task.status =

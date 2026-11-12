@@ -79,6 +79,8 @@ export type ModelConfig = {
    * Pi's agent retry settings when the endpoint needs other values than Pi's defaults (three
    * retries from two seconds); unset fields keep Pi's defaults.
    */
+  /** Headers added to every request, read when it is sent. */
+  headers?: () => Record<string, string>;
   retry?: {
     maxRetries?: number;
     baseDelayMs?: number;
