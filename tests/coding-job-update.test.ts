@@ -16,7 +16,11 @@ import {
 } from "../src/coding/requirements.js";
 import { canonicalJson } from "../src/coding/github.js";
 import { codingSettings } from "../src/coding/schema.js";
-import { fixture, settings } from "./helpers/coding-fixture.js";
+import {
+  fixture,
+  settings,
+  unusedAnthropic,
+} from "./helpers/coding-fixture.js";
 
 const opus = "anthropic/claude-opus-5.5";
 const pricey = "synthetic/too-expensive";
@@ -32,11 +36,6 @@ async function setup(t: TestContext, phase: "build" | "review" = "review") {
     leaderModel: "synthetic/leader",
     model: "synthetic/coder",
     reviewerModel: "synthetic/reviewer",
-    contextWindows: {
-      "synthetic/leader": 2048,
-      "synthetic/coder": 4096,
-      "synthetic/reviewer": 8192,
-    },
   });
   const c = new CodingController(
     f.db,
@@ -60,6 +59,10 @@ async function setup(t: TestContext, phase: "build" | "review" = "review") {
       },
       { id: pricey, inputPrice: 1e6, outputPrice: 1e6, tools: true },
     ],
+    undefined,
+    false,
+    undefined,
+    unusedAnthropic,
   );
   const started = (await c.call("a", f.run, {
     operation: "coding_start",
@@ -172,11 +175,8 @@ test("changing the reviewer during review restarts its session and keeps the wor
   assert.equal(after.checkpoint.piState.reviewRound, 2);
   assert.deepEqual(after.checkpoint.files, before.checkpoint.files);
   assert.equal(after.checkpoint.plan, before.checkpoint.plan);
-  assert.deepEqual(after.settings.contextWindows, {
-    "synthetic/leader": 2048,
-    "synthetic/coder": 4096,
-    [opus]: 1_000_000,
-  });
+  // Pi's own catalogue supplies each Claude model's window (journal 181).
+  assert.equal(after.settings.contextWindows, undefined);
   const notice = (
     await f.db.query(
       "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND event_key='settings:change'",

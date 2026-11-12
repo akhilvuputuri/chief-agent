@@ -68,6 +68,19 @@ import { ownerProgress } from "./progress-text.js";
 import { seal, open } from "../secret-box.js";
 import { errorFields, opsLog } from "../ops-log.js";
 import { ModelError } from "../model.js";
+import Anthropic from "@anthropic-ai/sdk";
+import { anthropicUsage, type AnthropicPrices } from "../anthropic.js";
+import {
+  assembleStream,
+  betaList,
+  messagesRequest,
+  refusal,
+  relayedError,
+  upstreamFailureCode,
+  type CodingAnthropic,
+  type MessagesReply,
+} from "./pi-messages.js";
+import { rejectionReason } from "./rejection-reason.js";
 import { CodingModelFailure, type CodingFailureCode } from "./model-failure.js";
 import { boxView } from "./box-sandbox.js";
 import { runtimeMemory } from "./memory-schema.js";
@@ -228,6 +241,8 @@ export class CodingController {
       tokens: AgentGitHubTokens;
       author: { name: string; email: string };
     },
+    /** Pi jobs call Claude only through this direct Anthropic route (journal 181). */
+    private anthropic?: CodingAnthropic,
   ) {
     this.requirements = new CodingRequirements(db, allowed, clock);
     this.merges = new CodingMergeApprovals(db, allowed, clock);
@@ -279,16 +294,16 @@ export class CodingController {
             this.resultScope(job, call.id),
           ),
         );
+        // The sealed result is the message Anthropic returned (journal 181).
         if (
-          response.message?.tool_calls?.some((c: any) => {
-            if (c.function?.name !== "report") return false;
-            const r = JSON.parse(c.function.arguments);
-            return (
-              r.kind === "review" &&
-              r.verdict === "APPROVE" &&
-              r.detail === document.detail
-            );
-          })
+          response.content?.some(
+            (b: any) =>
+              b?.type === "tool_use" &&
+              b.name === "report" &&
+              b.input?.kind === "review" &&
+              b.input.verdict === "APPROVE" &&
+              b.input.detail === document.detail,
+          )
         )
           return true;
       } catch {
@@ -506,7 +521,8 @@ export class CodingController {
         | "worker_request_rejected"
         | "model_context_limit"
         | CodingFailureCode;
-      httpStatus: 409 | 413;
+      /** The status the worker got back: the host's own, or Anthropic's when relayed. */
+      httpStatus: number;
       /** A fixed reason code for a generic rejection (src/coding/rejection-reason.ts). */
       reason?: string;
       elapsedMs?: number;
@@ -548,6 +564,14 @@ export class CodingController {
     if (a.operation === "coding_status") return this.status(user, a.id);
     await this.foreground(user, run);
     if (a.operation === "coding_model_set") {
+      this.assertDirectPiModels(
+        {
+          runtime: this.settings.runtime,
+          model: a.model,
+          reviewerModel: a.model,
+        },
+        "No setting was changed.",
+      );
       if (!this.catalog) throw new Error("Coding model catalog unavailable");
       return setModelPreference(
         this.db,
@@ -622,8 +646,7 @@ export class CodingController {
         model: preferred.coder,
         reviewerModel: preferred.reviewer,
       };
-      const contextWindows = await this.contextWindows(selected);
-      if (contextWindows) Object.assign(selected, { contextWindows });
+      this.assertDirectPiModels(selected, "No job was started.");
       // Agent publication is snapshotted only when the separate agent App is configured.
       if (selected.agentGit && !this.agentGit) delete selected.agentGit;
       const id = randomUUID();
@@ -1013,22 +1036,9 @@ export class CodingController {
         this.priceFilters.output,
       );
     }
-    // Only the job's current models keep a window; the snapshot holds at most three.
-    const windows = {
-      ...job.settings.contextWindows,
-      ...(await this.contextWindows(next)),
-    };
-    const current = [
-      next.leaderModel ?? next.model,
-      next.model,
-      next.reviewerModel,
-    ];
-    if (job.settings.runtime === "pi")
-      Object.assign(next, {
-        contextWindows: Object.fromEntries(
-          Object.entries(windows).filter(([id]) => current.includes(id)),
-        ),
-      });
+    this.assertDirectPiModels(next, "The job was not changed.");
+    // Pi's own catalogue gives each Claude model's window (journal 181); none is snapshotted.
+    delete (next as { contextWindows?: unknown }).contextWindows;
     const piState = this.freshSession(job, next, a.requestKey);
     const restarted = !!piState;
     const checkpoint = piState
@@ -1248,39 +1258,24 @@ export class CodingController {
     }
     return job;
   }
-  /** Snapshots catalog context windows for selected Pi models; missing metadata is omitted, never guessed. */
-  private async contextWindows(settings: CodingSettings) {
-    if (settings.runtime !== "pi" || !this.catalog) return undefined;
-    const ids = new Set([
+  /** Pi jobs call Claude directly at Anthropic (journal 181): refuse a model without that route. */
+  private assertDirectPiModels(
+    settings: Pick<
+      CodingSettings,
+      "runtime" | "model" | "leaderModel" | "reviewerModel"
+    >,
+    outcome: string,
+  ) {
+    if (settings.runtime !== "pi") return;
+    for (const model of new Set([
       settings.leaderModel ?? settings.model,
       settings.model,
       settings.reviewerModel,
-    ]);
-    let found: Record<string, number> = {};
-    let errorCode = "metadata_missing";
-    try {
-      found = Object.fromEntries(
-        (await this.catalog())
-          .filter(
-            (m) =>
-              ids.has(m.id) &&
-              Number.isSafeInteger(m.contextWindow) &&
-              m.contextWindow! >= 1024 &&
-              m.contextWindow! <= 100_000_000,
-          )
-          .map((m) => [m.id, m.contextWindow!]),
-      );
-    } catch {
-      errorCode = "catalog_unavailable";
-    }
-    // Pi falls back to its own catalog, or 32k for uncatalogued models; make that visible.
-    for (const model of ids)
-      if (found[model] === undefined)
-        opsLog("coding.context_window_unavailable", "warn", {
-          model,
-          errorCode,
-        });
-    return Object.keys(found).length ? found : undefined;
+    ]))
+      if (!this.anthropic?.route(model))
+        throw new ToolValidationError(
+          `Coding jobs call Claude directly at Anthropic, and ${model} is not a Claude model Chief calls directly (config/model-policy.json lists them, such as anthropic/claude-opus-5.5 and anthropic/claude-sonnet-5.5). ${outcome}`,
+        );
   }
   private agentTokens = new Map<string, AgentToken>();
   /** Issues the attempt's single-repository agent token; never for plans, other jobs or unapproved work. */
@@ -1313,9 +1308,9 @@ export class CodingController {
     await this.agentGit?.tokens.revoke(issued.token);
   }
   async assignment(job: CodingJob) {
-    // Workers strictly validate settings: windows travel beside them and host-only workflow stays home.
+    // Workers strictly validate settings: native model ids travel beside them and host-only workflow stays home.
     const {
-      contextWindows,
+      contextWindows: _unused,
       prWorkflow: _hostOnly,
       autoRetryTransientOnce: _hostRetry,
       agentGit,
@@ -1333,7 +1328,20 @@ export class CodingController {
       mode: job.mode,
       baseSha: job.base_sha,
       settings,
-      ...(contextWindows ? { contextWindows } : {}),
+      ...(job.settings.runtime === "pi"
+        ? {
+            nativeModels: Object.fromEntries(
+              [
+                job.settings.leaderModel ?? job.settings.model,
+                job.settings.model,
+                job.settings.reviewerModel,
+              ].flatMap((model) => {
+                const route = this.anthropic?.route(model);
+                return route ? [[model, route.nativeModel]] : [];
+              }),
+            ),
+          }
+        : {}),
       ...(agentGit && this.agentGit && job.mode === "implement"
         ? {
             agentGit: {
@@ -1652,6 +1660,383 @@ export class CodingController {
     await this.revokeAgentToken(job.attempt_id);
     return { accepted: true };
   }
+  /**
+   * One Pi model call (journal 181): the request goes to Anthropic as Pi built it, apart from
+   * the model, effort and output cap this job decides, and Anthropic's stream comes back to
+   * the worker unchanged. The host keeps its own copy of the stream to record the call.
+   */
+  async piMessages(
+    job: CodingJob,
+    role: "coder" | "reviewer",
+    raw: unknown,
+    request: {
+      betas?: string | string[];
+      version?: string | string[];
+      purpose?: string | string[];
+      /** Aborts when the worker's connection closes. */
+      signal: AbortSignal;
+    },
+  ): Promise<MessagesReply> {
+    const refuse = async (error: unknown) => {
+      await this.recordRejection(job, {
+        phase: "model",
+        code: "worker_request_rejected",
+        httpStatus: 400,
+        reason: rejectionReason(error),
+      }).catch(() => false);
+      return refusal(
+        error instanceof Error
+          ? error.message
+          : "Coding request rejected; inspect job state before retrying",
+      );
+    };
+    const effectiveRole =
+      role === "coder" && job.mode === "plan" ? "leader" : role;
+    const selected =
+      effectiveRole === "reviewer"
+        ? job.settings.reviewerModel
+        : effectiveRole === "leader"
+          ? (job.settings.leaderModel ?? job.settings.model)
+          : job.settings.model;
+    let body: Record<string, unknown>;
+    let route: ReturnType<CodingAnthropic["route"]>;
+    let purpose: "agent" | "compaction" | undefined;
+    try {
+      if (job.settings.runtime !== "pi")
+        throw new Error("Native Pi endpoint requires a Pi job");
+      if (
+        role === "reviewer" &&
+        job.mode !== "implement" &&
+        !(job.mode === "plan" && job.settings.planCheck)
+      )
+        throw new Error("Reviewer model requires approved implementation");
+      route = this.anthropic?.route(selected);
+      if (!route)
+        throw new Error("Pi coding model has no direct Anthropic route");
+      if (
+        request.purpose !== undefined &&
+        request.purpose !== "agent" &&
+        request.purpose !== "compaction"
+      )
+        throw new Error("Invalid model request purpose");
+      purpose = request.purpose;
+      body = messagesRequest(raw, {
+        model: route.nativeModel,
+        effort: job.settings.effort,
+        maxTokens: outputAllowance(job.settings, effectiveRole),
+      });
+    } catch (error) {
+      return refuse(error);
+    }
+    const callId = randomUUID();
+    const claimed = await this.db.query(
+      `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+1,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4 RETURNING id)
+      INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input) SELECT $5,id,$2,$6,$7,$8::jsonb FROM claimed RETURNING id`,
+      [
+        job.id,
+        job.attempt_id,
+        job.settings.limits.models,
+        this.clock(),
+        callId,
+        effectiveRole,
+        hash(body),
+        // The readable copy; the request itself goes to Anthropic exactly.
+        JSON.stringify(
+          storable({
+            ...(purpose ? { purpose } : {}),
+            requestedModel: selected,
+            request: scrubTrace(body),
+          }),
+        ),
+      ],
+    );
+    if (!claimed.rows.length) {
+      // Say which condition refused the slot, so a pause can be diagnosed.
+      const now = (
+        await this.db.query(
+          "SELECT state,attempt_id,model_busy,used_models,attempt_deadline FROM coding_jobs WHERE id=$1",
+          [job.id],
+        )
+      ).rows[0];
+      return refuse(
+        new Error(
+          !now ||
+            !active.includes(now.state) ||
+            now.attempt_id !== job.attempt_id
+            ? "Coding attempt is no longer active"
+            : new Date(now.attempt_deadline).getTime() <= this.clock().getTime()
+              ? "Coding attempt deadline has passed"
+              : now.used_models >= job.settings.limits.models
+                ? "Model allocation exhausted"
+                : "Another model request is already in flight",
+        ),
+      );
+    }
+    const started = Date.now();
+    const cancellation = new AbortController();
+    this.inFlightModels.set(callId, {
+      jobId: job.id,
+      controller: cancellation,
+    });
+    const deadline = AbortSignal.timeout(
+      Math.max(
+        1,
+        new Date(job.attempt_deadline).getTime() - this.clock().getTime(),
+      ),
+    );
+    const signal = AbortSignal.any([
+      cancellation.signal,
+      deadline,
+      request.signal,
+    ]);
+    const release = async () => {
+      this.inFlightModels.delete(callId);
+      await this.db.query(
+        "UPDATE coding_jobs SET model_busy=false WHERE id=$1 AND attempt_id=$2",
+        [job.id, job.attempt_id],
+      );
+    };
+    const fail = async (
+      code: CodingFailureCode,
+      details: {
+        httpStatus?: number;
+        providerStatus?: number;
+        responseId?: string;
+      } = {},
+    ) => {
+      await this.db.query(
+        "UPDATE coding_model_calls SET state='uncertain' WHERE id=$1 AND state='pending'",
+        [callId],
+      );
+      const { httpStatus, ...rest } = details;
+      await this.recordRejection(job, {
+        phase: "model",
+        code,
+        httpStatus: httpStatus ?? details.providerStatus ?? 400,
+        elapsedMs: Date.now() - started,
+        callId,
+        // The attempt's deadline bounds the whole call.
+        ...(code === "model_timeout" ? { timeoutKind: "total" as const } : {}),
+        ...rest,
+      }).catch(() => false);
+    };
+    const abortCode = (): CodingFailureCode =>
+      cancellation.signal.aborted
+        ? "model_cancelled"
+        : deadline.aborted
+          ? "model_timeout"
+          : "model_disconnected";
+    let response: Response;
+    try {
+      const live = (
+        await this.db.query(
+          "SELECT state,attempt_id FROM coding_jobs WHERE id=$1",
+          [job.id],
+        )
+      ).rows[0];
+      if (
+        signal.aborted ||
+        !live ||
+        !active.includes(live.state) ||
+        live.attempt_id !== job.attempt_id ||
+        !this.allowed(job.user_id)
+      ) {
+        await fail("model_cancelled");
+        await release();
+        return refusal("Coding request cancelled before model dispatch");
+      }
+      const version = Array.isArray(request.version)
+        ? request.version[0]
+        : request.version;
+      response = await this.anthropic!.send(
+        body,
+        {
+          betas: betaList(request.betas),
+          ...(version && /^\d{4}-\d{2}-\d{2}$/.test(version)
+            ? { version }
+            : {}),
+        },
+        signal,
+      );
+    } catch (error) {
+      try {
+        if (
+          error instanceof Anthropic.APIError &&
+          !(error instanceof Anthropic.APIConnectionError) &&
+          typeof error.status === "number"
+        ) {
+          await fail(upstreamFailureCode(error.status, error.type), {
+            providerStatus: error.status,
+          });
+          return relayedError(error);
+        }
+        if (signal.aborted) {
+          await fail(abortCode());
+          return refusal("Coding model generation cancelled");
+        }
+        await fail("model_disconnected");
+        // A transport failure before any reply: Pi's own retry decides whether to send again.
+        return refusal("Model provider connection error", 502);
+      } finally {
+        await release();
+      }
+    }
+    if (!response.body) {
+      await fail("model_provider_failed");
+      await release();
+      return refusal("Model provider returned no stream", 502);
+    }
+    const [toWorker, toHost] = response.body.tee();
+    void this.recordPiStream(job, {
+      callId,
+      role: effectiveRole,
+      purpose,
+      selected,
+      prices: route.prices,
+      started,
+      body: toHost,
+      signal,
+      abortCode,
+      fail,
+      release,
+    }).catch((error) =>
+      opsLog("coding.model_record_failed", "warn", {
+        taskId: job.id,
+        ...errorFields(error),
+      }),
+    );
+    const headers: Record<string, string> = {
+      "content-type":
+        response.headers.get("content-type") ?? "text/event-stream",
+    };
+    const requestId = response.headers.get("request-id");
+    if (requestId) headers["request-id"] = requestId;
+    return { status: response.status, headers, body: toWorker };
+  }
+  /** Records one relayed Pi call from the host's copy of the stream. */
+  private async recordPiStream(
+    job: CodingJob,
+    call: {
+      callId: string;
+      role: "leader" | "coder" | "reviewer";
+      purpose?: "agent" | "compaction";
+      selected: string;
+      prices: AnthropicPrices;
+      started: number;
+      body: ReadableStream<Uint8Array>;
+      signal: AbortSignal;
+      abortCode: () => CodingFailureCode;
+      fail: (
+        code: CodingFailureCode,
+        details?: {
+          httpStatus?: number;
+          providerStatus?: number;
+          responseId?: string;
+        },
+      ) => Promise<void>;
+      release: () => Promise<void>;
+    },
+  ) {
+    let bytes = 0;
+    let responseId: string | undefined;
+    let progressSavedAt = Date.now();
+    const progress = () => {
+      if (Date.now() - progressSavedAt < 10000) return;
+      progressSavedAt = Date.now();
+      void this.db
+        .query(
+          `INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,$3,$4::jsonb,'suppressed' FROM coding_jobs WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running')`,
+          [
+            job.id,
+            job.attempt_id,
+            `${job.attempt_id}:model-progress:${randomUUID()}`,
+            JSON.stringify(
+              storable({
+                kind: "model_progress",
+                role: call.role,
+                callId: call.callId,
+                responseId,
+                provider: "Anthropic",
+                elapsedMs: Date.now() - call.started,
+                receivedBytes: bytes,
+              }),
+            ),
+          ],
+        )
+        .catch(() => {});
+    };
+    const counted = call.body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          bytes += chunk.byteLength;
+          controller.enqueue(chunk);
+          progress();
+        },
+      }),
+    );
+    try {
+      const { message, complete, error } = await assembleStream(
+        counted,
+        (event) => {
+          if (event.type === "message_start")
+            responseId = event.message.id?.slice(0, 160);
+        },
+      );
+      const usage = message?.usage
+        ? anthropicUsage(message, call.prices)
+        : undefined;
+      if (complete && message && !call.signal.aborted) {
+        await this.db.query(
+          "UPDATE coding_model_calls SET state='complete',result=$2::jsonb,result_box=$3 WHERE id=$1",
+          [
+            call.callId,
+            // The readable copy; the sealed copy and the worker's stream stay exact.
+            JSON.stringify(storable(scrubTrace(message))),
+            seal(
+              this.resultKey(),
+              JSON.stringify(message),
+              this.resultScope(job, call.callId),
+            ),
+          ],
+        );
+      } else {
+        const apiError =
+          error instanceof Anthropic.APIError ? error : undefined;
+        await call.fail(
+          call.signal.aborted
+            ? call.abortCode()
+            : apiError
+              ? upstreamFailureCode(apiError.status, apiError.type)
+              : "model_disconnected",
+          { httpStatus: 200, ...(responseId ? { responseId } : {}) },
+        );
+      }
+      // A started generation is billed whether or not it finished.
+      if (usage)
+        await this.db.query(
+          "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,$2,$3::jsonb,'suppressed')",
+          [
+            job.id,
+            `${job.attempt_id}:model:${randomUUID()}`,
+            JSON.stringify(
+              storable({
+                kind: "model_usage",
+                role: call.role,
+                ...(call.purpose ? { purpose: call.purpose } : {}),
+                model: call.selected,
+                usage,
+                provider: "Anthropic",
+                ...(complete && !call.signal.aborted
+                  ? {}
+                  : { incomplete: true }),
+              }),
+            ),
+          ],
+        );
+    } finally {
+      await call.release();
+    }
+  }
   async generate(
     job: CodingJob,
     input: {
@@ -1659,35 +2044,12 @@ export class CodingController {
       role: "leader" | "coder" | "reviewer";
       messages: ModelMessage[];
       tools: ToolDefinition[];
-      maxOutputTokens?: number;
-      purpose?: "agent" | "compaction";
-      retryOf?: string;
     },
   ) {
-    if (
-      input.retryOf !== undefined &&
-      (job.settings.runtime !== "pi" ||
-        !z.string().uuid().safeParse(input.retryOf).success)
-    )
-      throw new Error("Invalid generation recovery parent");
-    if (
-      input.maxOutputTokens !== undefined &&
-      (job.settings.runtime !== "pi" ||
-        !Number.isSafeInteger(input.maxOutputTokens) ||
-        input.maxOutputTokens < 1)
-    )
-      throw new Error("Invalid per-call output allowance");
-    if (
-      input.purpose !== undefined &&
-      (job.settings.runtime !== "pi" ||
-        !["agent", "compaction"].includes(input.purpose))
-    )
-      throw new Error("Invalid model request purpose");
-    if (
-      input.role === "leader" &&
-      !job.settings.squad &&
-      job.settings.runtime !== "pi"
-    )
+    // Pi jobs reach Claude through piMessages; this route serves the legacy workers.
+    if (job.settings.runtime === "pi")
+      throw new Error("Pi jobs use the Messages route");
+    if (input.role === "leader" && !job.settings.squad)
       throw new Error("Leader role requires the reviewed squad runtime");
     const prior = (
       await this.db.query("SELECT * FROM coding_model_calls WHERE id=$1", [
@@ -1717,24 +2079,6 @@ export class CodingController {
         ),
       );
     }
-    if (input.retryOf) {
-      const parent = (
-        await this.db.query(
-          `SELECT p.* FROM coding_model_calls p WHERE p.id=$1 AND p.job_id=$2 AND p.attempt_id=$3 AND p.state='uncertain'
-         AND NOT (p.input ? 'retryOf') AND EXISTS (
-           SELECT 1 FROM coding_events e WHERE e.job_id=p.job_id
-           AND e.payload->>'kind'='worker_request_rejected' AND e.payload->>'callId'=p.id::text
-           AND ((e.payload->>'code'='model_rate_limited' AND e.payload->>'providerStatus'='429')
-             OR (e.payload->>'code'='model_transient_failure' AND e.payload->>'providerStatus' IN ('500','502','503','504')))
-           AND NOT (e.payload ? 'timeoutKind' OR e.payload ? 'finishReason' OR e.payload ? 'providerFailure'))`,
-          [input.retryOf, job.id, job.attempt_id],
-        )
-      ).rows[0];
-      const original = { ...input, callId: input.retryOf };
-      delete original.retryOf;
-      if (!parent || parent.request_hash !== hash(original))
-        throw new Error("Generation recovery parent or payload does not match");
-    }
     const cancellation = new AbortController();
     if (this.inFlightModels.has(input.callId))
       throw new Error("Model call is already in flight");
@@ -1751,8 +2095,7 @@ export class CodingController {
         : input.role === "leader"
           ? (job.settings.leaderModel ?? job.settings.model)
           : job.settings.model;
-    const enhanced =
-      job.settings.harnessVersion === 2 || job.settings.runtime === "pi";
+    const enhanced = job.settings.harnessVersion === 2;
     const allowance = outputAllowance(job.settings, input.role);
     const total = AbortSignal.timeout(
       Math.max(
@@ -1780,7 +2123,7 @@ export class CodingController {
     try {
       const claimed = await this.db.query(
         `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+1,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4
-         AND ($9::text IS NULL OR NOT EXISTS (SELECT 1 FROM coding_model_calls WHERE job_id=$1 AND attempt_id=$2 AND input->>'retryOf'=$9)) RETURNING id)
+         RETURNING id)
       INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input) SELECT $5,id,$2,$6,$7,$8::jsonb FROM claimed RETURNING id`,
         [
           job.id,
@@ -1802,7 +2145,6 @@ export class CodingController {
                     : job.settings.model,
             }),
           ),
-          input.retryOf ?? null,
         ],
       );
       if (!claimed.rows.length) {
@@ -1822,9 +2164,7 @@ export class CodingController {
               ? "Coding attempt deadline has passed"
               : now.used_models >= job.settings.limits.models
                 ? "Model allocation exhausted"
-                : now.model_busy || !input.retryOf
-                  ? "Another model request is already in flight"
-                  : "Generation recovery already used",
+                : "Another model request is already in flight",
         );
       }
       admitted = true;
@@ -1846,15 +2186,6 @@ export class CodingController {
         messages: input.messages,
         tools: input.tools,
         reasoning: job.settings.effort,
-        ...(job.settings.runtime === "pi"
-          ? {
-              requireComplete: true,
-              maxOutputTokens: Math.min(
-                input.maxOutputTokens ?? allowance,
-                allowance,
-              ),
-            }
-          : {}),
         signal: AbortSignal.any([cancellation.signal, total, idle.signal]),
         ...(enhanced
           ? {
@@ -1933,7 +2264,6 @@ export class CodingController {
             storable({
               kind: "model_usage",
               role: input.role,
-              ...(input.purpose ? { purpose: input.purpose } : {}),
               model: result.model,
               usage: result.usage,
               provider: result.provider,
@@ -1966,7 +2296,6 @@ export class CodingController {
                 storable({
                   kind: "model_usage",
                   role: input.role,
-                  ...(input.purpose ? { purpose: input.purpose } : {}),
                   model: requestedModel,
                   usage: billed.usage,
                   provider: billed.provider,
@@ -1987,10 +2316,7 @@ export class CodingController {
         else if (total.aborted || idle.signal.aborted) {
           code = "model_timeout";
           if (total.aborted) timeoutKind = "total";
-        } else if (
-          (enhanced || job.settings.runtime === "pi") &&
-          error instanceof ModelError
-        ) {
+        } else if (enhanced && error instanceof ModelError) {
           code =
             error.diagnostics.failureCode === "incomplete" ||
             error.diagnostics.finishReason === "length"

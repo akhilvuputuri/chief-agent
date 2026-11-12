@@ -8,6 +8,10 @@ import { storable } from "../src/storable.js";
 import { checkpoint } from "../src/coding/schema.js";
 import { reportDocument } from "@chief-agent/pi-runtime/report";
 import { candidate, fixture, settings } from "./helpers/coding-fixture.js";
+import {
+  messagesResponse,
+  messagesStream,
+} from "../coding_runtime_pi/tests/anthropic-sse.js";
 
 // Job 280f2d70 paused when a coder reply held a NUL: Postgres refused the readable copy (journal 155).
 const nul = "regex /^[^\u0000-\u001f]+$/";
@@ -176,7 +180,7 @@ test("a report document is bound to its hash, so one with a NUL is refused, not 
   );
 });
 
-test("on the Pi route, a reply with such text reaches Pi exactly and replays exactly", async (t) => {
+test("on the Pi route, a reply with such text reaches Pi exactly and is stored readably", async (t) => {
   const f = await fixture(t);
   const started: any = await f.start("storable-pi", "plan");
   await f.c.tick();
@@ -193,50 +197,41 @@ test("on the Pi route, a reply with such text reaches Pi exactly and replays exa
   const app = await server({} as any);
   t.after(() => app.close());
   await codingApi(app, f.c);
-  f.setGeneration(() => ({
-    message: { role: "assistant", content: `${nul} ${lone}` },
-  }));
-  const request = {
-    method: "POST" as const,
-    url: `/coding/worker/${job.id}/pi/coder/v1/chat/completions`,
-    headers: { authorization: `Bearer ${f.c.token(job.id, job.attempt_id)}` },
-    payload: {
-      runtime_call_id: randomUUID(),
-      model: settings.model,
-      messages: [{ role: "user", content: `Task ${nul}` }],
-      tools: [],
-    },
+  const turn = {
+    content: [{ type: "text" as const, text: `${nul} ${lone}` }],
   };
-  const first = await app.inject(request);
-  assert.equal(first.statusCode, 200, first.body);
-  assert.equal(first.json().choices[0].message.content, `${nul} ${lone}`);
-  // The same call replays the sealed, exact reply without a new model call.
-  const replay = await app.inject(request);
-  assert.equal(replay.statusCode, 200, replay.body);
-  assert.equal(replay.json().choices[0].message.content, `${nul} ${lone}`);
-  assert.equal(f.modelCalls(), 1);
+  f.setMessages(async () => messagesResponse(turn));
+  const response = await app.inject({
+    method: "POST",
+    url: `/coding/worker/${job.id}/pi/coder/v1/messages`,
+    headers: { "x-api-key": f.c.token(job.id, job.attempt_id) },
+    payload: {
+      model: "claude-opus-5-5",
+      max_tokens: 1000,
+      stream: true,
+      messages: [{ role: "user", content: `Task ${nul}` }],
+    },
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  // Pi receives Anthropic's bytes exactly, the text JSON-escaped as the API sent it.
+  assert.equal(response.body, messagesStream(turn));
+  for (let i = 0; i < 100 && (await f.row(job.id)).model_busy; i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
   const stored = (
     await f.db.query(
-      "SELECT input,result FROM coding_model_calls WHERE job_id=$1",
+      "SELECT state,input,result FROM coding_model_calls WHERE job_id=$1",
       [job.id],
     )
   ).rows[0];
+  assert.equal(stored.state, "complete");
   assert.equal(
-    stored.result.message.content,
+    stored.result.content[0].text,
     "regex /^[^-\u001f]+$/ half an emoji \ufffd.",
   );
-  assert.equal(stored.input.messages[0].content, "Task regex /^[^-\u001f]+$/");
-  // Streamed framing carries the same exact text, JSON-escaped.
-  const streamed = await app.inject({
-    ...request,
-    payload: {
-      ...request.payload,
-      runtime_call_id: randomUUID(),
-      stream: true,
-    },
-  });
-  assert.equal(streamed.statusCode, 200, streamed.body);
-  assert(streamed.body.includes(JSON.stringify(`${nul} ${lone}`).slice(1, -1)));
+  assert.equal(
+    stored.input.request.messages[0].content,
+    "Task regex /^[^-\u001f]+$/",
+  );
 });
 
 test("review findings are compared with the exact reviewer reply, so such findings are refused", async (t) => {

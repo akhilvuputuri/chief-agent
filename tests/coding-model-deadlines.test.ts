@@ -62,7 +62,8 @@ import {
   fixture,
   requirementBrief,
 } from "./helpers/coding-fixture.js";
-for (const runtime of ["python", "pi"])
+// The Pi Messages route's deadline is covered in coding-pi-messages.test.ts.
+for (const runtime of ["python"])
   test(`${runtime} remaining job deadline aborts a stalled model and exposes its exact timeout category`, async (t) => {
     const f = await fixture(t);
     const job: any = await f.start("deadline-stream", "plan");
@@ -75,11 +76,7 @@ for (const runtime of ["python", "pi"])
       [
         job.id,
         new Date(allocationStart + 100),
-        JSON.stringify(
-          runtime === "pi"
-            ? { ...settings, runtime: "pi", squad: false, autoMerge: false }
-            : { ...settings, harnessVersion: 2, squad: true },
-        ),
+        JSON.stringify({ ...settings, harnessVersion: 2, squad: true }),
       ],
     );
     f.stallModel();

@@ -111,32 +111,26 @@ test("Pi output allowance is captured per job and cannot be changed by caller hi
   ]);
   await f.c.tick();
   const job = await f.row(started.id);
-  assert.equal((await f.c.assignment(job)).settings.maxOutputTokens, 16000);
-  f.setGeneration((_model, input) => {
-    assert.equal(input.maxOutputTokens, 16000);
-    assert.equal(input.requireComplete, true);
-    assert.equal(input.stream, true);
-    assert.equal(typeof input.onProgress, "function");
-    return { message: { role: "assistant", content: "Complete" } };
-  });
+  const assignment: any = await f.c.assignment(job);
+  assert.equal(assignment.settings.maxOutputTokens, 16000);
+  // The worker learns each model's Anthropic id from the host.
+  assert.equal(assignment.nativeModels[settings.model], "claude-opus-5-5");
   const app = server();
   t.after(() => app.close());
   await codingApi(app, f.c);
   const response = await app.inject({
     method: "POST",
-    url: `/coding/worker/${job.id}/pi/coder/v1/chat/completions`,
-    headers: { authorization: `Bearer ${f.c.token(job.id, job.attempt_id)}` },
+    url: `/coding/worker/${job.id}/pi/coder/v1/messages`,
+    headers: { "x-api-key": f.c.token(job.id, job.attempt_id) },
     payload: {
-      runtime_call_id: randomUUID(),
-      model: settings.model,
+      model: "claude-opus-5-5",
       messages: [{ role: "user", content: "Fixture" }],
-      tools: [],
       max_tokens: 50000,
-      requireComplete: false,
+      stream: true,
     },
   });
   assert.equal(response.statusCode, 200);
-  assert.equal(f.modelCalls(), 1);
+  assert.equal(f.messagesRequests()[0]!.body.max_tokens, 16000);
   assert.equal((await f.row(job.id)).settings.maxOutputTokens, 16000);
 });
 test("expanded coding allocations survive assignment, provisioning, status and checkpoint validation", async (t) => {

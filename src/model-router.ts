@@ -298,6 +298,10 @@ export class ModelRouter {
   route(model: string): ModelRoute {
     return this.direct(model) ? "anthropic-direct" : "openrouter";
   }
+  /** The direct Anthropic mapping a model is called through, or undefined if it goes to OpenRouter. */
+  anthropicRoute(model: string): AnthropicRoute | undefined {
+    return this.direct(model);
+  }
   private openRouter(model: string) {
     const o = this.options;
     return o.openRouter

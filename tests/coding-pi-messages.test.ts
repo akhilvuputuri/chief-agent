@@ -1,0 +1,622 @@
+import { test, type TestContext } from "node:test";
+import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
+import Anthropic from "@anthropic-ai/sdk";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  CodingRuntime,
+  TaskStore,
+  anthropicModel,
+} from "@chief-agent/pi-runtime";
+import { AnthropicMessagesGateway } from "../src/anthropic.js";
+import { server } from "../src/server.js";
+import { codingApi } from "../src/coding/api.js";
+import { settings, fixture } from "./helpers/coding-fixture.js";
+import {
+  messageStart,
+  messagesResponse,
+  messagesStream,
+  toolUse,
+  type FakeTurn,
+} from "../coding_runtime_pi/tests/anthropic-sse.js";
+
+/** A running Pi job, the gateway routes and the worker's capability header. */
+async function piJob(
+  t: TestContext,
+  options: { mode?: "plan" | "implement"; planCheck?: boolean } = {},
+) {
+  const f = await fixture(t);
+  const started = await f.start("pi", options.mode ?? "plan");
+  await f.c.tick();
+  let job = await f.row(started.id);
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    job.id,
+    JSON.stringify({
+      ...settings,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+      effort: "medium",
+      maxOutputTokens: 32000,
+      reviewerMaxOutputTokens: 16000,
+      ...(options.planCheck ? { planCheck: true } : {}),
+    }),
+  ]);
+  job = await f.row(job.id);
+  const app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const headers = {
+    "x-api-key": f.c.token(job.id, job.attempt_id),
+    "anthropic-beta":
+      "mid-conversation-output-config-2026-07-01,thinking-binding-controls-2026-08-01",
+    "x-runtime-purpose": "agent",
+    "anthropic-version": "2023-06-01",
+  };
+  const url = (role = "coder") =>
+    `/coding/worker/${job.id}/pi/${role}/v1/messages?beta=true`;
+  /** Waits until the host has recorded every relayed call. */
+  const settled = async () => {
+    for (let i = 0; i < 200; i++) {
+      const busy = (
+        await f.db.query("SELECT model_busy FROM coding_jobs WHERE id=$1", [
+          job.id,
+        ])
+      ).rows[0].model_busy;
+      if (!busy) return;
+      await delay(10);
+    }
+    throw new Error("Model call was never recorded");
+  };
+  const calls = async () =>
+    (
+      await f.db.query(
+        "SELECT id,role,state,input,result,result_box FROM coding_model_calls WHERE job_id=$1 ORDER BY created_at,id",
+        [job.id],
+      )
+    ).rows;
+  const events = async (kind: string) =>
+    (
+      await f.db.query(
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND payload->>'kind'=$2 ORDER BY id",
+        [job.id, kind],
+      )
+    ).rows.map((r: any) => r.payload);
+  return { f, job, app, headers, url, settled, calls, events };
+}
+
+/** A request as Pi's Anthropic client builds it. */
+const request = (overrides: Record<string, unknown> = {}) => ({
+  model: "claude-opus-5-5",
+  max_tokens: 128000,
+  stream: true,
+  system: [
+    {
+      type: "text",
+      text: "Pi system prompt",
+      cache_control: { type: "ephemeral" },
+    },
+  ],
+  thinking: {
+    type: "adaptive",
+    display: "summarized",
+    block_binding: { prefix_mismatch_behavior: "drop_block" },
+  },
+  output_config: { effort: "high" },
+  tools: [
+    {
+      name: "read",
+      description: "Read a file",
+      eager_input_streaming: true,
+      input_schema: { type: "object", properties: {}, required: [] },
+      cache_control: { type: "ephemeral" },
+    },
+  ],
+  messages: [
+    { role: "user", content: "Plan the fix" },
+    {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "", signature: "c2lnLTE=" },
+        { type: "tool_use", id: "toolu_1", name: "read", input: { path: "a" } },
+      ],
+    },
+    { role: "system", content: [], output_config: { effort: "medium" } },
+    {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_1",
+          content: "source",
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+    },
+    { role: "system", content: [], output_config: { effort: "medium" } },
+  ],
+  ...overrides,
+});
+
+test("the host relays Pi's request and Anthropic's stream unchanged, deciding only model, effort and output cap", async (t) => {
+  const { f, app, headers, url, settled, calls, events } = await piJob(t);
+  const turn = {
+    id: "msg_relay",
+    content: [
+      { type: "thinking" as const, thinking: "", signature: "c2lnLTI=" },
+      { type: "text" as const, text: "Reading café" },
+      toolUse("toolu_2", "read", { path: "b" }),
+    ],
+    usage: {
+      input_tokens: 1000,
+      output_tokens: 200,
+      cache_read_input_tokens: 5000,
+      cache_creation_input_tokens: 300,
+    },
+  };
+  f.setMessages(async () => messagesResponse(turn));
+  assert.equal(
+    (
+      await app.inject({
+        method: "POST",
+        url: url(),
+        payload: request(),
+        headers: { ...headers, "x-api-key": "forged" },
+      })
+    ).statusCode,
+    401,
+  );
+  const body = request();
+  const response = await app.inject({
+    method: "POST",
+    url: url(),
+    payload: body,
+    headers,
+  });
+  assert.equal(response.statusCode, 200);
+  assert.match(String(response.headers["content-type"]), /text\/event-stream/);
+  // The worker receives Anthropic's bytes exactly.
+  assert.equal(response.body, messagesStream(turn));
+  await settled();
+  const [sent] = f.messagesRequests();
+  assert.equal(sent!.wire.version, "2023-06-01");
+  assert.deepEqual(sent!.wire.betas, [
+    "mid-conversation-output-config-2026-07-01",
+    "thinking-binding-controls-2026-08-01",
+  ]);
+  // Only the job's output cap and effort replace Pi's values; nothing else changes.
+  assert.deepEqual(sent!.body, {
+    ...body,
+    max_tokens: 32000,
+    output_config: { effort: "medium" },
+  });
+  assert(!JSON.stringify(sent).includes(headers["x-api-key"]));
+  const [call] = await calls();
+  assert.equal(call.state, "complete");
+  assert.equal(call.role, "leader");
+  assert.equal(call.input.purpose, "agent");
+  assert.equal(call.input.requestedModel, settings.model);
+  assert.deepEqual(call.input.request.messages, body.messages);
+  // The recorded result is the message Anthropic returned.
+  assert.equal(call.result.id, "msg_relay");
+  assert.deepEqual(call.result.content, turn.content);
+  assert.equal(call.result.stop_reason, "tool_use");
+  const [usage] = await events("model_usage");
+  assert.equal(usage.role, "leader");
+  assert.equal(usage.purpose, "agent");
+  assert.equal(usage.provider, "Anthropic");
+  assert.equal(usage.model, settings.model);
+  assert.equal(usage.usage.prompt_tokens, 6300);
+  assert.equal(usage.usage.completion_tokens, 200);
+  assert.equal(usage.usage.prompt_tokens_details.cached_tokens, 5000);
+  assert.equal(usage.usage.prompt_tokens_details.cache_write_tokens, 300);
+  assert.equal(
+    usage.usage.cost,
+    (1000 * 4 + 5000 * 0.2 + 300 * 5 + 200 * 20) / 1e6,
+  );
+  assert.equal(usage.incomplete, undefined);
+  assert.equal(
+    (await f.row((await f.db.query("SELECT id FROM coding_jobs")).rows[0].id))
+      .model_busy,
+    false,
+  );
+});
+
+test("the host refuses another model, other effort, fallbacks, a speed or a malformed request before any call", async (t) => {
+  const { f, app, headers, url, calls, events } = await piJob(t);
+  const cases: [Record<string, unknown>, string][] = [
+    [{ model: "claude-opus-5" }, "model_not_pinned"],
+    [
+      {
+        messages: [
+          { role: "user", content: "x" },
+          { role: "system", content: [], output_config: { effort: "max" } },
+        ],
+      },
+      "effort_not_pinned",
+    ],
+    [{ fallbacks: [{ model: "claude-opus-4-8" }] }, "model_option_refused"],
+    [{ speed: "fast" }, "model_option_refused"],
+    [{ max_tokens: "lots" }, "messages_request_invalid"],
+    [{ messages: "none" }, "messages_request_invalid"],
+  ];
+  for (const [overrides] of cases) {
+    const response = await app.inject({
+      method: "POST",
+      url: url(),
+      payload: request(overrides),
+      headers,
+    });
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.headers["x-should-retry"], "false");
+    assert.equal(response.json().type, "error");
+    assert.equal(response.json().error.type, "invalid_request_error");
+  }
+  assert.equal(f.messagesRequests().length, 0);
+  assert.equal((await calls()).length, 0);
+  assert.deepEqual(
+    (await events("worker_request_rejected")).map((e) => e.reason).sort(),
+    cases.map(([, reason]) => reason).sort(),
+  );
+  const purpose = await app.inject({
+    method: "POST",
+    url: url(),
+    payload: request(),
+    headers: { ...headers, "x-runtime-purpose": "other" },
+  });
+  assert.equal(purpose.statusCode, 400);
+  // A reviewer call before an approved implementation is refused, as before.
+  const reviewer = await app.inject({
+    method: "POST",
+    url: url("reviewer"),
+    payload: request(),
+    headers,
+  });
+  assert.equal(reviewer.statusCode, 400);
+  assert(
+    (await events("worker_request_rejected")).some(
+      (e) => e.reason === "reviewer_too_early",
+    ),
+  );
+  assert.equal(f.messagesRequests().length, 0);
+});
+
+test("Anthropic's error reply reaches Pi with its status and retry headers, and is recorded", async (t) => {
+  const { f, app, headers, url, settled, calls, events } = await piJob(t);
+  f.setMessages(async () => {
+    throw Anthropic.APIError.generate(
+      429,
+      {
+        type: "error",
+        error: { type: "rate_limit_error", message: "Rate limited" },
+      },
+      "429",
+      new Headers({ "retry-after": "7", "request-id": "req_429" }),
+    );
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: url(),
+    payload: request(),
+    headers,
+  });
+  assert.equal(response.statusCode, 429);
+  assert.equal(response.headers["retry-after"], "7");
+  assert.equal(response.json().error.type, "rate_limit_error");
+  await settled();
+  assert.equal((await calls())[0].state, "uncertain");
+  const [rejected] = await events("worker_request_rejected");
+  assert.equal(rejected.code, "model_rate_limited");
+  assert.equal(rejected.providerStatus, 429);
+  assert.equal(rejected.httpStatus, 429);
+  // The slot is free again: Pi's own retry can send the next request.
+  f.setMessages(async () =>
+    messagesResponse({ content: [{ type: "text", text: "ok" }] }),
+  );
+  const retried = await app.inject({
+    method: "POST",
+    url: url(),
+    payload: request(),
+    headers,
+  });
+  assert.equal(retried.statusCode, 200);
+  await settled();
+  assert.deepEqual(
+    (await calls()).map((c) => c.state),
+    ["uncertain", "complete"],
+  );
+});
+
+/** A stream that sends message_start and then waits until its request is aborted. */
+function hanging(signal: AbortSignal) {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(messageStart({ usage: { input_tokens: 4000 } })),
+        );
+        signal.addEventListener(
+          "abort",
+          () => controller.error(new Error("aborted")),
+          { once: true },
+        );
+      },
+    }),
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+for (const stop of ["cancel", "deadline", "disconnect"] as const)
+  test(`a ${stop} stops the in-flight call and records what was billed`, async (t) => {
+    const { f, job, app, headers, url, settled, calls, events } =
+      await piJob(t);
+    let upstream: AbortSignal | undefined;
+    f.setMessages(async (_body, _betas, signal) => {
+      upstream = signal;
+      return hanging(signal);
+    });
+    if (stop === "deadline")
+      await f.db.query(
+        "UPDATE coding_jobs SET attempt_deadline=$2 WHERE id=$1",
+        [job.id, new Date(Date.now() + 300)],
+      );
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const address = app.server.address() as { port: number };
+    const client = new AbortController();
+    const reply = fetch(`http://127.0.0.1:${address.port}${url()}`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify(request()),
+      signal: client.signal,
+    });
+    const response = await reply;
+    assert.equal(response.status, 200);
+    const reader = response.body!.getReader();
+    await reader.read();
+    if (stop === "cancel") (f.c as any).abortModels(job.id);
+    if (stop === "disconnect") client.abort();
+    if (stop !== "disconnect")
+      await assert.rejects(async () => {
+        for (;;) if ((await reader.read()).done) throw new Error("ended");
+      });
+    await settled();
+    assert.equal(upstream!.aborted, true);
+    assert.equal((await calls())[0].state, "uncertain");
+    const [rejected] = await events("worker_request_rejected");
+    assert.equal(
+      rejected.code,
+      {
+        cancel: "model_cancelled",
+        deadline: "model_timeout",
+        disconnect: "model_disconnected",
+      }[stop],
+    );
+    if (stop === "deadline") assert.equal(rejected.timeoutKind, "total");
+    const [usage] = await events("model_usage");
+    assert.equal(usage.incomplete, true);
+    assert.equal(usage.usage.prompt_tokens, 4000);
+    // The aborted client's keep-alive socket would otherwise hold the server open.
+    app.server.closeAllConnections();
+  });
+
+test("Pi jobs and coding model choices must use a model Chief calls directly at Anthropic", async (t) => {
+  const f = await fixture(t, {
+    settings: { ...settings, runtime: "pi", model: "unrouted/model" },
+  });
+  await assert.rejects(
+    f.start("unrouted", "plan"),
+    /Coding jobs call Claude directly at Anthropic, and unrouted\/model is not a Claude model Chief calls directly.*No job was started/,
+  );
+  const g = await fixture(t, { settings: { ...settings, runtime: "pi" } });
+  await assert.rejects(
+    g.c.call("a", g.run, {
+      operation: "coding_model_set",
+      role: "coder",
+      model: "unrouted/model",
+    }),
+    /unrouted\/model is not a Claude model Chief calls directly.*No setting was changed/,
+  );
+});
+
+test("through the host, Pi resends the first response's content blocks byte for byte", async (t) => {
+  const upstream: { headers: Record<string, unknown>; body: any }[] = [];
+  const turns: FakeTurn[] = [
+    {
+      id: "msg_first",
+      content: [
+        { type: "thinking", thinking: "", signature: "Zmlyc3Qtc2lnbmF0dXJl" },
+        { type: "text", text: "Reading the café source" },
+        toolUse("toolu_first", "read", { path: "sum.js" }),
+      ],
+    },
+    {
+      id: "msg_second",
+      content: [
+        { type: "thinking", thinking: "Summary", signature: "c2Vjb25k" },
+        toolUse("toolu_report", "report", {
+          kind: "plan",
+          summary: "Fix café sum",
+          detail: "Use addition in sum.js and check sum(2,3)=5.",
+        }),
+      ],
+    },
+  ];
+  const anthropicApi = createServer(async (req, res) => {
+    let text = "";
+    for await (const chunk of req) text += chunk;
+    upstream.push({ headers: req.headers, body: JSON.parse(text) });
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(messagesStream(turns[upstream.length - 1]!));
+  });
+  await new Promise<void>((resolve) =>
+    anthropicApi.listen(0, "127.0.0.1", resolve),
+  );
+  t.after(
+    () => new Promise<void>((resolve) => anthropicApi.close(() => resolve())),
+  );
+  const gateway = new AnthropicMessagesGateway("host-anthropic-key", {
+    baseURL: `http://127.0.0.1:${(anthropicApi.address() as AddressInfo).port}`,
+  });
+  const f = await fixture(t, {
+    anthropic: {
+      route: () => ({
+        nativeModel: "claude-opus-5-5",
+        prices: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
+      }),
+      send: (body, wire, signal) => gateway.send(body, wire, signal),
+    },
+  });
+  const started = await f.start("pi-e2e", "plan");
+  await f.c.tick();
+  let job = await f.row(started.id);
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    job.id,
+    JSON.stringify({
+      ...settings,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+      effort: "medium",
+      maxOutputTokens: 32000,
+    }),
+  ]);
+  job = await f.row(job.id);
+  const app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const host = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
+  const token = f.c.token(job.id, job.attempt_id);
+  const root = await mkdtemp(join(tmpdir(), "pi-host-protocol-"));
+  const workspace = join(root, "work");
+  await mkdir(workspace);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", workspace, ...args], { stdio: "pipe" });
+  await writeFile(join(workspace, "sum.js"), "// synthetic\n");
+  git("init", "-q");
+  git("add", ".");
+  git(
+    "-c",
+    "user.name=Synthetic",
+    "-c",
+    "user.email=synthetic@example.invalid",
+    "commit",
+    "-qm",
+    "Fixture",
+  );
+  const runtime = new CodingRuntime({
+    store: new TaskStore(
+      join(root, "state"),
+      "synthetic-state-key-32-characters",
+    ),
+    model: anthropicModel({
+      model: "claude-opus-5-5",
+      baseUrl: `${host}/coding/worker/${job.id}/pi/coder`,
+      apiKey: token,
+      maxTokens: 32000,
+      reasoning: "medium",
+    }),
+  });
+  const task = await runtime.start({
+    workspace,
+    objective: "Plan the synthetic fix",
+  });
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(upstream.length, 2);
+  // The second request carries the first response's blocks exactly as Anthropic sent them.
+  const replayed = upstream[1]!.body.messages.filter(
+    (m: any) => m.role === "assistant",
+  );
+  assert.equal(replayed.length, 1);
+  assert.equal(
+    JSON.stringify(replayed[0].content),
+    JSON.stringify(turns[0]!.content),
+  );
+  for (const { headers, body } of upstream) {
+    // The host's key reaches Anthropic; the worker's capability never does.
+    assert.equal(headers.authorization, "Bearer host-anthropic-key");
+    // Pi's API version travels with its request.
+    assert.equal(headers["anthropic-version"], "2023-06-01");
+    assert(!JSON.stringify(headers).includes(token));
+    assert.match(
+      String(headers["anthropic-beta"]),
+      /mid-conversation-output-config-2026-07-01/,
+    );
+    assert.equal(body.max_tokens, 32000);
+    assert.deepEqual(body.output_config, { effort: "medium" });
+  }
+  for (let i = 0; i < 200; i++) {
+    if (!(await f.row(job.id)).model_busy) break;
+    await delay(10);
+  }
+  const recorded = (
+    await f.db.query(
+      "SELECT state,result FROM coding_model_calls WHERE job_id=$1 ORDER BY created_at,id",
+      [job.id],
+    )
+  ).rows;
+  assert.deepEqual(
+    recorded.map((r: any) => r.state),
+    ["complete", "complete"],
+  );
+  assert.deepEqual(
+    recorded.map((r: any) => r.result.content),
+    turns.map((turn) => turn.content),
+  );
+});
+
+test("a failed connection to Anthropic is left to Pi's retry, and an error inside the stream is recorded", async (t) => {
+  const { f, app, headers, url, settled, calls, events } = await piJob(t);
+  f.setMessages(async () => {
+    throw new Anthropic.APIConnectionError({ message: "Connection error." });
+  });
+  const failed = await app.inject({
+    method: "POST",
+    url: url(),
+    payload: request(),
+    headers,
+  });
+  assert.equal(failed.statusCode, 502);
+  // Pi's stock retry policy decides; the host does not forbid a retry.
+  assert.equal(failed.headers["x-should-retry"], undefined);
+  await settled();
+  // Anthropic can end a started stream with an error event (for example overloaded).
+  const stream =
+    messageStart({ usage: { input_tokens: 900 } }) +
+    `event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Overloaded" } })}\n\n`;
+  f.setMessages(
+    async () =>
+      new Response(stream, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+  );
+  const broken = await app.inject({
+    method: "POST",
+    url: url(),
+    payload: request(),
+    headers,
+  });
+  assert.equal(broken.statusCode, 200);
+  // Pi reads the error event itself.
+  assert.equal(broken.body, stream);
+  await settled();
+  assert.deepEqual(
+    (await calls()).map((c) => c.state),
+    ["uncertain", "uncertain"],
+  );
+  assert.deepEqual(
+    (await events("worker_request_rejected")).map((e) => e.code).sort(),
+    ["model_disconnected", "model_transient_failure"],
+  );
+  const [usage] = await events("model_usage");
+  assert.equal(usage.incomplete, true);
+  assert.equal(usage.usage.prompt_tokens, 900);
+});

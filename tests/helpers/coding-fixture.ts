@@ -45,6 +45,104 @@ import { recoverRuntime } from "../../src/execution.js";
 import { Assistant } from "../../src/agent.js";
 import { CustomAgent } from "../../src/custom-agent.js";
 import { JobTools } from "../../src/tools.js";
+import Anthropic from "@anthropic-ai/sdk";
+import type { CodingAnthropic } from "../../src/coding/pi-messages.js";
+import {
+  messagesResponse,
+  type FakeBlock,
+} from "../../coding_runtime_pi/tests/anthropic-sse.js";
+
+/**
+ * Pi catalogue models the fixture's Anthropic route hands out, one per distinct job model, so a
+ * scripted reply can still tell the roles apart.
+ */
+const FIXTURE_NATIVE = [
+  "claude-opus-5-5",
+  "claude-sonnet-5-5",
+  "claude-haiku-5-5",
+];
+
+/**
+ * A flat view of a Pi Messages request for workflow tests whose subject is not the protocol:
+ * one system text, then user, assistant (text and tool calls) and tool-result entries.
+ */
+export function scriptView(body: any) {
+  const text = (content: unknown) =>
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .filter((b: any) => b.type === "text")
+            .map((b: any) => b.text)
+            .join("\n")
+        : "";
+  const messages: any[] = [{ role: "system", content: text(body.system) }];
+  for (const m of body.messages ?? []) {
+    if (m.role === "system") {
+      if (text(m.content))
+        messages.push({ role: "system", content: text(m.content) });
+    } else if (m.role === "assistant") {
+      const calls = (m.content ?? []).filter((b: any) => b.type === "tool_use");
+      messages.push({
+        role: "assistant",
+        content: text(m.content) || null,
+        ...(calls.length
+          ? {
+              tool_calls: calls.map((b: any) => ({
+                id: b.id,
+                type: "function",
+                function: { name: b.name, arguments: JSON.stringify(b.input) },
+              })),
+            }
+          : {}),
+      });
+    } else {
+      const results = Array.isArray(m.content)
+        ? m.content.filter((b: any) => b.type === "tool_result")
+        : [];
+      if (!results.length)
+        messages.push({ role: "user", content: text(m.content) });
+      for (const r of results)
+        messages.push({
+          role: "tool",
+          tool_call_id: r.tool_use_id,
+          content: text(r.content),
+        });
+    }
+  }
+  return {
+    messages,
+    tools: (body.tools ?? []).map((t: any) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.input_schema,
+    })),
+    maxOutputTokens: body.max_tokens,
+  };
+}
+
+/** A scripted { message: { content, tool_calls } } reply as an Anthropic stream. */
+export function scriptedResponse(reply: any) {
+  const message = reply?.message ?? {};
+  const content: FakeBlock[] = [];
+  if (typeof message.content === "string" && message.content)
+    content.push({ type: "text", text: message.content });
+  for (const call of message.tool_calls ?? []) {
+    let input: unknown;
+    try {
+      input = JSON.parse(call.function.arguments);
+    } catch {
+      input = { unparsable: call.function.arguments };
+    }
+    content.push({
+      type: "tool_use",
+      id: call.id,
+      name: call.function.name,
+      input,
+    });
+  }
+  return messagesResponse({ content });
+}
 export const settings = codingSettings.parse({
   repository: "akhilvuputuri/chief-agent",
   branch: "main",
@@ -87,6 +185,8 @@ export async function fixture(
     /** Replaces the in-memory sandbox, e.g. with a real box sandbox on this database. */
     provider?: (db: Database) => SandboxProvider;
     settings?: typeof settings;
+    /** Replaces the fixture's Anthropic route (every fixture model maps to claude-opus-5-5). */
+    anthropic?: CodingAnthropic;
   } = {},
 ) {
   const pg = await migratedPGlite();
@@ -140,6 +240,72 @@ export async function fixture(
   let published = false;
   let modelReply = "fixture reply";
   let generationReply: ((model: string, input: any) => any) | undefined;
+  const messagesRequests: {
+    body: Record<string, unknown>;
+    wire: { betas: string[]; version?: string };
+    signal: AbortSignal;
+  }[] = [];
+  /** One scripted model reply, shared by the legacy route and the Pi Messages route. */
+  const respond = async (selectedModel: string, input: any) => {
+    modelCalls++;
+    if (stallModel) {
+      if (input.signal.aborted) throw input.signal.reason;
+      await new Promise((_resolve, reject) =>
+        input.signal.addEventListener(
+          "abort",
+          () => reject(input.signal.reason),
+          { once: true },
+        ),
+      );
+    }
+    if (failModel) throw failModelError;
+    return generationReply
+      ? generationReply(selectedModel, input)
+      : { message: { role: "assistant", content: modelReply } };
+  };
+  const natives = new Map<string, string>();
+  const nativeFor = (model: string) => {
+    if (!natives.has(model))
+      natives.set(model, FIXTURE_NATIVE[natives.size % FIXTURE_NATIVE.length]!);
+    return natives.get(model)!;
+  };
+  let messagesReply: CodingAnthropic["send"] = async (body, _wire, signal) => {
+    const selected = [...natives].find(([, id]) => id === body.model)?.[0];
+    let reply: unknown;
+    try {
+      reply = await respond(selected ?? String(body.model), {
+        ...scriptView(body),
+        signal,
+      });
+    } catch (error) {
+      // A scripted provider failure reaches Pi as Anthropic's own error reply.
+      const status = (error as ModelError)?.diagnostics?.httpStatus;
+      if (typeof status !== "number") throw error;
+      throw Anthropic.APIError.generate(
+        status,
+        {
+          type: "error",
+          error: { type: "api_error", message: "Synthetic provider failure" },
+        },
+        undefined,
+        new Headers(),
+      );
+    }
+    return scriptedResponse(reply);
+  };
+  const anthropic: CodingAnthropic = options.anthropic ?? {
+    route: (model) =>
+      model === "unrouted/model"
+        ? undefined
+        : {
+            nativeModel: nativeFor(model),
+            prices: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
+          },
+    send: async (body, wire, signal) => {
+      messagesRequests.push({ body, wire, signal });
+      return messagesReply(body, wire, signal);
+    },
+  };
   const publisher = {
     resolve: async () => base,
     publish: async () => {
@@ -163,25 +329,14 @@ export async function fixture(
     "https://coding.example.com",
     (u) => u === "a" && permitted,
     (selectedModel) => ({
-      generate: async (input) => {
-        modelCalls++;
-        if (stallModel) {
-          if (input.signal.aborted) throw input.signal.reason;
-          await new Promise((_resolve, reject) =>
-            input.signal.addEventListener(
-              "abort",
-              () => reject(input.signal.reason),
-              { once: true },
-            ),
-          );
-        }
-        if (failModel) throw failModelError;
-        return generationReply
-          ? generationReply(selectedModel, input)
-          : { message: { role: "assistant", content: modelReply } };
-      },
+      generate: (input) => respond(selectedModel, input),
     }),
     () => now,
+    undefined,
+    undefined,
+    false,
+    undefined,
+    anthropic,
   );
   // Most controller tests seed an already-approved implementation phase;
   // separate lifecycle tests below exercise real planning/delivery/confirmation.
@@ -270,6 +425,11 @@ export async function fixture(
     setReply: (text: string) => {
       modelReply = text;
     },
+    /** Requests the controller sent to the fixture's Anthropic route. */
+    messagesRequests: () => messagesRequests,
+    setMessages: (reply: CodingAnthropic["send"]) => {
+      messagesReply = reply;
+    },
   };
 }
 export async function requirementBrief(
@@ -333,3 +493,14 @@ export async function requirementBrief(
   assert(brief.includes(plan));
   return { jobId: job.id, approvalId, messageId, brief };
 }
+
+/** An Anthropic route for controllers a test builds itself; it never sends a request. */
+export const unusedAnthropic: CodingAnthropic = {
+  route: () => ({
+    nativeModel: "claude-opus-5-5",
+    prices: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
+  }),
+  send: async () => {
+    throw new Error("This test makes no model call");
+  },
+};

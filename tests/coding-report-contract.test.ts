@@ -63,6 +63,7 @@ import {
   candidate,
   fixture,
   requirementBrief,
+  unusedAnthropic,
 } from "./helpers/coding-fixture.js";
 test("Pi profile rejects Python selectors and automatic merge", async () => {
   assert(
@@ -179,7 +180,7 @@ for (const { documentLength, terminalRecovery } of [
   })),
   { documentLength: 0, terminalRecovery: true },
 ])
-  test(`Pi bridge complete approved workflow preserves ${documentLength || "short"}-character documents${terminalRecovery ? " with terminal HTTP recovery" : ""}`, async (t) => {
+  test(`Pi bridge complete approved workflow preserves ${documentLength || "short"}-character documents${terminalRecovery ? " after Pi's own retry of a provider failure" : ""}`, async (t) => {
     const f = await fixture(t);
     const root = await mkdtemp(join(tmpdir(), "pi-bridge-fixture-"));
     const source = join(root, "source");
@@ -562,15 +563,13 @@ for (const { documentLength, terminalRecovery } of [
           [started.id],
         )
       ).rows;
-      const children = calls.filter((call) => call.input.retryOf);
-      assert.equal(children.length, 3);
-      for (const child of children) {
-        const parent = calls.find((call) => call.id === child.input.retryOf);
-        assert.equal(parent.state, "uncertain");
-        assert.equal(child.state, "complete");
-        assert.equal(child.attempt_id, parent.attempt_id);
-        assert.equal(child.role, parent.role);
-      }
+      // Each failed call is recorded once; Pi's stock retry sends a new request.
+      const failed = calls.filter((call) => call.state === "uncertain");
+      assert.equal(failed.length, 3);
+      assert.deepEqual(
+        failed.map((call) => call.role).sort(),
+        ["leader", "coder", "reviewer"].sort(),
+      );
       assert.equal(
         result.used_models,
         calls.filter((call) => call.attempt_id === result.attempt_id).length,
@@ -746,6 +745,12 @@ test("bundled Pi cutover snapshots new jobs while duplicate legacy requests and 
       () => {
         throw new Error("This routing test must not make model calls");
       },
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      unusedAnthropic,
     );
   const prior = controller(
     selectCodingBackend({ default: "legacy" }, legacy, pi),

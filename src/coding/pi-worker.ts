@@ -17,15 +17,13 @@ import {
   type ReferenceDocument,
   TaskStore,
   Workspace as PiWorkspace,
-  compatibleModel,
+  anthropicModel,
   localExecutor,
   type Task,
 } from "@chief-agent/pi-runtime";
 import {
-  codingContextWindows,
   codingSettings,
   checkpoint,
-  modelCallTimeoutMs,
   outputAllowance,
   type Checkpoint,
   type Outcome,
@@ -50,7 +48,8 @@ const assignmentSchema = z.object({
   mode: z.enum(["plan", "implement"]),
   baseSha: z.string().regex(/^[a-f0-9]{40}$/),
   settings: codingSettings,
-  contextWindows: codingContextWindows.optional(),
+  /** The Anthropic id of each of the job's models (journal 181). */
+  nativeModels: z.record(z.string().max(120), z.string().max(120)).optional(),
   agentGit: z
     .object({
       repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
@@ -375,23 +374,15 @@ export async function runPiWorker(
         : assignment.mode === "plan"
           ? (config.leaderModel ?? config.model)
           : config.model;
-    return compatibleModel({
-      provider: "openrouter",
-      model,
-      fallbackContextWindow: assignment.contextWindows?.[model],
-      baseUrl: `${workerOrigin}/coding/worker/${assignment.id}/pi/${role}/v1`,
+    const native = assignment.nativeModels?.[model];
+    if (!native) throw new Error("Coding model has no direct Anthropic route");
+    // Pi's own Anthropic client; the host adds the key and relays Anthropic's stream.
+    return anthropicModel({
+      model: native,
+      baseUrl: `${workerOrigin}/coding/worker/${assignment.id}/pi/${role}`,
       apiKey: workerToken,
-      // Pi supplies the selected model's capacity. The request byte envelope
-      // below is a separate transport bound, not an artificial model window.
       maxTokens: outputAllowance(config, role),
-      // The host replies only when the generation is done (journal 156).
-      responseTimeoutMs:
-        modelCallTimeoutMs(outputAllowance(config, role)) + 60000,
       reasoning: config.effort,
-      requestIdField: "runtime_call_id",
-      requestPurposeField: "runtime_purpose",
-      maxRequestBytes: 3_990_000,
-      terminalHttpRecovery: { attemptId: assignment.attemptId },
     });
   }
   /**
