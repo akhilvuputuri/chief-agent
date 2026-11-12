@@ -175,34 +175,34 @@ export class CodingAutomation {
       );
     }
   }
+  /** Waits without changing stage or summary; touching keeps other PR jobs from starving. */
+  private async touch(j: CodingJob) {
+    await this.db.query(
+      "UPDATE coding_jobs SET updated_at=now() WHERE id=$1 AND lease=$2 AND lease_until>now() AND state='pr_ready' AND stage=$3",
+      [j.id, j.lease, j.stage],
+    );
+  }
   private async manual(j: CodingJob, d: Record, reason: string) {
     await this.phase(j, d, "manual_review", reason, true);
   }
   /**
-   * Main moved before merge: re-implement the approved plan on current main (owner policy,
-   * 17 October 2026: the plan approval carries over; checks, review and the Merge card repeat).
+   * GitHub reports the PR conflicts with main: re-implement the approved plan on current main
+   * (owner policy, 17 October 2026: the plan approval carries over; checks, review and the
+   * Merge card repeat). Main moving without a conflict never reaches this (journal 180).
+   *
+   * Interim (journal 180): re-implementing from the plan is the remaining way a conflict is
+   * resolved; a later piece replaces it with an in-box `git rebase` of the reviewed commit.
    */
   private async rebase(j: CodingJob, d: Record, main: string) {
-    const prior = Number(
-      (
-        await this.db.query(
-          "SELECT count(*)::int AS n FROM coding_revisions WHERE job_id=$1 AND request_key LIKE 'rebase:%'",
-          [j.id],
-        )
-      ).rows[0].n,
-    );
     if (
       !/^[a-f0-9]{40}$/.test(main) ||
-      prior >= 2 ||
       j.used_models >= j.settings.limits.models ||
       (j.checkpoint.piState?.toolsUsed ?? 0) >= j.settings.limits.tools
     ) {
       await this.manual(
         j,
         d,
-        prior >= 2
-          ? "Main moved again after two automatic rebases; inspect before merging."
-          : "Main moved, but the shared allocation is exhausted; explicit owner action is needed.",
+        "The PR conflicts with main, but the shared allocation is exhausted; explicit owner action is needed.",
       );
       return;
     }
@@ -217,7 +217,7 @@ export class CodingAutomation {
       await this.manual(
         j,
         d,
-        "Main moved, but this job's current scope has no recorded owner approval to carry over; explicit owner action is needed.",
+        "The PR conflicts with main, but this job's current scope has no recorded owner approval to carry over; explicit owner action is needed.",
       );
       return;
     }
@@ -233,13 +233,13 @@ export class CodingAutomation {
         : {}),
     };
     const scope = requirementScope({ ...j, checkpoint: cp });
-    const message = `Rebase onto current main ${main}: approved plan carried over (owner policy, 17 October 2026)`;
+    const message = `The PR conflicts with main; re-applying on current main ${main}: approved plan carried over (owner policy, 17 October 2026)`;
     const changed = await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',base_sha=$5,summary='Main moved; re-applying the approved change on current main before checks, review and the Merge card',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision),
+      `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',base_sha=$5,summary='The PR conflicts with main; re-applying the approved change on current main before checks, review and the Merge card',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision),
       budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$6::jsonb,'remainingMs',$7::bigint),'suppressed' FROM changed RETURNING job_id),
       approval AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'rebase-approval:'||revision,jsonb_build_object('decision','approved','approvedScope',$8::text,'carriedFrom',$10::text,'reason','rebase','carriedArtifact',$13::text),'suppressed' FROM changed RETURNING job_id),
       revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$11,$12,'implement' FROM changed RETURNING job_id)
-      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$11,jsonb_build_object('summary','Main moved since this job started, so Chief is re-applying your approved change on current main, then re-running the checks and review before asking you to merge.') FROM changed ON CONFLICT DO NOTHING RETURNING job_id`,
+      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$11,jsonb_build_object('summary','The PR conflicts with recent changes on main, so Chief is re-applying your approved change on current main, then re-running the checks and review before asking you to merge.') FROM changed ON CONFLICT DO NOTHING RETURNING job_id`,
       [
         j.id,
         j.lease,
@@ -373,7 +373,6 @@ export class CodingAutomation {
       const target: MergeTarget = {
         id: j.id,
         revision: j.revision,
-        baseSha: j.base_sha,
         url: (j as any).pr_url,
         head: d.head,
         tree: d.tree,
@@ -456,10 +455,9 @@ export class CodingAutomation {
         return;
       }
       const ownerMerge = j.settings.prWorkflow === "owner_merge";
-      // Owner-merge PRs are built on the job base by construction, so main's tip is what matters.
-      const mainMoved =
-        i.main !== j.base_sha || (!ownerMerge && i.base !== j.base_sha);
-      if (mainMoved && !ownerMerge) {
+      // Owner-merge PRs merge like any PR: main moving is not an event, only a conflict is
+      // (journal 180). The legacy squad flow still requires an unchanged base and main.
+      if (!ownerMerge && (i.main !== j.base_sha || i.base !== j.base_sha)) {
         await this.manual(
           j,
           d,
@@ -488,8 +486,11 @@ export class CodingAutomation {
         );
         return;
       }
-      // Rebase only candidates that could otherwise merge; blocked ones go to the owner first.
-      if (mainMoved) {
+      // Only GitHub's definite conflict needs work; unknown (null) mergeability waits at the
+      // merge gate below. A PR built on current main cannot conflict with it, so `false` with
+      // an unmoved main is a stale reading and also waits. Rebase only candidates that could
+      // otherwise merge.
+      if (ownerMerge && i.mergeable === false && i.main !== j.base_sha) {
         await this.rebase(j, d, i.main);
         return;
       }
@@ -620,6 +621,17 @@ export class CodingAutomation {
         i.mergeable !== true ||
         (i.unresolvedThreads ?? 0) > 0
       ) {
+        // GitHub recomputes mergeability after every push to main and reports null meanwhile.
+        // That is not a change to this PR: keep its stage, card and any owner tap, and look again.
+        if (
+          ownerMerge &&
+          i.mergeable === null &&
+          i.checks === "passed" &&
+          !(i.unresolvedThreads ?? 0)
+        ) {
+          await this.touch(j);
+          return;
+        }
         if (this.now().getTime() - Date.parse(d.waitingSince) > 3600000)
           await this.manual(
             j,
@@ -694,9 +706,8 @@ export class CodingAutomation {
       if (
         final.head !== d.head ||
         final.tree !== d.tree ||
-        (j.settings.prWorkflow !== "owner_merge" &&
-          final.base !== j.base_sha) ||
-        final.main !== j.base_sha ||
+        (!ownerMerge &&
+          (final.base !== j.base_sha || final.main !== j.base_sha)) ||
         final.closed ||
         final.merged
       ) {
@@ -707,10 +718,22 @@ export class CodingAutomation {
         );
         return;
       }
+      const fresh = [...(await this.ownerRequests(j)), ...final.feedback].some(
+        (f) => !d.handled.includes(f.id),
+      );
+      // Mergeability still being computed keeps the owner's tap; the next tick merges.
       if (
-        [...(await this.ownerRequests(j)), ...final.feedback].some(
-          (f) => !d.handled.includes(f.id),
-        ) ||
+        ownerMerge &&
+        !fresh &&
+        final.mergeable === null &&
+        final.checks === "passed" &&
+        !(final.unresolvedThreads ?? 0)
+      ) {
+        await this.touch(j);
+        return;
+      }
+      if (
+        fresh ||
         final.checks !== "passed" ||
         final.mergeable !== true ||
         (final.unresolvedThreads ?? 0) > 0

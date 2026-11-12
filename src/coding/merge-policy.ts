@@ -66,7 +66,6 @@ export type PrInspection = {
 export type MergeTarget = {
   id: string;
   revision: number;
-  baseSha: string;
   head: string;
   url: string;
   tree: string;

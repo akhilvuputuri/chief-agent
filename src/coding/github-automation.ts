@@ -38,7 +38,7 @@ export class GitHubAutomation implements PrAutomationRepository {
     return Number(url.slice(prefix.length));
   }
   private number(t: MergeTarget) {
-    if (![t.head, t.baseSha, t.tree].every(sha))
+    if (![t.head, t.tree].every(sha))
       throw new Error("Invalid owned PR target");
     return this.prNumber(t.url);
   }
@@ -242,12 +242,8 @@ export class GitHubAutomation implements PrAutomationRepository {
   }
   async ready(t: MergeTarget) {
     const pr = await this.owned(t);
-    if (
-      pr.state !== "open" ||
-      pr.merged ||
-      pr.head.sha !== t.head ||
-      pr.base.sha !== t.baseSha
-    )
+    // The PR's base.sha follows main as it moves; only the head identifies what was reviewed.
+    if (pr.state !== "open" || pr.merged || pr.head.sha !== t.head)
       throw new Error("Readiness target changed");
     if (!pr.draft) return;
     const data = await this.graphql(
@@ -287,11 +283,9 @@ export class GitHubAutomation implements PrAutomationRepository {
         throw new Error("Different head was merged");
       return { sha: pr.merge_commit_sha as string };
     }
-    if (
-      pr.state !== "open" ||
-      pr.head.sha !== t.head ||
-      pr.base.sha !== t.baseSha
-    )
+    // GitHub merges the pinned head onto main as it is now (journal 180); the result's tree
+    // differs from the reviewed one when main has moved, and that is expected.
+    if (pr.state !== "open" || pr.head.sha !== t.head)
       throw new Error("Merge target changed");
     if (pr.draft) await this.ready(t);
     let r;
