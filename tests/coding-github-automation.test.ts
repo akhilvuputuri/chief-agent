@@ -12,7 +12,6 @@ function fixture() {
   const t: MergeTarget = {
     id: randomUUID(),
     revision: 2,
-    baseSha: base,
     head,
     tree,
     url: `https://github.com/${repo}/pull/9`,
@@ -184,6 +183,17 @@ test("merge is fenced to the recorded head, marks the owned draft ready and neve
   foreign.pr.head.repo.full_name = "other/repo";
   await assert.rejects(foreign.gh.merge(foreign.t), /ownership/);
   assert.equal(foreign.writes.length, 0);
+});
+test("main moving changes the PR's base commit but neither readiness nor the exact-head merge (journal 180)", async () => {
+  const f = fixture();
+  // GitHub's base.sha follows main; the reviewed head and tree are unchanged.
+  f.pr.base.sha = "f".repeat(40);
+  await f.gh.ready(f.t);
+  assert.deepEqual(f.writes.at(-1), { ready: true });
+  f.pr.draft = false;
+  const result = await f.gh.merge(f.t);
+  assert.equal(result.sha, merged);
+  assert.deepEqual(f.writes.at(-1).body, { sha: head, merge_method: "merge" });
 });
 test("merge reconciliation verifies the same head and returns the existing merge without a second write", async () => {
   const f = fixture();

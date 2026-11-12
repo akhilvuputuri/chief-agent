@@ -751,7 +751,7 @@ export class CodingController {
       return this.requirements.request(job, a.requestKey);
     }
     // Owner asks to continue a parked owner-merge PR: return it to the automation, which
-    // re-runs every merge gate (and rebases onto main if needed). Real holds re-park with their reason.
+    // re-runs every merge gate. Real holds re-park with their reason.
     // A retried identical continue request is answered from its record, whatever the stage is now.
     if (
       a.operation === "coding_resume" &&
@@ -787,10 +787,10 @@ export class CodingController {
         );
       await this.assertFreshOrConfirmed(job, a, CONTINUABLE);
       const released = await this.db.query(
-        `WITH changed AS (UPDATE coding_jobs SET stage='awaiting_ci',summary='Owner asked to continue; re-checking the PR and rebasing onto main if needed',updated_at=now() WHERE id=$1 AND user_id=$2 AND state='pr_ready' AND stage=$3 AND revision=$4 AND (lease IS NULL OR lease_until<now()) RETURNING id),
+        `WITH changed AS (UPDATE coding_jobs SET stage='awaiting_ci',summary='Owner asked to continue; re-checking the PR',updated_at=now() WHERE id=$1 AND user_id=$2 AND state='pr_ready' AND stage=$3 AND revision=$4 AND (lease IS NULL OR lease_until<now()) RETURNING id),
         -- The waits restart now, so an old stop time does not re-park the job on its first check.
         waits AS (UPDATE coding_events SET payload=jsonb_set(payload,'{waitingSince}',to_jsonb($6::text)) WHERE job_id IN (SELECT id FROM changed) AND event_key='automation:'||$4::int RETURNING job_id)
-        INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,$5,jsonb_build_object('summary','Owner asked to continue; the PR returns to automatic checks, rebase and the Merge card.','previousStage',$3::text),'suppressed' FROM changed RETURNING job_id`,
+        INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,$5,jsonb_build_object('summary','Owner asked to continue; the PR returns to automatic checks and the Merge card.','previousStage',$3::text),'suppressed' FROM changed RETURNING job_id`,
         [
           job.id,
           user,
@@ -862,11 +862,11 @@ export class CodingController {
             : job.settings.prWorkflow === "owner_merge" &&
                 (job.stage === "manual_review" ||
                   job.stage === "merge_declined")
-              ? `This job's PR stopped for owner attention (${job.summary}). If the owner asks to continue, use coding_resume on this job: it re-runs the merge checks and rebases if needed; holds that still apply (protected files, exhausted allocation, two rebases) come back with their reason.`
+              ? `This job's PR stopped for owner attention (${job.summary}). If the owner asks to continue, use coding_resume on this job: it re-runs the merge checks; holds that still apply (operator steps, exhausted allocation) come back with their reason.`
               : job.stage === "manual_review" || job.stage === "merge_declined"
                 ? `This job's PR stopped for owner attention (${job.summary}). It will not continue automatically and Chief cannot merge it in this state; explain the reason, then the owner can act on GitHub or start a new job.`
                 : job.settings.prWorkflow === "owner_merge"
-                  ? "This job already has a PR and continues on its own: Chief handles Devin and MR feedback, rebases onto main when it moves, re-runs checks and review, then sends the owner a Merge / Keep open card. Nothing to resume or revise; report its stage from coding_status."
+                  ? "This job already has a PR and continues on its own: Chief handles Devin and MR feedback, re-runs checks and review, then sends the owner a Merge / Keep open card. Main moving does not change it; only a merge conflict sends the change back to the coder. Nothing to resume or revise; report its stage from coding_status."
                   : job.settings.autoMerge
                     ? "This job already has a PR and continues through its automatic merge workflow; report its stage from coding_status."
                     : "This job already has a draft PR; it predates the owner-merge workflow, so it can only be merged on GitHub or replaced by a new job.",

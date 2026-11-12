@@ -20,6 +20,8 @@ Since 4 November 2026 ([journal 152](journey/152-fixes-reach-an-open-pr.md)):
 - A PR that changes database migrations, Compose, environment files or workflows no longer stops before review feedback. It is marked ready, Devin and CI run, feedback is fixed, and only then does it stop. The stop says Chief will not merge it and names what is left for a person, such as "merge it on GitHub and right away run the database rollout for 036_x.sql". The Merge card names the same steps for other changes, such as running `kite run eval:picker` after a tool-picker change.
 - `tests/migration-rollout.test.ts` fails any migration without its `compose.yaml` line. From 032 it also fails one without a `scripts/deploy-*.py` rollout script that names it as `MIGRATION`, and that script's test. Coding jobs run it in `kite run check`, so a coder has to add the rollout pieces before review.
 
+> **Update, 13 November 2026 ([journal 180](journey/180-main-moving-is-not-an-event.md)):** an open owner-merge PR is not rebuilt when main moves. If GitHub can merge it cleanly it goes to the Merge card and merges as it is; only a PR GitHub reports as conflicting goes back to the coder, which re-applies the approved change on current main (interim, until an in-box `git rebase` replaces it). The "rebase rounds" mentioned below are those conflict rounds.
+
 ### Planning, review and the Start card
 
 The owner taps **Start** on a short card and does not read the plan, so the pipeline checks it instead. Introduced 4 November 2026 after PR 416 ([journal 151](journey/151-review-that-looks-for-failures.md)):

@@ -219,7 +219,7 @@ test("replying to an owner-merge job that already has a PR asks for changes on t
   assert.equal(saved.rows[0].payload.text, "Rename the heading");
   assert.equal((await f.row(job.id)).stage, "awaiting_ci");
   await f.db.query(
-    "UPDATE coding_jobs SET stage='manual_review',summary='Main moved again after two automatic rebases; inspect before merging.' WHERE id=$1",
+    "UPDATE coding_jobs SET stage='manual_review',summary='The PR conflicts with main, but the shared allocation is exhausted; explicit owner action is needed.' WHERE id=$1",
     [job.id],
   );
   await request("rename-please-2");
