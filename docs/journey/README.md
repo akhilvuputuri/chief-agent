@@ -183,6 +183,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 13 November | [182 — Pi's tools and prompt as shipped](182-pi-tools-and-prompt-as-shipped.md): why did the coder run one shell command per turn and never use Pi's file tools? | The worker replaced Pi's system prompt, which made Pi drop its own tool list and rules, and forced every tool to run one at a time. Pi now builds its own prompt with our role text appended, tools run in parallel (the workspace checkpoint waits until none is running), `bash` has no default time limit, `grep` truncates instead of failing, and the document-page gate is gone. Confinement, the isolated executor and `read_document` stay. Worker only; reaches jobs with the next worker image. |
 | 13 November | [181 — One request is not a preference](181-one-request-is-not-a-preference.md): why did half the learned facts overstate what the owner said? | Tested on synthetic data; release pending. Facts carry their kind, a single request is kept as a note outside turns until another day repeats it, and a habit on one day's evidence is flagged |
 | 13 November | [183 — Can the judge be trusted](183-can-the-judge-be-trusted.md): can the memory judge be trusted when nobody labels anything? | Tested on synthetic data; release pending. Planted errors and a decoy with known answers, evidence quotes the host checks, and repeats plus a second model on a nightly sample |
+| 13 November | [184 — An alert leads to the trace](184-alert-to-answer.md): can an alert take the owner straight to what went wrong? | In progress; rollout pending. A review found agentwatch had answered no production question (82 of 367 traces held a failed span, no real alert had fired). Its trace page now opens on asked, replied and first error; a firing alert names what failed and links to the traces, and Chief's relay passes that on |
 
 ## Coding-agent learning path
 
@@ -269,5 +270,4 @@ MCP integrations: [67 — Remote MCP connectors](67-mcp-connectors.md), [15 — 
 
 Article targets: [67 — Reader MCP](67-mcp-connectors.md) → [69 — Shared link resolution](69-link-resolution.md) → [178 — Study list or Reader](178-study-list-link-classification.md).
 
-- 13 November 2026: [184 — Can an alert take the owner straight to what went wrong?](184-alert-to-answer.md) — agentwatch review: no incident had used it; the trace page now opens on asked, replied and first error; alerts point at traces; rollout pending.
 - 13 October 2026: [83 — Sustained Pi context verification](83-pi-context-verification.md) — failing native budget/compaction reproductions and representative acceptance gates; Gemini coder convergence diagnosed; owner-selected lean release in progress.

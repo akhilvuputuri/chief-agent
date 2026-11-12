@@ -47,18 +47,23 @@ export interface MonitorAlert {
 const MAX_EXAMPLES = 3;
 const MAX_LABEL = 120;
 /**
- * A link is passed on only when it is an https link to a trace page, so whatever else a
- * response holds cannot put another address in the owner's chat.
+ * The link field is passed on only when it is an https link to a trace page. That bounds the
+ * links this adds; it does not bound what Telegram links by itself. A label, like a monitor's
+ * name, is plain text, and Telegram may still make a link of an address written in one.
  */
 const TRACE_URL =
   /^https:\/\/[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?(:\d{1,5})?\/#\/trace\/[0-9a-f]{32}(\/[0-9a-f]{16})?$/;
 
 /** One plain line: the names in it come from spans, which the agent's own inputs can shape. */
 function line(text: string, limit: number) {
-  return text
-    .replace(/[\p{Cc}\p{Cf}\s]+/gu, " ")
-    .trim()
-    .slice(0, limit);
+  return (
+    text
+      .replace(/[\p{Cc}\p{Cf}\s]+/gu, " ")
+      .trim()
+      .slice(0, limit)
+      // The cut counts UTF-16 units and can halve a character; half of one is not valid text.
+      .replace(/[\uD800-\uDBFF]$/, "")
+  );
 }
 
 /**
@@ -171,10 +176,7 @@ function driftText(alert: MonitorAlert, name: string, now: number) {
 export function alertText(alert: MonitorAlert, now = Date.now()) {
   // Anyone who can reach agentwatch sets this name, so it is reduced to one plain line. Not
   // kept in history; a reply quoting this message reaches the model as untrusted quoted text.
-  const name = alert.monitor_name
-    .replace(/[\p{Cc}\p{Cf}\s]+/gu, " ")
-    .trim()
-    .slice(0, 200);
+  const name = line(alert.monitor_name, 200);
   if (alert.mode === "drift") {
     const text = driftText(alert, name, now);
     if (text) return text;

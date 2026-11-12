@@ -45,12 +45,12 @@ agentwatch:
 
 Chief (this change):
 
-- [src/trace-alerts.ts](../../src/trace-alerts.ts): a firing alert's text is followed by its detail and up to three examples, each a label and, on its own line, its link. Labels are reduced to one plain line and 120 characters, as a monitor's name is. A link is passed on only when it is an `https` link to a trace page (`TRACE_URL`), so nothing else a response holds can put another address in the chat. Without any link the text still ends "Details in agentwatch.". A resolved alert shows none of it. An alert without the new fields reads exactly as before, so this can release ahead of agentwatch.
+- [src/trace-alerts.ts](../../src/trace-alerts.ts): a firing alert's text is followed by its detail and up to three examples, each a label and, on its own line, its link. Labels are reduced to one plain line and 120 characters, as a monitor's name is. The link field is passed on only when it is an `https` link to a trace page (`TRACE_URL`). That bounds the links this change adds, not what Telegram links by itself: a label, like a monitor's name, is plain text, and Telegram may still make a link of an address written in one. The names that can reach a label are a tool's (the model APIs allow letters, digits, `_` and `-`), a model's, an error type's and a score's; agentwatch makes each one word of at most 64 characters. Without any link the text still ends "Details in agentwatch.". A resolved alert shows none of it. An alert without the new fields reads exactly as before, so this can release ahead of agentwatch.
 - [src/main.ts](../../src/main.ts): alerts are sent with link previews off; a preview could only show the sign-in page.
 
 ## Verification and outcome
 
-Tested: 15 tests in [tests/trace-alerts.test.ts](../../tests/trace-alerts.test.ts), 3 new (the text with pointers, the text without links, and hostile labels and links). agentwatch's own tests and browser tests are in its pull requests.
+Tested: 15 tests in [tests/trace-alerts.test.ts](../../tests/trace-alerts.test.ts), 3 new (the text with pointers, the text without links, and hostile labels and links). Independent review (Opus 5.5) of this branch's first commit: **approve with nits**. It found the claim about addresses overstated (corrected above and in the code), a test that still passed with the link pattern's anchor removed (a case added), and that a cut could halve a character (the half is now dropped, also from a monitor's name). It compared 20 alerts without the new fields against `main` and found the text identical. agentwatch's own tests and browser tests are in its pull requests.
 
 Not yet verified: anything on the host. What the rollout has to show: a firing alert arrives in Telegram with a link; the link opens the trace on a phone at its summary, with the failed span one tap away.
 

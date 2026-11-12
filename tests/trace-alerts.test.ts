@@ -174,6 +174,7 @@ test("only a plain line and an https trace link are passed on", () => {
   ]);
   for (const url of [
     "javascript:alert(1)",
+    `see https://traces.example.com/#/trace/${TRACE}`,
     `https://traces.example.com/#/trace/${TRACE}\nhttps://evil.example`,
     `https://traces.example.com/#/trace/${TRACE}?next=https://evil.example`,
     `https://user:pass@traces.example.com/#/trace/${TRACE}`,
@@ -186,6 +187,18 @@ test("only a plain line and an https trace link are passed on", () => {
       "Alert: Tool errors is 42% over the last 24 hours, above the limit of 30% (50 samples). Details in agentwatch.\n\nx",
       url,
     );
+  // A cut that would halve a character leaves valid text.
+  const halved = alertText(
+    alert({ examples: [{ label: "x".repeat(119) + "\u{1F600}" }] }),
+  );
+  assert.equal(halved.isWellFormed(), true);
+  assert.match(halved, /x{119}$/);
+  assert.equal(
+    alertText(alert({ monitor_name: "n".repeat(199) + "\u{1F600}" }))
+      .slice(0, 220)
+      .isWellFormed(),
+    true,
+  );
   // Shapes that are not examples at all are ignored.
   for (const examples of ["text", { label: "x" }, [null, 3, {}, { label: 7 }]])
     assert.match(alertText(alert({ examples })), /\. Details in agentwatch\.$/);
