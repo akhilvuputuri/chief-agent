@@ -33,6 +33,12 @@ What would change this: summaries that turn out large enough to matter in storag
 
 **Mixed display within one conversation (hypothesis from the guidance, not tested live).** A resumed job can hold blocks from before the change (empty text) and after it (summaries). Replaying either kind unchanged is what the guidance requires, and `display` is outside the bound prefix. In Pi jobs the question does not arise, because no thinking blocks are replayed.
 
+**No earlier thinking in any Pi request (read in code; behaviour from before this change).** Coding calls run without a spending scope, so `callScope()` in `src/anthropic.ts` returns nothing for them and `ThinkingStates` records and inserts nothing. Pi also drops the `anthropic.thinking` entries (above). Every Pi request therefore carries no earlier thinking at all. Hypothesis, not measured: the model may think again on each turn about what it already worked out, which could explain part of the long thinking in journal 169. This change does not alter that; the summaries may help test it.
+
+**Prompt cache (reported, not measured).** Anthropic's caching guidance lists a change to the `thinking` settings among the changes that invalidate the messages cache; it does not single out `display`. Within a Pi job, display is the same on every call, so only a job running across the deploy can see one cache miss, at its first call after the release.
+
+**What the summaries hold (reported).** On Opus 5.5, the progress notes the model writes between tool calls come back as `thinking` blocks too, and under `"summarized"` they carry text. Stored entries therefore mix those short progress notes with reasoning summaries, and a profiling script cannot tell them apart by type.
+
 **Where the summary is stored.** In `coding_model_calls.result` (jsonb), for each entry of `result->'message'->'reasoning_details'` with `type = 'anthropic.thinking'` and `block->>'type' = 'thinking'`, the summary is `block->>'thinking'` and `position` is where it stood among the visible blocks. A `redacted_thinking` block has `data` and no text. For example:
 
 ```sql
@@ -51,11 +57,17 @@ Calls served by the OpenRouter fallback carry OpenRouter's own entries instead, 
 
 **Review.** Pending: needs an independent reviewer's verdict for the exact head.
 
+> **Update, 12 November 2026:** an independent review of `7b37751` (PR 466) approved, with non-blocking notes. This revision addresses them: the failure mode if the API rejects the request shape, the plan to check it before release, the cache and progress-note notes above, the absence of earlier thinking in Pi requests, and a code comment in `src/anthropic.ts` that is now worded as an inference. The new head needs its own review verdict.
+
 ## Verification and outcome
 
 Tested locally on 12 November 2026 (Node 22.23.4, Kite 0.2.0, PGlite): `kite run typecheck` passed; `tsx --test tests/anthropic.test.ts` (30 passed), `tests/model-router.test.ts` (12 passed) and `tests/coding-output-allowance.test.ts` (5 passed). With the changes to `src/anthropic.ts` and `src/coding/controller.ts` reverted, the two opt-in tests fail and the replay test still passes, as expected for behaviour that was already correct (the OpenRouter test was not rerun that way). The full TypeScript suite (`kite run build && kite run test:ts`) ran 1,679 tests: 1,678 passed, 1 skipped, none failed.
 
 Not verified: that the live API accepts `display: "summarized"` together with `block_binding` under the thinking-binding beta on this account (the guidance documents both fields on adaptive thinking, not this exact combination), what the summaries look like, and their size. The first live Pi job after release answers all three; its records can be read with the query above.
+
+**If the API rejects the shape (read in code).** The 400 would be classified `rejected`, which has no cooldown (`DirectCooldown.seconds` in `src/model-router.ts`; only the beta-enrollment code cools). Pi calls send no earlier thinking, so the adapter's retry without thinking does not apply. Every Pi call would then make one failed direct request and fall back to OpenRouter for that call, paid from OpenRouter credit, and the owner would get a fallback message on Telegram at most once an hour per fault. Coding would be slower and costlier, not broken. Rollback is a revert of this change.
+
+**Plan before release (needs the owner's go).** One synthetic direct call with this exact request shape (adaptive thinking with `display: "summarized"` and `block_binding`, under the thinking-binding beta) against the real API, to confirm a 200 and a non-empty summary.
 
 ## Follow-up and next iteration
 
