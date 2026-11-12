@@ -507,3 +507,24 @@ test("with stable tools the opening system message is identical on every call an
     await f.pg.close();
   }
 });
+
+test("link saving is its own domain, separate from MCP briefs", () => {
+  assert.equal(domainOf("link_save"), "links");
+  assert.equal(domainOf("link_move"), "links");
+  assert.equal(domainOf("study_list"), "links");
+  assert.equal(domainOf("study_update"), "links");
+  assert.equal(domainOf("link_resolve"), undefined);
+  assert.equal(domainOf("mcp_write"), "mcp");
+  const pick = (message: string) => [...selectDomains({ message })].sort();
+  assert.deepEqual(pick("save this https://x.com/a/status/1"), ["links"]);
+  assert.deepEqual(
+    pick(
+      "Save this article to Reader for offline reading: https://example.org/a",
+    ),
+    ["links", "news"],
+  );
+  assert.deepEqual(pick("what's on my AI study list?"), ["links"]);
+  assert.ok(pick("save the brief you wrote to Reader").includes("mcp"));
+  assert.match(DOMAIN_GUIDANCE.links!, /never default to Reader/);
+  assert.match(DOMAIN_GUIDANCE.links!, /study_list/);
+});

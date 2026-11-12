@@ -1,4 +1,5 @@
 import { linkResolve } from "./link-schema.js";
+import { linkSchemas } from "./links-schema.js";
 import { singaporeSchemas } from "./singapore/schema.js";
 import { mcpTools, mcpRead, mcpWrite, mcpOperation } from "./mcp-schema.js";
 import {
@@ -128,6 +129,7 @@ export const action = z.discriminatedUnion("operation", [
   mcpRead,
   mcpWrite,
   mcpOperation,
+  ...linkSchemas,
   z
     .object({
       operation: z.literal("conversation_search"),

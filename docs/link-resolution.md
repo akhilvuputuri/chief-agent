@@ -49,6 +49,8 @@ writes, owner isolation and cancellation still apply. Ordinary publisher URLs
 that cannot be fetched remain labelled `owner_provided`, leaving extraction to
 Reader. Generic MCP transport and other remote-server operations remain unchanged.
 
+> **Update, 12 November 2026 ([journal 178](journey/178-study-list-link-classification.md)):** owner-shared links now reach Reader through `link_save` ([links](links.md)), which canonicalises the URL (tracking parameters removed) and sends that same URL as the frozen payload, so a retry under the same key always carries the identical payload.
+
 ## Deployment
 
 Use the reviewed additive operator procedure: install only migration 031, preserve

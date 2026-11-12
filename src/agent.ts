@@ -1633,14 +1633,28 @@ export class Assistant {
         this.tools.mcp &&
         op === "mcp_write" &&
         (await this.tools.mcp.replayMatches(scope.user, input, uncertain.rows));
+      // Saving the same link again is the retry that settles its own pending Reader save or
+      // an uncertain earlier save of it (docs/links.md); any other write still waits.
+      const linkRetry =
+        !!this.tools.linkTools &&
+        (op === "link_save" || op === "link_move") &&
+        (await this.tools.linkTools.retriesUncertain(
+          scope.user,
+          input,
+          uncertain.rows,
+        ));
       if (
         this.tools.mcp &&
-        !(await this.tools.mcp.pendingAllows(scope.user, input))
+        !(await this.tools.mcp.pendingAllows(scope.user, input)) &&
+        !(
+          linkRetry &&
+          (await this.tools.linkTools!.retriesPending(scope.user, input))
+        )
       )
         throw new WriteBlockedError(
           "An uncertain write requires inspection: reconcile the pending MCP operation first",
         );
-      if (uncertain.rows.length && !exactMcpReplay)
+      if (uncertain.rows.length && !exactMcpReplay && !linkRetry)
         throw new WriteBlockedError(
           uncertain.rows.every((r) => r.operation === "calendar_draft")
             ? "An uncertain write requires inspection before further writes. It is an earlier Calendar draft attempt. It is checked again on the owner's next write, from two minutes after it started, and cleared if it saved nothing; ask the owner to try again then, or request operator inspection if it persists."

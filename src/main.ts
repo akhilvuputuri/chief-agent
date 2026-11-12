@@ -91,6 +91,8 @@ import { JobTools } from "./tools.js";
 import { WebTools } from "./providers.js";
 import { Assistant } from "./agent.js";
 import { ToolPicker } from "./tool-picker.js";
+import { LinkTools } from "./links.js";
+import { LinkClassifier } from "./link-classifier.js";
 import { ShadowDecisions } from "./shadow.js";
 import { EffortPicker } from "./effort.js";
 import { closeServer, server } from "./server.js";
@@ -111,6 +113,7 @@ import {
   telegram,
   sendCalendarApprovals,
   sendLibraryApprovals,
+  sendLinkChoices,
   sendPortfolioApprovals,
   sendResponsibilityApprovals,
 } from "./telegram.js";
@@ -805,6 +808,24 @@ if (mcpMigrated) {
     links,
   );
 }
+// Study list and link classification (migration 036, docs/links.md). Without the migration
+// the link tools stay unoffered instead of failing every turn.
+const studyMigrated = !!(
+  await db.query("SELECT 1 FROM runtime_migrations WHERE version=36")
+).rows.length;
+const linkTools = studyMigrated
+  ? new LinkTools(db, {
+      classifier: (() => {
+        try {
+          return new LinkClassifier(c.OPENROUTER_API_KEY || undefined);
+        } catch (error) {
+          opsLog("links.config_failed", "error", errorFields(error));
+          return undefined;
+        }
+      })(),
+      mcp: () => mcp,
+    })
+  : undefined;
 const assistant = new Assistant(
   db,
   new CustomAgent(
@@ -845,9 +866,11 @@ const assistant = new Assistant(
     mailIndex,
     recallEmbedder,
     publicBrowser,
+    linkTools,
   ),
   {
     links: !!links,
+    studyList: !!linkTools,
     publicBrowser: !!publicBrowser,
     mcp: !!mcp?.configured,
     canvases: !!c.MINIAPP_ORIGIN,
@@ -1089,6 +1112,14 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
         delivery.runId,
       );
       await sendLibraryApprovals(
+        bot,
+        db,
+        user,
+        undefined,
+        extra.message_thread_id,
+        delivery.runId,
+      );
+      await sendLinkChoices(
         bot,
         db,
         user,

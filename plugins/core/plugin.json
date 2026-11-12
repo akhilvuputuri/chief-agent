@@ -353,6 +353,10 @@
     {
       "id": "invoice-ledger",
       "path": "skills/invoice-ledger/SKILL.md"
+    },
+    {
+      "id": "link-saving",
+      "path": "skills/link-saving/SKILL.md"
     }
   ]
 }

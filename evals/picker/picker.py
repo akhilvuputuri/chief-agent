@@ -13,6 +13,7 @@ from typing import Any
 
 DOMAINS = (
     "mcp",
+    "links",
     "gmail",
     "calendar",
     "daily",

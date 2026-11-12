@@ -27,6 +27,7 @@ export const CORE_OPERATIONS = new Set([
 
 export const TOOL_DOMAINS = [
   "mcp",
+  "links",
   "gmail",
   "calendar",
   "daily",
@@ -51,7 +52,9 @@ export type ToolDomain = (typeof TOOL_DOMAINS)[number];
 
 /** One line per domain for the model's catalogue of loadable tools. */
 export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
-  mcp: "connected remote MCP tools, Reader article/brief saving and submission status",
+  mcp: "connected remote MCP tools, Reader brief saving and submission status",
+  links:
+    "saving a shared link: classify it as study material or offline reading, the study list, moving between it and Reader",
   gmail: "read-only Gmail search/thread/read across connected accounts",
   calendar: "Calendar lookups and approval-gated event drafts",
   daily: "saved items, reminders, briefings and the daily Sheet",
@@ -85,6 +88,8 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
  * the request instead of changing the cached prefix.
  */
 export const DOMAIN_GUIDANCE: Partial<Record<ToolDomain, string>> = {
+  links:
+    'Link-saving skill. When the owner shares a link and asks to save it ("save this", "bookmark", "keep this"), call link_save; never save an owner-shared link with mcp_write save_link, and never default to Reader. link_save reads the page and has the classifier judge study material (tutorials, courses, papers, repos, technical threads in the owner\'s learning interests) versus offline reading (news, essays, general-interest long reads). Set destination only when the owner\'s own words say where: "to study", "for learning" or "for AI learning" is study; "for offline reading", "read later" or "to Reader" is reader; "both" is both. Pass interests: the owner\'s learning interests from their explicit memories, whatever key holds them (the host also reads a learning_interests memory, or one whose key names learning, interests or study). Do not invent a title or topic; pass title only when the owner wrote it. Relay the result\'s where line in one sentence. needs_choice means the owner got Study list / Reader / Both buttons: say so briefly and do not ask an open question. A pending, refused or uncertain Reader result is not saved; say what the result says. Corrections: "move it to Reader" is link_move to reader (it leaves the study list only after Reader confirms), "move it to my study list" is link_move to study with the link, "take it off my study list" is study_remove. Reader is only for offline reading. For "what\'s on my study list" call study_list (filter by topic, tag or status when asked) and reply as a short phone list grouped by status: title, site, topic. Use study_update for status (to study, in progress, done), notes and tags.',
   canvas:
     "When canvas tools are available, use saved canvases for rich results worth revisiting (tables of roles, evidence-backed analyses, preparation plans). Choose useful components based on the request; short conversation stays in Telegram. canvas_list finds earlier documents; canvas_read retrieves exact revisions in chunks. Refining the same topic updates that canvas; a new topic creates a separate canvas. Updates must reconcile the latest base revision and preserve block IDs. A saved canvas is a snapshot, not an independently verified finding. Ground content in actual records/sources; do not invent URLs or data. Use finish_turn.canvases with saved IDs and optional exact revisions to attach open buttons. The Mini App never authorizes sensitive actions. Do not promise a canvas or link before a successful save.",
   jobs: "For job fit, interview research and preparation, use the job-alignment skill and job_alignment_start/resume/read. The scope can be selected roles or all saved roles, never force a one-role workflow. Get exact role IDs from the jobs agent (its refs) or allSaved, and select relevant memory keys. For substantial work establish durable work tracking. Automatically resume pending roles within the existing allocation, keeping scopeId in the task checkpoint; do not restart the scope on each pass. Read full reports before synthesis and requested prep/Sheet saves. Combine overlapping preparation while retaining role/evidence links. Scope history is context, not authorization to resume old work. Reports distinguish unknown experience and interview uncertainty; do not upgrade those to gaps or confirmed stages.",
@@ -93,6 +98,9 @@ export const DOMAIN_GUIDANCE: Partial<Record<ToolDomain, string>> = {
 
 const PREFIXES: [string, ToolDomain][] = [
   ["mcp_", "mcp"],
+  ["link_save", "links"],
+  ["link_move", "links"],
+  ["study_", "links"],
   ["gmail_", "gmail"],
   ["calendar_", "calendar"],
   ["item_", "daily"],
@@ -132,9 +140,10 @@ export function domainOf(operation: string): ToolDomain | undefined {
 // Conservative cues: a missed domain costs one tools_load step, an extra one
 // costs only schema characters. Word boundaries avoid matching inside words.
 const CUES: [ToolDomain, RegExp][] = [
+  ["mcp", /\b(mcp|reader (save|submission|status)|save.{0,40}brief)\b/i],
   [
-    "mcp",
-    /\b(mcp|reader|offline|read later|save.{0,40}(article|brief|link))\b/i,
+    "links",
+    /\b(reader|offline|read later|study list|to study|bookmark\w*)\b|\bsave (this|that|it)\b.{0,80}https?:\/\/|\bsave\b.{0,40}\b(article|link|thread|post|repo|paper|tutorial|course)s?\b|https?:\/\/\S+.{0,40}\b(save|keep|later)\b/i,
   ],
   [
     "gathering",

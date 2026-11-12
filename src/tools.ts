@@ -1,4 +1,5 @@
 import type { LinkResolver } from "./link-resolution.js";
+import type { LinkTools } from "./links.js";
 import type { PublicBrowser } from "./public-browser/client.js";
 import type { McpTools } from "./mcp.js";
 import type { Gathering } from "./gathering/controller.js";
@@ -61,6 +62,7 @@ export class JobTools {
     readonly mailRecall?: Pick<MailIndex, "recall">,
     private recallEmbedder?: Embedder,
     readonly publicBrowser?: PublicBrowser,
+    readonly linkTools?: LinkTools,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -143,6 +145,16 @@ export class JobTools {
     if (isSingaporeAction(a)) {
       if (!this.singapore) throw new Error("Singapore data is not configured");
       return this.singapore.call(a, { run });
+    }
+    if (
+      a.operation === "link_save" ||
+      a.operation === "link_move" ||
+      a.operation === "study_list" ||
+      a.operation === "study_update" ||
+      a.operation === "study_remove"
+    ) {
+      if (!this.linkTools) throw new Error("Link saving is not configured");
+      return this.linkTools.call(user, run, a, signal);
     }
     if (a.operation === "link_resolve") {
       if (!this.links) throw new Error("Link resolution is not configured");
