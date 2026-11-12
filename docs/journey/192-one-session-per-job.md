@@ -92,6 +92,18 @@ Second round of review fixes:
 - **Disagreement** needs the same findings as last round (a hash is kept in `reviewed`); new findings on an unchanged candidate go to the coder.
 - The host refuses a multi-line ask option.
 
+Third round of review fixes:
+
+- **The push credential depends on the commit.** The box uses a GitHub credential only to push the branch and open the draft PR (`publishSandboxBranch`); it clones the repository and fetches the base over public HTTPS with none. A GitHub App installation token can be scoped per token to chosen repositories and to a subset of the installation's permissions (Chief already asks for one repository with `contents` and `pull_requests` write, `checks` and `statuses` read), so a read-only token would be possible, but nothing before the commit needs one. `githubToken` therefore issues nothing until this attempt has its `publish-approved` record and the job's stage is `publishing`; after `finish`, or in a new attempt, the old record issues nothing.
+- **Stage `publishing` is sticky.** `progress` cannot change the stage or summary once it is `publishing`; `stopped` (a lost heartbeat, a stopped box, a deadline) resets it with the state, so the next attempt asks for publication again.
+- **A message during publication is kept**, as an owner inbox item, and the owner is told it is applied after publication. If the push fails, the next attempt delivers it; once the PR is open, an undelivered owner item on the published job starts a feedback round (the existing item is delivered, no copy is made).
+- **Only an agent call's approval counts**: a compaction or cache-warm call on the reviewer path never does.
+- **The fence splits on every line separator** (CR LF, CR, LF, NEL, LS, PS) before quoting.
+- **A refused warm request is not recorded as a rejection**, so it cannot change what `autoRetryOnce` sees; a warm call after a compaction is refused the same quiet way.
+- The coder's session is restored once at the start of an attempt.
+
+Accepted, with the reason: cache-warm calls are not counted or rate-limited separately. A warm call must equal the role's previous request, one call per job runs at a time, and stage D3 removes the per-call count for every call by the owner's decision, so a misbehaving box's spend is bounded by the job's machine-time backstop for warm and normal calls alike. Known boundary: the review runs inside the box, so the candidate hash the header carries is the box's claim, joined to the reviewer model's recorded APPROVE; it is not proof of what the reviewer read.
+
 The reviewer installs dependencies itself in every round, because its copy is rebuilt from a clean clone each time. That cost is accepted for independence.
 
 Known suspects, not changed here: the artifact bounds (500 files, 1 MB per file, 10 MB in total, no binary files) can stop a job that adds large or binary assets; a git filter the coder configures can hang the snapshot until the box ends, now that the worker's git timeouts are gone.
