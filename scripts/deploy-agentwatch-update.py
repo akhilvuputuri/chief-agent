@@ -13,13 +13,19 @@ It does not require or write RELEASE, publish source, or stop, recreate or retag
 gateway (it only reads the gateway's health). Afterwards the live compose.yaml and db/ hash
 the same as the reviewed main, so the next automatic release proceeds normally and keeps
 the gateway's own settings, which this procedure leaves byte-identical. On any failure after
-compose.yaml is written, the previous compose.yaml and agentwatch container are restored.
-The agentwatch-data volume is never removed."""
+agentwatch is stopped, the previous compose.yaml and agentwatch container are restored.
+
+A new agentwatch may change the format of its database, which the previous image then refuses
+to open, so restoring the container alone would not be a rollback. Before the new image
+starts, agentwatch is stopped and its data files are copied to BACKUPS on the host; a rollback
+puts those files back before starting the previous image. The agentwatch-data volume itself
+is never removed, and the newest KEPT_BACKUPS copies are kept."""
 import fcntl
 import json
 import pathlib
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -30,6 +36,32 @@ LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
 AGENTWATCH_CONTAINER = 'hermes-companion-agentwatch-1'
 COMPOSE_NETWORK = 'hermes-companion_default'
+DATA_VOLUME = 'hermes-companion_agentwatch-data'
+# Copies of agentwatch's data files, one directory an update, readable by root only: they hold
+# the same conversations as the traces.
+BACKUPS = pathlib.Path('/var/backups/agentwatch-update')
+KEPT_BACKUPS = 3
+# Run inside a throwaway container from the previous agentwatch image, with no network. Each
+# keeps a file's owner, since agentwatch does not run as root. The restore empties /data first:
+# a write-ahead log the new image left behind would otherwise be replayed into the old file.
+COPY_OUT = (
+    'import os, shutil\n'
+    'for name in sorted(os.listdir("/data")):\n'
+    '    source, target = "/data/" + name, "/backup/" + name\n'
+    '    shutil.copy2(source, target)\n'
+    '    found = os.stat(source)\n'
+    '    os.chown(target, found.st_uid, found.st_gid)\n'
+)
+COPY_BACK = (
+    'import os, shutil\n'
+    'for name in os.listdir("/data"):\n'
+    '    os.remove("/data/" + name)\n'
+    'for name in sorted(os.listdir("/backup")):\n'
+    '    source, target = "/backup/" + name, "/data/" + name\n'
+    '    shutil.copy2(source, target)\n'
+    '    found = os.stat(source)\n'
+    '    os.chown(target, found.st_uid, found.st_gid)\n'
+)
 AGENTWATCH_REPOSITORY = 'ghcr.io/akhilvuputuri/agentwatch'
 SERVICE_LINE = re.compile(rb'^  agentwatch:[ \t]*\n', re.M)
 # Only the next service key or a top-level key ends the block; comments do not.
@@ -69,7 +101,10 @@ JUDGE_KEY_ENV = b'OPENROUTER_API_KEY'
 MAX_JUDGE_DAILY = 50
 COMMAND_FLAGS = {b'--host', b'--allow-host', b'--retain-days', b'--memory-limit',
                  b'--judge-endpoint', b'--judge-key-env', b'--judge-max-daily',
-                 b'--auth-user', b'--api-key-env', b'--forwarded-allow-ips'}
+                 b'--auth-user', b'--api-key-env', b'--forwarded-allow-ips', b'--public-url'}
+# Where alerts link to (agentwatch's docs/design.md#monitors-and-alerts): the https address of
+# a public name agentwatch answers to, which exists only with signing in on.
+PUBLIC_URL = re.compile(rb'https://([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)')
 # Signing in (agentwatch's docs/design.md#signing-in): the password hash and --auth-user go
 # together, and so do the gateway's key and --api-key-env, or trace export and the alert relay
 # would be refused. Behind the host's Caddy, the client address must come from the proxy.
@@ -184,6 +219,35 @@ def agentwatch_ingests(key=None):
             raise RuntimeError('agentwatch did not refuse a request without its key; signing in is not on')
 
 
+def _copy(image, script, mounts):
+    """Runs one of the copy scripts as root in a container from `image`, cut off from the
+    network. Root, because the backup directory is root's and the files are agentwatch's."""
+    run(['docker', 'run', '--rm', '--network', 'none', '--read-only', '--user', '0:0',
+         '--entrypoint', 'python', *mounts, image, '-c', script])
+
+
+def back_up(image, sha):
+    """Copies agentwatch's data files (it must be stopped) to a new directory and returns it."""
+    BACKUPS.mkdir(mode=0o700, parents=True, exist_ok=True)
+    BACKUPS.chmod(0o700)
+    target = BACKUPS / (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + sha[:12])
+    target.mkdir(mode=0o700)
+    _copy(image, COPY_OUT, ['--volume', DATA_VOLUME + ':/data:ro', '--volume', str(target) + ':/backup'])
+    return target
+
+
+def restore(image, backup):
+    """Puts a backup's files back in place of whatever is in the volume (agentwatch stopped)."""
+    _copy(image, COPY_BACK, ['--volume', DATA_VOLUME + ':/data', '--volume', str(backup) + ':/backup:ro'])
+
+
+def prune_backups():
+    """Keeps the newest KEPT_BACKUPS. Their names start with a UTC time, so they sort by age."""
+    found = sorted(path for path in BACKUPS.iterdir() if path.is_dir())
+    for old in found[:-KEPT_BACKUPS]:
+        shutil.rmtree(old)
+
+
 def network_gateway():
     """The Compose network's gateway: the address Caddy on the host reaches agentwatch from,
     through Docker's loopback port proxy."""
@@ -270,6 +334,11 @@ def validate_command(command, environment):
         raise RuntimeError('agentwatch signing in behind Caddy needs --forwarded-allow-ips')
     if proxies and not PROXY_ADDRESSES.fullmatch(proxies[0]):
         raise RuntimeError('agentwatch --forwarded-allow-ips must list addresses or networks')
+    for public in values.get(b'--public-url', []):
+        named = PUBLIC_URL.fullmatch(public)
+        if (not signing_in or named is None or named.group(1) in PRIVATE_HOSTS
+                or named.group(1) not in values.get(b'--allow-host', [])):
+            raise RuntimeError('agentwatch --public-url must be https:// and a public --allow-host name, with signing in on')
     if b'OPENROUTER_API_KEY' not in environment:
         return values
     if values.get(b'--judge-endpoint') != [JUDGE_ENDPOINT]:
@@ -409,7 +478,12 @@ def main():
             if not gateway_healthy():
                 raise RuntimeError('Gateway is not healthy; inspect before updating agentwatch')
             old_compose = (LIVE / 'compose.yaml').read_bytes()
+            backup = None
             try:
+                # Stopped first, so the files are complete and nothing is written while they
+                # are copied. From here on a failure restores the previous agentwatch.
+                compose('stop', 'agentwatch')
+                backup = back_up(previous, sha)
                 (LIVE / 'compose.yaml').write_bytes((stage / 'compose.yaml').read_bytes())
                 compose('up', '-d', '--no-deps', 'agentwatch')
                 if not agentwatch_healthy():
@@ -420,13 +494,23 @@ def main():
             except Exception:
                 try:
                     (LIVE / 'compose.yaml').write_bytes(old_compose)
+                    if backup is not None:
+                        # The new image may have rewritten the files in a format the previous
+                        # one cannot open.
+                        compose('stop', 'agentwatch')
+                        restore(previous, backup)
                     compose('up', '-d', '--no-deps', 'agentwatch')
                     if not agentwatch_healthy() or agentwatch_image_id() != previous:
                         raise RuntimeError('Rollback health failed')
                 except Exception:
-                    raise RuntimeError('Rollback needs operator inspection; gateway untouched; agentwatch volume kept') from None
+                    raise RuntimeError('Rollback needs operator inspection; gateway untouched; agentwatch volume kept'
+                                       + ('' if backup is None else '; its data as it was is in ' + str(backup))) from None
                 raise RuntimeError('agentwatch update failed; previous agentwatch restored') from None
-            print(json.dumps({'agentwatch': image, 'healthy': True}))
+            try:
+                prune_backups()
+            except Exception:
+                pass  # an old copy left behind is not a failed update
+            print(json.dumps({'agentwatch': image, 'healthy': True, 'backup': str(backup)}))
 
 
 if __name__ == '__main__':
