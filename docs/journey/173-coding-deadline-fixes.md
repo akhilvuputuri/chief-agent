@@ -47,6 +47,8 @@ The five-minute startup margin is kept: before the first heartbeat the deadline 
 
 Independent review: pending.
 
+> **Update, 12 November 2026:** independent review of `d0887bef` approved; two edge-case tests added in `ce0de25a` (a 180-minute configuration with a 150-minute job claims with 150 plus the margin; a 90-minute job on a two-hour image keeps 90). The three affected test files pass, 26 tests.
+
 ## Verification and outcome
 
 **Tested, locally, 12 November 2026** (Node 22.23.4, Kite 0.2.0, PGlite): the three affected files pass (24 tests); the full TypeScript suite (`kite run test:ts`) passed 1,680 tests with 1 skipped and none failing; `kite run typecheck` passed; Prettier is clean on the changed files. With the old claim restored, all five new deadline tests fail.
