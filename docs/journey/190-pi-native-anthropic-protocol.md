@@ -100,3 +100,7 @@ A security re-review showed that content inside messages still reached Anthropic
 - **Proven against what Pi sends.** A test through the real host route runs a real Pi session into the final-report phase (its mid-conversation system message) and a build that makes Pi compact, and asserts no request was refused.
 - **A worker that hung up while waiting for the slot** is answered with a refusal before the slot is claimed, so it costs no allowance and leaves no `uncertain` call.
 - **Follow-up:** a reviewer-only capability, issued when the reviewer starts, would remove the reviewer proof's dependence on the per-attempt capability (the known boundary above).
+
+## Update, 13 November 2026: released and pinned
+
+Merged as `991004f` (PR 479); release run 43294918807 succeeded and the gateway was healthy at `991004f`. GitHub's container job ("Pi worker boundary") passed on the final head after the container smoke was moved to the new protocol. The worker image built from `991004f` (run 43294388365, `sha256:7e205748…`) is pinned in `config/coding-pi.json` and `config/boxes.json`, and `previousImages` is emptied because no earlier image can reach the new route. No real job has run on it yet, so behaviour on a real task is still unmeasured.
