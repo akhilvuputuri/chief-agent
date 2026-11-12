@@ -14,6 +14,8 @@ Chief resolves the requested model to an exact catalog ID and checks tool/reason
 
 The runtime uses Pi's native OpenAI-compatible transport through Chief's OpenRouter facade. These tests concern models routed through OpenRouter, not direct vendor APIs, image/audio inputs or every future catalog model. Pi preserves structured and opaque reasoning during tool continuations. The facade remains strict and bounded; exact role/model identity, request journals and owner implementation approval remain host authority.
 
+> **Update, 13 November 2026 ([journal 184](journey/184-pi-native-anthropic-protocol.md)):** Pi coding jobs now use Pi's native Anthropic Messages transport through the host, for Claude models with a direct Anthropic route only; the OpenAI-compatible facade and its OpenRouter route are gone. Thinking blocks and tool calls are kept and resent by Pi as the API returned them.
+
 The report tool advertises only valid results for the current intent and the actual planning-summary bound. A clean prose-only ending receives one report-only finalization prompt within the active run and original allocation. Repository/command tools are deactivated for that prompt. Repeated missing reports, errors, cancellation or exhausted allocation stop visibly; the handoff does not resume a paused job, approve implementation or replace checks. A valid question or reviewer REQUEST_CHANGES remains a real workflow outcome. Review context labels the approved plan’s historical starting state separately from the completed candidate. Empty or truncated provider generations stop with fixed diagnostics; an uncertain call ID is not replayed.
 
 ## Evidence and limits

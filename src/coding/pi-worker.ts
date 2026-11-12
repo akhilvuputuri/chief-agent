@@ -48,7 +48,7 @@ const assignmentSchema = z.object({
   mode: z.enum(["plan", "implement"]),
   baseSha: z.string().regex(/^[a-f0-9]{40}$/),
   settings: codingSettings,
-  /** The Anthropic id of each of the job's models (journal 181). */
+  /** The Anthropic id of each of the job's models (journal 184). */
   nativeModels: z.record(z.string().max(120), z.string().max(120)).optional(),
   agentGit: z
     .object({

@@ -175,7 +175,7 @@ test("changing the reviewer during review restarts its session and keeps the wor
   assert.equal(after.checkpoint.piState.reviewRound, 2);
   assert.deepEqual(after.checkpoint.files, before.checkpoint.files);
   assert.equal(after.checkpoint.plan, before.checkpoint.plan);
-  // Pi's own catalogue supplies each Claude model's window (journal 181).
+  // Pi's own catalogue supplies each Claude model's window (journal 184).
   assert.equal(after.settings.contextWindows, undefined);
   const notice = (
     await f.db.query(

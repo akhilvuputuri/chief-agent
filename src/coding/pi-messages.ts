@@ -11,7 +11,7 @@ import type { CodingFailureCode } from "./model-failure.js";
 /**
  * How a Pi coding job reaches Claude: the worker runs Pi's own Anthropic Messages client against
  * the host, and the host sends each request on with its key and relays Anthropic's stream
- * back unchanged (journal 181).
+ * back unchanged (journal 184).
  */
 export type CodingAnthropic = {
   /** The direct route for a job's model, or undefined when the model has none. */
