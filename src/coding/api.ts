@@ -90,7 +90,7 @@ export async function codingApi(
         ["POST", "github-token"],
         ["POST", "pi-session"],
         ["GET", "pi-session"],
-        // Pi's Anthropic client posts to {baseUrl}/v1/messages (journal 184).
+        // Pi's Anthropic client posts to {baseUrl}/v1/messages (journal 190).
         ["POST", "pi/coder/v1/messages"],
         ["POST", "pi/reviewer/v1/messages"],
       ] as const) {

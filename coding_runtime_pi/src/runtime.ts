@@ -572,7 +572,7 @@ export class CodingRuntime {
         }
         // Pi's outer session can recover a length/error response through compaction;
         // that is switched off here. An error turn ends this run of the agent loop, and Pi's
-        // stock retry then resends a retryable failure (journal 184); only a failure that
+        // stock retry then resends a retryable failure (journal 190); only a failure that
         // outlasts its retries pauses the task.
         if (["error", "aborted", "length"].includes(turn.message.stopReason))
           settings.setCompactionEnabled(false);

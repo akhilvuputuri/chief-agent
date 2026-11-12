@@ -49,7 +49,7 @@ Source must be treated as untrusted: the container is the host boundary and must
 
 ## Chief client
 
-Chief's bridge lives outside this package in `src/coding/pi-worker.ts`. Chief retains owner-bound Telegram approval, task identity, model/provider policy, job lease, sandbox provisioning and draft publication. The bridge consumes the library API and maps to Chief's existing private task endpoints. The worker reaches Claude through Chief's host, which adds the key, decides the model, effort and output cap, and relays Anthropic's stream unchanged (journal 184).
+Chief's bridge lives outside this package in `src/coding/pi-worker.ts`. Chief retains owner-bound Telegram approval, task identity, model/provider policy, job lease, sandbox provisioning and draft publication. The bridge consumes the library API and maps to Chief's existing private task endpoints. The worker reaches Claude through Chief's host, which adds the key, decides the model, effort and output cap, and relays Anthropic's stream unchanged (journal 190).
 
 The bridge uploads immutable encrypted Pi session entries separately from artifact checkpoints, so disposable workers do not lose acknowledged context. Existing Python code/images/jobs retain their original runtime selector. The new backend is independently selected for new tasks only; Pi artifacts are draft-only and do not inherit the Python squad's automatic merge authority.
 

@@ -144,7 +144,13 @@ for (const investigationTurns of [1, 32])
     );
     if (investigationTurns === 32) {
       const system = last.system.map((b: any) => b.text).join("\n");
-      assert(system.includes("Host workflow phase: final report"));
+      // Pi sends a changed prompt section to Claude as a mid-conversation system message.
+      const update = last.messages
+        .filter((m: any) => m.role === "system")
+        .flatMap((m: any) => m.content)
+        .map((b: any) => b.text ?? "")
+        .join("\n");
+      assert(update.includes("Host workflow phase: final report"));
       assert(system.includes("Plan the synthetic fix"));
       assert(system.includes("preserve the owner-selected objective"));
       assert.deepEqual(

@@ -13,7 +13,7 @@ Measured with this PR's classifier, 16 of the 60 merged PRs before PR 386 change
 - **Measured:** `prettier --check .` covers the docs, so `format and types` still applies to these PRs.
 - **Measured, TypeScript 7.0.2 against 5.9.3:** `tsc` output was byte-identical across all 222 emitted files. The `typescript` package no longer exports the JavaScript compiler API (`createSourceFile`), which `scripts/pi-report-acceptance.mjs` and two scripts in `scripts/pi-acceptance/` use.
 
-> **Update, 13 November 2026 ([journal 184](184-pi-native-anthropic-protocol.md)):** `scripts/pi-report-acceptance.mjs` and `scripts/pi-acceptance/prepare-workflow.mjs` were deleted with the retired acceptance harness; `scripts/pi-acceptance/prepare-oracle.mjs` still uses `typescript`.
+> **Update, 13 November 2026 ([journal 190](190-pi-native-anthropic-protocol.md)):** `scripts/pi-report-acceptance.mjs` and `scripts/pi-acceptance/prepare-workflow.mjs` were deleted with the retired acceptance harness; `scripts/pi-acceptance/prepare-oracle.mjs` still uses `typescript`.
 
 ## Diagnosis and alternatives
 

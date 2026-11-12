@@ -241,7 +241,7 @@ export class CodingController {
       tokens: AgentGitHubTokens;
       author: { name: string; email: string };
     },
-    /** Pi jobs call Claude only through this direct Anthropic route (journal 184). */
+    /** Pi jobs call Claude only through this direct Anthropic route (journal 190). */
     private anthropic?: CodingAnthropic,
   ) {
     this.requirements = new CodingRequirements(db, allowed, clock);
@@ -294,7 +294,7 @@ export class CodingController {
             this.resultScope(job, call.id),
           ),
         );
-        // The sealed result is the message Anthropic returned (journal 184).
+        // The sealed result is the message Anthropic returned (journal 190).
         if (
           response.content?.some(
             (b: any) =>
@@ -1037,7 +1037,7 @@ export class CodingController {
       );
     }
     this.assertDirectPiModels(next, "The job was not changed.");
-    // Pi's own catalogue gives each Claude model's window (journal 184); none is snapshotted.
+    // Pi's own catalogue gives each Claude model's window (journal 190); none is snapshotted.
     delete (next as { contextWindows?: unknown }).contextWindows;
     const piState = this.freshSession(job, next, a.requestKey);
     const restarted = !!piState;
@@ -1258,7 +1258,7 @@ export class CodingController {
     }
     return job;
   }
-  /** Pi jobs call Claude directly at Anthropic (journal 184): refuse a model without that route. */
+  /** Pi jobs call Claude directly at Anthropic (journal 190): refuse a model without that route. */
   private assertDirectPiModels(
     settings: Pick<
       CodingSettings,
@@ -1661,7 +1661,7 @@ export class CodingController {
     return { accepted: true };
   }
   /**
-   * One Pi model call (journal 184): the request goes to Anthropic as Pi built it, apart from
+   * One Pi model call (journal 190): the request goes to Anthropic as Pi built it, apart from
    * the model, effort and output cap this job decides, and Anthropic's stream comes back to
    * the worker unchanged. The host keeps its own copy of the stream to record the call.
    */

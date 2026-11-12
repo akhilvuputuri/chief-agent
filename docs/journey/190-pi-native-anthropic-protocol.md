@@ -1,4 +1,4 @@
-# 184 — Pi speaks Anthropic's protocol to the host
+# 190 — Pi speaks Anthropic's protocol to the host
 
 Work date(s): 2026-11-13. Written/revised: 2026-11-13.
 Status: implemented and tested offline on branch `coding-revamp/b-native-protocol` from `2910171b`; review, merge and release are pending. No paid model call was made.
@@ -64,10 +64,11 @@ Not released. The worker image must be rebuilt and pinned with this runtime, and
 
 - Measure on the first job: cache reads per call, cost per role and whether `thinking_dropped` stays at zero.
 
-## Update, 13 November 2026: after rebasing onto `81276321`
+## Update, 13 November 2026: after rebasing onto main
 
 Rebased onto main with builder C's piece ([journal 182](182-pi-tools-and-prompt-as-shipped.md)); there were no conflicts.
 
 - **Retry, tested.** The question was whether `runtime.ts`, which ends the agent loop on an error turn, stops Pi's stock retry. Measured with a throwaway probe against a fake Messages API: a 429 with `retry-after: 1` on the second request was resent and the plan finished (`waiting_approval`, three requests); a 529 on every later request was resent three times (Pi's default) and then paused the task after about 14 seconds. Ending the loop run does not pre-empt the retry, because Pi's session retries after the agent run ends, so no code change was needed beyond correcting the comment there. A permanent test now runs a real Pi session through the host route with a 429 then success: the retry carries the same messages, the session continues, and the calls are recorded `complete`, `uncertain`, `complete` with one `model_rate_limited` (429) rejection.
 - **Images.** `images: { blockImages: true }` (in `runtime.ts`) and `autoResizeImages: false` (in `tools.ts`) existed only because the OpenAI-shaped proxy could not carry images; both are removed, so image reads are Pi's defaults. Tested through the host: a PNG read by the model reaches the fake API as a base64 `image` block in the `tool_result`. Not tested: Pi's image resizing (it runs in a worker thread) inside the real sandbox under the process guard.
+- **Final-report phase text.** With Claude, Pi sends the host's changed prompt section (the final-report phase) as a mid-conversation system message instead of rewriting the top-level system prompt, which keeps the cached prefix. The native-protocol test now looks for it there.
 - **The test not counted as a pass** is `tests/box-docker.test.ts`, skipped unless `CHIEF_BOX_DOCKER_IMAGE` is set; it is skipped on main too.

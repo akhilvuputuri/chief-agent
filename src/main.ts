@@ -667,7 +667,7 @@ if (c.CODING_RUNTIME === "on") {
           author: { name: c.CODING_COMMIT_NAME, email: c.CODING_COMMIT_EMAIL },
         }
       : undefined,
-    // Pi coding models are reached only through the direct Anthropic route (journal 184).
+    // Pi coding models are reached only through the direct Anthropic route (journal 190).
     {
       route: (model) => models.anthropicRoute(model),
       send: (body, wire, signal) => codingAnthropic.send(body, wire, signal),

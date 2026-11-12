@@ -85,4 +85,4 @@ Not measured: whether a real coding job now uses `read`/`edit`, issues several c
 - The per-run tool and model allocations remain.
 - `images: { blockImages: true }` and `autoResizeImages: false` remain until the native model protocol carries images.
 
-> **Update, 13 November 2026 ([journal 184](184-pi-native-anthropic-protocol.md)):** with the native Anthropic protocol both overrides are removed, so image reads follow Pi's defaults (resized and sent as image blocks). Tested: a PNG the model reads reaches the fake Messages API as a base64 `image` block inside the `tool_result`.
+> **Update, 13 November 2026 ([journal 190](190-pi-native-anthropic-protocol.md)):** with the native Anthropic protocol both overrides are removed, so image reads follow Pi's defaults (resized and sent as image blocks). Tested: a PNG the model reads reaches the fake Messages API as a base64 `image` block inside the `tool_result`.
