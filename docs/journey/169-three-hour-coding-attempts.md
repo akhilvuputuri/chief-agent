@@ -55,8 +55,8 @@ The owner chose `medium` for new Pi jobs after reading the evidence above. `effo
 
 **Measured, production `coding_model_calls` for job `9600af57`, before the resume:** the coder's tools were `read`, `grep`, `find`, `ls`, `edit`, `write`, `bash`, `report` and `read_document`.
 
-- **One tool call per turn.** 173 of 179 coder responses and 71 of 78 reviewer responses asked for exactly one tool. The planner, with no shell, asked for two or three at a time in 12 of its 15.
-- **Shell instead of the file tools.** All but 12 of the coder's tool calls were `bash`: 49 `sed`, 42 `grep`, 14 `cat`, and 25 `python3` scripts averaging 2,543 characters that edited files. It called `edit` zero times and `read` once. The reviewer made 67 `bash` calls, mostly `grep`, `sed` and `cat`.
+- **One tool call per turn.** 168 of 173 coder responses and 63 of 69 reviewer responses asked for exactly one tool. The planner, with no shell, asked for two or three at a time in 12 of its 15.
+- **Shell instead of the file tools.** All but 9 of the coder's 178 tool calls were `bash`: 49 `sed`, 42 `grep`, 14 `cat`, and 25 `python3` scripts averaging 2,543 characters that edited files. It called `edit` and `read` zero times. The reviewer made 60 `bash` calls, mostly `grep`, `sed` and `cat`.
 - **The prompt says nothing about either.** The Pi runtime replaces Pi's default system prompt with Chief's (`coding_runtime_pi/src/runtime.ts`), which asks for real checks and scope but gives no guidance on choosing tools or batching independent reads.
 
 **Hypothesis, not tested:** each extra turn costs a full model call with its thinking, and each edit script is written out as output tokens at about 100 a second. Telling the coder and reviewer to use `read` and `edit` and to batch independent reads in one turn could cut the number of turns substantially. That is a worker change, so it needs a new worker image and a pin.
