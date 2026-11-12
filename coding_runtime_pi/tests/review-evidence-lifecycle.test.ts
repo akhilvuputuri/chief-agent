@@ -9,9 +9,10 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   CodingRuntime,
   TaskStore,
-  compatibleModel,
+  anthropicModel,
   documentHash,
 } from "../src/index.js";
+import { messagesStream, toolUse, type FakeBlock } from "./anthropic-sse.js";
 
 test("complete large review evidence survives native compaction and explicit runtime/store replacement", async (t) => {
   const text = Array.from(
@@ -54,12 +55,18 @@ test("complete large review evidence survives native compaction and explicit run
       wireSizes.push(Buffer.byteLength(raw));
       const body = JSON.parse(raw),
         compact = !body.tools?.length;
-      for (const message of body.messages ?? []) {
-        if (message.role !== "tool" || typeof message.content !== "string")
-          continue;
+      const results = (body.messages ?? []).flatMap((message: any) =>
+        Array.isArray(message.content)
+          ? message.content.filter(
+              (b: any) =>
+                b.type === "tool_result" && typeof b.content === "string",
+            )
+          : [],
+      );
+      for (const result of results) {
         let chunk: any;
         try {
-          chunk = JSON.parse(message.content);
+          chunk = JSON.parse(result.content);
         } catch {
           continue;
         }
@@ -69,7 +76,7 @@ test("complete large review evidence survives native compaction and explicit run
           observed[attempt]![i] = chunk.text[i - chunk.from];
       }
       if (!compact) {
-        const names = body.tools.map((tool: any) => tool.function.name);
+        const names = body.tools.map((tool: any) => tool.name);
         assert(names.includes("read_document"));
         assert(
           !names.some((name: string) =>
@@ -78,20 +85,21 @@ test("complete large review evidence survives native compaction and explicit run
         );
       }
       const interrupt = !compact && attempt === 0 && page === 45;
-      let delta: any, finish: string;
+      let content: FakeBlock[], finish: string;
       if (compact) {
         summaries++;
-        delta = {
-          role: "assistant",
-          content: `Review immutable candidate_diff, hash ${hash}. Continue reading its remaining pages; the host retains the complete document. No files changed. No verdict submitted.`,
-        };
-        finish = "stop";
+        content = [
+          {
+            type: "text",
+            text: `Review immutable candidate_diff, hash ${hash}. Continue reading its remaining pages; the host retains the complete document. No files changed. No verdict submitted.`,
+          },
+        ];
+        finish = "end_turn";
       } else if (interrupt) {
-        delta = {
-          role: "assistant",
-          content: "Controlled incomplete model response",
-        };
-        finish = "length";
+        content = [
+          { type: "text", text: "Controlled incomplete model response" },
+        ];
+        finish = "max_tokens";
       } else {
         const call =
           page < 50
@@ -109,31 +117,18 @@ test("complete large review evidence survives native compaction and explicit run
                     "The complete immutable evidence was available after replacement.",
                 },
               };
-        delta = {
-          role: "assistant",
-          content: null,
-          tool_calls: [
-            {
-              index: 0,
-              id: `evidence-${sequence}`,
-              type: "function",
-              function: {
-                name: call.name,
-                arguments: JSON.stringify(call.arguments),
-              },
-            },
-          ],
-        };
-        finish = "tool_calls";
+        content = [toolUse(`evidence-${sequence}`, call.name, call.arguments)];
+        finish = "tool_use";
       }
-      const header = {
-        id: `review-evidence-${sequence++}`,
-        model: "fixture/review-evidence",
-      };
       const input = Math.ceil(Buffer.byteLength(raw) / 4);
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(
-        `data: ${JSON.stringify({ ...header, choices: [{ index: 0, delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ ...header, choices: [{ index: 0, delta: {}, finish_reason: finish }], usage: { prompt_tokens: input, completion_tokens: 100, total_tokens: input + 100 } })}\n\ndata: [DONE]\n\n`,
+        messagesStream({
+          id: `review-evidence-${sequence++}`,
+          content,
+          stopReason: finish,
+          usage: { input_tokens: input, output_tokens: 100 },
+        }),
       );
     } catch (error) {
       handlerError = error;
@@ -151,14 +146,13 @@ test("complete large review evidence survives native compaction and explicit run
       store,
       runtime: new CodingRuntime({
         store,
-        model: compatibleModel({
-          provider: "synthetic",
-          model: "fixture/review-evidence",
+        model: anthropicModel({
+          model: "claude-opus-5-5",
           apiKey: "synthetic",
-          baseUrl: `http://127.0.0.1:${(server.address() as any).port}/v1`,
-          contextWindow: 1000000,
+          baseUrl: `http://127.0.0.1:${(server.address() as any).port}`,
+          // A small window makes Pi compact during the long review.
+          contextWindow: 60000,
           maxTokens: 16000,
-          maxRequestBytes: 179000,
         }),
       }),
     };
@@ -194,7 +188,6 @@ test("complete large review evidence survives native compaction and explicit run
   assert.equal(done.status, "completed", done.summary);
   assert.equal(done.report?.verdict, "APPROVE");
   assert.equal(observed[1]!.join(""), text);
-  assert(wireSizes.every((size) => size <= 179000));
   assert.equal(git("status", "--short").toString(), "");
   console.log(
     JSON.stringify({

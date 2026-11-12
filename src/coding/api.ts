@@ -1,17 +1,14 @@
 import { errorFields, opsLog } from "../ops-log.js";
 import { SandboxAcknowledgementPending, WorkerRefused } from "./provider.js";
 import { rejectionReason } from "./rejection-reason.js";
-import { piCompletion } from "./pi-proxy.js";
+import { Readable } from "node:stream";
+import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { CodingController } from "./controller.js";
 import { ModelError } from "../model.js";
 import { CodingModelFailure } from "./model-failure.js";
-import {
-  isTerminalHttpStatus,
-  retryParentHeader,
-  type TerminalHttpReceipt,
-} from "@chief-agent/pi-runtime/terminal-http-recovery";
+import { purposeHeader } from "@chief-agent/pi-runtime";
 
 const message = z
   .object({
@@ -93,14 +90,16 @@ export async function codingApi(
         ["POST", "github-token"],
         ["POST", "pi-session"],
         ["GET", "pi-session"],
-        ["POST", "pi/coder/v1/chat/completions"],
-        ["POST", "pi/reviewer/v1/chat/completions"],
+        // Pi's Anthropic client posts to {baseUrl}/v1/messages (journal 190).
+        ["POST", "pi/coder/v1/messages"],
+        ["POST", "pi/reviewer/v1/messages"],
       ] as const) {
+        const messages =
+          path === "pi/coder/v1/messages" || path === "pi/reviewer/v1/messages";
         const diagnosticPhase =
           path === "pi-session" || path === "github-token"
             ? "checkpoint"
-            : path === "pi/coder/v1/chat/completions" ||
-                path === "pi/reviewer/v1/chat/completions"
+            : messages
               ? "model"
               : path;
         api.route({
@@ -108,11 +107,16 @@ export async function codingApi(
           url: `/:id/${path}`,
           // Pi report/checkpoint documents plus the existing bounded patch/files.
           // Worst-case JSON escaping of every allowed string fits within 64 MB.
+          // Messages requests may be as large as Anthropic's own 32 MB request limit.
           bodyLimit:
-            path === "checkpoint" || path === "finish" ? 64_000_000 : 8_000_000,
-          // Authenticate the larger artifact routes before parsing their bodies.
+            path === "checkpoint" || path === "finish"
+              ? 64_000_000
+              : messages
+                ? 32 * 1024 * 1024
+                : 8_000_000,
+          // Authenticate the larger routes before parsing their bodies.
           onRequest: async (req, reply) => {
-            if (path !== "checkpoint" && path !== "finish") return;
+            if (path !== "checkpoint" && path !== "finish" && !messages) return;
             if (
               !z
                 .string()
@@ -125,7 +129,9 @@ export async function codingApi(
             try {
               await controller.authenticate(
                 (req.params as { id: string }).id,
-                req.headers.authorization?.replace(/^Bearer /, "") ?? "",
+                messages
+                  ? String(req.headers["x-api-key"] ?? "")
+                  : (req.headers.authorization?.replace(/^Bearer /, "") ?? ""),
                 path === "finish",
               );
             } catch (error) {
@@ -149,11 +155,21 @@ export async function codingApi(
                 .send({ error: "Invalid worker capability" });
             let job;
             const acknowledgementUntil = Date.now() + 120000;
+            // A worker that goes away stops its model call, including while it waits here.
+            const gone = new AbortController();
+            if (messages)
+              reply.raw.on("close", () => {
+                if (!reply.raw.writableFinished) gone.abort();
+              });
+            // Pi's Anthropic client sends its key (the worker capability) as x-api-key.
+            const capability = messages
+              ? String(req.headers["x-api-key"] ?? "")
+              : (req.headers.authorization?.replace(/^Bearer /, "") ?? "");
             while (true) {
               try {
                 job = await controller.authenticate(
                   id,
-                  req.headers.authorization?.replace(/^Bearer /, "") ?? "",
+                  capability,
                   path === "finish",
                 );
                 break;
@@ -209,17 +225,24 @@ export async function codingApi(
                   Number(query.offset ?? 0),
                 );
               }
-              if (path.endsWith("chat/completions")) {
-                const response = await piCompletion(
-                  controller,
+              if (messages) {
+                const response = await controller.piMessages(
                   job,
-                  path.includes("/reviewer/") ? "reviewer" : "coder",
+                  path.startsWith("pi/reviewer/") ? "reviewer" : "coder",
                   req.body,
-                  req.headers[retryParentHeader],
+                  {
+                    betas: req.headers["anthropic-beta"],
+                    version: req.headers["anthropic-version"],
+                    purpose: req.headers[purposeHeader],
+                    signal: gone.signal,
+                  },
                 );
-                return response.stream
-                  ? reply.type("text/event-stream").send(response.body)
-                  : response.body;
+                reply.code(response.status).headers(response.headers);
+                return reply.send(
+                  typeof response.body === "string"
+                    ? response.body
+                    : Readable.fromWeb(response.body as WebReadableStream),
+                );
               }
               if (path === "assignment") return controller.assignment(job);
               if (path === "heartbeat") return await controller.heartbeat(job);
@@ -252,11 +275,7 @@ export async function codingApi(
                 );
               }
             } catch (error) {
-              if (
-                !path.endsWith("chat/completions") &&
-                path !== "model" &&
-                hostFailure(error)
-              ) {
+              if (!messages && path !== "model" && hostFailure(error)) {
                 opsLog("coding.worker_request_unavailable", "warn", {
                   taskId: id,
                   ...errorFields(error),
@@ -273,43 +292,34 @@ export async function codingApi(
                     : error instanceof ModelError
                       ? "model_provider_failed"
                       : "worker_request_rejected";
-              const recorded = await controller
+              await controller
                 .recordRejection(job, {
                   phase: diagnosticPhase,
                   code,
-                  httpStatus: 409,
+                  httpStatus: messages ? 400 : 409,
                   ...(code === "worker_request_rejected"
                     ? { reason: rejectionReason(error) }
                     : {}),
                   ...(error instanceof CodingModelFailure ? error.details : {}),
                 })
                 .catch(() => false);
-              const recovery: TerminalHttpReceipt | undefined =
-                recorded &&
-                path.endsWith("chat/completions") &&
-                job.settings.runtime === "pi" &&
-                !req.headers[retryParentHeader] &&
-                error instanceof CodingModelFailure &&
-                ["model_rate_limited", "model_transient_failure"].includes(
-                  error.code,
-                ) &&
-                isTerminalHttpStatus(error.details.providerStatus) &&
-                !error.details.timeoutKind &&
-                !error.details.finishReason &&
-                !error.details.providerFailure
-                  ? {
-                      version: 1,
-                      kind: "terminal-provider-http",
-                      callId: error.details.callId,
-                      attemptId: job.attempt_id!,
-                      providerStatus: error.details.providerStatus,
-                    }
-                  : undefined;
+              if (messages)
+                // In Anthropic's shape, so Pi's client reports it and does not retry.
+                return reply
+                  .code(400)
+                  .header("x-should-retry", "false")
+                  .send({
+                    type: "error",
+                    error: {
+                      type: "invalid_request_error",
+                      message:
+                        "Coding request rejected; inspect job state before retrying",
+                    },
+                  });
               return reply.code(409).send({
                 error:
                   "Coding request rejected; inspect job state before retrying",
                 code,
-                ...(recovery ? { recovery } : {}),
               });
             }
           },

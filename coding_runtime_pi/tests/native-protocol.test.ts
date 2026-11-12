@@ -1,96 +1,80 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { CodingRuntime, TaskStore, compatibleModel } from "../src/index.js";
+import {
+  CodingRuntime,
+  TaskStore,
+  anthropicModel,
+  purposeHeader,
+} from "../src/index.js";
+import { messagesStream, toolUse, type FakeTurn } from "./anthropic-sse.js";
 
-for (const choice of [
-  { provider: "synthetic", model: "synthetic/model", deepseek: false },
-  { provider: "synthetic", model: "synthetic/handoff", deepseek: false },
-  {
-    provider: "openrouter",
-    model: "deepseek/deepseek-v4.1-flash",
-    deepseek: true,
-  },
-  // A dated snapshot newer than Pi's bundled list keeps its base model's protocol rules.
-  {
-    provider: "openrouter",
-    model: "deepseek/deepseek-v4.1-flash-1017",
-    deepseek: true,
-  },
-  ...[
-    "openai/gpt-6.1-sol",
-    "anthropic/claude-sonnet-5.5",
-    "anthropic/claude-haiku-5.5",
-    "google/gemini-3.8-flash",
-    "qwen/qwen3.8-max-0902",
-    "z-ai/glm-5.3-flash",
-    "mistralai/mistral-large-4-0",
-  ].map((model) => ({ provider: "openrouter", model, deepseek: false })),
-])
-  test(`native Pi ${choice.model} protocol performs tool continuation, request identity and Unicode without paid inference`, async (t) => {
-    const bodies: any[] = [];
-    const investigationTurns = choice.model === "synthetic/handoff" ? 32 : 1;
+async function workspace(root: string) {
+  const dir = join(root, "work");
+  await mkdir(dir);
+  execFileSync("git", ["init", "-q", dir]);
+  execFileSync("git", ["-C", dir, "config", "user.name", "Synthetic"]);
+  execFileSync("git", [
+    "-C",
+    dir,
+    "config",
+    "user.email",
+    "synthetic@example.invalid",
+  ]);
+  await writeFile(join(dir, "sum.js"), "// synthetic\n");
+  await writeFile(
+    join(dir, "AGENTS.md"),
+    "Synthetic project rule: preserve the owner-selected objective.\n",
+  );
+  execFileSync("git", ["-C", dir, "add", "."]);
+  execFileSync("git", ["-C", dir, "commit", "-qm", "Fixture"]);
+  return dir;
+}
+
+for (const investigationTurns of [1, 32])
+  test(`Pi's Anthropic client resends each response's content blocks unchanged (${investigationTurns} investigation turns)`, async (t) => {
+    const requests: { headers: Record<string, unknown>; body: any }[] = [];
+    const turns: FakeTurn[] = [];
     const server = createServer(async (req, res) => {
-      assert.equal(req.headers.authorization, "Bearer synthetic-capability");
+      assert.equal(req.url, "/gateway/v1/messages?beta=true");
       let text = "";
       for await (const chunk of req) text += chunk;
-      const body = JSON.parse(text);
-      bodies.push(body);
-      const tool = bodies.length <= investigationTurns;
-      const message = {
-        role: "assistant",
-        content: null,
-        reasoning_details: [
-          { type: "reasoning.text", text: "Synthetic reasoning", id: "r1" },
-          {
-            type: "reasoning.encrypted",
-            data: "synthetic-opaque-signature",
-            id: "signature1",
-            format: "unknown",
-            index: 1,
-          },
-        ],
-        tool_calls: [
-          {
-            index: 0,
-            id: tool ? "read-call" : "report-call",
-            type: "function",
-            function: {
-              name: tool ? "read" : "report",
-              arguments: JSON.stringify(
-                tool
-                  ? { path: "sum.js" }
-                  : {
-                      kind: "plan",
-                      summary: "Fix café sum",
-                      detail:
-                        "Use addition in sum.js. Check Unicode café and sum(2,3)=5.",
-                    },
-              ),
-            },
-          },
-        ],
-      };
-      const chunk = {
-        id: "synthetic",
-        object: "chat.completion.chunk",
-        created: 1,
-        model: body.model,
-        choices: [{ index: 0, delta: message, finish_reason: null }],
-      };
-      const end = {
-        ...chunk,
-        choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
-        usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 },
-      };
+      requests.push({ headers: req.headers, body: JSON.parse(text) });
+      const n = requests.length;
+      const turn: FakeTurn =
+        n <= investigationTurns
+          ? {
+              id: `msg_${n}`,
+              content: [
+                // Omitted-display thinking: empty text, real signature.
+                { type: "thinking", thinking: "", signature: `sig-${n}-Zm9v` },
+                { type: "text", text: `Reading café ${n}` },
+                toolUse(`toolu_read_${n}`, "read", { path: "sum.js" }),
+              ],
+            }
+          : {
+              id: `msg_${n}`,
+              content: [
+                {
+                  type: "thinking",
+                  thinking: "Summarised reasoning",
+                  signature: "sig-final",
+                },
+                toolUse("toolu_report", "report", {
+                  kind: "plan",
+                  summary: "Fix café sum",
+                  detail:
+                    "Use addition in sum.js. Check Unicode café and sum(2,3)=5.",
+                }),
+              ],
+            };
+      turns.push(turn);
       res.writeHead(200, { "content-type": "text/event-stream" });
-      res.end(
-        `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(end)}\n\ndata: [DONE]\n\n`,
-      );
+      res.end(messagesStream(turn));
     });
     await new Promise<void>((resolve) =>
       server.listen(0, "127.0.0.1", resolve),
@@ -100,93 +84,98 @@ for (const choice of [
     );
     const port = (server.address() as { port: number }).port;
     const root = await mkdtemp(join(tmpdir(), "pi-native-protocol-"));
-    const workspace = join(root, "work");
-    await mkdir(workspace);
-    execFileSync("git", ["init", "-q", workspace]);
-    execFileSync("git", ["-C", workspace, "config", "user.name", "Synthetic"]);
-    execFileSync("git", [
-      "-C",
-      workspace,
-      "config",
-      "user.email",
-      "synthetic@example.invalid",
-    ]);
-    await writeFile(join(workspace, "sum.js"), "// synthetic\n");
-    await writeFile(
-      join(workspace, "AGENTS.md"),
-      "Synthetic project rule: preserve the owner-selected objective.\n",
-    );
-    execFileSync("git", ["-C", workspace, "add", "."]);
-    execFileSync("git", ["-C", workspace, "commit", "-qm", "Fixture"]);
     const runtime = new CodingRuntime({
       store: new TaskStore(
         join(root, "state"),
         "synthetic-state-key-32-characters",
       ),
-      model: compatibleModel({
-        provider: choice.provider,
-        model: choice.model,
-        baseUrl: `http://127.0.0.1:${port}/v1`,
+      model: anthropicModel({
+        model: "claude-opus-5-5",
+        baseUrl: `http://127.0.0.1:${port}/gateway`,
         apiKey: "synthetic-capability",
-        requestIdField: "runtime_call_id",
-        contextWindow: 32000,
         maxTokens: 8000,
+        reasoning: "medium",
       }),
     });
     const task = await runtime.start({
-      workspace,
+      workspace: await workspace(root),
       objective: "Plan the synthetic fix",
     });
     const result = await runtime.run(task.id);
     assert.equal(result.status, "waiting_approval");
     assert(result.plan?.text.includes("café"));
-    assert.equal(bodies.length, investigationTurns + 1);
-    if (investigationTurns === 32) {
-      const final = bodies.at(-1);
-      assert.equal(final.messages[0].role, "system");
-      assert(
-        final.messages[0].content.includes("Host workflow phase: final report"),
-      );
-      assert(final.messages[0].content.includes("Plan the synthetic fix"));
-      assert(
-        final.messages[0].content.includes(
-          "preserve the owner-selected objective",
-        ),
-      );
-      assert.equal(
-        final.messages.filter((m: any) => m.role === "system").length,
-        1,
-      );
-      assert.deepEqual(
-        final.tools.map((t: any) => t.function.name),
-        bodies[0].tools.map((t: any) => t.function.name),
-      );
-    }
-    assert.notEqual(bodies[0].runtime_call_id, bodies[1].runtime_call_id);
-    assert(
-      bodies[1].messages.some(
-        (m: any) => m.role === "tool" && m.tool_call_id === "read-call",
-      ),
-    );
-    assert(
-      bodies[1].messages.some(
-        (m: any) =>
-          m.role === "assistant" && m.reasoning_details?.[0]?.id === "r1",
-      ),
-    );
-    if (choice.deepseek) {
-      const replay = bodies[1].messages.find(
-        (m: any) => m.role === "assistant",
-      );
-      assert.equal(replay.reasoning_content, "");
-      assert.equal(replay.reasoning_details[0].id, "r1");
-    }
-    const continued = bodies[1].messages.find(
-      (m: any) => m.role === "assistant",
-    );
-    assert.equal(
-      continued.reasoning_details.find((r: any) => r.id === "signature1").data,
-      "synthetic-opaque-signature",
-    );
+    assert.equal(requests.length, investigationTurns + 1);
     assert.equal(result.used.models, investigationTurns + 1);
+    // The capability lives only in the worker's memory: no file the model's tools could read
+    // (workspace, task store, Pi session) contains it.
+    for (const file of await readdir(root, {
+      recursive: true,
+      withFileTypes: true,
+    }))
+      if (file.isFile())
+        assert(
+          !(await readFile(join(file.parentPath, file.name), "utf8")).includes(
+            "synthetic-capability",
+          ),
+          join(file.parentPath, file.name),
+        );
+    for (const { headers, body } of requests) {
+      // The gateway capability travels as Pi's API key; there is no Anthropic key in the box.
+      assert.equal(headers["x-api-key"], "synthetic-capability");
+      assert.equal(headers[purposeHeader], "agent");
+      assert.equal(body.model, "claude-opus-5-5");
+      assert.equal(body.stream, true);
+      assert.equal(body.max_tokens, 8000);
+      assert.equal(body.thinking.type, "adaptive");
+      // Pi's per-turn effort marker carries the configured level.
+      assert.deepEqual(body.messages.at(-1), {
+        role: "system",
+        content: [],
+        output_config: { effort: "medium" },
+      });
+    }
+    // Every earlier response comes back in the next request exactly as the API sent it.
+    const last = requests.at(-1)!.body;
+    const assistants = last.messages.filter((m: any) => m.role === "assistant");
+    assert.equal(assistants.length, investigationTurns);
+    assistants.forEach((m: any, i: number) => {
+      assert.equal(
+        JSON.stringify(m.content),
+        JSON.stringify(turns[i]!.content),
+      );
+    });
+    assert(
+      last.messages.some(
+        (m: any) =>
+          m.role === "user" &&
+          Array.isArray(m.content) &&
+          m.content.some(
+            (b: any) =>
+              b.type === "tool_result" && b.tool_use_id === "toolu_read_1",
+          ),
+      ),
+    );
+    if (investigationTurns === 32) {
+      const system = last.system.map((b: any) => b.text).join("\n");
+      // Pi sends a changed prompt section to Claude as a mid-conversation system message.
+      const update = last.messages
+        .filter((m: any) => m.role === "system")
+        .flatMap((m: any) => m.content)
+        .map((b: any) => b.text ?? "")
+        .join("\n");
+      assert(update.includes("Host workflow phase: final report"));
+      assert(system.includes("Plan the synthetic fix"));
+      assert(system.includes("preserve the owner-selected objective"));
+      assert.deepEqual(
+        last.tools.map((tool: any) => tool.name),
+        requests[0]!.body.tools.map((tool: any) => tool.name),
+      );
+    }
   });
+
+test("a model Pi's catalogue does not list is refused before any request", async () => {
+  await assert.rejects(
+    anthropicModel({ model: "claude-unknown-0" })(async () => {}),
+    /no Anthropic model claude-unknown-0/,
+  );
+});

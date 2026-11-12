@@ -51,6 +51,7 @@ import { PublicFeedFetcher } from "./news-feed.js";
 import { run as runTelegram, type RunnerHandle } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
 import { FallbackAlerts, ModelRouter } from "./model-router.js";
+import { AnthropicMessagesGateway } from "./anthropic.js";
 import {
   resolveAgentModel,
   resolveJudgeModel,
@@ -601,6 +602,9 @@ if (c.CODING_RUNTIME === "on") {
     throw startupError("STARTUP_CODING_SANDBOX", (error as Error).message);
   }
   const owners = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+  const codingAnthropic = new AnthropicMessagesGateway(c.ANTHROPIC_API_KEY, {
+    workspaceId: c.ANTHROPIC_WORKSPACE_ID,
+  });
   coding = new CodingController(
     db,
     settings,
@@ -663,6 +667,11 @@ if (c.CODING_RUNTIME === "on") {
           author: { name: c.CODING_COMMIT_NAME, email: c.CODING_COMMIT_EMAIL },
         }
       : undefined,
+    // Pi coding models are reached only through the direct Anthropic route (journal 190).
+    {
+      route: (model) => models.anthropicRoute(model),
+      send: (body, wire, signal) => codingAnthropic.send(body, wire, signal),
+    },
   );
 }
 // Read-only IBKR holdings (issue #146): off unless explicitly enabled with its migration.

@@ -71,22 +71,23 @@ export type StartRequest = {
   referenceDocuments?: import("./report.js").ReferenceDocument[];
 };
 export type ModelConfig = {
-  provider: string;
+  /** An Anthropic model id from Pi's catalogue, such as claude-opus-5-5. */
   model: string;
-  apiKey?: string;
+  /** Messages API origin; a gateway when the box must not hold the Anthropic key. */
   baseUrl?: string;
-  reasoning?: "off" | "low" | "medium" | "high";
+  apiKey?: string;
+  reasoning?: "low" | "medium" | "high";
   contextWindow?: number;
-  /** Used only when Pi's bundled catalog does not know the model; known models keep their catalog window. */
-  fallbackContextWindow?: number;
   maxTokens?: number;
-  requestIdField?: string;
-  requestPurposeField?: string;
-  maxRequestBytes?: number;
-  /** How long to wait for a model reply, when longer than Node's 300-second fetch default. */
-  responseTimeoutMs?: number;
-  /** Opt-in authenticated host receipt protocol; direct providers stay disabled. */
-  terminalHttpRecovery?: { attemptId: string };
+  /**
+   * Pi's agent retry settings when the endpoint needs other values than Pi's defaults (three
+   * retries from two seconds); unset fields keep Pi's defaults.
+   */
+  retry?: {
+    maxRetries?: number;
+    baseDelayMs?: number;
+    maxAgentDelayMs?: number;
+  };
 };
 export const defaultLimits: Limits = {
   ms: 2_400_000,

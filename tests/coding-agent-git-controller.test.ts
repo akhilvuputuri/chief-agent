@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { fixture, settings } from "./helpers/coding-fixture.js";
+import {
+  fixture,
+  settings,
+  unusedAnthropic,
+} from "./helpers/coding-fixture.js";
 import { CodingController } from "../src/coding/controller.js";
 import { codingSettings, outcome } from "../src/coding/schema.js";
 import { requirementScope } from "../src/coding/requirements.js";
@@ -53,6 +57,7 @@ function controller(f: Awaited<ReturnType<typeof fixture>>, enabled = true) {
           author: { name: "Owner", email: "owner@example.invalid" },
         }
       : undefined,
+    unusedAnthropic,
   );
   return { c, tokens };
 }

@@ -26,18 +26,16 @@ test("Pi merge proof requires a sealed reviewer APPROVE matching the acknowledge
   const controller = f.c as any;
   const record = async (args: unknown) => {
     const id = randomUUID();
+    // The sealed result is the message Anthropic returned.
     const response = {
-      message: {
-        role: "assistant",
-        content: null,
-        tool_calls: [
-          {
-            id: "r",
-            type: "function",
-            function: { name: "report", arguments: JSON.stringify(args) },
-          },
-        ],
-      },
+      id: "msg_review",
+      type: "message",
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "", signature: "c2ln" },
+        { type: "tool_use", id: "toolu_r", name: "report", input: args },
+      ],
+      stop_reason: "tool_use",
     };
     await f.db.query(
       "INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,state,input,result_box) VALUES($1,$2,$3,'reviewer','fixture','complete','{}'::jsonb,$4)",

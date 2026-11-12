@@ -24,6 +24,8 @@ Offline tests exercise the two incident-sized plans, maximum-size ASCII/Unicode 
 
 The paid acceptance harness is prepared by `node scripts/pi-report-acceptance.mjs OUTPUT`. Preparation makes no model calls. It uses checked-in public source/migration schemas with an isolated PGlite database, synthetic users and a multi-file options-resolution fixture. Its model proxy receives only synthetic task messages/tool observations; production model credentials stay at the existing trusted gateway. The fixture binds its own exact approval, checks real code and uses additional external assertions and a fixture draft publisher. It never confirms an owner job or publishes a real PR.
 
+> **Update, 13 November 2026 ([journal 190](190-pi-native-anthropic-protocol.md)):** this harness was retired with the OpenRouter-shaped Pi proxy; the files named here were deleted.
+
 An initial remote launch was rejected by automatic approval review because a broad source/migration payload lacked explicit provenance. No paid call or production change ran. The test setup is being changed to an auditable public source revision and synthetic data before retrying. Paid results, actual CodeBuild checks, exact independent review and deployment remain pending; offline results are not a general reliability claim.
 
 ## Follow-up

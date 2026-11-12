@@ -1,8 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { OpenRouter, ModelError } from "../src/model.js";
-import { piCompletion } from "../src/coding/pi-proxy.js";
-import { randomUUID } from "node:crypto";
 import {
   readGenerationStream,
   StreamFailure,
@@ -29,7 +27,7 @@ const chunk = (delta: unknown, finish: string | null = null) => ({
   choices: [{ index: 0, delta, finish_reason: finish }],
 });
 
-test("Pi complete-response policy rejects nonempty incomplete upstream choices before native framing", async () => {
+test("the complete-response policy rejects nonempty incomplete upstream choices", async () => {
   for (const finish of [
     "length",
     "content_filter",
@@ -78,31 +76,14 @@ test("Pi complete-response policy rejects nonempty incomplete upstream choices b
           });
         },
       );
-      const controller = {
-        generate: (_job: unknown, input: any) =>
-          adapter.generate({
-            messages: input.messages,
-            tools: input.tools,
-            reasoning: "high",
-            signal: new AbortController().signal,
-            requireComplete: true,
-          }),
-      };
       await assert.rejects(
-        piCompletion(
-          controller as any,
-          {
-            mode: "plan",
-            settings: { runtime: "pi", model: "fixture/model" },
-          } as any,
-          "coder",
-          {
-            runtime_call_id: randomUUID(),
-            model: "fixture/model",
-            messages: [{ role: "user", content: "fixture" }],
-            tools: [],
-          },
-        ),
+        adapter.generate({
+          messages: [{ role: "user", content: "fixture" }],
+          tools: [],
+          reasoning: "high",
+          signal: new AbortController().signal,
+          requireComplete: true,
+        }),
         (error: any) =>
           error instanceof ModelError &&
           error.diagnostics.failureCode === "incomplete" &&

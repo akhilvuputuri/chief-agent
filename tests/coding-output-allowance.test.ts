@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { reportLimits } from "@chief-agent/pi-runtime/report";
 import {
@@ -58,13 +57,8 @@ test("the shipped profile leaves room for the largest report plus heavy reasonin
       outputAllowance(shipped, role) >= needed,
       `${role} allowance ${outputAllowance(shipped, role)} is below ${needed}`,
     );
-  // Owner-approved 11 November 2026 (journal 161): a 64,000-token reviewer, so a call may run
-  // for up to about 10.7 minutes on the host.
+  // Owner-approved 11 November 2026 (journal 161): a 64,000-token reviewer.
   assert.equal(outputAllowance(shipped, "reviewer"), 64000);
-  assert.equal(
-    modelCallTimeoutMs(outputAllowance(shipped, "reviewer")),
-    640000,
-  );
 });
 
 test("each role's model call is sent its own allowance", async (t) => {
@@ -76,23 +70,32 @@ test("each role's model call is sent its own allowance", async (t) => {
   ]);
   await f.c.tick();
   const job = await f.row(started.id);
-  const sent: number[] = [];
-  f.setGeneration((_model, input) => {
-    sent.push(input.maxOutputTokens);
-    return { message: { role: "assistant", content: "Complete" } };
-  });
-  for (const [role, requested] of [
-    ["leader", undefined],
-    ["leader", 200000],
-    ["leader", 6553],
-    ["reviewer", 128000],
-  ] as const)
-    await f.c.generate(job, {
-      callId: randomUUID(),
+  const route = (model: string) =>
+    (f.c as any).anthropic.route(model).nativeModel;
+  for (const [role, model, requested] of [
+    ["coder", settings.model, 200000],
+    ["coder", settings.model, 6553],
+    ["reviewer", settings.reviewerModel, 128000],
+  ] as const) {
+    const reply = await f.c.piMessages(
+      job,
       role,
-      messages: [{ role: "user", content: "Synthetic" }],
-      tools: [],
-      ...(requested ? { maxOutputTokens: requested } : {}),
-    });
-  assert.deepEqual(sent, [128000, 128000, 6553, 16000]);
+      {
+        model: route(model),
+        max_tokens: requested,
+        stream: true,
+        messages: [{ role: "user", content: "Synthetic" }],
+      },
+      { signal: new AbortController().signal },
+    );
+    assert.equal(reply.status, 200);
+    await new Response(reply.body).text();
+    for (let i = 0; i < 100 && (await f.row(job.id)).model_busy; i++)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  // Pi's own value is kept when it is below the role's allowance (as near a full context).
+  assert.deepEqual(
+    f.messagesRequests().map((r) => r.body.max_tokens),
+    [128000, 6553, 16000],
+  );
 });

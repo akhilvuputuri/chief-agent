@@ -6,7 +6,7 @@ export {
   artifactHash,
   type Executor,
 } from "./workspace.js";
-export { compatibleModel, type ModelFactory } from "./model.js";
+export { anthropicModel, purposeHeader, type ModelFactory } from "./model.js";
 export type * from "./types.js";
 export { serveRpc } from "./rpc.js";
 

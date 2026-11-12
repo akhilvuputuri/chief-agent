@@ -75,6 +75,8 @@ After the owner-directed switch to Gemini 4 Argon on 14 October ([journal 85](85
 
 - `scripts/pi-acceptance/provider-helper.mjs` and `scripts/fixtures/pi-report-proxy.mjs` use the resolved ceilings, so acceptance runs filter like production.
 
+> **Update, 13 November 2026 ([journal 190](190-pi-native-anthropic-protocol.md)):** this harness was retired with the OpenRouter-shaped Pi proxy; the files named here were deleted.
+
 Independent review (Opus 5.5, commit `3a26ad0`) requested changes:
 
 - **High.** The thinking-signature risk, untested in a real tool loop. The loop probe above showed that the routed provider does not block it, with the caveats below.

@@ -514,6 +514,101 @@ function retryAfter(headers: Headers | undefined) {
     : undefined;
 }
 
+/** OpenRouter-shaped usage, priced from the configured per-million rates. */
+export function anthropicUsage(
+  message: Pick<BetaMessage, "usage"> & {
+    input_transformations?: BetaMessage["input_transformations"];
+  },
+  p: AnthropicPrices,
+) {
+  const u = message.usage;
+  const uncached = u?.input_tokens ?? 0;
+  const read = u?.cache_read_input_tokens ?? 0;
+  const write = u?.cache_creation_input_tokens ?? 0;
+  // A 1-hour cache write costs twice the input price, not the 5-minute write price; the usage
+  // breaks writes down by lifetime when any were 1-hour.
+  const longWrite = Math.min(
+    write,
+    u?.cache_creation?.ephemeral_1h_input_tokens ?? 0,
+  );
+  const output = u?.output_tokens ?? 0;
+  const reasoning = u?.output_tokens_details?.thinking_tokens;
+  return {
+    prompt_tokens: uncached + read + write,
+    completion_tokens: output,
+    total_tokens: uncached + read + write + output,
+    prompt_tokens_details: { cached_tokens: read, cache_write_tokens: write },
+    ...(Number.isFinite(reasoning)
+      ? { completion_tokens_details: { reasoning_tokens: reasoning } }
+      : {}),
+    cost:
+      (uncached * p.input +
+        read * p.cacheRead +
+        (write - longWrite) * p.cacheWrite +
+        longWrite * p.input * 2 +
+        output * p.output) /
+      1e6,
+    route: "anthropic-direct",
+    thinking_dropped: (message.input_transformations ?? []).filter(
+      (t) => t.type === "thinking_dropped",
+    ).length,
+  };
+}
+
+/**
+ * Sends one Messages request exactly as given and returns Anthropic's raw streamed response,
+ * for a caller that relays it unchanged (Pi coding workers, src/coding/pi-messages.ts). The
+ * caller owns retries, so none are made here; everything else is the SDK's default.
+ */
+export class AnthropicMessagesGateway {
+  private readonly client: Anthropic;
+  constructor(
+    key: string,
+    options: {
+      workspaceId?: string;
+      transport?: typeof fetch;
+      baseURL?: string;
+    } = {},
+  ) {
+    const workspaceId = options.workspaceId ?? "";
+    if (workspaceId && !WORKSPACE_ID.test(workspaceId))
+      throw new Error("Invalid Anthropic workspace ID");
+    this.client = new Anthropic({
+      apiKey: key,
+      baseURL: options.baseURL ?? "https://api.anthropic.com",
+      ...(options.transport ? { fetch: options.transport } : {}),
+      maxRetries: 0,
+      ...(workspaceId
+        ? { defaultHeaders: { "anthropic-workspace-id": workspaceId } }
+        : {}),
+      logLevel: "off", // The SDK can log raw stream chunks; never log content.
+      openTelemetry: false,
+    });
+  }
+  send(
+    body: Record<string, unknown>,
+    wire: { betas: string[]; version?: string },
+    signal: AbortSignal,
+  ): Promise<Response> {
+    return this.client.beta.messages
+      .create(
+        {
+          ...body,
+          ...(wire.betas.length ? { betas: wire.betas } : {}),
+          stream: true,
+        } as unknown as BetaMessageStreamParams & { stream: true },
+        {
+          signal,
+          // The caller's API version, so the request means what its sender built it to mean.
+          ...(wire.version
+            ? { headers: { "anthropic-version": wire.version } }
+            : {}),
+        },
+      )
+      .asResponse();
+  }
+}
+
 export class AnthropicDirect implements ModelAdapter {
   readonly model: string;
   private readonly nativeModel: string;
@@ -875,34 +970,8 @@ export class AnthropicDirect implements ModelAdapter {
     }
   }
 
-  /** OpenRouter-shaped usage, priced from the configured per-million rates. */
   private usage(message: BetaMessage) {
-    const u = message.usage;
-    const uncached = u?.input_tokens ?? 0;
-    const read = u?.cache_read_input_tokens ?? 0;
-    const write = u?.cache_creation_input_tokens ?? 0;
-    const output = u?.output_tokens ?? 0;
-    const reasoning = u?.output_tokens_details?.thinking_tokens;
-    const p = this.prices;
-    return {
-      prompt_tokens: uncached + read + write,
-      completion_tokens: output,
-      total_tokens: uncached + read + write + output,
-      prompt_tokens_details: { cached_tokens: read, cache_write_tokens: write },
-      ...(Number.isFinite(reasoning)
-        ? { completion_tokens_details: { reasoning_tokens: reasoning } }
-        : {}),
-      cost:
-        (uncached * p.input +
-          read * p.cacheRead +
-          write * p.cacheWrite +
-          output * p.output) /
-        1e6,
-      route: "anthropic-direct",
-      thinking_dropped: (message.input_transformations ?? []).filter(
-        (t) => t.type === "thinking_dropped",
-      ).length,
-    };
+    return anthropicUsage(message, this.prices);
   }
 
   private failure(error: unknown, signal: AbortSignal, emitted: boolean) {

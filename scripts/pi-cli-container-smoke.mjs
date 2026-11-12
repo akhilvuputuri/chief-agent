@@ -1,4 +1,4 @@
-// Exercise the actual standalone guarded CLI entry, with synthetic model traffic.
+// Exercise the actual standalone guarded CLI entry, with synthetic Anthropic Messages traffic.
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
@@ -53,11 +53,64 @@ task.plan = {
 };
 task.approved = { revision: 1, hash: task.plan.hash };
 await new TaskStore(join(root, "tasks"), key).save(task);
+/** Server-sent events as the Anthropic Messages API streams one response. */
+const event = (type, data) =>
+  `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+function messagesStream(tool) {
+  let out = event("message_start", {
+    message: {
+      id: `msg_synthetic_${calls}`,
+      type: "message",
+      role: "assistant",
+      model: "claude-opus-5-5",
+      content: [],
+      stop_reason: null,
+      stop_sequence: null,
+      usage: { input_tokens: 100, output_tokens: 1 },
+    },
+  });
+  if (tool) {
+    out += event("content_block_start", {
+      index: 0,
+      content_block: {
+        type: "tool_use",
+        id: `toolu_synthetic_${calls}`,
+        name: tool.name,
+        input: {},
+      },
+    });
+    out += event("content_block_delta", {
+      index: 0,
+      delta: {
+        type: "input_json_delta",
+        partial_json: JSON.stringify(tool.arguments),
+      },
+    });
+  } else {
+    out += event("content_block_start", {
+      index: 0,
+      content_block: { type: "text", text: "" },
+    });
+    out += event("content_block_delta", {
+      index: 0,
+      delta: { type: "text_delta", text: "Done." },
+    });
+  }
+  out += event("content_block_stop", { index: 0 });
+  out += event("message_delta", {
+    delta: { stop_reason: tool ? "tool_use" : "end_turn", stop_sequence: null },
+    usage: { output_tokens: 50 },
+  });
+  return out + event("message_stop", {});
+}
 let calls = 0;
 const server = createServer(async (req, res) => {
-  assert.equal(req.headers.authorization, "Bearer synthetic-api-key");
-  for await (const _chunk of req) {
-  }
+  // Pi's own Anthropic client: the Messages route, with the configured key as its API key.
+  assert.equal(req.url, "/v1/messages?beta=true");
+  assert.equal(req.headers["x-api-key"], "synthetic-api-key");
+  let body = "";
+  for await (const chunk of req) body += chunk;
+  assert.equal(JSON.parse(body).model, "claude-opus-5-5");
   const current = calls++;
   const tool =
     current === 0
@@ -72,40 +125,8 @@ const server = createServer(async (req, res) => {
             },
           }
         : undefined;
-  const delta = tool
-    ? {
-        role: "assistant",
-        content: null,
-        tool_calls: [
-          {
-            index: 0,
-            id: `synthetic-${current}`,
-            type: "function",
-            function: {
-              name: tool.name,
-              arguments: JSON.stringify(tool.arguments),
-            },
-          },
-        ],
-      }
-    : { role: "assistant", content: "Done." };
-  const chunk = {
-    id: "synthetic",
-    object: "chat.completion.chunk",
-    created: 1,
-    model: "synthetic/model",
-    choices: [{ index: 0, delta, finish_reason: null }],
-  };
-  const terminal = {
-    ...chunk,
-    choices: [
-      { index: 0, delta: {}, finish_reason: tool ? "tool_calls" : "stop" },
-    ],
-  };
   res.writeHead(200, { "content-type": "text/event-stream" });
-  res.end(
-    `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(terminal)}\n\ndata: [DONE]\n\n`,
-  );
+  res.end(messagesStream(tool));
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 try {
@@ -130,12 +151,11 @@ try {
     "--state",
     "/fixture",
     "--local-execution",
-    "--provider",
-    "synthetic",
+    // A model from Pi's catalogue; the fake above speaks Anthropic's protocol.
     "--model",
-    "synthetic/model",
+    "claude-opus-5-5",
     "--base-url",
-    `http://127.0.0.1:${port}/v1`,
+    `http://127.0.0.1:${port}`,
   ];
   const result = await promisify(execFile)("docker", args, {
     timeout: 60000,

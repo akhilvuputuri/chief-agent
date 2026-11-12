@@ -5,7 +5,8 @@ import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { CodingRuntime, TaskStore, compatibleModel } from "../src/index.js";
+import { CodingRuntime, TaskStore, anthropicModel } from "../src/index.js";
+import { messagesStream, toolUse } from "./anthropic-sse.js";
 
 for (const fixedWindow of [true, false]) {
   test(`native planning output with ${fixedWindow ? "artificial fixed window" : "selected model metadata"}`, async (t) => {
@@ -18,10 +19,10 @@ for (const fixedWindow of [true, false]) {
       for await (const chunk of req) raw += chunk;
       const body = JSON.parse(raw),
         compact = !body.tools?.length;
-      const finalizing = JSON.stringify(body.messages).includes(
+      const finalizing = JSON.stringify([body.system, body.messages]).includes(
         "Host workflow phase: final report",
       );
-      const budget = body.max_tokens ?? body.max_completion_tokens;
+      const budget = body.max_tokens;
       if (compact) {
         summaries++;
         summaryBudgets.push(budget);
@@ -39,40 +40,39 @@ for (const fixedWindow of [true, false]) {
             },
           }
         : { name: "read", arguments: { path: "source.js" } };
-      const delta =
+      const content =
         compact || truncated
-          ? {
-              role: "assistant",
-              content: compact
-                ? "Inspected source.js. REQUIREMENT_HEADROOM remains authoritative. No edit or check has occurred. Report the source-grounded implementation plan and preserve the owner approval boundary."
-                : "Partial planning output must not become an approved plan.",
-            }
-          : {
-              role: "assistant",
-              content: null,
-              tool_calls: [
-                {
-                  index: 0,
-                  id: `call-${reads}-${finalBudgets.length}`,
-                  type: "function",
-                  function: {
-                    name: call.name,
-                    arguments: JSON.stringify(call.arguments),
-                  },
-                },
-              ],
-            };
-      const header = {
-        id: `response-${reads}-${summaries}-${finalBudgets.length}`,
-        model: "fixture/headroom",
-      };
+          ? [
+              {
+                type: "text" as const,
+                text: compact
+                  ? "Inspected source.js. REQUIREMENT_HEADROOM remains authoritative. No edit or check has occurred. Report the source-grounded implementation plan and preserve the owner approval boundary."
+                  : "Partial planning output must not become an approved plan.",
+              },
+            ]
+          : [
+              toolUse(
+                `call-${reads}-${finalBudgets.length}`,
+                call.name,
+                call.arguments,
+              ),
+            ];
       // The provider's usage is below Pi's automatic maintenance threshold.
       // Native request construction still reserves provider safety headroom
       // and clamps output below the selected profile before final reporting.
       const promptTokens = compact ? 100 : 20000;
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(
-        `data: ${JSON.stringify({ ...header, choices: [{ index: 0, delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ ...header, choices: [{ index: 0, delta: {}, finish_reason: truncated ? "length" : compact ? "stop" : "tool_calls" }], usage: { prompt_tokens: promptTokens, completion_tokens: 100, total_tokens: promptTokens + 100 } })}\n\ndata: [DONE]\n\n`,
+        messagesStream({
+          id: `response-${reads}-${summaries}-${finalBudgets.length}`,
+          content,
+          stopReason: truncated
+            ? "max_tokens"
+            : compact
+              ? "end_turn"
+              : "tool_use",
+          usage: { input_tokens: promptTokens, output_tokens: 100 },
+        }),
       );
     });
     await new Promise<void>((resolve) =>
@@ -109,14 +109,12 @@ for (const fixedWindow of [true, false]) {
         join(root, "state"),
         "synthetic-report-headroom-key-at-least32",
       ),
-      model: compatibleModel({
-        provider: "openrouter",
-        model: "deepseek/deepseek-v4.1-flash",
+      model: anthropicModel({
+        model: "claude-opus-5-5",
         apiKey: "synthetic",
-        baseUrl: `http://127.0.0.1:${(server.address() as any).port}/v1`,
+        baseUrl: `http://127.0.0.1:${(server.address() as any).port}`,
         ...(fixedWindow ? { contextWindow: 40000 } : {}),
         maxTokens: 16000,
-        maxRequestBytes: 179000,
       }),
     });
     const task = await runtime.start({

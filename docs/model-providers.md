@@ -12,6 +12,8 @@ Chief has two model pathways: OpenRouter, which every call used until November 2
 
 Every model the gateway builds goes through `ModelRouter.modelFor(slug)` in [`src/model-router.ts`](../src/model-router.ts): the main model, the media model, agents and research specialists, the nightly learner and judge, and the coding controller's model factory. The coding factory is the whole coding pathway: Pi and the Python squad sandboxes never hold a provider key and send every model call to the host proxy, which uses that factory.
 
+> **Update, 13 November 2026 ([journal 190](journey/190-pi-native-anthropic-protocol.md)):** Pi coding jobs no longer go through `modelFor` or its OpenRouter fallback. The host relays Pi's own Anthropic Messages requests with the direct route's key and prices (`ModelRouter.anthropicRoute`), and a Pi job or coding model choice without a direct Anthropic route is refused. The legacy coding workers keep the routing described here.
+
 A slug goes **direct** only when all of these hold:
 
 1. `MODEL_PROVIDER` is `anthropic`. The code default and `config/runtime.json` are both `anthropic`, so this is inert until a key arrives.

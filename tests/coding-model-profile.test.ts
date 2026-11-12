@@ -63,6 +63,7 @@ import {
   candidate,
   fixture,
   requirementBrief,
+  unusedAnthropic,
 } from "./helpers/coding-fixture.js";
 test("coding model-role commands snapshot new Pi jobs without changing existing jobs or other roles", async (t) => {
   const f = await fixture(t);
@@ -72,15 +73,11 @@ test("coding model-role commands snapshot new Pi jobs without changing existing 
     squad: false,
     autoMerge: false,
   });
+  // Pi jobs call Claude directly, so only models with a direct Anthropic route qualify.
   const catalog = [
-    "openai/gpt-6.1-sol",
     "anthropic/claude-sonnet-5.5",
     "anthropic/claude-haiku-5.5",
-    "google/gemini-3.8-flash",
-    "deepseek/deepseek-v4.1-flash",
-    "qwen/qwen3.8-max-0902",
-    "z-ai/glm-5.3-flash",
-    "mistralai/mistral-large-4-0",
+    "anthropic/claude-opus-5.5",
   ].map((id) => ({ id, inputPrice: 1, outputPrice: 5, tools: true }));
   const controller = new CodingController(
     f.db,
@@ -94,7 +91,20 @@ test("coding model-role commands snapshot new Pi jobs without changing existing 
       throw new Error("Model selection does not dispatch inference");
     },
     undefined,
-    async () => catalog,
+    async () => [
+      ...catalog,
+      { id: "openai/gpt-6.1-sol", inputPrice: 1, outputPrice: 5, tools: true },
+    ],
+    undefined,
+    false,
+    undefined,
+    {
+      ...unusedAnthropic,
+      route: (model) =>
+        model.startsWith("anthropic/") || model.startsWith("fixture/")
+          ? unusedAnthropic.route(model)
+          : undefined,
+    },
   );
   const start = async (requestKey: string) =>
     (await controller.call("a", f.run, {
@@ -139,70 +149,17 @@ test("coding model-role commands snapshot new Pi jobs without changing existing 
       model: catalog[0].id,
     }),
   );
+  // A catalogue model without a direct Anthropic route cannot be chosen for Pi jobs.
+  await assert.rejects(
+    controller.call("a", f.run, {
+      operation: "coding_model_set",
+      role: "coder",
+      model: "openai/gpt-6.1-sol",
+    }),
+    /not a Claude model Chief calls directly/,
+  );
   assert.equal(f.creates(), 0);
   assert.equal(f.modelCalls(), 0);
-});
-test("Pi provider failures expose typed diagnostics without retrying uncertain model calls", async (t) => {
-  for (const [failure, code] of [
-    [
-      new ModelError("Synthetic empty provider response", true, {
-        failureCode: "empty",
-        finishReason: "stop",
-      }),
-      "model_transient_failure",
-    ],
-    [
-      new ModelError("Synthetic reasoning exhausted output", false, {
-        failureCode: "empty",
-        finishReason: "length",
-      }),
-      "model_incomplete",
-    ],
-  ] as const) {
-    const f = await fixture(t);
-    const started = await f.start(randomUUID(), "plan");
-    await f.c.tick();
-    let job = await f.row(started.id);
-    await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
-      job.id,
-      JSON.stringify({
-        ...settings,
-        runtime: "pi",
-        squad: false,
-        autoMerge: false,
-      }),
-    ]);
-    job = await f.row(job.id);
-    f.failModel(failure);
-    const app = server();
-    t.after(() => app.close());
-    await codingApi(app, f.c);
-    const callId = randomUUID();
-    const request = {
-      method: "POST" as const,
-      url: `/coding/worker/${job.id}/pi/coder/v1/chat/completions`,
-      headers: { authorization: `Bearer ${f.c.token(job.id, job.attempt_id)}` },
-      payload: {
-        runtime_call_id: callId,
-        model: settings.model,
-        messages: [{ role: "user", content: "Synthetic failure probe" }],
-        tools: [],
-      },
-    };
-    const response = await app.inject(request);
-    assert.equal(response.statusCode, 409);
-    assert.equal(response.json().code, code);
-    const saved = (
-      await f.db.query("SELECT state FROM coding_model_calls WHERE id=$1", [
-        callId,
-      ])
-    ).rows[0];
-    assert.equal(saved.state, "uncertain");
-    const status = (await f.c.status("a", job.id)) as any;
-    assert.equal(status.lastFailure.code, code);
-    await app.inject(request);
-    assert.equal(f.modelCalls(), 1);
-  }
 });
 test("Pi report documents bind checkpoint content and support the full escaped transport envelope", async (t) => {
   const f = await fixture(t);
@@ -651,192 +608,3 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
     assert.equal((await f.row(started.id)).state, "pr_ready");
     assert.equal(f.publishes(), 1);
   });
-for (const field of ["max_tokens", "max_completion_tokens"] as const)
-  test(`Pi forwards native ${field} through the authenticated facade to the provider`, async (t) => {
-    const f = await fixture(t);
-    const started = await f.start("pi-summary-budget", "plan");
-    await f.c.tick();
-    await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
-      started.id,
-      JSON.stringify({
-        ...settings,
-        runtime: "pi",
-        squad: false,
-        autoMerge: false,
-        maxOutputTokens: 16000,
-      }),
-    ]);
-    const job = await f.row(started.id);
-    const requests: any[] = [];
-    f.setGeneration((model, input) =>
-      new OpenRouter("synthetic-key", model, 2, 10, async (_url, init) => {
-        requests.push(JSON.parse(String(init?.body)));
-        const frame = {
-          id: "synthetic-summary",
-          model,
-          choices: [
-            {
-              index: 0,
-              delta: {
-                role: "assistant",
-                content: "Compact retained task state",
-              },
-              finish_reason: "stop",
-            },
-          ],
-        };
-        return new Response(
-          `data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`,
-          { headers: { "content-type": "text/event-stream" } },
-        );
-      }).generate(input),
-    );
-    const app = server();
-    t.after(() => app.close());
-    await codingApi(app, f.c);
-    const response = await app.inject({
-      method: "POST",
-      url: `/coding/worker/${job.id}/pi/coder/v1/chat/completions`,
-      headers: { authorization: `Bearer ${f.c.token(job.id, job.attempt_id)}` },
-      payload: {
-        runtime_call_id: randomUUID(),
-        model: settings.model,
-        messages: [
-          { role: "system", content: "Summarize retained task state." },
-          { role: "user", content: "Synthetic conversation only" },
-        ],
-        tools: [],
-        stream: true,
-        [field]: 4096,
-      },
-    });
-    assert.equal(response.statusCode, 200, response.body);
-    assert.equal(requests.length, 1);
-    assert.equal(
-      requests[0].max_tokens,
-      4096,
-      "Pi summary budget was replaced by the job-wide maximum",
-    );
-  });
-test("Pi per-call budgets are bounded, validated and bound to request replay", async (t) => {
-  const f = await fixture(t);
-  const started = await f.start("pi-budget-contract", "plan");
-  await f.c.tick();
-  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
-    started.id,
-    JSON.stringify({
-      ...settings,
-      runtime: "pi",
-      squad: false,
-      autoMerge: false,
-      maxOutputTokens: 8000,
-    }),
-  ]);
-  const job = await f.row(started.id),
-    sent: any[] = [];
-  f.setGeneration((model, input) => {
-    sent.push({ purpose: input.purpose, budget: input.maxOutputTokens });
-    return new OpenRouter("synthetic-key", model, 2, 10, async (_url, init) => {
-      sent.at(-1).wire = JSON.parse(String(init?.body)).max_tokens;
-      const chunk = {
-        id: "budget-fixture",
-        model,
-        choices: [
-          {
-            index: 0,
-            delta: { role: "assistant", content: "Synthetic summary" },
-            finish_reason: "stop",
-          },
-        ],
-      };
-      return new Response(
-        `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`,
-        { headers: { "content-type": "text/event-stream" } },
-      );
-    }).generate(input);
-  });
-  const app = server();
-  t.after(() => app.close());
-  await codingApi(app, f.c);
-  const base = {
-    runtime_call_id: randomUUID(),
-    model: settings.model,
-    messages: [{ role: "user", content: "Synthetic task state" }],
-    tools: [],
-    stream: true,
-    max_tokens: 4096,
-    runtime_purpose: "compaction",
-  };
-  const send = (payload: unknown) =>
-    app.inject({
-      method: "POST",
-      url: `/coding/worker/${job.id}/pi/coder/v1/chat/completions`,
-      headers: { authorization: `Bearer ${f.c.token(job.id, job.attempt_id)}` },
-      payload,
-    });
-  assert.equal((await send(base)).statusCode, 200);
-  assert.equal((await send(base)).statusCode, 200);
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].wire, 4096);
-  const journal = (
-    await f.db.query("SELECT input FROM coding_model_calls WHERE id=$1", [
-      base.runtime_call_id,
-    ])
-  ).rows[0].input;
-  assert.equal(journal.purpose, "compaction");
-  assert.equal(journal.maxOutputTokens, 4096);
-  assert.equal((await send({ ...base, max_tokens: 2048 })).statusCode, 409);
-  assert.equal(
-    (await send({ ...base, runtime_purpose: "agent" })).statusCode,
-    409,
-  );
-  for (const value of [0, -1, 1.5, "4096", null, Number.MAX_SAFE_INTEGER + 1])
-    assert.equal(
-      (
-        await send({
-          ...base,
-          runtime_call_id: randomUUID(),
-          max_tokens: value,
-        })
-      ).statusCode,
-      409,
-    );
-  assert.equal(
-    (
-      await send({
-        ...base,
-        runtime_call_id: randomUUID(),
-        max_completion_tokens: 2048,
-      })
-    ).statusCode,
-    409,
-  );
-  assert.equal(
-    (
-      await send({
-        ...base,
-        runtime_call_id: randomUUID(),
-        runtime_purpose: "unknown",
-      })
-    ).statusCode,
-    409,
-  );
-  assert.equal(sent.length, 1);
-  assert.equal(
-    (await send({ ...base, runtime_call_id: randomUUID(), max_tokens: 16000 }))
-      .statusCode,
-    200,
-  );
-  assert.equal(sent.at(-1).wire, 8000);
-  assert.equal(
-    (
-      await send({
-        ...base,
-        runtime_call_id: randomUUID(),
-        max_completion_tokens: 4096,
-      })
-    ).statusCode,
-    200,
-  );
-  assert.equal(sent.at(-1).wire, 4096);
-});

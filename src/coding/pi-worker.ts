@@ -17,15 +17,13 @@ import {
   type ReferenceDocument,
   TaskStore,
   Workspace as PiWorkspace,
-  compatibleModel,
+  anthropicModel,
   localExecutor,
   type Task,
 } from "@chief-agent/pi-runtime";
 import {
-  codingContextWindows,
   codingSettings,
   checkpoint,
-  modelCallTimeoutMs,
   outputAllowance,
   type Checkpoint,
   type Outcome,
@@ -41,6 +39,14 @@ import {
 
 /** Below this much attempt time, failed checks pause for the owner instead of a repair round. */
 const CHECK_REPAIR_MIN_MS = 10 * 60_000;
+/**
+ * Pi's retry settings for model calls through the host. A release restarts the gateway: about
+ * six seconds measured (journal 150), and the release script waits up to about 2.5 minutes for
+ * health, longer with a rollback. Pi's defaults (three retries: 2, 4 and 8 seconds) give up
+ * after 14 seconds; eight retries (2, 4, 8, 16, 32, then 60 seconds each, Pi's longest
+ * delay) keep trying for about four minutes (journal 190).
+ */
+export const GATEWAY_RETRY = { maxRetries: 8 };
 const assignmentSchema = z.object({
   id: z.string().uuid(),
   attemptId: z.string().uuid(),
@@ -50,7 +56,8 @@ const assignmentSchema = z.object({
   mode: z.enum(["plan", "implement"]),
   baseSha: z.string().regex(/^[a-f0-9]{40}$/),
   settings: codingSettings,
-  contextWindows: codingContextWindows.optional(),
+  /** The Anthropic id of each of the job's models (journal 190). */
+  nativeModels: z.record(z.string().max(120), z.string().max(120)).optional(),
   agentGit: z
     .object({
       repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
@@ -375,23 +382,16 @@ export async function runPiWorker(
         : assignment.mode === "plan"
           ? (config.leaderModel ?? config.model)
           : config.model;
-    return compatibleModel({
-      provider: "openrouter",
-      model,
-      fallbackContextWindow: assignment.contextWindows?.[model],
-      baseUrl: `${workerOrigin}/coding/worker/${assignment.id}/pi/${role}/v1`,
+    const native = assignment.nativeModels?.[model];
+    if (!native) throw new Error("Coding model has no direct Anthropic route");
+    // Pi's own Anthropic client; the host adds the key and relays Anthropic's stream.
+    return anthropicModel({
+      model: native,
+      baseUrl: `${workerOrigin}/coding/worker/${assignment.id}/pi/${role}`,
       apiKey: workerToken,
-      // Pi supplies the selected model's capacity. The request byte envelope
-      // below is a separate transport bound, not an artificial model window.
       maxTokens: outputAllowance(config, role),
-      // The host replies only when the generation is done (journal 156).
-      responseTimeoutMs:
-        modelCallTimeoutMs(outputAllowance(config, role)) + 60000,
       reasoning: config.effort,
-      requestIdField: "runtime_call_id",
-      requestPurposeField: "runtime_purpose",
-      maxRequestBytes: 3_990_000,
-      terminalHttpRecovery: { attemptId: assignment.attemptId },
+      retry: GATEWAY_RETRY,
     });
   }
   /**
