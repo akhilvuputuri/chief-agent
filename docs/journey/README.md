@@ -176,6 +176,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 12 November | [166 — Traces from anywhere](166-traces-from-anywhere.md): can the owner read Chief's traces from a phone, without exposing them to anyone else? | Tested; rollout pending. agentwatch gained a sign-in (agentwatch#21, approved after review found a throttle race); Chief sends it an API key; three reviewed procedures install the key, switch signing in on and add the Caddy site |
 | 12 November | [168 — Kite builds TypeScript](168-kite-builds-typescript.md): can Kite build Chief's TypeScript, and is its output the same as tsc's? | Kite 0.2.0 pinned; 250 files match tsc's syntax tree; Chief's build not yet switched. Update, 12 November: build switched to `kite build` and the worker image with Kite 0.2.0 pinned; not yet released. Update, 12 November: live in `aac9036`; the CI build step fell from a median of 17 s to under 1 s |
 | 12 November | [169 — Three-hour coding attempts](169-three-hour-coding-attempts.md): why did the first Opus coding job run out of time? | Not stuck: 83% of the coder's output was thinking at `high` effort, at about 100 tokens a second. New jobs get 180 minutes; lowering effort left to the owner. Not yet released |
+| 12 November | [172 — Coding-job profile](172-coding-job-profile.md): how do we compare one coding job's time and cost with another's? | A read-only `scripts/coding-job-profile.sql`, per attempt and role; reproduces journal 169's figures for `9600af57`. Tooling only; not yet merged |
 
 ## Coding-agent learning path
 

@@ -148,3 +148,13 @@ The host confirmation change merged in PR #157 after exact-head Astra approval a
 ## Automatic MR workflow candidate
 
 See [coding automation](coding-automation.md) for one reviewer loop, MR feedback, merge/release gates, Telegram model preferences and bounded operational diagnostics. The implementation and Python 0.1.3 image/read-scope pin are separate rollout steps; the automatic selector remains absent until reviewed publication.
+
+## Profiling a job — 12 November 2026
+
+Added 12 November 2026 ([journal 172](journey/172-coding-job-profile.md)). [`scripts/coding-job-profile.sql`](../scripts/coding-job-profile.sql) prints where one job's time and money went, per attempt and role, so jobs at different settings can be compared. It is read-only: SELECTs inside `BEGIN READ ONLY … ROLLBACK`. Run it from a machine with the operator connection, giving a job id or an unambiguous prefix:
+
+```sh
+ssh chief-prod 'sudo docker exec -i hermes-companion-postgres-1 sh -c "psql -X -v job=9600af57 -U \$POSTGRES_USER -d \$POSTGRES_DB"' < scripts/coding-job-profile.sql
+```
+
+Sections: the job's settings (state, stage, revision, models, effort, limits, worker image tail); each attempt's wall time, end markers, rejected worker requests and model requests by role; a timeline of the worker's stage reports with minutes to the next; model usage (calls, cost, prompt, cached and completion tokens, reasoning tokens and their share, routes); the gaps between consecutive answers in each run of one role, in four buckets, and the model's own share of that time; tool calls per response, tool names and the first word of each `bash` command; and the count and length of thinking summaries. It never prints prompts, replies, tool arguments beyond that first word, thinking text, the objective or the environment. The output still describes private work, so keep it off the repository except as aggregates.

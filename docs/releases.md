@@ -1,3 +1,8 @@
+## Coding-job profile script (12 November 2026)
+
+- **Tooling.** `scripts/coding-job-profile.sql` prints one coding job's phases, model usage, latency, tool use and thinking-summary counts per attempt and role, read-only, for comparing jobs (first use: the next `medium`-effort job against `9600af57`). Nothing in the running application changes: no code path, migration or Compose change. See [journal 172](journey/172-coding-job-profile.md) and [coding](coding.md#profiling-a-job--12-november-2026).
+- **Deployment.** Not yet recorded as live; it needs no release, only a merge.
+
 ## Coding attempts may run three hours (12 November 2026)
 
 - **Configuration.** New Pi coding jobs get 180 minutes per attempt instead of 150, the most one attempt may run. Model and tool-call limits, models and effort are unchanged. No code, migration or Compose change.
