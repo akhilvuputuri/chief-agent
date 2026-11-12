@@ -22,26 +22,27 @@ verdicts AS (
     data->>'verdict' AS verdict
   FROM events WHERE type='judge.fact' ORDER BY data->>'revisionId', id DESC),
 turns AS (
-  SELECT DISTINCT ON (data->>'turnRunId') data, created_at FROM events
+  SELECT DISTINCT ON (data->>'turnRunId') user_id, data, created_at FROM events
   WHERE type='judge.turn' AND data->>'state'='judged'
   ORDER BY data->>'turnRunId', id DESC),
 context AS (
-  SELECT r.key, count(*) AS in_context FROM turns t
+  SELECT c.user_id, r.key, count(*) AS in_context FROM turns t
   JOIN memory_context c ON c.run_id::text=t.data->>'turnRunId'
   CROSS JOIN LATERAL unnest(c.selected) AS s(id)
-  JOIN memory_revisions r ON r.user_id=c.user_id AND r.id=s.id GROUP BY r.key),
+  JOIN memory_revisions r ON r.user_id=c.user_id AND r.id=s.id
+  GROUP BY c.user_id, r.key),
 used AS (
-  SELECT u->>'key' AS key, count(*) AS relevant,
+  SELECT t.user_id, u->>'key' AS key, count(*) AS relevant,
     count(*) FILTER (WHERE u->>'use'='followed') AS followed,
     count(*) FILTER (WHERE u->>'use'='ignored') AS ignored,
     count(*) FILTER (WHERE u->>'use'='contradicted' OR u->>'claimed'='contradicted') AS against,
     max(t.created_at)::date AS last_relevant
   FROM turns t CROSS JOIN LATERAL jsonb_array_elements(t.data->'relevant') AS u
-  GROUP BY u->>'key'),
+  GROUP BY t.user_id, u->>'key'),
 restated AS (
-  SELECT r->>'key' AS key, count(*) AS times FROM turns t
+  SELECT t.user_id, r->>'key' AS key, count(*) AS times FROM turns t
   CROSS JOIN LATERAL jsonb_array_elements(coalesce(t.data->'restated','[]'::jsonb)) AS r
-  GROUP BY r->>'key')
+  GROUP BY t.user_id, r->>'key')
 SELECT 'item' AS row, i.key,
   CASE WHEN i.key LIKE 'lesson:procedure:%' THEN 'procedure'
        WHEN i.kind='lesson' THEN 'lesson'
@@ -62,9 +63,9 @@ SELECT 'item' AS row, i.key,
   coalesce(u.last_relevant::text,'') AS last_relevant
 FROM items i
 LEFT JOIN verdicts v ON v.revision=i.id::text
-LEFT JOIN context c ON c.key=i.key
-LEFT JOIN used u ON u.key=i.key
-LEFT JOIN restated rs ON rs.key=i.key
+LEFT JOIN context c ON c.user_id=i.user_id AND c.key=i.key
+LEFT JOIN used u ON u.user_id=i.user_id AND u.key=i.key
+LEFT JOIN restated rs ON rs.user_id=i.user_id AND rs.key=i.key
 ORDER BY
   CASE coalesce(v.verdict,'') WHEN 'contradicted' THEN 0 WHEN 'unsupported' THEN 1
     WHEN 'overstated' THEN 2 ELSE 3 END,

@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
-import { isLearned, isNote, MemoryStore } from "./memory.js";
+import { isLearned, isNote, MemoryChanged, MemoryStore } from "./memory.js";
 import {
   DECOYS,
   factProbes,
@@ -1309,9 +1309,22 @@ export class Learner {
         `SELECT r.id,r.key,r.value,r.source,r.created_at::text AS at FROM memory_heads h
          JOIN memory_revisions r ON r.user_id=h.user_id AND r.id=h.revision_id
          WHERE h.user_id=$1 AND r.status='active' AND r.kind='fact' AND r.origin='learned'
-         AND ($2::timestamptz IS NULL OR (r.created_at,r.id)>($2::timestamptz,$3::uuid))
+         AND (($2::timestamptz IS NULL OR (r.created_at,r.id)>($2::timestamptz,$3::uuid))
+           -- A fault found by an earlier judge prompt is judged again by this one, since the
+           -- repair acts only on the current judge's verdicts.
+           OR EXISTS (SELECT 1 FROM (SELECT e.data->>'verdict' AS verdict,l.prompt_version AS version
+             FROM events e JOIN learner_runs l ON l.run_id=e.run_id AND l.user_id=e.user_id
+             WHERE e.user_id=$1 AND e.type='judge.fact' AND e.data->>'revisionId'=r.id::text
+             AND l.prompt_version LIKE 'judge-%' ORDER BY e.id DESC LIMIT 1) v
+             WHERE v.verdict IN ('overstated','unsupported','contradicted') AND v.version<>$5))
          ORDER BY r.created_at,r.id LIMIT $4`,
-        [user, after?.at ?? null, after?.id ?? NO_ID, limit],
+        [
+          user,
+          after?.at ?? null,
+          after?.id ?? NO_ID,
+          limit,
+          JUDGE_PROMPT_VERSION,
+        ],
       )
     ).rows as Array<{
       id: string;
@@ -1854,10 +1867,12 @@ export class Learner {
          count(*) FILTER (WHERE data->>'mutation'='control' AND data->>'verdict'<>'supported')::int AS "falseAlarms"
          FROM events WHERE user_id=$1 AND type='judge.probe' AND data->>'verdict'<>'missed'
          AND created_at>$2 AND run_id IN
-           (SELECT run_id FROM learner_runs WHERE user_id=$1 AND prompt_version LIKE 'judge-%')`,
+           (SELECT run_id FROM learner_runs WHERE user_id=$1 AND prompt_version=$3)`,
         [
           user,
           new Date(now.getTime() - REPAIR_LIMITS.gateDays * 24 * 3600_000),
+          // The record is the current judge's: a new prompt starts with none.
+          JUDGE_PROMPT_VERSION,
         ],
       )
     ).rows[0] as JudgeRecord;
@@ -1875,13 +1890,22 @@ export class Learner {
         `SELECT r.id,r.key,r.value,r.source,r.untrusted_sources,v.verdict,v.reason
          FROM memory_heads h
          JOIN memory_revisions r ON r.user_id=h.user_id AND r.id=h.revision_id
-         CROSS JOIN LATERAL (SELECT e.id,e.data->>'verdict' AS verdict,e.data->>'reason' AS reason
-           FROM events e WHERE e.user_id=$1 AND e.type='judge.fact'
-           AND e.data->>'revisionId'=r.id::text AND e.run_id IN
-             (SELECT run_id FROM learner_runs WHERE user_id=$1 AND prompt_version LIKE 'judge-%')
+         CROSS JOIN LATERAL (SELECT e.id,e.data->>'verdict' AS verdict,e.data->>'reason' AS reason,
+           l.prompt_version AS version
+           FROM events e JOIN learner_runs l ON l.run_id=e.run_id AND l.user_id=e.user_id
+           WHERE e.user_id=$1 AND e.type='judge.fact'
+           AND e.data->>'revisionId'=r.id::text AND l.prompt_version LIKE 'judge-%'
            ORDER BY e.id DESC LIMIT 1) v
          WHERE h.user_id=$1 AND r.status='active' AND r.kind='fact' AND r.origin='learned'
-         AND v.verdict=ANY($2::text[])
+         AND v.verdict=ANY($2::text[]) AND v.version=$5
+         -- With a message still on record to rewrite from; a fact without one stays as it is,
+         -- and must not hold the queue.
+         AND jsonb_typeof(r.source->'messageIds')='array'
+         AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.source->'messageIds') AS m(id)
+           WHERE EXISTS (SELECT 1 FROM conversation_inputs i WHERE i.user_id=$1 AND i.id::text=m.id)
+           OR EXISTS (SELECT 1 FROM conversation_messages cm WHERE cm.user_id=$1 AND cm.id::text=m.id)
+           OR (m.id LIKE 'request:%' AND EXISTS (SELECT 1 FROM work_tasks t
+             WHERE t.user_id=$1 AND t.id::text=substr(m.id,9))))
          AND coalesce((r.source->>'repairs')::int,0)<$3
          AND NOT EXISTS (SELECT 1 FROM events k WHERE k.user_id=$1 AND k.type='repair.kept'
            AND k.data->>'revisionId'=r.id::text AND k.run_id IN
@@ -1896,6 +1920,8 @@ export class Learner {
           ["overstated", "unsupported", "contradicted"],
           REPAIR_LIMITS.attempts,
           limit,
+          // Only what the current judge said: the gate vouches for no other.
+          JUDGE_PROMPT_VERSION,
         ],
       )
     ).rows as Array<{
@@ -1909,10 +1935,42 @@ export class Learner {
     }>;
   }
 
+  /**
+   * Up to `limit` faulted facts with the messages they rest on. A fact whose messages are gone
+   * has nothing to be rewritten from; it is passed over, and more rows are read so that such
+   * facts cannot hold the queue.
+   */
+  private async repairItems(user: string, limit: number) {
+    const items: Array<
+      RepairItem & { source: Record<string, unknown>; untrusted: string[] }
+    > = [];
+    for (const r of await this.repairRows(user, limit * 4)) {
+      if (items.length >= limit) break;
+      const messages = await this.judgeMessages(user, r.source);
+      if (!messages.length) continue;
+      items.push({
+        id: `r${items.length + 1}`,
+        revisionId: r.id,
+        key: r.key,
+        value: r.value,
+        verdict: r.verdict,
+        reason: clip(r.reason ?? "", 300),
+        ...(r.source.durability === "one_off" ? { note: true } : {}),
+        ...(typeof r.source.until === "string"
+          ? { until: r.source.until }
+          : {}),
+        messages,
+        source: r.source,
+        untrusted: r.untrusted_sources,
+      });
+    }
+    return items;
+  }
+
   /** Whether the repair has work and the judge has earned it, so other nights open no run. */
   private async repairDue(user: string, now: Date) {
     return (
-      (await this.repairRows(user, 1)).length > 0 &&
+      (await this.repairItems(user, 1)).length > 0 &&
       gateOpen(await this.judgeRecord(user, now))
     );
   }
@@ -1941,15 +1999,26 @@ export class Learner {
         return "until is not a real date";
       if (args.until < today)
         return "That has already ended; make it a one_off note";
+      if (until - Date.parse(today) > LEARNING_LIMITS.untilMaxMs)
+        return "until is more than a year away; that is a standing fact in all but name";
     }
-    if (args.durability === "standing") {
-      if (
-        !quoteSupports(args.quote, args.value) ||
-        durabilityFlags(args.quote, args.value, "standing", 1).length
-      )
-        return "A standing fact must use only the owner's words, from a quote in which they speak generally; otherwise make it one_off";
-    } else if (HABIT.test(args.value))
+    // A note is already the narrowest kind, and any other kind would put it back in every turn.
+    if (item.note && args.durability !== "one_off")
+      return "This is a note of one occasion and stays one; rewrite it as a one_off or keep it";
+    // Anything that stays in every turn must be the owner's own words and nothing more.
+    if (args.durability !== "one_off" && !quoteSupports(args.quote, args.value))
+      return "A standing or dated fact must use only the owner's words from the quote; otherwise make it one_off";
+    if (
+      args.durability === "standing" &&
+      durabilityFlags(args.quote, args.value, "standing", 1).length
+    )
+      return "A standing fact needs a quote in which the owner speaks generally; otherwise make it one_off";
+    if (args.durability !== "standing" && HABIT.test(args.value))
       return "A note or a dated fact claims no habit: no prefers, usually, always or the like";
+    // A note may be reworded, but not filled out: most of it must be the owner's words, with
+    // no number, negation, address or payment word of its own.
+    if (quoteFlags(args.quote, args.value).some((f) => f !== "paraphrased"))
+      return "That adds to what the owner said; say only what the quote says";
     if (
       args.value === item.value &&
       args.durability === String(item.source.durability ?? "standing") &&
@@ -1981,29 +2050,7 @@ export class Learner {
       untouched: 0,
     };
     try {
-      const items: Array<
-        RepairItem & { source: Record<string, unknown>; untrusted: string[] }
-      > = [];
-      for (const r of await this.repairRows(user, REPAIR_LIMITS.perNight)) {
-        const messages = await this.judgeMessages(user, r.source);
-        // Without its messages there is nothing to rewrite from; it stays for the owner.
-        if (!messages.length) continue;
-        items.push({
-          id: `r${items.length + 1}`,
-          revisionId: r.id,
-          key: r.key,
-          value: r.value,
-          verdict: r.verdict,
-          reason: clip(r.reason ?? "", 300),
-          ...(r.source.durability === "one_off" ? { note: true } : {}),
-          ...(typeof r.source.until === "string"
-            ? { until: r.source.until }
-            : {}),
-          messages,
-          source: r.source,
-          untrusted: r.untrusted_sources,
-        });
-      }
+      const items = await this.repairItems(user, REPAIR_LIMITS.perNight);
       progress.candidates = items.length;
       if (!items.length) return await finish("completed", progress);
       const today = singaporeDay(now);
@@ -2058,8 +2105,8 @@ export class Learner {
                 ? `There is no fact ${args.fact}`
                 : decided.has(item.id)
                   ? `${item.id} already has a decision`
-                  : name === "repair_retire" && item.verdict === "overstated"
-                    ? "An overstated fact is rewritten, not retired; the owner said something like it"
+                  : name === "repair_retire" && item.verdict !== "contradicted"
+                    ? "Only a contradicted fact is retired here; rewrite this one as what the messages do say, or keep it"
                     : name === "repair_fact"
                       ? this.checkRepair(item, args, today)
                       : undefined;
@@ -2147,6 +2194,7 @@ export class Learner {
                 reason: `The judge found it ${item.verdict}. ${args.reason}`,
                 learnerRun: id,
                 untrustedSources: item.untrusted,
+                expect: item.revisionId,
               },
               provenance,
             );
@@ -2182,6 +2230,8 @@ export class Learner {
               learnerRun: id,
               untrustedSources: item.untrusted,
               flags: quoteFlags(args.quote, args.value),
+              // Checked again under the row's lock: the owner may save the key at any moment.
+              expect: item.revisionId,
             });
             progress.narrowed++;
             await applied("narrowed", {
@@ -2191,6 +2241,10 @@ export class Learner {
           }
         } catch (error) {
           progress.untouched++;
+          if (error instanceof MemoryChanged) {
+            await applied("skipped_changed");
+            continue;
+          }
           await applied("failed", {
             error: error instanceof Error ? error.name : "unknown",
           });
@@ -3324,6 +3378,11 @@ export class Learner {
               quote: args.quote,
               durability: args.durability,
               ...(args.until ? { until: args.until } : {}),
+              // How often the key has been repaired stays with it, so new evidence does not
+              // restart the count.
+              ...(held && isLearned(held) && held.source.repairs !== undefined
+                ? { repairs: held.source.repairs }
+                : {}),
             }
           : {}),
       };

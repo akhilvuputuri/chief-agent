@@ -4,8 +4,8 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import type { Database } from "../src/db.js";
 import { Learner } from "../src/learning.js";
-import { isNote, MemoryStore } from "../src/memory.js";
-import { shownInTurn } from "../src/memory-judge.js";
+import { isNote, MemoryChanged, MemoryStore } from "../src/memory.js";
+import { JUDGE_PROMPT_VERSION, shownInTurn } from "../src/memory-judge.js";
 import {
   gateOpen,
   REPAIR_LIMITS,
@@ -116,6 +116,7 @@ async function judged(
   db: Database,
   events: Array<[string, Record<string, unknown>]>,
   ago = DAY,
+  version: string = JUDGE_PROMPT_VERSION,
 ) {
   const run = randomUUID();
   const at = new Date(NIGHT.getTime() - ago);
@@ -125,8 +126,8 @@ async function judged(
   );
   await db.query(
     `INSERT INTO learner_runs(id,user_id,run_id,state,model,prompt_version,started_at,finished_at)
-     VALUES($1,'owner',$2,'completed','test/model','judge-v3',$3,$3)`,
-    [randomUUID(), run, at],
+     VALUES($1,'owner',$2,'completed','test/model',$4,$3,$3)`,
+    [randomUUID(), run, at, version],
   );
   for (const [type, data] of events)
     await db.query(
@@ -427,15 +428,12 @@ test("a rewrite must stay inside the owner's words; a refused one gets one corre
   const result = await repair(db, adapter);
   assert.equal(inputs.length, REPAIR_LIMITS.modelCalls);
   const refusals = results(inputs[1]).map((r: any) => r.refused ?? "accepted");
-  assert.match(
-    refusals[0],
-    /only the owner's words, from a quote in which they speak generally/,
-  );
+  assert.match(refusals[0], /a quote in which the owner speaks generally/);
   assert.match(refusals[1], /claims no habit/);
   assert.match(refusals[2], /only the owner's words/);
   assert.match(refusals[3], /exact words in this fact's messages/);
   assert.match(refusals[4], /already ended/);
-  assert.match(refusals[5], /rewritten, not retired/);
+  assert.match(refusals[5], /Only a contradicted fact is retired/);
   // "Vegan" is not a word of the owner's at all.
   assert.match(refusals[6], /must come from the quote/);
   assert.match(refusals[7], /no fact r9/);
@@ -473,7 +471,7 @@ test("an unsupported fact may be retired, a fact the repair keeps is not sent ag
     "I am in Penang this week",
   );
   await judged(db, [
-    verdict(gym, "unsupported", "A question, not a statement"),
+    verdict(gym, "contradicted", "The owner says the opposite"),
     verdict(tea, "overstated", "Adds nothing; the judge was wrong"),
     verdict(changed, "overstated"),
     ...good,
@@ -521,7 +519,7 @@ test("an unsupported fact may be retired, a fact the repair keeps is not sent ag
   assert.deepEqual([last.status, last.origin], ["retired", "learned"]);
   assert.match(
     last.reason,
-    /^The judge found it unsupported\. The owner only asked/,
+    /^The judge found it contradicted\. The owner only asked/,
   );
   // The learner's retirement leaves the key open to newer evidence.
   assert.deepEqual(await store.removed("owner"), []);
@@ -619,16 +617,16 @@ test("the owner forgets or narrows a memory by saying so, and the learner does n
     source: {},
   });
   const run = randomUUID();
-  // "That was only for the Tokyo trip": the same key, in the owner's narrower words.
+  // "No, I prefer the window": the same key, corrected in the owner's words, and theirs now.
   await tools.execute("owner", run, {
     operation: "memory_set",
     key: "seat",
-    value: "Wanted an aisle seat for the Tokyo trip only",
+    value: "Prefers window seats",
   });
-  const narrowed = (await head(db, "seat"))!;
+  const corrected = (await head(db, "seat"))!;
   assert.deepEqual(
-    [narrowed.origin, narrowed.value],
-    ["owner", "Wanted an aisle seat for the Tokyo trip only"],
+    [corrected.origin, corrected.value],
+    ["owner", "Prefers window seats"],
   );
   // "Forget that", for a fact and for a learned procedure.
   assert.deepEqual(
@@ -770,4 +768,307 @@ test("evidence is whole words of the turn, so a fragment quotes nothing", () => 
   assert.equal(shownInTurn(turn, "the weekly report to Priya"), true);
   assert.equal(shownInTurn(turn, "nt the wee"), false);
   assert.equal(shownInTurn(turn, "eekly repor"), false);
+});
+
+test("a rewrite cannot widen a fact by calling it dated, fill out a note, or turn a note back into a fact", async (t) => {
+  const db = await setup(t);
+  const seat = await learned(
+    db,
+    "seat",
+    "Prefers aisle seats",
+    "Get me an aisle seat on the Tokyo flight",
+  );
+  const tea = await learned(
+    db,
+    "tea",
+    "Asked for a green tea",
+    "Order a green tea for me",
+    { durability: "one_off" },
+  );
+  const gym = await learned(
+    db,
+    "gym",
+    "Goes to the gym on Mondays",
+    "Is the gym open on Monday?",
+  );
+  await judged(db, [
+    verdict(seat, "overstated"),
+    verdict(tea, "overstated", "Adds nothing"),
+    verdict(gym, "unsupported", "A question"),
+    ...good,
+  ]);
+  const quote = "Get me an aisle seat on the Tokyo flight";
+  const { adapter, inputs } = model((_input, n) =>
+    n === 1
+      ? [
+          // Broader than the fault it repairs, and still in every turn, under another name.
+          [
+            "repair_fact",
+            {
+              fact: "r1",
+              value: "Aisle seat on all flights",
+              quote,
+              durability: "time_bound",
+              until: "2027-06-01",
+              reason: "Test",
+            },
+          ],
+          [
+            "repair_fact",
+            {
+              fact: "r1",
+              value: "Aisle seat on the Tokyo flight",
+              quote,
+              durability: "time_bound",
+              until: "2099-12-31",
+              reason: "Test",
+            },
+          ],
+          // A note filled out with things the owner never said.
+          [
+            "repair_fact",
+            {
+              fact: "r1",
+              value:
+                "Asked Chief to email the accountant about aisle seat invoices",
+              quote,
+              durability: "one_off",
+              reason: "Test",
+            },
+          ],
+          // A note stays a note.
+          [
+            "repair_fact",
+            {
+              fact: "r2",
+              value: "Green tea for me",
+              quote: "Order a green tea for me",
+              durability: "standing",
+              reason: "Test",
+            },
+          ],
+          [
+            "repair_fact",
+            {
+              fact: "r2",
+              value: "Green tea for me",
+              quote: "Order a green tea for me",
+              durability: "time_bound",
+              until: "2026-12-05",
+              reason: "Test",
+            },
+          ],
+          // The owner may have backed it with something the repair cannot see.
+          ["repair_retire", { fact: "r3", reason: "Only a question" }],
+        ]
+      : [["repair_finish", {}]],
+  );
+  const result = await repair(db, adapter);
+  const refusals = results(inputs[1]).map((r: any) => r.refused ?? "accepted");
+  assert.match(refusals[0], /must use only the owner's words from the quote/);
+  assert.match(refusals[1], /more than a year away/);
+  assert.match(refusals[2], /adds to what the owner said/);
+  assert.match(refusals[3], /stays one/);
+  assert.match(refusals[4], /stays one/);
+  assert.match(refusals[5], /Only a contradicted fact is retired/);
+  // Nothing was accepted, so nothing changed.
+  assert.deepEqual(
+    [result.narrowed, result.retired, result.untouched],
+    [0, 0, 3],
+  );
+  assert.equal((await head(db, "seat"))!.id, seat.id);
+  assert.equal((await head(db, "tea"))!.id, tea.id);
+  assert.equal((await head(db, "gym"))!.id, gym.id);
+});
+
+test("a change decided against one revision is not written over another: the owner's save wins", async (t) => {
+  const db = await setup(t);
+  const store = new MemoryStore(db);
+  const seat = await learned(
+    db,
+    "seat",
+    "Prefers aisle seats",
+    "Get me an aisle seat",
+  );
+  const theirs = await store.write("owner", {
+    key: "seat",
+    value: "Prefers window seats",
+    kind: "fact",
+    origin: "owner",
+    reason: "test",
+    source: {},
+  });
+  // The repair read the learned revision; by the time it writes, the owner has saved theirs.
+  await assert.rejects(
+    store.write("owner", {
+      key: "seat",
+      value: "Asked for an aisle seat",
+      kind: "fact",
+      origin: "learned",
+      reason: "test",
+      source: {},
+      expect: seat.id,
+    }),
+    MemoryChanged,
+  );
+  await assert.rejects(
+    store.retire(
+      "owner",
+      "seat",
+      { origin: "learned", reason: "test", expect: seat.id },
+      {},
+    ),
+    MemoryChanged,
+  );
+  const current = (await head(db, "seat"))!;
+  assert.deepEqual(
+    [current.id, current.value],
+    [theirs.id, "Prefers window seats"],
+  );
+  assert.equal((await store.history("owner", "seat")).length, 2);
+  // Against the revision that is current, it goes through.
+  const ok = await store.write("owner", {
+    key: "seat",
+    value: "Prefers window seats on long flights",
+    kind: "fact",
+    origin: "owner",
+    reason: "test",
+    source: {},
+    expect: theirs.id,
+  });
+  assert.equal((await head(db, "seat"))!.id, ok.id);
+});
+
+test("facts with no messages left do not hold the queue, and only the current judge's verdicts and record count", async (t) => {
+  const db = await setup(t);
+  const store = new MemoryStore(db);
+  // More faulted facts than a night takes, none with a message to rewrite from.
+  const orphans = [];
+  for (let i = 0; i < REPAIR_LIMITS.perNight * 4 + 2; i++)
+    orphans.push(
+      await store.write("owner", {
+        key: `orphan_${String.fromCharCode(97 + i)}`,
+        value: `Orphan fact ${i}`,
+        kind: "fact",
+        origin: "learned",
+        reason: "test",
+        // Half cite nothing; half cite a message that no longer exists.
+        source: i % 2 ? { messageIds: [randomUUID()] } : {},
+      }),
+    );
+  const seat = await learned(
+    db,
+    "seat",
+    "Prefers aisle seats",
+    "Get me an aisle seat on the Tokyo flight",
+  );
+  // An earlier judge prompt faulted them all, and has a perfect record of its own.
+  await judged(
+    db,
+    [
+      ...orphans.map((o) => verdict(o, "overstated")),
+      verdict(seat, "overstated"),
+      ...good,
+    ],
+    2 * DAY,
+    "judge-v1",
+  );
+  // Neither its verdicts nor its record open the repair.
+  assert.equal(await due(db), false);
+  // The judge reads those faults again under the current prompt, beside anything new.
+  const rows = await (
+    learner(db, model(() => []).adapter) as any
+  ).judgeFactRows(
+    "owner",
+    { at: new Date(NIGHT.getTime() + DAY).toISOString(), id: seat.id },
+    100,
+  );
+  assert.equal(rows.length, orphans.length + 1);
+  // Faulted again by the current judge, with a record that passes the gate.
+  await judged(db, [
+    ...orphans.map((o) => verdict(o, "overstated")),
+    verdict(seat, "overstated"),
+    ...good,
+  ]);
+  assert.equal(await due(db), true);
+  const { adapter, inputs } = model(() => [
+    [
+      "repair_fact",
+      {
+        fact: "r1",
+        value: "Asked for an aisle seat on the Tokyo flight",
+        quote: "Get me an aisle seat on the Tokyo flight",
+        durability: "one_off",
+        reason: "One flight",
+      },
+    ],
+  ]);
+  const result = await repair(db, adapter);
+  // The one fact that can be repaired is reached past all those that cannot.
+  assert.deepEqual(
+    shown(inputs[0]).facts.map((f: any) => f.fact),
+    ["Prefers aisle seats"],
+  );
+  assert.deepEqual([result.candidates, result.narrowed], [1, 1]);
+  // Once the current judge's verdict on a fact is "supported", the older fault is spent.
+  const rejudged = await (
+    learner(db, model(() => []).adapter) as any
+  ).judgeFactRows(
+    "owner",
+    { at: new Date(NIGHT.getTime() + DAY).toISOString(), id: seat.id },
+    100,
+  );
+  assert.equal(rejudged.length, 0);
+});
+
+test("how often a key was repaired stays with it through new evidence and a rollback", async (t) => {
+  const db = await setup(t);
+  const store = new MemoryStore(db);
+  const seat = await learned(
+    db,
+    "seat",
+    "Prefers aisle seats",
+    "Get me an aisle seat on the Tokyo flight",
+    { repairs: 1 },
+  );
+  await judged(db, [verdict(seat, "overstated"), ...good]);
+  const result = await repair(
+    db,
+    model(() => [
+      [
+        "repair_fact",
+        {
+          fact: "r1",
+          value: "Asked for an aisle seat on the Tokyo flight",
+          quote: "Get me an aisle seat on the Tokyo flight",
+          durability: "one_off",
+          reason: "One flight",
+        },
+      ],
+    ]).adapter,
+  );
+  assert.equal((await head(db, "seat"))!.source.repairs, 2);
+  // Undoing a later learner run restores a copy that still carries the count.
+  const laterRun = randomUUID();
+  await db.query(
+    `INSERT INTO learner_runs(id,user_id,state,model,prompt_version)
+     VALUES($1,'owner','completed','test/model','learner-v6')`,
+    [laterRun],
+  );
+  await store.write("owner", {
+    key: "seat",
+    value: "Asked for an aisle seat twice",
+    kind: "fact",
+    origin: "learned",
+    reason: "test",
+    source: {},
+    learnerRun: laterRun,
+  });
+  assert.equal((await head(db, "seat"))!.source.repairs, undefined);
+  await store.rollback("owner", { learnerRun: laterRun }, "test");
+  const restored = (await head(db, "seat"))!;
+  assert.deepEqual(
+    [restored.value, restored.source.repairs, result.narrowed],
+    ["Asked for an aisle seat on the Tokyo flight", 2, 1],
+  );
 });

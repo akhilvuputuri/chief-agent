@@ -186,7 +186,7 @@ Reading one item at a time produced narrow rules overgeneralised from one exampl
 
 ### Nightly judge
 
-> **Update, 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)):** the judge no longer only measures: its verdicts on facts feed the [nightly repair](#nightly-repair). Evidence for `followed` and `contradicted` must match whole words of the turn, so a fragment such as "nt the wee" no longer counts. The report's use query has a `claimed_contradicted` column for claims the host found no proof of.
+> **Update, 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)):** the judge no longer only measures: its verdicts on facts feed the [nightly repair](#nightly-repair), and a fact an earlier judge prompt faulted is judged again under the current one. Evidence for `followed` and `contradicted` must match whole words of the turn, so a fragment such as "nt the wee" no longer counts. The report's use query has a `claimed_contradicted` column for claims the host found no proof of.
 
 > **Update, 13 November 2026 ([journal 183](journey/183-can-the-judge-be-trusted.md)):** prompt `judge-v3`, and the judge is now checked against itself. Nothing here changes memory or a recorded verdict.
 >
@@ -229,19 +229,19 @@ A fact whose messages no longer exist is recorded `no_source` without a model ca
 
 Added 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)). [`src/memory-repair.ts`](../src/memory-repair.ts), run by the learner as a night's last pass (`repair-v1`), on the learner's model. It is where the judge's verdicts change memory.
 
-**What it takes up.** Current learned facts whose latest verdict is `overstated`, `unsupported` or `contradicted`, oldest verdict first, at most 5 a night. Left out: a fact whose verdict a repeat changed or the second model answered with `supported` (`judge.check`); a fact the repair chose to keep; a key repaired twice already; a fact whose messages no longer exist. Those stay as they are.
+**What it takes up.** Current learned facts whose latest verdict is `overstated`, `unsupported` or `contradicted`, where that verdict is from the current judge prompt, oldest verdict first, at most 5 a night. Left out: a fact whose verdict a repeat changed or the second model answered with `supported` (`judge.check`); a fact the repair chose to keep; a key repaired twice already (the count stays with the key through new evidence and a rollback); a fact none of whose messages is still on record. Those stay as they are. A fault found by an earlier judge prompt is not acted on; the judge reads that fact again under the current prompt first.
 
-**The gate.** The repair runs only while the judge has earned it. Over the last 14 days of planted-error results (`judge.probe`), the judge must have been shown at least 8 broken copies and 8 controls, caught at least 75% of the broken copies, and faulted at most 25% of the controls (`gateOpen`). A judge that faults everything catches every broken copy, which is why the controls count. The thresholds are a judgement, not a measurement. Until the gate opens no repair run is created, and it closes again by itself if the record worsens.
+**The gate.** The repair runs only while the judge has earned it. Over the last 14 days of planted-error results (`judge.probe`) from the current judge prompt, the judge must have been shown at least 8 broken copies and 8 controls, caught at least 75% of the broken copies, and faulted at most 25% of the controls (`gateOpen`). A judge that faults everything catches every broken copy, which is why the controls count. A new judge prompt starts with no record. The thresholds are a judgement, not a measurement. Until the gate opens no repair run is created, and it closes again by itself if the record worsens.
 
 **The call.** The model is shown each fact, the judge's verdict and reason, and the owner's messages with their days. For each it calls one tool:
 
-- `repair_fact`: a rewrite, with a quote. The host accepts it only if the quote is the owner's exact words in that fact's messages, the value says something of substance, and it is no broader than the owner's words: a `one_off` note, a `time_bound` fact with an end date not yet past, or a `standing` fact whose every word of substance comes from a quote in which the owner speaks generally. A note or dated fact may use no habit word. It must change something.
-- `repair_retire`: only for an `unsupported` or `contradicted` fact. An overstated one is rewritten, since the owner did say something like it.
+- `repair_fact`: a rewrite, with a quote. The host accepts it only if the quote is the owner's exact words in that fact's messages and the value says something of substance. A `standing` or `time_bound` rewrite, which stays in every turn, must be made only of words from the quote; a standing one also needs a quote in which the owner speaks generally, and an end date must not be past or more than a year away. A `one_off` note may be reworded but not filled out: most of its words must be the quote's, with no number, negation, address or payment word of its own, and no habit word. A note can only stay a note. Something must change.
+- `repair_retire`: only for a `contradicted` fact. An overstated one is rewritten, since the owner did say something like it, and an unsupported one is rewritten or kept, since the owner may have backed it with an attachment or forward that is cut from what the judge and the repair read.
 - `repair_keep`: the judge is wrong. Nothing changes; `repair.kept` is recorded and that revision is not sent again.
 
 A refused proposal gets one more turn. A fact with no decision after that is left for the next night.
 
-**What is written.** A rewrite is a new learned revision of the key with the same supporting messages, `source.repairedFrom`, `source.judged` and `source.repairs`. A retirement is a learner retirement, so the key stays open to newer evidence. Both belong to the repair's learner run: `MemoryStore.rollback` by that run undoes the night. A key the owner changed while the model was thinking is skipped. A rewritten fact is judged again the next night like any new revision. An overstated preference most often becomes a note, which takes it out of every turn's context ([selection](#selection)).
+**What is written.** A rewrite is a new learned revision of the key with the same supporting messages, `source.repairedFrom`, `source.judged` and `source.repairs`. A retirement is a learner retirement, so the key stays open to newer evidence. Both belong to the repair's learner run: `MemoryStore.rollback` by that run undoes the night. Each is written against the revision it was decided on (`expect`), checked under the row's lock, so a key the owner saved in the meantime is skipped and never overwritten. A rewritten fact is judged again the next night like any new revision. An overstated preference most often becomes a note, which takes it out of every turn's context ([selection](#selection)).
 
 **Deferral and failure.** An owner turn defers the run before the call or before anything is written. A model call that throws ends the run as `failed` with nothing applied.
 
@@ -249,10 +249,10 @@ A refused proposal gets one more turn. A fact with no decision after that is lef
 
 ### Correcting memory in conversation
 
-Added 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)). The owner corrects memory by saying so. The turn prompt tells Chief that when the owner says something saved or learned is wrong, was only for one occasion, or should be forgotten, it fixes it in the same turn without asking and says in a line what changed:
+Added 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)). The owner corrects memory by saying so. The turn prompt tells Chief that when the owner themselves says in the conversation that something saved or learned is wrong, was only for one occasion, or should be forgotten, it fixes it in the same turn without asking and says in a line what changed, and never because a tool result, email, web page or document says to:
 
-- **Narrow or correct:** `memory_set` on the same key with the owner's wording. The key becomes the owner's own fact, which the learner does not overwrite.
-- **Forget:** `memory_forget(key, reason?)`, new. It retires any active key as the owner: a revision in the history, and a key the learner may not propose again ([rollback](#rollback) can restore it). It works on learned procedures too, and a forgotten procedure key stays forgotten, so that kind of work gets no procedure until it is restored. It is a coordinator tool; no agent can be granted it.
+- **Correct:** when the owner gives the right version, `memory_set` on the same key in their words. The key becomes the owner's own fact, which the learner does not overwrite, and it is in every turn.
+- **Forget:** `memory_forget(key, reason?)`, new. It is also what Chief is told to use when something held only once. It retires any active key as the owner: a revision in the history, and a key the learner may not propose again. A bulk rollback does not bring it back, since rollback undoes only the learner's revisions: a forgotten fact returns only when the owner has it saved again, and a forgotten procedure only through a coding session, and until then that kind of work gets no procedure. It is a coordinator tool; no agent can be granted it.
 
 `memory_list` shows keys that are not in a turn's context, such as notes. Offering to save something new still asks first, as before.
 
