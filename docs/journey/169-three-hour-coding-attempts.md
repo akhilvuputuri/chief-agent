@@ -5,6 +5,8 @@ Status: new Pi jobs get 180 minutes instead of 150. Effort is unchanged; lowerin
 
 > **Update, 12 November 2026:** live in `92999f8` (PR 460, release run 43159458020).
 
+> **Update, 12 November 2026:** the owner chose `medium` effort for new jobs; see [Effort lowered to medium](#effort-lowered-to-medium-12-november-2026). The same section records that the coder made one tool call per turn and used the shell instead of `read` and `edit`.
+
 ## User-visible problem and preceding iteration
 
 Coding job `9600af57` (the study-links feature, rerun after [journal 164](164-claude-models-everywhere.md) moved the planner, coder and reviewer to Opus 5.5) paused with "Coding time ran out while the coding box was still working; saved work is retained". It was on worker image `sha256:33639fbe…` from [journal 167](167-review-that-reads-what-changed.md). The owner asked why it took so long, since the same kind of task is faster in an interactive Claude Code session.
@@ -59,7 +61,7 @@ The owner chose `medium` for new Pi jobs after reading the evidence above. `effo
 
 - **One tool call per turn.** 168 of 173 coder responses and 63 of 69 reviewer responses asked for exactly one tool. The planner, with no shell, asked for two or three at a time in 12 of its 15.
 - **Shell instead of the file tools.** All but 9 of the coder's 178 tool calls were `bash`: 49 `sed`, 42 `grep`, 14 `cat`, and 25 `python3` scripts averaging 2,543 characters that edited files. It called `edit` and `read` zero times. The reviewer made 60 `bash` calls, mostly `grep`, `sed` and `cat`.
-- **The prompt says nothing about either.** The Pi runtime replaces Pi's default system prompt with Chief's (`coding_runtime_pi/src/runtime.ts`), which asks for real checks and scope but gives no guidance on choosing tools or batching independent reads.
+- **The prompt says nothing about either.** The Pi runtime replaces Pi's default system prompt with Chief's (prompt text in `coding_runtime_pi/src/runtime.ts`), which asks for real checks and scope but gives no guidance on choosing the file tools over `bash`, or on batching repository reads (it does say to request several `read_document` pages in one turn). The replacement is in `coding_runtime_pi/src/resources.ts`.
 
 **Hypothesis, not tested:** each extra turn costs a full model call with its thinking, and each edit script is written out as output tokens at about 100 a second. Telling the coder and reviewer to use `read` and `edit` and to batch independent reads in one turn could cut the number of turns substantially. That is a worker change, so it needs a new worker image and a pin.
 
