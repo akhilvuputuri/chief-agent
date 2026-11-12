@@ -227,6 +227,26 @@ for (const scenario of [
     assert.equal(f.counts().merges, 0);
   });
 }
+test("the legacy flow stops when main or the PR base changed, and still times out on unknown mergeability", async (t) => {
+  for (const moved of ["main", "base"] as const) {
+    const f = await fixture(t);
+    f.setInspection({ checks: "passed", [moved]: "e".repeat(40) });
+    await f.auto.tick();
+    const job = await f.job();
+    assert.equal(job.stage, "manual_review", moved);
+    assert.match(job.summary, /Main changed since approved requirements/);
+    assert.equal(f.counts().merges, 0);
+  }
+  const g = await fixture(t);
+  g.setInspection({ checks: "passed", mergeable: null });
+  await g.auto.tick();
+  assert.equal((await g.job()).stage, "awaiting_ci");
+  g.advance();
+  await g.auto.tick();
+  const stopped = await g.job();
+  assert.equal(stopped.stage, "manual_review");
+  assert.match(stopped.summary, /mergeability remain unavailable/);
+});
 test("MR feedback queues the coder with findings while preserving approved scope and shared allocation", async (t) => {
   const f = await fixture(t);
   f.setInspection({

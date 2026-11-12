@@ -898,6 +898,95 @@ test("unknown mergeability waits without dropping the card or the owner's tap, a
   assert.equal(cards.length, 1);
 });
 
+test("a conflict reading with main unmoved is stale: it waits and nothing is re-applied", async (t) => {
+  const f = await fixture(t);
+  f.setInspection({ checks: "passed", draft: false, mergeable: false });
+  await f.auto.tick();
+  const waiting = await f.job();
+  assert.equal(waiting.state, "pr_ready");
+  assert.equal(waiting.revision, 1);
+  assert.equal(waiting.stage, "awaiting_ci");
+  assert.equal(waiting.checkpoint.files.length, 1);
+  f.setInspection({ mergeable: true });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_merge_approval");
+  assert.equal(f.counts().merges, 0);
+});
+
+/** Brings the fixture job to an owner Merge tap that has not yet been acted on. */
+async function tapped(f: Awaited<ReturnType<typeof fixture>>) {
+  f.setInspection({ checks: "passed" });
+  await f.auto.tick();
+  await f.auto.tick();
+  const card = await f.deliverCard();
+  await f.approvals.confirm("owner", card.id, true, "owner", 55);
+  assert.equal((await f.job()).stage, "merge_approved");
+}
+
+test("unknown mergeability never keeps a tap alive past a real change to the PR", async (t) => {
+  // (a) New feedback goes to the coder; the tap is gone with the old revision.
+  const a = await fixture(t);
+  await tapped(a);
+  a.setInspection({
+    mergeable: null,
+    feedback: [{ id: "devin-2", text: "Devin: a new finding" }],
+  });
+  await a.auto.tick();
+  const queued = await a.job();
+  assert.equal(queued.state, "queued");
+  assert.equal(queued.revision, 2);
+  assert.equal(a.counts().merges, 0);
+
+  // (b) An open review thread drops the tap; once resolved, a fresh card is needed.
+  const b = await fixture(t);
+  await tapped(b);
+  b.setInspection({ mergeable: null, unresolvedThreads: 1 });
+  await b.auto.tick();
+  assert.equal((await b.job()).stage, "awaiting_ci");
+  b.setInspection({ mergeable: true, unresolvedThreads: 0 });
+  await b.auto.tick();
+  assert.equal((await b.job()).stage, "awaiting_merge_approval");
+  assert.equal(b.counts().merges, 0);
+  const cards = (
+    await b.db.query(
+      "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload ? 'merge'",
+      [b.id],
+    )
+  ).rows;
+  assert.equal(cards.length, 2);
+
+  // (c) Failing checks stop the job.
+  const c = await fixture(t);
+  await tapped(c);
+  c.setInspection({ mergeable: null, checks: "failed" });
+  await c.auto.tick();
+  assert.equal((await c.job()).stage, "manual_review");
+  assert.equal(c.counts().merges, 0);
+
+  // (d) A changed head stops the job.
+  const d = await fixture(t);
+  await tapped(d);
+  d.setInspection({ mergeable: null, head: "f".repeat(40) });
+  await d.auto.tick();
+  assert.equal((await d.job()).stage, "manual_review");
+  assert.equal(d.counts().merges, 0);
+
+  // (e) Fresh feedback on the final read before merge drops the tap even while unknown.
+  const e = await fixture(t);
+  await tapped(e);
+  e.onNextInspect(async () => {
+    e.onNextInspect(async () => {
+      e.setInspection({
+        mergeable: null,
+        feedback: [{ id: "devin-3", text: "Devin: late finding" }],
+      });
+    });
+  });
+  await e.auto.tick();
+  assert.equal((await e.job()).stage, "awaiting_ci");
+  assert.equal(e.counts().merges, 0);
+});
+
 test("a re-apply never carries over a scope the owner did not approve", async (t) => {
   const f = await fixture(t);
   f.setInspection({

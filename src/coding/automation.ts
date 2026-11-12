@@ -487,8 +487,10 @@ export class CodingAutomation {
         return;
       }
       // Only GitHub's definite conflict needs work; unknown (null) mergeability waits at the
-      // merge gate below. Rebase only candidates that could otherwise merge.
-      if (ownerMerge && i.mergeable === false) {
+      // merge gate below. A PR built on current main cannot conflict with it, so `false` with
+      // an unmoved main is a stale reading and also waits. Rebase only candidates that could
+      // otherwise merge.
+      if (ownerMerge && i.mergeable === false && i.main !== j.base_sha) {
         await this.rebase(j, d, i.main);
         return;
       }
@@ -622,6 +624,7 @@ export class CodingAutomation {
         // GitHub recomputes mergeability after every push to main and reports null meanwhile.
         // That is not a change to this PR: keep its stage, card and any owner tap, and look again.
         if (
+          ownerMerge &&
           i.mergeable === null &&
           i.checks === "passed" &&
           !(i.unresolvedThreads ?? 0)
@@ -720,6 +723,7 @@ export class CodingAutomation {
       );
       // Mergeability still being computed keeps the owner's tap; the next tick merges.
       if (
+        ownerMerge &&
         !fresh &&
         final.mergeable === null &&
         final.checks === "passed" &&

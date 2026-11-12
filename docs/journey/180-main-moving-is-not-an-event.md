@@ -38,10 +38,10 @@ The legacy squad path (`autoMerge`, Python runtime) keeps its "Main changed sinc
 
 - `src/coding/automation.ts`:
   - an owner-merge job's base and main are no longer compared;
-  - `rebase()` runs only when `mergeable === false`, and its owner text says the PR conflicts with main;
+  - `rebase()` runs only when `mergeable === false` and main differs from the job's base, and its owner text says the PR conflicts with main. A PR built on current main cannot conflict with it, so `false` with an unmoved main is treated as a stale reading and waits for the next tick;
   - the two-rebase counter is removed;
   - the final re-read before merge compares head and tree (and base and main only for the legacy flow);
-  - `mergeable: null` with checks passed and no open threads waits in its current stage, touching `updated_at` so other jobs still get their turn. This applies at the first read and after the final re-read. A waiting card and an owner tap both survive, and nothing times out because of it.
+  - `mergeable: null` with checks passed and no open threads waits in its current stage, touching `updated_at` so other jobs still get their turn. This applies at the first read and after the final re-read. A waiting card and an owner tap both survive, and nothing times out because of it. A PR whose mergeability GitHub never finishes computing would therefore wait without notice; this is known and accepted, since no use so far shows a need for a limit. The wait applies to owner-merge jobs only; the legacy flow keeps its one-hour stop. Any real change during the wait still invalidates the tap: new feedback, an open thread, failing checks or a changed head.
 - `src/coding/github-automation.ts`, `src/coding/merge-policy.ts`: `ready()` and `merge()` no longer compare the PR's `base.sha`; `MergeTarget.baseSha` is removed because nothing else used it. The merge is still pinned to the reviewed head (`sha: head`).
 - `src/coding/controller.ts`, `src/runtime.ts`: tool and status texts no longer say the job is rebased when main moves; they say main moving does not change the job and only a merge conflict sends the change back to the coder.
 - Dated notes in `docs/coding-automation.md`, `docs/coding.md`, `docs/boxes.md`.
@@ -56,7 +56,10 @@ Run locally on 13 November 2026 (results in the builder's report):
   - main moved with a clean merge: no rebuild, the Merge card is reached and survives a further move, the tap merges, and the release is tracked by the merge commit to `deployed`;
   - unknown mergeability over two hours keeps the card and the tap, including a `null` on the final re-read, and merges once it is `true`;
   - a conflicting PR is re-applied (interim), including after three earlier re-applies;
-  - a re-apply never carries over an unapproved scope.
+  - a re-apply never carries over an unapproved scope;
+  - a conflict reading with main unmoved waits and re-applies nothing;
+  - during a null wait, new feedback, an open thread, failing checks, a changed head, or fresh feedback on the final read each invalidate the tap.
+- `tests/coding-automation.test.ts`: the legacy flow still stops with "Main changed since approved requirements" when main or the PR base changed, and still stops after an hour of unknown mergeability.
 - `tests/coding-github-automation.test.ts`: a moved `base.sha` neither blocks readiness nor the exact-head merge.
 - The test "automatic rebases stop after two rounds" was deleted with the cap.
 
@@ -66,3 +69,4 @@ Not run: any real GitHub call or paid model call.
 
 - Replace the interim conflict re-implementation with an in-box `git rebase` of the reviewed commit (next revamp piece).
 - Release tracking waits for a `companion/production` receipt on the exact merge commit. Within the `companion-production` concurrency group, a later push to main can supersede a still-pending release run, so the merge commit may never get its own receipt and the job would park after an hour. This was not changed here. It is a property of main moving after the merge, not before it.
+- Reviewer's note: CI on the PR tested the merge with main as it was when the PR was pushed, and is not re-run when main moves (normal for a repository that does not require up-to-date branches). If branch protection ever requires up-to-date branches, GitHub will refuse the merge and the job goes to manual review.
