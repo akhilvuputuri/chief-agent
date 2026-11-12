@@ -49,7 +49,7 @@ export function questionExcerpt(text: string, max = 200) {
 
 /**
  * Items that wait on the owner, for the foreground turn context: coding jobs that need the
- * owner (a requirements or merge card, a question, a pause, a failure, a PR stopped for
+ * owner (a Start or merge card, a question, a pause, a failure, a PR stopped for
  * attention), delivered monitoring cards that expired unanswered (kept until their end date has
  * passed, journal 117), and Chief's own recent questions the owner has not answered.
  * Without these, Chief answered "status?" without the plans it had finished and started
@@ -64,9 +64,9 @@ export async function openLoops(
   const coding = options.coding
     ? (
         await db.query(
-          // Requirements cards are any event carrying `requirements` (the first card is the
-          // attempt's ":finished" event; re-sent cards are "requirements:" events). Only a card
-          // for the job's current revision can still be confirmed.
+          // Start cards are events carrying `requirements` ("requirements:" events, written when
+          // the job is created, on each message before Start and on a re-send). Only a card for
+          // the job's current revision can still start the job.
           `SELECT j.id,left(j.objective,120) objective,j.state,j.stage,left(j.summary,160) summary,
              left(j.question,200) question,j.updated_at,
              -- Card state over every undecided, live card for the current revision (and head, for
@@ -104,12 +104,12 @@ export async function openLoops(
         awaiting:
           j.state === "plan_ready"
             ? j.card === "open"
-              ? "owner to confirm the requirements card"
+              ? "owner to tap Start on the Start card; a message before Start is added to the request (coding_reply)"
               : j.card === "expired"
-                ? "requirements card expired; offer a fresh one (coding_resume)"
+                ? "Start card expired; offer a fresh one (coding_resume)"
                 : j.revise_requested && j.card !== "pending"
-                  ? "owner asked for changes to the plan; ask what to change, then revise it (coding_reply)"
-                  : "plan ready but its card is not delivered yet; read coding_status before offering one"
+                  ? "owner did not start it; ask what to change, then send it (coding_reply)"
+                  : "waiting for Start but its card is not delivered yet; read coding_status before offering one"
             : j.state === "awaiting_input"
               ? "owner to answer the job's question"
               : j.state === "paused"

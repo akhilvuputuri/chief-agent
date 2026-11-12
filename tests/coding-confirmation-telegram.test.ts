@@ -10,7 +10,7 @@ import { telegram } from "../src/telegram.js";
 import { readConfig } from "../src/config.js";
 import type { Assistant } from "../src/agent.js";
 
-test("Telegram buttons and direct yes replies confirm the displayed coding brief without slash commands", async (t) => {
+test("the Start button and a direct yes reply start the displayed request without slash commands", async (t) => {
   for (const transport of [
     "button",
     "reply",
@@ -70,31 +70,16 @@ test("Telegram buttons and direct yes replies confirm the displayed coding brief
       requestKey: "request",
       objective: "Requested feature",
       context: "Synthetic acceptance",
-      mode: "implement",
     });
+    // The job waits for Start: no box before the tap (journal 191).
     await coding.tick();
-    const row = (
-      await db.query("SELECT * FROM coding_jobs WHERE id=$1", [job.id])
-    ).rows[0];
-    await coding.finish(row, {
-      kind: "plan_ready",
-      summary: "Brief prepared",
-      checkpoint: {
-        plan: "Scope: the requested feature. Tests: synthetic acceptance.",
-        patch: "",
-        summary: "",
-        files: [],
-      },
-    });
-    await coding.tick();
-    await coding.tick();
+    assert.equal(starts, 0);
     let approval = "";
-    for (let i = 0; i < 2; i++)
-      await coding.deliver(async (_u, target, _text, id) => {
-        assert.deepEqual(target, { kind: "topic", topic: "coding" });
-        if (id) approval = id.id;
-        return { message_id: 100 };
-      });
+    await coding.deliver(async (_u, target, _text, id) => {
+      assert.deepEqual(target, { kind: "topic", topic: "coding" });
+      if (id) approval = id.id;
+      return { message_id: 100 };
+    });
     assert(approval);
     const bot = telegram(
       readConfig({
@@ -135,7 +120,7 @@ test("Telegram buttons and direct yes replies confirm the displayed coding brief
       date: 0,
       chat: { id: 123, type: "private" },
       from: { id: 999, is_bot: true, first_name: "Fixture" },
-      text: "Requirements",
+      text: "Ready to start",
     };
     const update: any = transport.startsWith("button")
       ? {
@@ -159,15 +144,27 @@ test("Telegram buttons and direct yes replies confirm the displayed coding brief
             reply_to_message: card,
           },
         };
+    // The Change button is gone: an old cod:no tap changes nothing.
+    await bot.handleUpdate({
+      update_id: 0,
+      callback_query: {
+        id: "old-change",
+        from,
+        chat_instance: "private",
+        data: `cod:no:${approval}`,
+        message: card,
+      },
+    } as any);
+    assert.equal(
+      (await db.query("SELECT mode FROM coding_jobs WHERE id=$1", [job.id]))
+        .rows[0].mode,
+      "plan",
+    );
     await bot.handleUpdate(update);
     if (transport.includes("ack-fails")) {
       assert(failedAck);
       assert.equal(replies.length, 0);
-    } else
-      assert(
-        replies[0]?.includes("Requirements approved"),
-        JSON.stringify(replies),
-      );
+    } else assert(replies[0]?.startsWith("Started."), JSON.stringify(replies));
     assert.equal(
       (
         await db.query("SELECT mode,revision FROM coding_jobs WHERE id=$1", [
@@ -184,8 +181,8 @@ test("Telegram buttons and direct yes replies confirm the displayed coding brief
     );
     if (transport.startsWith("reply"))
       assert.equal(replies.length, transport.includes("ack-fails") ? 0 : 1);
-    assert.equal(starts, 1);
+    assert.equal(starts, 0);
     await coding.tick();
-    assert.equal(starts, 2);
+    assert.equal(starts, 1);
   }
 });

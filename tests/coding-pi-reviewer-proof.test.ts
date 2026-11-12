@@ -6,7 +6,7 @@ import { seal } from "../src/secret-box.js";
 
 test("Pi merge proof requires a sealed reviewer APPROVE matching the acknowledged review document", async (t) => {
   const f = await fixture(t);
-  const started = await f.start("pi-proof", "implement");
+  const started = await f.start("pi-proof");
   const attempt = randomUUID();
   const detail = "The candidate implements the approved plan exactly.";
   const base = await f.row(started.id);

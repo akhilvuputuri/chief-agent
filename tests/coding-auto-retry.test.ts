@@ -18,7 +18,7 @@ async function paused(
   } = {},
 ) {
   const f = await fixture(t);
-  const job = await f.start("request", "plan");
+  const job = await f.start("request");
   const attempt = randomUUID();
   await f.db.query(
     `UPDATE coding_jobs SET state='paused',stage='paused',attempt_id=$2,cleanup=$3,publication_started=$4,
@@ -171,7 +171,7 @@ test("the host records the transient cause when a sandbox stops or its heartbeat
     ["silent", "heartbeat_lost"],
   ] as const) {
     const f = await fixture(t);
-    const job = await f.start("request", "plan");
+    const job = await f.start("request");
     await f.c.tick(); // provisions the sandbox
     const j = await f.row(job.id);
     if (stop === "terminal") await f.provider.terminate(j.sandbox_id);
@@ -209,7 +209,7 @@ test("a revoked owner's older job does not block another owner's retry", async (
   await f.db.query("UPDATE coding_jobs SET user_id='b' WHERE id=$1", [
     other.id,
   ]);
-  const job = await f.start("second", "plan");
+  const job = await f.start("second");
   const attempt = randomUUID();
   await f.db.query(
     "UPDATE coding_jobs SET state='paused',stage='paused',attempt_id=$2,cleanup='complete',updated_at=now()-interval '5 minutes' WHERE id=$1",
@@ -229,7 +229,7 @@ test("a sandbox whose stop reason could not be read is not classified as transie
   (f.provider as any).terminalReason = async () => {
     throw new Error("lookup failed");
   };
-  const job = await f.start("request", "plan");
+  const job = await f.start("request");
   await f.c.tick();
   const j = await f.row(job.id);
   await f.provider.terminate(j.sandbox_id);
@@ -245,7 +245,7 @@ test("a sandbox whose stop reason could not be read is not classified as transie
 
 test("the host-only retry switch never reaches the strict worker settings", async (t) => {
   const f = await fixture(t);
-  const job = await f.start("request", "plan");
+  const job = await f.start("request");
   await f.db.query(
     "UPDATE coding_jobs SET settings=settings||'{\"autoRetryTransientOnce\":false}'::jsonb WHERE id=$1",
     [job.id],
@@ -258,7 +258,7 @@ test("the host-only retry switch never reaches the strict worker settings", asyn
 test("more than twenty revoked owners' pauses do not crowd out an allowed retry", async (t) => {
   const { f, job: first } = await paused(t, { age: "20 minutes" });
   const pause = async (key: string, age: string, cause: string) => {
-    const job = await f.start(key, "plan");
+    const job = await f.start(key);
     const attempt = randomUUID();
     await f.db.query(
       "UPDATE coding_jobs SET state='paused',stage='paused',attempt_id=$2,cleanup='complete',updated_at=now()-$3::interval WHERE id=$1",

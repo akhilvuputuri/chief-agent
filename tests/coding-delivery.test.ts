@@ -2,44 +2,34 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { sendCodingDelivery } from "../src/coding/delivery.js";
 
-test("complete Unicode requirements and approval buttons share one document receipt", async () => {
-  const document = {
-    filename: "coding-plan-r2.md",
-    content: "# Original request\n" + "完整要求😀\n".repeat(6000),
-  };
-  let sent = 0;
+test("a Start card is one text message with a single Start button", async () => {
+  const keyboards: any[] = [];
   const receipt = await sendCodingDelivery(
-    "**Coding plan — revision 2**\nReview the attached complete requirements.",
+    "**Ready to start**\n\nFix the reminder bug 😀\n\nCoder: anthropic/claude-sonnet-5.5. Reviewer: anthropic/claude-opus-5.5.",
     { kind: "requirements", id: "approval" },
-    document,
     {
-      text: async () => {
-        throw Error("Must not split approval into text fragments");
-      },
-      document: async (file, caption, keyboard) => {
-        sent++;
-        assert.equal(file.content, document.content);
-        assert(caption.text.length <= 1024);
-        assert.equal(
-          keyboard?.inline_keyboard[0]?.[0]?.callback_data,
-          "cod:yes:approval",
-        );
+      text: async (_part, keyboard) => {
+        keyboards.push(keyboard);
         return { message_id: 91 };
       },
     },
   );
-  assert.equal(sent, 1);
   assert.equal(receipt.message_id, 91);
+  assert.equal(keyboards.length, 1);
+  assert.deepEqual(
+    keyboards[0]?.inline_keyboard.map((row: any[]) =>
+      row.map((b) => [b.text, b.callback_data]),
+    ),
+    [[["Start", "cod:yes:approval"]]],
+  );
 });
-test("failed document delivery cannot be reported as an approval receipt", async () => {
+test("a failed Start card send cannot be reported as an approval receipt", async () => {
   await assert.rejects(
     sendCodingDelivery(
-      "Review attached requirements",
+      "**Ready to start**",
       { kind: "requirements", id: "approval" },
-      { filename: "plan.md", content: "Complete requirements" },
       {
-        text: async () => ({ message_id: 1 }),
-        document: async () => {
+        text: async () => {
           throw Error("Delivery uncertain");
         },
       },
@@ -52,14 +42,10 @@ test("merge cards carry merge and keep-open buttons on the final text part", asy
   const receipt = await sendCodingDelivery(
     "**Ready to merge**\nAll checks and reviews passed.",
     { kind: "merge", id: "card" },
-    undefined,
     {
       text: async (_part, keyboard) => {
         keyboards.push(keyboard);
         return { message_id: 7 };
-      },
-      document: async () => {
-        throw Error("Merge cards are text messages");
       },
     },
   );

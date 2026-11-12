@@ -72,7 +72,6 @@ async function runningJob(
     requestKey: key,
     objective: "Synthetic objective",
     context: "Synthetic context",
-    mode: "plan",
   })) as any;
   const plan = { plan: "Approved plan", patch: "", summary: "", files: [] };
   await f.db.query(
@@ -88,7 +87,7 @@ async function runningJob(
     await f.db.query("SELECT * FROM coding_jobs WHERE id=$1", [started.id])
   ).rows[0];
   await f.db.query(
-    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'fixture-approved',$2::jsonb,'suppressed')",
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'agent-approved',$2::jsonb,'suppressed')",
     [
       job.id,
       JSON.stringify({
@@ -108,7 +107,6 @@ test("agent git is snapshotted only when the agent App is configured and stays h
     requestKey: "no-agent-app",
     objective: "Synthetic",
     context: "Synthetic",
-    mode: "plan",
   })) as any;
   const stored = (
     await f.db.query("SELECT settings FROM coding_jobs WHERE id=$1", [plain.id])

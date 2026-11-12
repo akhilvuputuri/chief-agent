@@ -10,7 +10,6 @@ import type { ModelAdapter, Message } from "../model.js";
 import {
   checkpoint,
   codingSettings,
-  assertCodingBrief,
   outcome,
   type Checkpoint,
   type Outcome,
@@ -18,6 +17,24 @@ import {
 import { artifactHash } from "./github.js";
 import { Workspace } from "./workspace.js";
 import { codingLoop, type LoopBudget } from "./loop.js";
+
+/** This legacy worker sends the whole brief in one request; reserve room for tools and a call group. */
+function assertCodingBrief(objective: string, context: string) {
+  const content = JSON.stringify({
+    objective,
+    context,
+    savedPlan: "",
+    savedSummary: "",
+  });
+  if (
+    Buffer.byteLength(
+      JSON.stringify({ messages: [{ role: "user", content }] }),
+    ) > 70000
+  )
+    throw new Error(
+      "Coding brief is too large for one legacy run; provide a shorter objective/context.",
+    );
+}
 
 const assignment = z.object({
   id: z.string().uuid(),

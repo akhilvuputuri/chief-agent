@@ -29,11 +29,7 @@ import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError, OpenRouter } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
-import {
-  codingSettings,
-  outcome,
-  assertCodingBrief,
-} from "../src/coding/schema.js";
+import { codingSettings, outcome } from "../src/coding/schema.js";
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -60,12 +56,12 @@ import {
   base,
   candidate,
   fixture,
-  requirementBrief,
+  startCard,
 } from "./helpers/coding-fixture.js";
 test("terminal provider metadata explains timeout and falls back safely if the diagnostic read fails", async (t) => {
   for (const diagnosticReadFails of [false, true]) {
     const f = await fixture(t),
-      job = await f.start(`terminal-diagnostic-${diagnosticReadFails}`, "plan");
+      job = await f.start(`terminal-diagnostic-${diagnosticReadFails}`);
     await f.c.tick();
     f.provider.inspect = async () => "terminal";
     Object.assign(f.provider, {

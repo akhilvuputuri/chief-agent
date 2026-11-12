@@ -1,6 +1,5 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,7 +13,6 @@ import {
   CodingRequirements,
   requirementScope,
 } from "../src/coding/requirements.js";
-import { canonicalJson } from "../src/coding/github.js";
 import { codingSettings } from "../src/coding/schema.js";
 import {
   fixture,
@@ -33,7 +31,6 @@ async function setup(t: TestContext, phase: "build" | "review" = "review") {
     runtime: "pi",
     squad: false,
     autoMerge: false,
-    leaderModel: "synthetic/leader",
     model: "synthetic/coder",
     reviewerModel: "synthetic/reviewer",
   });
@@ -69,7 +66,6 @@ async function setup(t: TestContext, phase: "build" | "review" = "review") {
     requestKey: "start",
     objective: "Fix a synthetic bug",
     context: "Synthetic evidence",
-    mode: "plan",
   })) as any;
   const checkpoint = {
     plan: "Fix the fixture",
@@ -113,20 +109,6 @@ const approve = (db: any, id: string, scope: string) =>
     "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'approved',$2::jsonb,'suppressed')",
     [id, JSON.stringify({ decision: "approved", approvedScope: scope })],
   );
-const legacyScope = (job: any) =>
-  createHash("sha256")
-    .update(
-      canonicalJson({
-        id: job.id,
-        objective: job.objective,
-        context: job.context,
-        baseSha: job.base_sha,
-        settings: job.settings,
-        plan: job.checkpoint.plan,
-      }),
-    )
-    .digest("hex");
-
 test("an approval covers the objective, context and plan, not who carries them out", async (t) => {
   const { f, row, requirements, id } = await setup(t);
   const job = await row();
@@ -146,10 +128,10 @@ test("an approval covers the objective, context and plan, not who carries them o
     assert.equal(await requirements.approved(changed), false);
 });
 
-test("an approval recorded under the earlier scope stays valid, and a settings change carries it", async (t) => {
+test("a settings change keeps the owner's Start of the request", async (t) => {
   const { f, row, update, requirements, id } = await setup(t);
   const job = await row();
-  await approve(f.db, id, legacyScope(job));
+  await approve(f.db, id, requirementScope(job));
   assert.equal(await requirements.approved(job), true);
   await update({ reviewerModel: opus });
   const after = await row();
@@ -187,10 +169,7 @@ test("changing the reviewer during review restarts its session and keeps the wor
   assert.deepEqual(notice.payload.changes, [
     { field: "Reviewer", from: "synthetic/reviewer", to: opus },
   ]);
-  assert.match(
-    notice.payload.summary,
-    /approval of the requirements still stands/,
-  );
+  assert.match(notice.payload.summary, /Start of the request still stands/);
   assert.match(notice.payload.summary, /stays stopped/);
 });
 
@@ -222,10 +201,7 @@ test("a stopped job moves to the current worker image and keeps its work and ses
       to: settings.image.slice(-12),
     },
   ]);
-  assert.match(
-    notice.payload.summary,
-    /approval of the requirements still stands/,
-  );
+  assert.match(notice.payload.summary, /Start of the request still stands/);
   await assert.rejects(update({ upgradeWorker: true }, "again"), /already has/);
 });
 
@@ -460,7 +436,7 @@ test("a worker reviews with the new reviewer in a fresh round after a switch", a
   git("add", ".");
   git("commit", "-qm", "Fixture");
   const commit = git("rev-parse", "HEAD").toString().trim();
-  const started = await f.start("pi-switch", "plan");
+  const started = await f.start("pi-switch", true);
   await f.db.query(
     "UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3 WHERE id=$1",
     [
@@ -587,10 +563,6 @@ test("a worker reviews with the new reviewer in a fresh round after a switch", a
       { prepareRepository },
     );
   };
-  await f.c.tick();
-  await run();
-  await f.c.tick();
-  await f.c.tick();
   let receipt = 100;
   let approvalId = "";
   let approvedMessage = 0;

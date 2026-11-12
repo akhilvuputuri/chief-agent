@@ -161,7 +161,6 @@ test("a later review round is told what changed since the reviewed candidate, wi
     candidateHash: "a".repeat(64),
     baseSha: "b".repeat(40),
     fileCount: 100,
-    plan: "p".repeat(6000),
     context: "c".repeat(16000),
     checks: [
       "kite ci",
@@ -199,7 +198,6 @@ test("a later review round is told what changed since the reviewed candidate, wi
       });
       assert(escaped.length <= 32000, `Escaped receipts: ${escaped.length}`);
       assert(escaped.includes(input.context));
-      assert(escaped.includes(input.plan));
       assert.equal((escaped.match(/"exitCode":0/g) ?? []).length, 4);
     }
   assert.match(later, /review round 3/);

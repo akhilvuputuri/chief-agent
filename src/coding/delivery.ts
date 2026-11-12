@@ -1,23 +1,16 @@
 import { formatTelegram, type FormattedMessage } from "../telegram-format.js";
 import type { InlineKeyboardMarkup } from "grammy/types";
 import { StatusMessageGone } from "./notices.js";
-export type CodingDocument = { filename: string; content: string };
 /** Which owner decision a delivered message's buttons answer. */
 export type CodingApproval = { kind: "requirements" | "merge"; id: string };
 type Receipt = { message_id: number };
-/** One document message binds the full brief and its approval buttons atomically. */
+/** Sends a coding message; the buttons go on its last part, whose receipt binds the decision. */
 export async function sendCodingDelivery(
   text: string,
   approval: CodingApproval | undefined,
-  document: CodingDocument | undefined,
   transport: {
     text: (
       part: FormattedMessage,
-      keyboard?: InlineKeyboardMarkup,
-    ) => Promise<Receipt>;
-    document: (
-      document: CodingDocument,
-      caption: FormattedMessage,
       keyboard?: InlineKeyboardMarkup,
     ) => Promise<Receipt>;
   },
@@ -30,10 +23,6 @@ export async function sendCodingDelivery(
               {
                 text: "Start",
                 callback_data: `cod:yes:${approval.id}`,
-              },
-              {
-                text: "Change",
-                callback_data: `cod:no:${approval.id}`,
               },
             ],
           ],
@@ -48,17 +37,6 @@ export async function sendCodingDelivery(
             ],
           }
         : undefined;
-  if (document) {
-    const captions = formatTelegram(text, 1024);
-    if (captions.length !== 1)
-      throw new Error("Coding document caption exceeds its presentation bound");
-    if (
-      Buffer.from(document.content, "utf8").toString("utf8") !==
-      document.content
-    )
-      throw new Error("Coding document contains invalid Unicode");
-    return transport.document(document, captions[0]!, keyboard);
-  }
   const parts = formatTelegram(text);
   let last: Receipt | undefined;
   for (const [index, part] of parts.entries())

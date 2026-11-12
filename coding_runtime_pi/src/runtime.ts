@@ -64,8 +64,9 @@ export class CodingRuntime {
     };
     if (!outside(workspace, store) || !outside(store, workspace))
       throw new Error("Private task storage and workspace must be disjoint");
-    if (!request.objective.trim() || request.objective.length > 24000)
-      throw new Error("Objective must be complete and bounded");
+    // No length cap: a long owner request is legitimate (journal 191).
+    if (!request.objective.trim())
+      throw new Error("Objective must not be empty");
     if (
       request.instructions !== undefined &&
       typeof request.instructions !== "string"
@@ -80,8 +81,6 @@ export class CodingRuntime {
         ))
     )
       throw new Error("Checks must be a bounded list of commands");
-    if ((request.instructions?.length ?? 0) > 32000)
-      throw new Error("Instructions exceed supported bound");
     documents(request.referenceDocuments ?? []);
     const base = (
       await promisify(execFile)("git", ["rev-parse", "HEAD"], {
@@ -290,13 +289,8 @@ export class CodingRuntime {
         task.limits.ms - (task.used.ms ?? 0),
       );
       timer.unref();
-      // Planning is an evidence-gathering pass, not an open-ended repository audit.
-      // End only at a settled tool boundary; never abort/replay an in-flight call.
-      const planningUntil =
-        performance.now() +
-        Math.min(600_000, (task.limits.ms - (task.used.ms ?? 0)) * 0.75);
-      let planningReads = 0;
-      let planningHandoff = false;
+      // Set when a rejected report ends the turn, so one report request follows.
+      let reportHandoff = false;
       let finalizing = !!task.reportFailure;
       let finalTurns = 0;
       let contextFailure: string | undefined;
@@ -390,13 +384,7 @@ export class CodingRuntime {
         task.intent === "build"
           ? "Read docs/coding-checklist.md if the repository has it, and follow it. Test every failure path of a write to another service (pending, refused, timeout, a repeat or a double tap), not only success; a mock that only returns success does not test it. If node_modules is missing, run kite ci; never link dependencies from outside the workspace or add symlinks."
           : "",
-        task.intent === "plan"
-          ? "Start the plan with a Requirements section: every explicit requirement in the owner objective and instructions, one per line, kept as written. Never drop, merge away or weaken one; the coder and reviewer check the plan against it."
-          : "",
         "Use report to return your result.",
-        task.intent === "plan"
-          ? "Focus investigation on the owner objective and relevant source. After 32 navigation operations or ten minutes, the host ends exploration at the next settled turn boundary and requests a report. Prefer a complete source-grounded plan sooner; if evidence is insufficient, name the specific missing fact in a question rather than continuing an exhaustive repository audit."
-          : "",
         task.intent === "learn" || task.intent === "plan"
           ? "Learn and plan are read-only; no implementation is approved."
           : "",
@@ -411,7 +399,7 @@ export class CodingRuntime {
           ? `Owner instructions:\n${task.ownerInstructions}`
           : "",
         task.intent === "build"
-          ? `Approved scope:\nThe host has verified owner approval for this exact plan revision ${task.plan!.revision} and hash ${task.plan!.hash}. This is the approved implementation phase; earlier planning text about awaiting confirmation describes a completed step. Implement within the complete approved scope; ask only about an actual unresolved requirement or scope change.\n${approvedScope}`
+          ? `Approved scope:\nThe host has verified that the owner started this exact request: the objective and owner instructions above are the approved scope.${approvedScope ? `\n${approvedScope}` : ""} Implement it completely; ask only about an actual unresolved requirement or scope change.`
           : "",
         task.instructions !== task.ownerInstructions
           ? `Working findings (not scope authority):\n${task.instructions}`
@@ -587,7 +575,7 @@ export class CodingRuntime {
           task.reportFailure &&
           turn.message.stopReason === "toolUse"
         ) {
-          planningHandoff = true;
+          reportHandoff = true;
           finalTurns = 1;
           return { action: "end" };
         }
@@ -650,17 +638,6 @@ export class CodingRuntime {
             return { action: "end" };
           }
         }
-        if (
-          task.intent === "plan" &&
-          !planningHandoff &&
-          !report &&
-          !stop.signal.aborted &&
-          turn.message.stopReason === "toolUse" &&
-          (planningReads >= 32 || performance.now() >= planningUntil)
-        ) {
-          planningHandoff = true;
-          return { action: "end" };
-        }
         return decision || undefined;
       };
       let toolsInFlight = 0;
@@ -685,12 +662,6 @@ export class CodingRuntime {
           e.type === "tool_execution_start" ||
           e.type === "tool_execution_end"
         ) {
-          if (
-            !finalizing &&
-            e.type === "tool_execution_end" &&
-            e.toolName !== "report"
-          )
-            planningReads++;
           // Pi runs the calls of one message in parallel. The checkpoint snapshots the
           // workspace, so it runs only when no tool is in flight: before the first call of a
           // batch starts executing (each call's admission waits for it) and after the last ends.
@@ -721,7 +692,7 @@ export class CodingRuntime {
           !report &&
           !finalizing &&
           !stop.signal.aborted &&
-          (planningHandoff ||
+          (reportHandoff ||
             (last?.role === "assistant" && last.stopReason === "stop")) &&
           task.used.models < task.limits.models &&
           task.used.tools < task.limits.tools
@@ -738,9 +709,7 @@ export class CodingRuntime {
             "Requesting one structured final report",
           );
           await session.prompt(
-            task.intent === "plan"
-              ? "The investigation pass is complete. Only report execution and required immutable read_document pages are now permitted. Call the report tool with kind plan covering the entire owner objective using retained evidence: affected components, proposed behavior and acceptance checks. Do not omit requirements, invent evidence/check results, or claim owner authorization. Call report with kind question and a specific evidence gap or blocker if retained evidence cannot support a complete plan."
-              : `Return the required structured report for ${task.intent} using report. Only report execution and required read_document are permitted. Do not repeat repository operations, invent check results, or claim owner authorization. Use question if the retained evidence cannot support a complete result.`,
+            `Return the required structured report for ${task.intent} using report. Only report execution and required read_document are permitted. Do not repeat repository operations, invent check results, or claim owner authorization. Use question if the retained evidence cannot support a complete result.`,
           );
           await pending;
         }
@@ -761,17 +730,11 @@ export class CodingRuntime {
         ["error", "aborted", "length"].includes(lastAssistant.stopReason)
       ) {
         task.status = "paused";
-        task.summary =
-          task.intent === "plan" && finalizing
-            ? "Planning report request failed; investigation and session retained. Inspect the failure before explicitly resuming."
-            : "Model run did not finish cleanly; session retained";
+        task.summary = "Model run did not finish cleanly; session retained";
       } else if (!report) {
         task.status = "paused";
         task.summary =
-          task.reportFailure ??
-          (task.intent === "plan" && finalizing
-            ? `Planning stopped after ${planningReads} navigation operations; the planner did not return a valid plan or question. Inspect the retained investigation before explicitly resuming, or start a new task with another planner.`
-            : "No valid report; inspect the retained session");
+          task.reportFailure ?? "No valid report; inspect the retained session";
       } else {
         task.report = report;
         task.reportFailure = undefined;

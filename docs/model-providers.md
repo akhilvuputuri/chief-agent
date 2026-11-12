@@ -188,6 +188,8 @@ None of this has been verified on the enabled production gateway; the [live veri
 
     > **Update, 12 November 2026 ([journal 169](journey/169-three-hour-coding-attempts.md)):** the first Opus job, `9600af57`, paused on the time limit during its first review; new jobs now get 180 minutes.
 
+> **Update, 13 November 2026 ([journal 191](journey/191-go-gate-no-planner.md)):** for item 6, Pi coding jobs have no planner. `config/coding-pi.json` selects `anthropic/claude-sonnet-5.5` as coder and `anthropic/claude-opus-5.5` as reviewer, both with a direct route.
+
 ## Switching back
 
 - **Through a release (preferred):** set `"MODEL_PROVIDER": "openrouter"` in `config/runtime.json` in an ordinary reviewed PR. Compose does not pass `MODEL_PROVIDER`, so the file is authoritative and the next release applies it. A `MODEL_PROVIDER` line in the server `.env` has no effect for the same reason.

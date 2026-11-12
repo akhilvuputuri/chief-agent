@@ -11,6 +11,7 @@ import {
   assertSquadCheckpoint,
 } from "../src/coding/squad-state.js";
 import { artifactHash } from "../src/coding/github.js";
+import { requirementScope } from "../src/coding/requirements.js";
 import { codingApi } from "../src/coding/api.js";
 import { server } from "../src/server.js";
 
@@ -93,18 +94,32 @@ async function setup(t: any) {
     requestKey: "request",
     objective: "Synthetic squad task",
     context: "",
-    mode: "plan",
   });
-  await c.tick();
+  // There is no planning attempt (journal 191): the owner's Start queues the implementation.
   const row = async () =>
     (await db.query("SELECT * FROM coding_jobs WHERE id=$1", [job.id])).rows[0];
+  await db.query(
+    "UPDATE coding_jobs SET mode='implement',state='queued',stage='queued' WHERE id=$1",
+    [job.id],
+  );
+  await db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'started',$2::jsonb,'suppressed')",
+    [
+      job.id,
+      JSON.stringify({
+        decision: "approved",
+        approvedScope: requirementScope(await row()),
+      }),
+    ],
+  );
+  await c.tick();
   const j = await row();
   const state = {
     sequence: 1,
     revision: j.revision,
     attemptId: j.attempt_id,
     scopeHash: squadScope(j, ""),
-    phase: "planning" as const,
+    phase: "idle" as const,
     candidateVersion: 0,
     candidateHash: "",
     toolsUsed: 0,
@@ -245,7 +260,7 @@ test("squad checkpoint writes are attempt/scope/sequence fenced and idempotent w
   assert.equal((await f.row()).checkpoint.squadState.sequence, 2);
 });
 
-test("host rejects planning delegation, skipped verification and forged/stale reviewer approval", async (t) => {
+test("host rejects an attempt that skips its leader, skipped verification and forged/stale reviewer approval", async (t) => {
   const f = await setup(t),
     cp = checkpoint.parse({
       squadState: {
@@ -364,9 +379,8 @@ test("stale squad completion cannot rewind a newer acknowledged checkpoint", asy
     "UPDATE coding_jobs SET mode='implement',checkpoint=$2::jsonb WHERE id=$1",
     [f.j.id, JSON.stringify(cp)],
   );
-  const { requirementScope } = await import("../src/coding/requirements.js");
   await f.db.query(
-    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'fixture-approved',$2::jsonb,'suppressed')",
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'squad-approved',$2::jsonb,'suppressed')",
     [
       f.j.id,
       JSON.stringify({

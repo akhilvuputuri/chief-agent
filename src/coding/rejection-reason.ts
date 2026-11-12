@@ -21,7 +21,6 @@ const reasons: Record<string, string> = {
   "Native Pi endpoint requires a Pi job": "pi_endpoint_mismatch",
   "Pi jobs use the Messages route": "pi_legacy_route",
   "Pi coding model has no direct Anthropic route": "model_not_direct",
-  "Reviewer model requires approved implementation": "reviewer_too_early",
   "Model is not the job's pinned role selection": "model_not_pinned",
   "Worker attempt superseded": "attempt_superseded",
   "Progress key conflict": "progress_key_conflict",

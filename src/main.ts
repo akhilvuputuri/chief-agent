@@ -1,4 +1,3 @@
-import { InputFile } from "grammy";
 import { MediaOutbox } from "./media-outbox.js";
 import { sendRunMedia } from "./telegram-media.js";
 import { editCodingStatus, sendCodingDelivery } from "./coding/delivery.js";
@@ -1311,8 +1310,8 @@ const routineTimer = setInterval(() => {
     );
   void coding
     ?.deliver(
-      async (user, target, text, approval, document) =>
-        sendCodingDelivery(text, approval, document, {
+      async (user, target, text, approval) =>
+        sendCodingDelivery(text, approval, {
           text: (part, keyboard) =>
             topics.deliver(user, target, (extra) =>
               bot.api.sendMessage(user, part.text, {
@@ -1321,19 +1320,6 @@ const routineTimer = setInterval(() => {
                 link_preview_options: { is_disabled: true },
                 ...(keyboard ? { reply_markup: keyboard } : {}),
               }),
-            ),
-          document: (file, caption, keyboard) =>
-            topics.deliver(user, target, (extra) =>
-              bot.api.sendDocument(
-                user,
-                new InputFile(Buffer.from(file.content, "utf8"), file.filename),
-                {
-                  ...extra,
-                  caption: caption.text,
-                  caption_entities: caption.entities,
-                  ...(keyboard ? { reply_markup: keyboard } : {}),
-                },
-              ),
             ),
         }),
       {

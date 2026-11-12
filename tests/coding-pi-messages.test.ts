@@ -29,12 +29,9 @@ import {
 } from "../coding_runtime_pi/tests/anthropic-sse.js";
 
 /** A running Pi job, the gateway routes and the worker's capability header. */
-async function piJob(
-  t: TestContext,
-  options: { mode?: "plan" | "implement"; planCheck?: boolean } = {},
-) {
+async function piJob(t: TestContext) {
   const f = await fixture(t);
-  const started = await f.start("pi", options.mode ?? "plan");
+  const started = await f.start("pi");
   await f.c.tick();
   let job = await f.row(started.id);
   await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
@@ -47,7 +44,6 @@ async function piJob(
       effort: "medium",
       maxOutputTokens: 32000,
       reviewerMaxOutputTokens: 16000,
-      ...(options.planCheck ? { planCheck: true } : {}),
     }),
   ]);
   job = await f.row(job.id);
@@ -201,7 +197,7 @@ test("the host relays Pi's request and Anthropic's stream unchanged, deciding on
   assert(!JSON.stringify(sent).includes(headers["x-api-key"]));
   const [call] = await calls();
   assert.equal(call.state, "complete");
-  assert.equal(call.role, "leader");
+  assert.equal(call.role, "coder");
   assert.equal(call.input.purpose, "agent");
   assert.equal(call.input.requestedModel, settings.model);
   assert.deepEqual(call.input.request.messages, body.messages);
@@ -210,7 +206,7 @@ test("the host relays Pi's request and Anthropic's stream unchanged, deciding on
   assert.deepEqual(call.result.content, turn.content);
   assert.equal(call.result.stop_reason, "tool_use");
   const [usage] = await events("model_usage");
-  assert.equal(usage.role, "leader");
+  assert.equal(usage.role, "coder");
   assert.equal(usage.purpose, "agent");
   assert.equal(usage.provider, "Anthropic");
   assert.equal(usage.model, settings.model);
@@ -505,20 +501,19 @@ test("the host refuses anything Pi does not send, before any call", async (t) =>
     headers: { ...headers, "x-runtime-purpose": "other" },
   });
   assert.equal(purpose.statusCode, 400);
-  // A reviewer call before an approved implementation is refused, as before.
-  const reviewer = await app.inject({
-    method: "POST",
-    url: url("reviewer"),
-    payload: request(),
-    headers,
-  });
-  assert.equal(reviewer.statusCode, 400);
-  assert(
-    (await events("worker_request_rejected")).some(
-      (e) => e.reason === "reviewer_too_early",
-    ),
-  );
+  // No model runs for a job the owner has not started (journal 191).
+  await f.db.query("UPDATE coding_jobs SET mode='plan'");
+  for (const role of ["coder", "reviewer"]) {
+    const early = await app.inject({
+      method: "POST",
+      url: url(role),
+      payload: request(),
+      headers,
+    });
+    assert.equal(early.statusCode, 401);
+  }
   assert.equal(f.messagesRequests().length, 0);
+  assert.equal((await calls()).length, 0);
 });
 
 test("Anthropic's error reply reaches Pi with its status and retry headers, and is recorded", async (t) => {
@@ -645,7 +640,7 @@ test("Pi jobs and coding model choices must use a model Chief calls directly at 
     settings: { ...settings, runtime: "pi", model: "unrouted/model" },
   });
   await assert.rejects(
-    f.start("unrouted", "plan"),
+    f.start("unrouted"),
     /Coding jobs call Claude directly at Anthropic, and unrouted\/model is not a Claude model Chief calls directly.*No job was started/,
   );
   const g = await fixture(t, { settings: { ...settings, runtime: "pi" } });
@@ -706,7 +701,7 @@ async function throughHost(
       send: (body, wire, signal) => gateway.send(body, wire, signal),
     },
   });
-  const started = await f.start("pi-e2e", "plan");
+  const started = await f.start("pi-e2e");
   await f.c.tick();
   let job = await f.row(started.id);
   await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
@@ -1197,10 +1192,10 @@ test("a real Pi session's final-report phase and compaction call pass the host's
         "SELECT payload FROM coding_events WHERE payload->>'kind'='worker_request_rejected'",
       )
     ).rows;
-  // (a) 32 investigation turns: the host ends planning with the final-report phase, which Pi
-  // sends as a mid-conversation system message.
+  // (a) A turn that ends in prose without a report: the runtime asks for the report with the
+  // final-report phase, which Pi sends as a mid-conversation system message.
   let finalPhase = false;
-  const planned = await throughHost(t, (n, body, res) => {
+  const planned = await throughHost(t, (_n, body, res) => {
     finalPhase ||= JSON.stringify(body.messages).includes(
       "Host workflow phase: final report",
     );
@@ -1208,7 +1203,7 @@ test("a real Pi session's final-report phase and compaction call pass the host's
       content: [
         finalPhase
           ? planReport
-          : toolUse(`toolu_read_${n}`, "read", { path: "sum.js" }),
+          : { type: "text", text: "sum.js subtracts; it should add." },
       ],
     });
   });

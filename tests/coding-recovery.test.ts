@@ -29,11 +29,7 @@ import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError, OpenRouter } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
-import {
-  codingSettings,
-  outcome,
-  assertCodingBrief,
-} from "../src/coding/schema.js";
+import { codingSettings, outcome } from "../src/coding/schema.js";
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -60,7 +56,7 @@ import {
   base,
   candidate,
   fixture,
-  requirementBrief,
+  startCard,
 } from "./helpers/coding-fixture.js";
 test("lost provisioning acknowledgement reconciles one sandbox, cleans up and requires explicit resume", async (t) => {
   const f = await fixture(t),
@@ -89,7 +85,6 @@ test("lost provisioning acknowledgement reconciles one sandbox, cleans up and re
     baseRevision: 1,
     requestKey: "reply",
     message: "Use a synthetic regression",
-    mode: "plan",
   });
   assert.equal(r.revision, 2);
   assert.equal(r.mode, "plan");
@@ -101,7 +96,6 @@ test("lost provisioning acknowledgement reconciles one sandbox, cleans up and re
         baseRevision: 1,
         requestKey: "reply",
         message: "Use a synthetic regression",
-        mode: "plan",
       })) as any
     ).revision,
     2,
@@ -113,14 +107,14 @@ test("lost provisioning acknowledgement reconciles one sandbox, cleans up and re
       baseRevision: 1,
       requestKey: "stale",
     }),
-    /scope changed/,
+    /revision changed/,
   );
 });
 test("deadline expiry keeps an explicit reason even when the worker exits before reporting", async (t) => {
   for (const terminal of [false, true]) {
     await t.test(terminal ? "already exited" : "still running", async (t) => {
       const f = await fixture(t),
-        job = await f.start("deadline", "plan");
+        job = await f.start("deadline");
       await f.c.tick();
       const j = await f.row(job.id);
       await f.c.heartbeat(j);
@@ -313,7 +307,7 @@ test("only verified artifact candidates publish; lost PR acknowledgement is reco
 });
 test("worker HTTP routes validate capabilities and reject malformed calls without private error text", async (t) => {
   const f = await fixture(t),
-    job = await f.start("plan", "plan");
+    job = await f.start("routes");
   await f.c.tick();
   const j = await f.row(job.id),
     app = server();
@@ -339,7 +333,9 @@ test("worker HTTP routes validate capabilities and reject malformed calls withou
   assert.equal(bad.statusCode, 409);
   assert(!bad.body.includes("private text"));
   assert(!bad.body.includes("secret"));
-  await assert.rejects(f.c.finish(j, candidate()), /Plan-only/);
+  // A job the owner has not started gives its worker nothing (journal 191).
+  await f.db.query("UPDATE coding_jobs SET mode='plan' WHERE id=$1", [j.id]);
+  assert.equal((await app.inject({ url: path, headers })).statusCode, 401);
 });
 test("coding continuation accepts indexed tool calls and keeps strict payload validation", async (t) => {
   const f = await fixture(t),

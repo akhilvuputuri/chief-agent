@@ -31,11 +31,7 @@ import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError, OpenRouter } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
-import {
-  codingSettings,
-  outcome,
-  assertCodingBrief,
-} from "../src/coding/schema.js";
+import { codingSettings, outcome } from "../src/coding/schema.js";
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -62,7 +58,7 @@ import {
   base,
   candidate,
   fixture,
-  requirementBrief,
+  startCard,
   unusedAnthropic,
 } from "./helpers/coding-fixture.js";
 test("Pi profile rejects Python selectors and automatic merge", async () => {
@@ -147,12 +143,11 @@ test("a Pi default retains legacy automation support without granting it to Pi j
   assert.equal(initialized, 1);
   assert.equal(pi.autoMerge, false);
 });
-test("Pi review prompt preserves maximum approved context within runtime instructions bound", () => {
-  const plan = "p".repeat(6000);
-  const context = "c".repeat(16000);
+test("Pi review prompt keeps the owner's whole request as the scope, with no plan", () => {
+  // No cap on the owner's request (journal 191): a long context reaches the reviewer whole.
+  const context = "c".repeat(40000);
   const instructions = piReviewInstructions({
     candidateHash: "a".repeat(64),
-    plan,
     baseSha: base,
     fileCount: 100,
     context,
@@ -163,15 +158,11 @@ test("Pi review prompt preserves maximum approved context within runtime instruc
       "kite run format:check",
     ].map((command) => ({ command, exitCode: 0, output: "r".repeat(32000) })),
   });
-  assert(
-    instructions.length <= 32000,
-    `Review instructions: ${instructions.length}`,
-  );
-  assert(instructions.includes(plan));
   assert(instructions.includes(context));
+  assert(instructions.includes("there is no separate plan"));
+  assert(!/approved plan/i.test(instructions));
   assert(instructions.includes("Changed artifact file count: 100"));
   assert(instructions.includes(base));
-  assert.equal((instructions.match(/r{1000}/g) ?? []).length, 4);
 });
 for (const { documentLength, terminalRecovery } of [
   ...[0, 9357, 32000, -32000].map((documentLength) => ({
@@ -224,7 +215,7 @@ for (const { documentLength, terminalRecovery } of [
     git("add", ".");
     git("commit", "-qm", "Fixture");
     const commit = git("rev-parse", "HEAD").toString().trim();
-    const started = await f.start("pi-e2e", "plan");
+    const started = await f.start("pi-e2e", true);
     const profile = {
       ...settings,
       runtime: "pi",
@@ -235,13 +226,6 @@ for (const { documentLength, terminalRecovery } of [
       "UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3 WHERE id=$1",
       [started.id, JSON.stringify(profile), commit],
     );
-    const fullPlan =
-      "Change sum.js subtraction to addition; preserve exported API; run check/build/format checks."
-        .padEnd(
-          Math.abs(documentLength) || 90,
-          documentLength < 0 ? "字\n" : " Scope retained.",
-        )
-        .slice(0, Math.abs(documentLength) || 90);
     const fullReview =
       "The checked fixture implements addition and preserves the API."
         .padEnd(
@@ -249,9 +233,8 @@ for (const { documentLength, terminalRecovery } of [
           documentLength < 0 ? "界\n" : " Evidence retained.",
         )
         .slice(0, Math.abs(documentLength) || 62);
-    const pages = documentLength
-      ? Math.ceil(fullPlan.length / documentPageChars)
-      : 0;
+    // The repair reads the earlier findings first: one 9,357-character page.
+    const findingsPages = 1;
     const turns = new Map<string, number>();
     const reviewed = new Map<string, number>();
     const readEvidence = reviewDocumentReader();
@@ -263,11 +246,9 @@ for (const { documentLength, terminalRecovery } of [
       const phase =
         selected === settings.reviewerModel
           ? "review"
-          : system.includes("Current intent: build")
-            ? system.includes("review_findings:")
-              ? "repair"
-              : "build"
-            : "plan";
+          : system.includes("review_findings:")
+            ? "repair"
+            : "build";
       if (terminalRecovery && !recoveredPhases.has(phase)) {
         recoveredPhases.add(phase);
         throw new ModelError("Synthetic terminal provider failure", true, {
@@ -286,14 +267,17 @@ for (const { documentLength, terminalRecovery } of [
       }
       const rawCount = turns.get(reviewKey) ?? 0;
       turns.set(reviewKey, rawCount + 1);
-      const requiredPages = phase === "repair" ? pages * 2 : pages;
-      const reading = phase !== "plan" && rawCount < requiredPages;
+      const requiredPages = phase === "repair" ? findingsPages : 0;
+      const reading = rawCount < requiredPages;
       if (phase === "build" || phase === "repair")
-        assert(system.includes("host has verified owner approval"));
+        assert(
+          system.includes(
+            "host has verified that the owner started this exact request",
+          ),
+        );
       // The review-repair scenario builds a larger change, so its repair is a small part of it.
       const larger = documentLength === 9357 && phase === "build" ? 1 : 0;
-      const count =
-        phase === "plan" ? rawCount : rawCount - requiredPages - larger;
+      const count = rawCount - requiredPages - larger;
       let tool: { name: string; arguments: any } | undefined;
       if (larger && count === -1 && !reading)
         tool = {
@@ -306,17 +290,6 @@ for (const { documentLength, terminalRecovery } of [
               { length: 1100 },
               (_, i) => `Synthetic supporting text, line ${i}.\n`,
             ).join(""),
-          },
-        };
-      if (phase === "plan" && count === 0)
-        tool = { name: "read", arguments: { path: "sum.js" } };
-      if (phase === "plan" && count === 1)
-        tool = {
-          name: "report",
-          arguments: {
-            kind: "plan",
-            summary: "Fix addition",
-            detail: fullPlan,
           },
         };
       if (phase === "build" && count === 0)
@@ -391,17 +364,11 @@ for (const { documentLength, terminalRecovery } of [
             assert(delivered("candidate_diff").includes("line 1099."));
           }
         }
-        assert(system.includes("historical starting state and desired change"));
+        assert(system.includes("The approved scope is the owner's request"));
         assert(!system.includes("No implementation approved"));
-        assert(system.includes("host validated owner approval"));
+        assert(system.includes("host validated the owner's Start"));
         assert(system.includes(commit));
-        assert(
-          system.includes(
-            documentLength
-              ? "approved_plan"
-              : "Change sum.js subtraction to addition",
-          ),
-        );
+        assert(system.includes("Synthetic evidence"));
         tool = { name: "read", arguments: { path: "sum.js" } };
       }
       if (phase === "review" && count === 1)
@@ -426,34 +393,8 @@ for (const { documentLength, terminalRecovery } of [
       if (reading)
         tool = {
           name: "read_document",
-          arguments: {
-            id:
-              phase === "repair" && rawCount >= pages
-                ? "review_findings"
-                : "approved_plan",
-            page:
-              phase === "repair" && rawCount >= pages
-                ? rawCount - pages
-                : rawCount,
-          },
+          arguments: { id: "review_findings", page: rawCount },
         };
-      if (phase !== "plan" && !reading && pages) {
-        const delivered = input.messages
-          .filter((m: any) => m.role === "tool")
-          .map((m: any) => m.content)
-          .filter(
-            (c: any) =>
-              typeof c === "string" && c.includes('"id":"approved_plan"'),
-          )
-          .map((c: any) => JSON.parse(c));
-        assert.equal(
-          delivered
-            .slice(-pages)
-            .map((d: any) => d.text)
-            .join(""),
-          fullPlan,
-        );
-      }
       return {
         message: {
           role: "assistant",
@@ -503,21 +444,14 @@ for (const { documentLength, terminalRecovery } of [
         { prepareRepository },
       );
     };
-    await f.c.tick();
-    await run();
-    assert.equal((await f.row(started.id)).state, "plan_ready");
-    await f.c.tick();
-    await f.c.tick();
     let receipt = 100;
     let approvalId = "";
     let approvedMessage = 0;
     for (let i = 0; i < 10 && !approvalId; i++)
-      await f.c.deliver(async (_owner, _target, text, id, document) => {
+      await f.c.deliver(async (_owner, _target, text, id) => {
         const message_id = ++receipt;
         if (id) {
-          assert(document?.content.includes(fullPlan));
-          assert.equal(formatTelegram(text, 1024).length, 1);
-          assert(document?.content.includes("Original request"));
+          assert.match(text, /^\*\*Ready to start\*\*/);
           approvalId = id.id;
           approvedMessage = message_id;
         }
@@ -531,7 +465,7 @@ for (const { documentLength, terminalRecovery } of [
     assert.equal(result.state, "publishing");
     assert.equal(result.result.review.verdict, "APPROVE");
     assert.equal(laterRounds, documentLength === 9357 ? 1 : 0);
-    assert.equal(result.checkpoint.plan, fullPlan);
+    assert.equal(result.checkpoint.plan, "");
     assert.equal(result.result.review.findings, fullReview);
     assert.equal(result.checkpoint.piState.reportDocument.detail, fullReview);
     assert.equal(result.checkpoint.piState.reportDocument.version, 1);
@@ -552,11 +486,7 @@ for (const { documentLength, terminalRecovery } of [
     assert.equal((await f.row(started.id)).state, "pr_ready");
     assert.equal(f.publishes(), 1);
     if (terminalRecovery) {
-      assert.deepEqual([...recoveredPhases].sort(), [
-        "build",
-        "plan",
-        "review",
-      ]);
+      assert.deepEqual([...recoveredPhases].sort(), ["build", "review"]);
       const calls = (
         await f.db.query(
           "SELECT id,attempt_id,role,state,input FROM coding_model_calls WHERE job_id=$1",
@@ -565,11 +495,11 @@ for (const { documentLength, terminalRecovery } of [
       ).rows;
       // Each failed call is recorded once; Pi's stock retry sends a new request.
       const failed = calls.filter((call) => call.state === "uncertain");
-      assert.equal(failed.length, 3);
-      assert.deepEqual(
-        failed.map((call) => call.role).sort(),
-        ["leader", "coder", "reviewer"].sort(),
-      );
+      assert.equal(failed.length, 2);
+      assert.deepEqual(failed.map((call) => call.role).sort(), [
+        "coder",
+        "reviewer",
+      ]);
       assert.equal(
         result.used_models,
         calls.filter((call) => call.attempt_id === result.attempt_id).length,
@@ -598,7 +528,7 @@ test("replacement Pi worker retains acknowledged history across a new sandbox pa
   git("add", ".");
   git("commit", "-qm", "Fixture");
   const baseSha = git("rev-parse", "HEAD").toString().trim();
-  const started = await f.start("pi-replacement", "plan");
+  const started = await f.start("pi-replacement");
   await f.db.query(
     "UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3 WHERE id=$1",
     [
@@ -693,10 +623,9 @@ test("replacement Pi worker retains acknowledged history across a new sandbox pa
                 function: {
                   name: "report",
                   arguments: JSON.stringify({
-                    kind: "plan",
+                    kind: "question",
                     summary: "Recovered inspection",
-                    detail:
-                      "Preserve the observed marker and implement only the requested scope after approval.",
+                    detail: "Should the observed marker stay as it is?",
                   }),
                 },
               },
@@ -707,7 +636,7 @@ test("replacement Pi worker retains acknowledged history across a new sandbox pa
   });
   await f.c.tick();
   await run();
-  assert.equal((await f.row(started.id)).state, "plan_ready");
+  assert.equal((await f.row(started.id)).state, "awaiting_input");
   assert(recovered);
   assert.notEqual(directories[0], directories[1]);
   const entries = await f.db.query(
@@ -762,7 +691,6 @@ test("bundled Pi cutover snapshots new jobs while duplicate legacy requests and 
       requestKey,
       objective: "Inspect a synthetic bug",
       context: "Synthetic evidence",
-      mode: "plan",
     }) as Promise<any>;
   const old = await start(prior, "before-cutover");
   const saved = (await f.row(old.id)).settings;

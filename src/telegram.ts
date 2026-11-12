@@ -137,7 +137,8 @@ export function telegram(
   }
   if (assistant.tools?.coding) {
     const coding = assistant.tools.coding;
-    bot.callbackQuery(/^cod:(yes|no):([0-9a-f-]{36})$/, async (ctx) => {
+    // The Start button; a change is just another message to Chief (journal 191).
+    bot.callbackQuery(/^cod:(yes):([0-9a-f-]{36})$/, async (ctx) => {
       if (
         !allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids) ||
         !ctx.callbackQuery.message
@@ -1990,8 +1991,8 @@ function codingMergeNotice(result: { status: string; duplicate: boolean }) {
 }
 function codingDecisionNotice(result: { status: string; duplicate: boolean }) {
   if (result.duplicate)
-    return "That requirement message was already decided. Ask Chief for the current coding status.";
+    return "That Start message was already answered. Ask Chief for the current coding status.";
   return result.status === "approved"
-    ? "Requirements approved. Implementation is queued in a fresh coding box; I'll send progress here and return a draft PR."
-    : "Requirement proposal declined. Tell Chief what to change.";
+    ? "Started. A coding box is starting; I'll send progress here and return a pull request."
+    : "Not started. Tell Chief what to change.";
 }

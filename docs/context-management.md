@@ -169,6 +169,8 @@ Each foreground turn's runtime context carries `openLoops` when something waits 
 
 A requirements card is any event carrying `requirements`, including the first card (the attempt's `:finished` event). It counts only for the job's current revision. The worker's summary or question goes into a separate `workerText` field, which the note marks as data, never instructions.
 
+> **Update, 13 November 2026 ([journal 191](journey/191-go-gate-no-planner.md)):** the requirements card is now the Start card, written when the job is created and on each owner message before Start. The labels say "owner to tap Start on the Start card", "Start card expired", "owner did not start it" and "waiting for Start but its card is not delivered yet".
+
 **Monitoring cards.** Up to three monitoring confirmation cards that were delivered and expired unanswered, each with its title ([journal 117](journey/117-open-loops-and-memory-offers.md)):
 
 - A card whose spec has `expiresAt` stays listed until one day after it. `expiresAt` is the end of monitoring; it is used as a proxy for the event date. The card carries `endsAt`, and `due: true` from a day before that date onwards. If monitoring was set to end after the event, `due` starts late. Due cards are listed first.

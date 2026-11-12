@@ -6,9 +6,11 @@ import { artifactHash, canonicalJson } from "./github.js";
 
 /**
  * Confirmation authority is a delivered owner message, never a model tool argument.
- * An approval covers what the owner read: the objective, context and plan. Who carries
- * it out (models, limits, image) and the base commit are not part of it; merge rules are
- * enforced at the merge gate and the Merge card.
+ * An approval covers what the owner read: the request (objective and context, with every
+ * follow-up sent before Start). Who carries it out (models, limits, image) and the base commit
+ * are not part of it; merge rules are enforced at the merge gate and the Merge card. The plan
+ * field is always empty since the planner was removed (journal 191); it stays in the hash so
+ * the scope of a job stays one formula.
  */
 export function requirementScope(job: CodingJob) {
   return createHash("sha256")
@@ -22,24 +24,17 @@ export function requirementScope(job: CodingJob) {
     )
     .digest("hex");
 }
-/** The scope approvals used before 31 October 2026, which also hashed the base and settings. */
-function legacyRequirementScope(job: CodingJob) {
-  return createHash("sha256")
-    .update(
-      canonicalJson({
-        id: job.id,
-        objective: job.objective,
-        context: job.context,
-        baseSha: job.base_sha,
-        settings: job.settings,
-        plan: job.checkpoint.plan,
-      }),
-    )
-    .digest("hex");
-}
-/** Every scope that still identifies this job's requirements; earlier approvals stay valid. */
-export function requirementScopes(job: CodingJob) {
-  return [requirementScope(job), legacyRequirementScope(job)];
+/** The Start card for the job's current request and revision. */
+export function startCard(job: CodingJob) {
+  return {
+    summary: "Ready to start. Tap Start, or send more to add to the request.",
+    requirements: {
+      revision: job.revision,
+      scope: requirementScope(job),
+      artifact: artifactHash(job.checkpoint),
+      plan: job.checkpoint.plan,
+    },
+  };
 }
 export class CodingRequirements {
   constructor(
@@ -51,31 +46,20 @@ export class CodingRequirements {
     if (!this.allowed(job.user_id)) return false;
     return !!(
       await this.db.query(
-        "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload->>'decision'='approved' AND payload->>'approvedScope'=ANY($2::text[]) LIMIT 1",
-        [job.id, requirementScopes(job)],
+        "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload->>'decision'='approved' AND payload->>'approvedScope'=$2 LIMIT 1",
+        [job.id, requirementScope(job)],
       )
     ).rows.length;
   }
+  /** Sends a fresh Start card for a job waiting for Start, for example after one expired. */
   async request(job: CodingJob, key: string) {
     if (
       !this.allowed(job.user_id) ||
       job.state !== "plan_ready" ||
-      job.mode !== "plan" ||
-      !job.checkpoint.plan.trim()
+      job.mode !== "plan"
     )
-      throw new ToolValidationError(
-        "A completed requirement brief is needed before confirmation",
-      );
-    const payload = {
-      summary:
-        "Requirements are ready. Review the complete brief, then approve it or ask Chief for changes.",
-      requirements: {
-        revision: job.revision,
-        scope: requirementScope(job),
-        artifact: artifactHash(job.checkpoint),
-        plan: job.checkpoint.plan,
-      },
-    };
+      throw new ToolValidationError("This job is not waiting for Start");
+    const payload = startCard(job);
     const result = await this.db.query(
       "INSERT INTO coding_events(id,job_id,event_key,payload) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(job_id,event_key) DO NOTHING RETURNING id",
       [
@@ -99,7 +83,7 @@ export class CodingRequirements {
       jobId: job.id,
       revision: job.revision,
       instruction:
-        "Review the delivered brief. Approve with its Telegram button or reply yes directly to that message. Model calls cannot confirm requirements.",
+        "A new Start card is on its way. The owner starts the job with its Start button or by replying yes directly to that message. Model calls cannot start a job.",
     };
   }
   async confirm(
@@ -129,7 +113,7 @@ export class CodingRequirements {
       !event.payload.requirements
     )
       throw new Error("Requirement confirmation unavailable");
-    if (!requirementScopes(event).includes(event.payload.requirements.scope))
+    if (requirementScope(event) !== event.payload.requirements.scope)
       throw new Error("Requirements changed");
     if (event.payload.decision) {
       if ((event.payload.decision === "approved") !== approve)
@@ -147,20 +131,20 @@ export class CodingRequirements {
       job.mode !== "plan" ||
       job.revision !== requirement.revision ||
       job.checkpoint.plan !== requirement.plan ||
-      !requirementScopes(job).includes(requirement.scope) ||
+      requirementScope(job) !== requirement.scope ||
       requirement.artifact !== artifactHash(job.checkpoint) ||
       !Number.isFinite(new Date(event.payload.confirmUntil).getTime()) ||
       new Date(event.payload.confirmUntil).getTime() <= this.clock().getTime()
     )
       throw new Error(
-        "Requirements expired or changed; ask Chief for a fresh brief",
+        "The request changed or this Start card expired; ask Chief for a fresh one",
       );
     const result = await this.db.query(
       `WITH changed AS (
       UPDATE coding_jobs SET mode=CASE WHEN $3 THEN 'implement' ELSE mode END,
         revision=revision+1,
         state=CASE WHEN $3 THEN 'queued' ELSE state END,stage=CASE WHEN $3 THEN 'queued' ELSE stage END,
-        summary=CASE WHEN $3 THEN 'Requirements approved; implementation queued' ELSE 'Requirements need revision; tell Chief what to change' END,
+        summary=CASE WHEN $3 THEN 'Started by the owner; implementation queued' ELSE 'Not started; tell Chief what to change' END,
         result=CASE WHEN $3 THEN NULL ELSE result END,
         attempt_id=CASE WHEN $3 THEN NULL ELSE attempt_id END,sandbox_id=CASE WHEN $3 THEN NULL ELSE sandbox_id END,
         heartbeat_at=CASE WHEN $3 THEN NULL ELSE heartbeat_at END,attempt_deadline=CASE WHEN $3 THEN NULL ELSE attempt_deadline END,
@@ -174,7 +158,7 @@ export class CodingRequirements {
       WHERE id=$6 AND job_id IN (SELECT id FROM changed) RETURNING job_id
     ), recorded AS (
       INSERT INTO coding_revisions(job_id,revision,request_key,message,mode)
-      SELECT id,revision,$6::text,CASE WHEN $3 THEN 'Owner approved the exact delivered requirements' ELSE 'Owner requested requirement changes' END,CASE WHEN $3 THEN 'implement' ELSE 'plan' END FROM changed
+      SELECT id,revision,$6::text,CASE WHEN $3 THEN 'Owner started the exact delivered request' ELSE 'Owner asked for changes before Start' END,CASE WHEN $3 THEN 'implement' ELSE 'plan' END FROM changed
       RETURNING job_id
     ) SELECT job_id FROM decided`,
       [

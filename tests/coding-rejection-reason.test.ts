@@ -9,7 +9,7 @@ import { sanitize } from "../src/ops-log.js";
 
 test("a refused model request records which condition refused it", async (t) => {
   const f = await fixture(t);
-  const job: any = await f.start("rejection-reason", "plan");
+  const job: any = await f.start("rejection-reason");
   await f.c.tick();
   const active = await f.row(job.id);
   await f.c.heartbeat(active);
@@ -63,7 +63,7 @@ test("only the host's own fixed messages map to reasons; anything else is unclas
 
 test("after a restart, a model call cut off mid-way frees the job's model slot", async (t) => {
   const f = await fixture(t);
-  const job: any = await f.start("restart-mid-call", "plan");
+  const job: any = await f.start("restart-mid-call");
   await f.c.tick();
   const active = await f.row(job.id);
   // The gateway stopped during a call: slot held, ledger row still pending.

@@ -29,11 +29,7 @@ import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError, OpenRouter } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
-import {
-  codingSettings,
-  outcome,
-  assertCodingBrief,
-} from "../src/coding/schema.js";
+import { codingSettings, outcome } from "../src/coding/schema.js";
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -60,7 +56,7 @@ import {
   base,
   candidate,
   fixture,
-  requirementBrief,
+  startCard,
 } from "./helpers/coding-fixture.js";
 test("UTF-8 observations fit the model endpoint byte limit", async () => {
   const root = await mkdtemp(join(tmpdir(), "chief-utf8-test-")),
@@ -200,53 +196,35 @@ test("non-UTF-8 indexed content is rejected instead of publishing replacement by
   await writeFile(join(root, "latin.txt"), Buffer.from("636166e90a", "hex"));
   await assert.rejects(w.snapshot("plan", "summary"), /not valid UTF-8/);
 });
-test("oversized owner briefs are rejected and large saved plans remain resumable through paging", async (t) => {
-  assert.throws(
-    () =>
-      assertCodingBrief(
-        "字".repeat(8000),
-        "字".repeat(23000),
-        "字".repeat(32000),
-      ),
-    /shorter objective/,
-  );
+test("a long owner request and a long follow-up are kept whole and wait for Start", async (t) => {
   const f = await fixture(t);
-  await assert.rejects(
-    f.c.call("a", f.run, {
-      operation: "coding_start",
-      requestKey: "large",
-      objective: "字".repeat(8000),
-      context: "字".repeat(16000),
-      mode: "plan",
-    }),
-    /brief is too large/,
-  );
-  assert.equal(f.creates(), 0);
-  assert.equal(
-    (await f.db.query("SELECT count(*) AS n FROM coding_jobs")).rows[0].n,
-    0,
-  );
-  const job = await f.start();
-  await f.db.query(
-    "UPDATE coding_jobs SET mode='plan',state='plan_ready',checkpoint=$2::jsonb WHERE id=$1",
-    [
-      job.id,
-      JSON.stringify({
-        plan: "字".repeat(32000),
-        patch: "",
-        summary: "",
-        files: [],
-      }),
-    ],
-  );
-  const resumed: any = await f.c.call("a", f.run, {
+  const objective = "字".repeat(30000);
+  const context = "字".repeat(60000);
+  const job: any = await f.c.call("a", f.run, {
+    operation: "coding_start",
+    requestKey: "large",
+    objective,
+    context,
+  });
+  assert.equal(job.state, "plan_ready");
+  const stored = await f.row(job.id);
+  assert.equal(stored.objective, objective);
+  assert.equal(stored.context, context);
+  const message = "字".repeat(40000);
+  const replied: any = await f.c.call("a", f.run, {
     operation: "coding_reply",
     id: job.id,
     baseRevision: 1,
-    requestKey: "revise",
-    message: "Keep the same scope, refine the tests",
-    mode: "plan",
+    requestKey: "more",
+    message,
   });
-  assert.equal((await f.row(job.id)).checkpoint.plan.length, 32000);
-  assert.equal(resumed.revision, 2);
+  assert.equal(replied.revision, 2);
+  assert.equal(replied.state, "plan_ready");
+  assert.equal(
+    (await f.row(job.id)).context,
+    `${context}\nOwner follow-up: ${message}`,
+  );
+  await f.c.tick();
+  assert.equal(f.creates(), 0);
+  assert.equal(f.modelCalls(), 0);
 });

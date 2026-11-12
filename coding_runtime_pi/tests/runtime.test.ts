@@ -612,46 +612,6 @@ test("a clean prose-only ending gets one report-only finalization and an exact p
   );
 });
 
-test("planning stops sustained exploration at a settled boundary and reports from retained evidence", async () => {
-  const f = await fixture();
-  const reads = Array.from({ length: 32 }, () => [
-    { name: "read", arguments: { path: "sum.js" } },
-  ]);
-  const runtime = new CodingRuntime({
-    store: f.store,
-    model: scripted([
-      ...reads,
-      [report("plan", "Fix sum.js and check addition in test.mjs.")],
-    ]),
-  });
-  const task = await runtime.start({
-    workspace: f.workspace,
-    objective: "Plan the entire fixture repair",
-  });
-  const result = await runtime.run(task.id);
-  assert.equal(result.status, "waiting_approval");
-  assert.equal(result.used.models, 33);
-  assert.equal(result.used.tools, 33);
-  assert.equal(result.approved, undefined);
-  const session = (await readFile(result.sessionFile!, "utf8"))
-    .split("\n")
-    .filter(Boolean)
-    .map((s) => JSON.parse(s));
-  const messages = session.map((e) => e.message).filter(Boolean);
-  assert.equal(
-    messages.filter((m) => m.role === "toolResult" && m.toolName === "read")
-      .length,
-    32,
-  );
-  assert(
-    messages.some(
-      (m) =>
-        m.role === "user" &&
-        JSON.stringify(m.content).includes("specific evidence gap"),
-    ),
-  );
-});
-
 test("a truncated report pauses even when retained history allows native compaction recovery", async () => {
   const f = await fixture();
   await writeFile(
@@ -686,52 +646,13 @@ test("a truncated report pauses even when retained history allows native compact
   assert.equal(entries.filter((e) => e.type === "compaction").length, 0);
 });
 
-test("one rejected navigation attempt can be corrected into a report without executing more source reads", async () => {
+test("a prose answer to the report request gets one format correction and then reports", async () => {
   const f = await fixture();
   const runtime = new CodingRuntime({
     store: f.store,
     model: scripted([
-      ...Array.from({ length: 32 }, () => [
-        { name: "read", arguments: { path: "sum.js" } },
-      ]),
       [{ name: "read", arguments: { path: "sum.js" } }],
-      [
-        report(
-          "question",
-          "What non-numeric input behavior should be retained?",
-        ),
-      ],
-    ]),
-  });
-  const task = await runtime.start({
-    workspace: f.workspace,
-    objective: "Plan from bounded investigation",
-  });
-  const result = await runtime.run(task.id);
-  assert.equal(result.status, "waiting_input");
-  assert.equal(result.used.models, 34);
-  assert.equal(result.used.tools, 33);
-  const entries = (await readFile(result.sessionFile!, "utf8"))
-    .split("\n")
-    .filter(Boolean)
-    .map((s) => JSON.parse(s));
-  const reads = entries
-    .map((e) => e.message)
-    .filter((m) => m?.role === "toolResult" && m.toolName === "read");
-  assert.equal(reads.length, 33);
-  assert.equal(reads.filter((m) => !m.isError).length, 32);
-  assert(reads.at(-1).isError);
-  assert.equal(result.plan, undefined);
-});
-
-test("one completed prose conclusion can be formatted into a plan without reopening investigation", async () => {
-  const f = await fixture();
-  const runtime = new CodingRuntime({
-    store: f.store,
-    model: scripted([
-      ...Array.from({ length: 32 }, () => [
-        { name: "read", arguments: { path: "sum.js" } },
-      ]),
+      [],
       [],
       [report("plan", "Fix sum.js and verify addition using test.mjs.")],
     ]),
@@ -742,8 +663,8 @@ test("one completed prose conclusion can be formatted into a plan without reopen
   });
   const result = await runtime.run(task.id);
   assert.equal(result.status, "waiting_approval");
-  assert.equal(result.used.models, 34);
-  assert.equal(result.used.tools, 33);
+  assert.equal(result.used.models, 4);
+  assert.equal(result.used.tools, 2);
   assert.equal(result.approved, undefined);
   const entries = (await readFile(result.sessionFile!, "utf8"))
     .split("\n")
@@ -760,7 +681,7 @@ test("one completed prose conclusion can be formatted into a plan without reopen
   );
 });
 
-test("planning finalization cannot keep reading or invent a plan when evidence is missing", async () => {
+test("finalization cannot keep reading or invent a report when evidence is missing", async () => {
   for (const final of [
     [
       report(
@@ -774,9 +695,7 @@ test("planning finalization cannot keep reading or invent a plan when evidence i
     const runtime = new CodingRuntime({
       store: f.store,
       model: scripted([
-        ...Array.from({ length: 32 }, () => [
-          { name: "read", arguments: { path: "sum.js" } },
-        ]),
+        [],
         final,
         [{ name: "read", arguments: { path: "sum.js" } }],
         [report("plan", "Must never run")],
@@ -787,7 +706,7 @@ test("planning finalization cannot keep reading or invent a plan when evidence i
       objective: "Plan with missing requirements",
     });
     const result = await runtime.run(task.id);
-    assert.equal(result.used.models, final[0]?.name === "report" ? 33 : 34);
+    assert.equal(result.used.models, final[0]?.name === "report" ? 2 : 3);
     assert.equal(
       result.status,
       final[0]?.name === "report" ? "waiting_input" : "paused",
@@ -796,7 +715,7 @@ test("planning finalization cannot keep reading or invent a plan when evidence i
     assert.equal(result.approved, undefined);
     assert.equal(
       result.events.filter((e) => e.text === "tool_execution_end: read").length,
-      final[0]?.name === "report" ? 32 : 34,
+      final[0]?.name === "report" ? 0 : 2,
     );
   }
 });
@@ -836,16 +755,11 @@ test("planning reserves time for reporting and saves the completed investigation
   assert.equal(result.plan, undefined);
 });
 
-test("owner cancellation at the planning handoff prevents any reporting call", async () => {
+test("owner cancellation at the report request prevents any reporting call", async () => {
   const f = await fixture();
   const runtime = new CodingRuntime({
     store: f.store,
-    model: scripted([
-      ...Array.from({ length: 32 }, () => [
-        { name: "read", arguments: { path: "sum.js" } },
-      ]),
-      [report("plan", "Unreachable")],
-    ]),
+    model: scripted([[], [report("plan", "Unreachable")]]),
     onEvent: async (task, event) => {
       if (event.text === "Requesting one structured final report")
         await runtime.cancel(task.id);
@@ -857,7 +771,7 @@ test("owner cancellation at the planning handoff prevents any reporting call", a
   });
   const result = await runtime.run(task.id);
   assert.equal(result.status, "cancelled");
-  assert.equal(result.used.models, 32);
+  assert.equal(result.used.models, 1);
   assert.equal(result.plan, undefined);
 });
 
@@ -1580,4 +1494,38 @@ test("concurrent saves of one task land in call order", async () => {
     ),
   );
   assert.equal((await f.store.get(task.id)).summary, "save 39");
+});
+
+test("a long owner request is accepted whole, and the prompt carries no planning budget or plan text", async () => {
+  const f = await fixture();
+  const prompts: string[] = [];
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: scripted(
+      [[report("question", "Which list?")]],
+      undefined,
+      (prompt) => prompts.push(prompt),
+    ),
+  });
+  const objective = "Fix the fixture. " + "o".repeat(30000);
+  const instructions = "Owner context. " + "i".repeat(40000);
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective,
+    instructions,
+  });
+  assert.equal(task.objective, objective);
+  assert.equal(task.ownerInstructions, instructions);
+  await assert.rejects(
+    runtime.start({ workspace: f.workspace, objective: " " }),
+    /must not be empty/,
+  );
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "waiting_input");
+  const prompt = prompts.join("\n");
+  assert(prompt.includes(objective));
+  assert(prompt.includes(instructions));
+  assert(
+    !/Requirements section|navigation operations|ten minutes/.test(prompt),
+  );
 });
