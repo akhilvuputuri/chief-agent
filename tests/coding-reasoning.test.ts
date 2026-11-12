@@ -139,7 +139,7 @@ test("the Start card shows the goal in at most two lines, the models and nothing
     /A third line stays in the request only/,
   );
   assert.equal(
-    (await f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId))
+    (await f.c.requirements.confirm("a", r.approvalId, "a", r.messageId))
       .status,
     "approved",
   );
@@ -174,7 +174,6 @@ test("coding_start runs nothing before Start; a model tool cannot start the job"
   const result = await f.c.requirements.confirm(
     "a",
     r.approvalId,
-    true,
     "a",
     r.messageId,
   );
@@ -184,7 +183,7 @@ test("coding_start runs nothing before Start; a model tool cannot start the job"
   await f.c.tick();
   assert.equal(f.creates(), 1);
   assert.equal(
-    (await f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId))
+    (await f.c.requirements.confirm("a", r.approvalId, "a", r.messageId))
       .duplicate,
     true,
   );
@@ -199,7 +198,6 @@ test("a Start card can still start the job 23 hours after delivery", async (t) =
   const result = await f.c.requirements.confirm(
     "a",
     r.approvalId,
-    true,
     "a",
     r.messageId,
   );
@@ -209,17 +207,17 @@ test("a Start card refuses another owner, another message, a changed request and
   const f = await fixture(t),
     r = await startCard(f);
   await assert.rejects(
-    f.c.requirements.confirm("b", r.approvalId, true, "b", r.messageId),
+    f.c.requirements.confirm("b", r.approvalId, "b", r.messageId),
   );
   await assert.rejects(
-    f.c.requirements.confirm("a", r.approvalId, true, "b", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, "b", r.messageId),
   );
   await assert.rejects(
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId + 1),
+    f.c.requirements.confirm("a", r.approvalId, "a", r.messageId + 1),
   );
   f.advance(86400001);
   await assert.rejects(
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, "a", r.messageId),
     /expired/,
   );
   assert.equal(f.creates(), 0);
@@ -231,24 +229,18 @@ test("a Start card refuses another owner, another message, a changed request and
     message: "Change the acceptance criteria",
   });
   await assert.rejects(
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, "a", r.messageId),
     /changed/,
   );
   assert.equal((await f.row(r.jobId)).mode, "plan");
 });
-test("a declined Start never starts work and an unknown delivery cannot authorise it", async (t) => {
+test("an unknown Start card delivery cannot authorise work", async (t) => {
   const f = await fixture(t),
     r = await startCard(f);
-  assert.equal(
-    (await f.c.requirements.confirm("a", r.approvalId, false, "a", r.messageId))
-      .status,
-    "revise",
-  );
-  assert.equal((await f.row(r.jobId)).state, "plan_ready");
   await f.c.call("a", f.run, {
     operation: "coding_resume",
     id: r.jobId,
-    baseRevision: 2,
+    baseRevision: 1,
     requestKey: "uncertain",
   });
   let uncertainId = "";
@@ -264,8 +256,6 @@ test("a declined Start never starts work and an unknown delivery cannot authoris
     ).rows[0].delivery,
     "uncertain",
   );
-  await assert.rejects(
-    f.c.requirements.confirm("a", uncertainId, true, "a", 999),
-  );
+  await assert.rejects(f.c.requirements.confirm("a", uncertainId, "a", 999));
   assert.equal(f.creates(), 0);
 });

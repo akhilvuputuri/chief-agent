@@ -138,7 +138,7 @@ export function telegram(
   if (assistant.tools?.coding) {
     const coding = assistant.tools.coding;
     // The Start button; a change is just another message to Chief (journal 191).
-    bot.callbackQuery(/^cod:(yes):([0-9a-f-]{36})$/, async (ctx) => {
+    bot.callbackQuery(/^cod:yes:([0-9a-f-]{36})$/, async (ctx) => {
       if (
         !allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids) ||
         !ctx.callbackQuery.message
@@ -149,8 +149,7 @@ export function telegram(
       try {
         result = await coding.requirements.confirm(
           String(ctx.from.id),
-          ctx.match[2]!,
-          ctx.match[1] === "yes",
+          ctx.match[1]!,
           String(ctx.callbackQuery.message.chat.id),
           ctx.callbackQuery.message.message_id,
         );
@@ -561,11 +560,12 @@ export function telegram(
     // is someone else's words, so it only ever reaches the conversation, marked as such.
     const typed =
       ctx.message.forward_origin === undefined ? ctx.message.text : undefined;
-    // A plain affirmation is authority only when replying to the exact delivered brief.
-    const requirementReply =
-      /^(yes|approve|approved|go ahead|no|not yet)[.!]?$/i.exec(
-        (typed ?? "").trim(),
-      );
+    // A plain affirmation is authority only when replying to the exact delivered Start card.
+    // Any other reply, "no" included, is an ordinary message: it reaches Chief, which adds
+    // it to the request before Start (journal 191).
+    const requirementReply = /^(yes|approve|approved|go ahead)[.!]?$/i.exec(
+      (typed ?? "").trim(),
+    );
     if (
       assistant.tools?.coding &&
       requirementReply &&
@@ -589,7 +589,6 @@ export function telegram(
           ? await assistant.tools.coding.requirements.confirm(
               user,
               requirementId,
-              !/^(no|not yet)$/i.test(requirementReply[1]!),
               String(ctx.chat.id),
               ctx.message.reply_to_message.message_id,
             )
@@ -1989,10 +1988,8 @@ function codingMergeNotice(result: { status: string; duplicate: boolean }) {
     ? "Merge approved. Chief will re-check the exact head, merge it and report the release."
     : "Kept open. The PR stays unmerged for you to review on GitHub.";
 }
-function codingDecisionNotice(result: { status: string; duplicate: boolean }) {
-  if (result.duplicate)
-    return "That Start message was already answered. Ask Chief for the current coding status.";
-  return result.status === "approved"
-    ? "Started. A coding box is starting; I'll send progress here and return a pull request."
-    : "Not started. Tell Chief what to change.";
+function codingDecisionNotice(result: { duplicate: boolean }) {
+  return result.duplicate
+    ? "That Start message was already answered. Ask Chief for the current coding status."
+    : "Started. A coding box is starting; I'll send progress here and return a pull request.";
 }

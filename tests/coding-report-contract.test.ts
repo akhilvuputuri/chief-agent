@@ -458,7 +458,7 @@ for (const { documentLength, terminalRecovery } of [
         return { message_id };
       });
     assert(approvalId);
-    await f.c.requirements.confirm("a", approvalId, true, "a", approvedMessage);
+    await f.c.requirements.confirm("a", approvalId, "a", approvedMessage);
     await f.c.tick();
     await run();
     const result = await f.row(started.id);

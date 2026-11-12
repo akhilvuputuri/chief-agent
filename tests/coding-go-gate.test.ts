@@ -5,6 +5,8 @@ import { randomUUID } from "node:crypto";
 import { fixture, settings, startCard } from "./helpers/coding-fixture.js";
 import { runPiWorker } from "../src/coding/pi-worker.js";
 import { requirementScope } from "../src/coding/requirements.js";
+import { sendCodingDelivery } from "../src/coding/delivery.js";
+import type { FormattedMessage } from "../src/telegram-format.js";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -24,11 +26,11 @@ async function deliverCard(f: Fixture, from: number) {
   let approvalId = "";
   let text = "";
   for (let i = 0; i < 5 && !approvalId; i++)
-    await f.c.deliver(async (_user, _target, sent, id) => {
+    await f.c.deliver(async (_user, _target, sent, id, plain) => {
       messageId++;
       if (id) {
         approvalId = id.id;
-        text = sent;
+        text = plain ? `${sent}\n\n${plain}` : sent;
       }
       return { message_id: messageId };
     });
@@ -96,7 +98,6 @@ test("Start queues the build with the owner's request as its scope and an empty 
   const result = await f.c.requirements.confirm(
     "a",
     r.approvalId,
-    true,
     "a",
     r.messageId,
   );
@@ -147,7 +148,7 @@ test("a message before Start joins the request and replaces the card; the old ca
   assert.equal(all[1].payload.requirements.scope, requirementScope(row));
   // The card the owner saw before the message no longer starts anything.
   await assert.rejects(
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, "a", r.messageId),
     /changed/,
   );
   assert.equal((await f.row(r.jobId)).state, "plan_ready");
@@ -159,7 +160,6 @@ test("a message before Start joins the request and replaces the card; the old ca
   const started = await f.c.requirements.confirm(
     "a",
     fresh.approvalId,
-    true,
     "a",
     fresh.messageId,
   );
@@ -202,7 +202,7 @@ test("coding_resume on an expired Start card sends a new one, which starts the j
   const r = await startCard(f);
   f.advance(86400001);
   await assert.rejects(
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, "a", r.messageId),
     /expired/,
   );
   const resent: any = await f.c.call("a", f.run, {
@@ -221,7 +221,6 @@ test("coding_resume on an expired Start card sends a new one, which starts the j
       await f.c.requirements.confirm(
         "a",
         fresh.approvalId,
-        true,
         "a",
         fresh.messageId,
       )
@@ -330,13 +329,7 @@ test("a reply to a stopped job after Start returns it to a new Start card (inter
   assert.equal(f.creates(), 1);
   const card = await deliverCard(f, 200);
   assert(card.approvalId);
-  await f.c.requirements.confirm(
-    "a",
-    card.approvalId,
-    true,
-    "a",
-    card.messageId,
-  );
+  await f.c.requirements.confirm("a", card.approvalId, "a", card.messageId);
   const queued = await f.row(started.id);
   assert.equal(queued.mode, "implement");
   assert.deepEqual(queued.checkpoint.files, files);
@@ -388,4 +381,43 @@ test("a dormant job of the old shape does not break a tick, delivery or status",
   assert.deepEqual(after.checkpoint, before.checkpoint);
   assert.equal(after.state, "pr_ready");
   assert.equal(f.creates(), 0);
+});
+
+test("the Start card shows the goal as written: no link, no markup, and a cut cannot break it", async (t) => {
+  const linked = "Fix [the docs](https://example.com/x) and `code` and *this*";
+  // The 300-unit cut falls inside the bold markup.
+  const cut = "a".repeat(295) + "**bold words**";
+  for (const objective of [linked, cut]) {
+    const f = await fixture(t);
+    await f.c.call("a", f.run, {
+      operation: "coding_start",
+      requestKey: "markup",
+      objective,
+      context: "",
+    });
+    let sent: FormattedMessage | undefined;
+    await f.c.deliver(async (_user, _target, text, approval, plain) =>
+      sendCodingDelivery(
+        text,
+        approval,
+        {
+          text: async (part) => {
+            sent = part;
+            return { message_id: 7 };
+          },
+        },
+        plain,
+      ),
+    );
+    assert(sent);
+    // Only the header is formatted; the goal and models are plain text.
+    assert.deepEqual(sent.entities, [
+      { type: "bold", offset: 0, length: "Ready to start".length },
+    ]);
+    if (objective === linked) assert(sent.text.includes(linked), sent.text);
+    else {
+      assert(sent.text.includes("a".repeat(295) + "**bol"), sent.text);
+      assert(!sent.text.includes("words"));
+    }
+  }
 });

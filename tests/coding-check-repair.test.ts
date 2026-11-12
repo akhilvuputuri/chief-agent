@@ -218,7 +218,7 @@ async function checksFixedAfter(t: any, wrongRounds: number, ms?: number) {
       return { message_id };
     });
   assert(approvalId);
-  await f.c.requirements.confirm("a", approvalId, true, "a", approvedMessage);
+  await f.c.requirements.confirm("a", approvalId, "a", approvedMessage);
   await f.c.tick();
   return { f, id: started.id as string, run, repairDocs, edits: () => edits };
 }

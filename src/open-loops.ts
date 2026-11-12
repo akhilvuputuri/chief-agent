@@ -86,10 +86,7 @@ export async function openLoops(
                 FROM coding_events e WHERE e.job_id=j.id AND e.payload ? 'merge'
                   AND (e.payload->'merge'->>'revision')::int = j.revision
                   AND e.payload->'merge'->>'head' IS NOT DISTINCT FROM j.head_sha
-                  AND NOT (e.payload ? 'decision') AND e.delivery IN ('pending','sending','sent')) AS merge_card,
-             EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id=j.id AND e.payload ? 'requirements'
-                AND e.payload->>'decision'='revise'
-                AND (e.payload->'requirements'->>'revision')::int = j.revision - 1) AS revise_requested
+                  AND NOT (e.payload ? 'decision') AND e.delivery IN ('pending','sending','sent')) AS merge_card
            FROM coding_jobs j
            WHERE j.user_id=$1 AND ${CODING_WAITS_ON_OWNER}
            ORDER BY j.updated_at DESC LIMIT 5`,
@@ -107,9 +104,7 @@ export async function openLoops(
               ? "owner to tap Start on the Start card; a message before Start is added to the request (coding_reply)"
               : j.card === "expired"
                 ? "Start card expired; offer a fresh one (coding_resume)"
-                : j.revise_requested && j.card !== "pending"
-                  ? "owner did not start it; ask what to change, then send it (coding_reply)"
-                  : "waiting for Start but its card is not delivered yet; read coding_status before offering one"
+                : "waiting for Start but its card is not delivered yet; read coding_status before offering one"
             : j.state === "awaiting_input"
               ? "owner to answer the job's question"
               : j.state === "paused"

@@ -186,7 +186,7 @@ async function reviewWith(t: any, command: string) {
       return { message_id };
     });
   assert(approvalId);
-  await f.c.requirements.confirm("a", approvalId, true, "a", approvedMessage);
+  await f.c.requirements.confirm("a", approvalId, "a", approvedMessage);
   await f.c.tick();
   return { f, id: started.id as string, run };
 }

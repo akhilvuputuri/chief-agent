@@ -1310,18 +1310,23 @@ const routineTimer = setInterval(() => {
     );
   void coding
     ?.deliver(
-      async (user, target, text, approval) =>
-        sendCodingDelivery(text, approval, {
-          text: (part, keyboard) =>
-            topics.deliver(user, target, (extra) =>
-              bot.api.sendMessage(user, part.text, {
-                ...extra,
-                entities: part.entities,
-                link_preview_options: { is_disabled: true },
-                ...(keyboard ? { reply_markup: keyboard } : {}),
-              }),
-            ),
-        }),
+      async (user, target, text, approval, plain) =>
+        sendCodingDelivery(
+          text,
+          approval,
+          {
+            text: (part, keyboard) =>
+              topics.deliver(user, target, (extra) =>
+                bot.api.sendMessage(user, part.text, {
+                  ...extra,
+                  entities: part.entities,
+                  link_preview_options: { is_disabled: true },
+                  ...(keyboard ? { reply_markup: keyboard } : {}),
+                }),
+              ),
+          },
+          plain,
+        ),
       {
         // Progress edits one status message in place (journal 115).
         edit: (user, messageId, text) =>

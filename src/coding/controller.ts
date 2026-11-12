@@ -856,18 +856,32 @@ export class CodingController {
     // A message from the owner is appended to the request, and the job waits for a new Start
     // card: the old card's scope no longer matches, so it cannot start the changed request.
     // After Start this is interim (journal 191): a stopped job returns to a Start card.
+    // The worker's session and review identities hash the request, so a changed request starts
+    // its build phase afresh: the files, patch and tool count are kept, the review and session
+    // state is not (otherwise review recovery would refuse the changed identity).
+    const pi = job.checkpoint.piState;
     const followUp =
       a.operation === "coding_reply"
         ? ({
             ...job,
             revision: job.revision + 1,
             context: `${job.context}\nOwner follow-up: ${message}`,
+            checkpoint: pi
+              ? {
+                  ...job.checkpoint,
+                  piState: {
+                    version: 1,
+                    toolsUsed: pi.toolsUsed,
+                    ...(pi.mrFeedback ? { mrFeedback: pi.mrFeedback } : {}),
+                  },
+                }
+              : job.checkpoint,
           } as CodingJob)
         : undefined;
     const changed = followUp
       ? await this.db.query(
           `WITH changed AS (
-      UPDATE coding_jobs SET revision=revision+1,mode='plan',context=$5,state='plan_ready',stage='awaiting_start',summary='Waiting for the owner to tap Start',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
+      UPDATE coding_jobs SET revision=revision+1,mode='plan',context=$5,checkpoint=$10::jsonb,state='plan_ready',stage='awaiting_start',summary='Waiting for the owner to tap Start',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
       WHERE id=$1 AND user_id=$2 AND revision=$3 AND context=$8 AND checkpoint=$9::jsonb AND ${RESTARTABLE} RETURNING id,revision,mode
     ), revised AS (
       INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$6,$4,mode FROM changed RETURNING job_id
@@ -882,6 +896,7 @@ export class CodingController {
             JSON.stringify(startCard(followUp)),
             job.context,
             JSON.stringify(job.checkpoint),
+            JSON.stringify(followUp.checkpoint),
           ],
         )
       : await this.db.query(
@@ -1058,10 +1073,23 @@ export class CodingController {
       : job.checkpoint;
     const approved =
       job.mode === "implement" && (await this.requirements.approved(job));
+    // A job waiting for Start shows its models on the Start card, so a model change replaces
+    // the card: the revision moves on, and the card the owner saw can no longer start it.
+    const waiting = job.state === "plan_ready" && job.mode === "plan";
+    const recard =
+      waiting &&
+      (next.model !== job.settings.model ||
+        next.reviewerModel !== job.settings.reviewerModel);
     const updated = await this.db.query(
       `WITH changed AS (
-        UPDATE coding_jobs SET settings=$4::jsonb,checkpoint=$5::jsonb
-        WHERE id=$1 AND user_id=$2 AND revision=$3 AND ${RESTARTABLE} AND settings=$6::jsonb AND checkpoint=$7::jsonb RETURNING id
+        UPDATE coding_jobs SET settings=$4::jsonb,checkpoint=$5::jsonb,revision=revision+CASE WHEN $10::boolean THEN 1 ELSE 0 END
+        WHERE id=$1 AND user_id=$2 AND revision=$3 AND ${RESTARTABLE} AND settings=$6::jsonb AND checkpoint=$7::jsonb RETURNING id,revision
+      ), revised AS (
+        INSERT INTO coding_revisions(job_id,revision,request_key,message,mode)
+        SELECT id,revision,$8::text,'Owner changed the models before Start','plan' FROM changed WHERE $10::boolean RETURNING job_id
+      ), card AS (
+        INSERT INTO coding_events(job_id,event_key,payload)
+        SELECT id,'requirements:'||revision||':'||$8::text,$11::jsonb FROM changed WHERE $10::boolean RETURNING job_id
       ) INSERT INTO coding_events(job_id,event_key,payload)
         SELECT id,$8::text,$9::jsonb FROM changed RETURNING job_id`,
       [
@@ -1082,8 +1110,18 @@ export class CodingController {
             .map(([field, from, to]) => `${field}: ${from} → ${to}`)
             .join(
               "; ",
-            )}.${restarted ? " That step restarts in a fresh session; finished work is kept." : ""}${approved ? " Your Start of the request still stands." : ""} The job stays stopped until you resume it.`,
+            )}.${restarted ? " That step restarts in a fresh session; finished work is kept." : ""}${approved ? " Your Start of the request still stands." : ""}${
+            waiting
+              ? recard
+                ? " A new Start card follows; tap Start on it to begin."
+                : " The job still waits for you to tap Start."
+              : " The job stays stopped until you resume it."
+          }`,
         }),
+        recard,
+        JSON.stringify(
+          startCard({ ...job, revision: job.revision + 1, checkpoint }),
+        ),
       ],
     );
     if (!updated.rows.length)
@@ -2789,6 +2827,8 @@ export class CodingController {
       target: import("../delivery-routing.js").Destination,
       text: string,
       approval?: import("./delivery.js").CodingApproval,
+      /** Text shown as written, never parsed as markup. */
+      plain?: string,
     ) => Promise<unknown>,
     options: {
       /** Edits a status message in place; without it, each progress run is a new message. */
@@ -2874,14 +2914,17 @@ export class CodingController {
           return out;
         };
         // The Start card (journal 191): the goal, who builds and reviews it, one Start button.
+        // The goal and model ids are the owner's and the profile's text: cut first, then sent
+        // as written, so neither markup in them nor a cut through it changes the card.
         const goal = String(j.objective)
           .split("\n")
           .map((line) => line.trim())
           .filter(Boolean)
           .slice(0, 2)
           .join("\n");
-        const caption = req
-          ? `**Ready to start**\n\n${units(goal, 300)}\n\nCoder: ${id(j.settings.model)}. Reviewer: ${id(j.settings.reviewerModel)}.`
+        const caption = req ? "**Ready to start**" : undefined;
+        const plain = req
+          ? `${units(goal, 300)}\n\nCoder: ${id(j.settings.model)}. Reviewer: ${id(j.settings.reviewerModel)}.`
           : undefined;
         // Without the owner-merge workflow no Merge card repeats the coder's summary, so the
         // first PR notice carries it (bounded like the Merge card).
@@ -2921,6 +2964,7 @@ export class CodingController {
             : merge
               ? { kind: "merge", id: e.id }
               : undefined,
+          plain,
         );
         if (req || merge) {
           const receipt = sent as { message_id?: number } | undefined;

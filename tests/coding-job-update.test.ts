@@ -24,7 +24,11 @@ const opus = "anthropic/claude-opus-5.5";
 const pricey = "synthetic/too-expensive";
 const session = "a".repeat(64);
 
-async function setup(t: TestContext, phase: "build" | "review" = "review") {
+async function setup(
+  t: TestContext,
+  phase: "build" | "review" = "review",
+  options: { waiting?: boolean } = {},
+) {
   const f = await fixture(t);
   const selected = codingSettings.parse({
     ...settings,
@@ -81,10 +85,11 @@ async function setup(t: TestContext, phase: "build" | "review" = "review") {
       reviewCandidate: { hash: "b".repeat(64), checks: [] },
     },
   };
-  await f.db.query(
-    "UPDATE coding_jobs SET mode='implement',state='paused',stage='paused',lease=NULL,cleanup='none',checkpoint=$2::jsonb,settings=$3::jsonb WHERE id=$1",
-    [started.id, JSON.stringify(checkpoint), JSON.stringify(selected)],
-  );
+  if (!options.waiting)
+    await f.db.query(
+      "UPDATE coding_jobs SET mode='implement',state='paused',stage='paused',lease=NULL,cleanup='none',checkpoint=$2::jsonb,settings=$3::jsonb WHERE id=$1",
+      [started.id, JSON.stringify(checkpoint), JSON.stringify(selected)],
+    );
   const row = async () =>
     (await f.db.query("SELECT * FROM coding_jobs WHERE id=$1", [started.id]))
       .rows[0];
@@ -104,6 +109,54 @@ async function setup(t: TestContext, phase: "build" | "review" = "review") {
   );
   return { f, c, row, update, requirements, id: started.id as string };
 }
+test("a model change while a job waits for Start replaces its Start card", async (t) => {
+  const { f, c, row, update, id } = await setup(t, "review", { waiting: true });
+  let receipt = 0;
+  const deliverCard = async () => {
+    let card: { id: string; message: number; text: string } | undefined;
+    for (let i = 0; i < 5 && !card; i++)
+      await c.deliver(async (_user, _target, text, approval, plain) => {
+        receipt++;
+        if (approval)
+          card = {
+            id: approval.id,
+            message: receipt,
+            text: `${text}\n${plain}`,
+          };
+        return { message_id: receipt };
+      });
+    return card!;
+  };
+  const first = await deliverCard();
+  assert.match(first.text, /Coder: synthetic\/coder\./);
+  await update({ coderModel: opus });
+  const waiting = await row();
+  assert.equal(waiting.state, "plan_ready");
+  assert.equal(waiting.revision, 2);
+  assert.equal(waiting.settings.model, opus);
+  const notice = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='settings:change'",
+      [id],
+    )
+  ).rows[0].payload;
+  assert.match(notice.summary, /tap Start/);
+  assert.doesNotMatch(notice.summary, /resume/);
+  // The card that showed the old coder can no longer start the job.
+  await assert.rejects(
+    c.requirements.confirm("a", first.id, "a", first.message),
+    /changed|expired/,
+  );
+  const second = await deliverCard();
+  assert.notEqual(second.id, first.id);
+  assert.match(second.text, /Coder: anthropic\/claude-opus-5\.5\./);
+  assert.equal(
+    (await c.requirements.confirm("a", second.id, "a", second.message)).status,
+    "approved",
+  );
+  assert.equal((await row()).mode, "implement");
+});
+
 const approve = (db: any, id: string, scope: string) =>
   db.query(
     "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'approved',$2::jsonb,'suppressed')",
@@ -576,7 +629,7 @@ test("a worker reviews with the new reviewer in a fresh round after a switch", a
       return { message_id };
     });
   assert(approvalId);
-  await f.c.requirements.confirm("a", approvalId, true, "a", approvedMessage);
+  await f.c.requirements.confirm("a", approvalId, "a", approvedMessage);
   await f.c.tick();
   await run();
   await f.c.tick();

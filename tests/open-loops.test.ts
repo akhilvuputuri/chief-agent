@@ -210,17 +210,6 @@ test("a re-sent requirements: card counts too, but only for the job's current re
     "owner to tap Start on the Start card; a message before Start is added to the request (coding_reply)",
   ]);
 });
-test("a Start card the owner declined is reported as such, not offered again", async () => {
-  const f = await fixture();
-  const revised = await f.job({
-    revision: 3,
-    summary: "Requirements need revision; tell Chief what to change",
-  });
-  await f.card(revised, { revision: 2, decision: "revise" });
-  assert.deepEqual(await awaiting(f.db), [
-    "owner did not start it; ask what to change, then send it (coding_reply)",
-  ]);
-});
 test("questions, pauses, merge cards and stopped PRs say what the owner needs; worker text stays separate", async () => {
   const f = await fixture();
   await f.job({

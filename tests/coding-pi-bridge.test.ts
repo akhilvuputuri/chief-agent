@@ -62,11 +62,11 @@ test("a yes reply to the exact Start card starts once; the started request canno
   const f = await fixture(t),
     r = await startCard(f);
   assert.equal(
-    await f.c.requirements.confirmReply("a", "a", r.messageId + 1, true),
+    await f.c.requirements.confirmReply("a", "a", r.messageId + 1),
     undefined,
   );
   assert.equal(
-    (await f.c.requirements.confirmReply("a", "a", r.messageId, true))!.status,
+    (await f.c.requirements.confirmReply("a", "a", r.messageId))!.status,
     "approved",
   );
   await f.c.tick();
@@ -87,7 +87,7 @@ test("a yes reply to the exact Start card starts once; the started request canno
 test("approved implementation resumes retain the same requirements without a model-granted approval", async (t) => {
   const f = await fixture(t),
     r = await startCard(f);
-  await f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId);
+  await f.c.requirements.confirm("a", r.approvalId, "a", r.messageId);
   const scope = (await f.row(r.jobId)).context;
   await f.c.tick();
   f.advance(1200000);
@@ -119,38 +119,13 @@ test("a queued job without the owner's Start pauses before provisioning and conc
   assert.equal((await f.row(job.id)).state, "paused");
   const r = await startCard(f, "confirmed");
   const results = await Promise.allSettled([
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, "a", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, "a", r.messageId),
   ]);
   assert(results.some((result) => result.status === "fulfilled"));
   assert.equal((await f.row(r.jobId)).revision, 2);
   await f.c.tick();
   assert.equal(f.creates(), 1);
-});
-test("decline advances the locked revision and a concurrent approve cannot overwrite it", async (t) => {
-  const f = await fixture(t),
-    r = await startCard(f);
-  const results = await Promise.allSettled([
-    f.c.requirements.confirm("a", r.approvalId, false, "a", r.messageId),
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
-  ]);
-  assert.equal(results[0].status, "fulfilled");
-  assert.equal(results[1].status, "rejected");
-  const current = await f.row(r.jobId);
-  assert.equal(current.revision, 2);
-  assert.equal(current.mode, "plan");
-  assert.equal(current.state, "plan_ready");
-  assert.equal(
-    (
-      await f.db.query(
-        "SELECT payload->>'decision' AS decision FROM coding_events WHERE id=$1",
-        [r.approvalId],
-      )
-    ).rows[0].decision,
-    "revise",
-  );
-  await f.c.tick();
-  assert.equal(f.creates(), 0);
 });
 test("Pi sessions append encrypted immutable entries and survive attempt changes", async (t) => {
   const f = await fixture(t);

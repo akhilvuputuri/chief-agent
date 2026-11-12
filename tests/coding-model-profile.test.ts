@@ -240,13 +240,21 @@ test("Pi report documents bind checkpoint content and support the full escaped t
     [entry],
   );
 });
-for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
+for (const {
+  documentLength,
+  firstCallFailure,
+  reviewerQuestion = false,
+  ownerReply = false,
+} of [
   { documentLength: 0, firstCallFailure: false },
+  // A reply to a job stopped in review returns it to a Start card; after Start the build
+  // runs afresh and reaches review (journal 191).
+  { documentLength: 0, firstCallFailure: false, ownerReply: true },
   { documentLength: 9357, firstCallFailure: false },
   { documentLength: 9357, firstCallFailure: true },
   { documentLength: 9357, firstCallFailure: false, reviewerQuestion: true },
 ])
-  test(`independent reviewer recovery preserves ${documentLength || "short"}-character documents (${reviewerQuestion ? "question" : firstCallFailure ? "before first tool" : "format"})`, async (t) => {
+  test(`independent reviewer recovery preserves ${documentLength || "short"}-character documents (${ownerReply ? "owner reply, then Start" : reviewerQuestion ? "question" : firstCallFailure ? "before first tool" : "format"})`, async (t) => {
     const f = await fixture(t);
     const root = await mkdtemp(join(tmpdir(), "pi-bridge-fixture-"));
     const source = join(root, "source");
@@ -461,7 +469,7 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
         return { message_id };
       });
     assert(approvalId);
-    await f.c.requirements.confirm("a", approvalId, true, "a", approvedMessage);
+    await f.c.requirements.confirm("a", approvalId, "a", approvedMessage);
     await f.c.tick();
     await run();
     let paused = await f.row(started.id);
@@ -492,6 +500,50 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
     await f.c.tick();
     await f.c.tick();
     paused = await f.row(started.id);
+    if (ownerReply) {
+      const replied: any = await f.c.call("a", f.run, {
+        operation: "coding_reply",
+        id: paused.id,
+        baseRevision: paused.revision,
+        requestKey: "owner-reply-in-review",
+        message: "Also keep the export name",
+      });
+      assert.equal(replied.state, "plan_ready");
+      const waiting = await f.row(paused.id);
+      // Files are kept; the review and session state is not.
+      assert.deepEqual(waiting.checkpoint.files, paused.checkpoint.files);
+      assert.equal(waiting.checkpoint.piState.phase, undefined);
+      assert.equal(waiting.checkpoint.piState.reviewCandidate, undefined);
+      assert.equal(waiting.checkpoint.piState.sessionScope, undefined);
+      let card = "";
+      let cardMessage = 0;
+      for (let i = 0; i < 10 && !card; i++)
+        await f.c.deliver(async (_owner, _target, _text, id) => {
+          const message_id = ++receipt;
+          if (id) {
+            card = id.id;
+            cardMessage = message_id;
+          }
+          return { message_id };
+        });
+      assert(card);
+      await f.c.requirements.confirm("a", card, "a", cardMessage);
+      recovered = true;
+      turns.set("build", 0);
+      turns.set("review", 0);
+      await f.c.tick();
+      await run();
+      // The build ran again in a fresh session, then review approved it.
+      assert.equal(turns.get("build"), 2);
+      const rebuilt = await f.row(started.id);
+      assert.equal(rebuilt.state, "publishing", rebuilt.summary);
+      assert.equal(rebuilt.result.review.verdict, "APPROVE");
+      assert.match(
+        rebuilt.context,
+        /Owner follow-up: Also keep the export name/,
+      );
+      return;
+    }
     await f.c.call("a", f.run, {
       operation: "coding_resume",
       id: paused.id,

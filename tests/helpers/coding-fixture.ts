@@ -452,11 +452,11 @@ export async function startCard(
   let card = "";
   // Earlier jobs' notices may be delivered first.
   for (let i = 0; i < 5 && !approvalId; i++)
-    await f.c.deliver(async (_user, target, text, id) => {
+    await f.c.deliver(async (_user, target, text, id, plain) => {
       assert.deepEqual(target, { kind: "topic", topic: "coding" });
       if (id) {
         approvalId = id.id;
-        card = text;
+        card = plain ? `${text}\n\n${plain}` : text;
       }
       return { message_id: ++messageId };
     });
