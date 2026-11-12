@@ -103,8 +103,9 @@ const neutral = (text: string) => text.replace(/\[(inbox|chief)/gi, "[ $1");
 export function fence(header: string, text: string) {
   // Every line of the wrapped text is quoted, so no line of it can open or close a block of
   // any kind (an inbox item, findings, the coder's summary or an owner message).
+  // Every line separator a model may read as one: CR LF, CR, LF, NEL, LS and PS.
   const body = (text ? neutral(text) : "(empty message)")
-    .split("\n")
+    .split(/\r\n|\r|\n|\u0085|\u2028|\u2029/)
     .map((line) => `> ${line}`)
     .join("\n");
   const b = boundary(body);
@@ -483,6 +484,8 @@ export async function runPiWorker(
       });
   }, hooks?.heartbeatMs ?? 20000);
   heartbeat.unref();
+  /** The coder's session was just restored at the start of the attempt; skip the next restore. */
+  let restoredOnce = false;
   async function runRole(
     runtime: CodingRuntime,
     task: Task,
@@ -491,8 +494,9 @@ export async function runPiWorker(
   ) {
     // Every run starts from the host's stored session, never from the local file (journal
     // 192); the reviewer's is rebuilt by its round.
-    if (role === "coder")
+    if (role === "coder" && !restoredOnce)
       record(await restoreSession(task, scopes.coder), "coder");
+    restoredOnce = false;
     active = { runtime, id: task.id, role };
     try {
       return await runtime.run(task.id, message);
@@ -739,6 +743,7 @@ export async function runPiWorker(
   try {
     receive(assignment.inbox);
     const coderEntries = await restoreSession(coder, scopes.coder);
+    restoredOnce = true;
     // An item in a restored session was delivered, even if its checkpoint never landed.
     record(coderEntries, "coder");
     if (pending("reviewer").length)

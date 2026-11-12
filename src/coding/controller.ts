@@ -283,7 +283,7 @@ export class CodingController {
       return false;
     const calls = (
       await db.query(
-        "SELECT id,attempt_id,result_box,created_at > COALESCE((SELECT max(created_at) FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' AND payload->>'source' IN ('owner','ask')),'-infinity'::timestamptz) AS after_owner FROM coding_model_calls WHERE job_id=$1 AND role='reviewer' AND state='complete' AND result_box IS NOT NULL AND input->>'candidate'=$2 ORDER BY created_at DESC,id DESC",
+        "SELECT id,attempt_id,result_box,created_at > COALESCE((SELECT max(created_at) FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' AND payload->>'source' IN ('owner','ask')),'-infinity'::timestamptz) AS after_owner FROM coding_model_calls WHERE job_id=$1 AND role='reviewer' AND state='complete' AND result_box IS NOT NULL AND input->>'candidate'=$2 AND COALESCE(input->>'purpose','agent')='agent' ORDER BY created_at DESC,id DESC",
         [job.id, artifactHash(result.checkpoint)],
       )
     ).rows;
@@ -1122,7 +1122,9 @@ export class CodingController {
         ? { to: "reviewer" }
         : {}),
     });
-    if (["queued", "provisioning", "running"].includes(job.state)) {
+    if (
+      ["queued", "provisioning", "running", "publishing"].includes(job.state)
+    ) {
       // Under the job's row lock, which `finish` also takes: the message lands before the
       // candidate check and holds it back, or the job is already publishing (journal 192).
       const added = await transaction(this.db, async (db) => {
@@ -1132,8 +1134,16 @@ export class CodingController {
             [job.id, user],
           )
         ).rows[0];
-        // Once publication is committed, the change being pushed is final (journal 192).
-        if (now?.stage === "publishing") return "publishing";
+        // Once publication is committed, the change being pushed is final; the message is kept
+        // for after it: the next attempt gets it if the push fails, and the PR's feedback
+        // round once the PR is open (journal 192).
+        if (now?.stage === "publishing" || now?.state === "publishing") {
+          await db.query(
+            "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,$2,$3::jsonb,'suppressed') ON CONFLICT DO NOTHING",
+            [job.id, key, payload],
+          );
+          return "held";
+        }
         if (
           !now ||
           now.revision !== job.revision ||
@@ -1147,7 +1157,11 @@ export class CodingController {
         return "added";
       });
       if (added === "added") return this.status(user, job.id);
-      if (added === "publishing") job = { ...job, state: "publishing" };
+      if (added === "held")
+        return {
+          ...(await this.status(user, job.id)),
+          note: "The job's change is being published right now, so this message was kept and is applied after publication: on the PR once it is open, or by the next attempt if publishing fails.",
+        };
     } else if (["awaiting_input", "paused", "failed"].includes(job.state)) {
       await this.assertFreshOrConfirmed(job, a, RESTARTABLE);
       const continued = await this.db.query(
@@ -1360,7 +1374,17 @@ export class CodingController {
       job.state !== "running" ||
       !this.allowed(job.user_id) ||
       !(await this.requirements.approved(job)) ||
-      new Date(job.attempt_deadline).getTime() <= this.clock().getTime()
+      new Date(job.attempt_deadline).getTime() <= this.clock().getTime() ||
+      // The box uses the token only to push and open the PR, so it gets one only after the
+      // host committed this attempt's publication (journal 192); cloning and fetching the
+      // base need no credential.
+      job.stage !== "publishing" ||
+      !(
+        await this.db.query(
+          "SELECT 1 FROM coding_events WHERE job_id=$1 AND event_key=$2",
+          [job.id, `${job.attempt_id}:publish-approved`],
+        )
+      ).rows.length
     )
       throw new Error("Agent GitHub access unavailable for this attempt");
     const cached = this.agentTokens.get(job.attempt_id);
@@ -1503,7 +1527,7 @@ export class CodingController {
       return { accepted: true };
     }
     const update = await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET stage=$3,summary=$4 WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id)
+      `WITH changed AS (UPDATE coding_jobs SET stage=CASE WHEN stage='publishing' THEN stage ELSE $3 END,summary=CASE WHEN stage='publishing' THEN summary ELSE $4 END WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id)
       INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$5,$6::jsonb FROM changed ON CONFLICT DO NOTHING RETURNING id`,
       [
         job.id,
@@ -1893,13 +1917,6 @@ export class CodingController {
       )
         throw new Error("Invalid model request purpose");
       purpose = request.purpose;
-      // Pi's cache warming replays a request with a one-token output cap; nothing else may
-      // claim that purpose (journal 192).
-      if (
-        purpose === "cache_warm" &&
-        (raw as { max_tokens?: unknown } | undefined)?.max_tokens !== 1
-      )
-        throw new Error("A cache-warming request has a one-token output cap");
       betas = piBetas(request.betas);
       body = messagesRequest(raw, {
         model: route.nativeModel,
@@ -1916,6 +1933,13 @@ export class CodingController {
     const shape = createHash("sha256")
       .update(canonicalJson(uncapped))
       .digest("hex");
+    // Pi's cache warming replays a request with a one-token output cap. A refused warm call
+    // is no failure of the job, so it is not recorded as a rejection (journal 192).
+    if (
+      purpose === "cache_warm" &&
+      (raw as { max_tokens?: unknown })?.max_tokens !== 1
+    )
+      return refusal("A cache-warming request has a one-token output cap");
     if (purpose === "cache_warm") {
       const previous = (
         await this.db.query(
@@ -1924,10 +1948,8 @@ export class CodingController {
         )
       ).rows[0]?.shape;
       if (previous !== shape)
-        return refuse(
-          new Error(
-            "A cache-warming request must replay the role's previous request",
-          ),
+        return refusal(
+          "A cache-warming request must replay the role's previous request",
         );
     }
     // One call at a time per job: each request queues behind the ones before it (a real
@@ -2671,7 +2693,7 @@ export class CodingController {
   ) {
     this.abortModels(j.id);
     await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET state=CASE WHEN state IN ('provisioning','running') THEN 'paused' ELSE state END,summary=CASE WHEN state IN ('provisioning','running') THEN $3 ELSE summary END,sandbox_id=COALESCE($6::text,sandbox_id),cleanup=CASE WHEN state IN ('provisioning','running') THEN CASE WHEN $5 THEN 'pending' ELSE 'none' END ELSE cleanup END,model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND (state IN ('provisioning','running') OR ($6::text IS NOT NULL AND state IN ('paused','cancelled') AND cleanup='pending')) RETURNING id,state)
+      `WITH changed AS (UPDATE coding_jobs SET state=CASE WHEN state IN ('provisioning','running') THEN 'paused' ELSE state END,stage=CASE WHEN state IN ('provisioning','running') THEN 'paused' ELSE stage END,summary=CASE WHEN state IN ('provisioning','running') THEN $3 ELSE summary END,sandbox_id=COALESCE($6::text,sandbox_id),cleanup=CASE WHEN state IN ('provisioning','running') THEN CASE WHEN $5 THEN 'pending' ELSE 'none' END ELSE cleanup END,model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND (state IN ('provisioning','running') OR ($6::text IS NOT NULL AND state IN ('paused','cancelled') AND cleanup='pending')) RETURNING id,state)
       INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$3::text) || CASE WHEN $7::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('cause',$7::text) END FROM changed WHERE state='paused' ON CONFLICT DO NOTHING`,
       [
         j.id,

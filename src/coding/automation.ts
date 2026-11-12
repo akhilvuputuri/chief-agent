@@ -271,6 +271,25 @@ export class CodingAutomation {
     );
     if (!changed.rows.length) throw new StageChanged();
   }
+  /**
+   * Owner messages kept while the job was publishing (journal 192), not yet delivered to the
+   * coder: once the PR is open they start a feedback round instead of sitting unread.
+   */
+  private async heldInbox(j: CodingJob) {
+    if (j.settings.prWorkflow !== "owner_merge" || !j.checkpoint.piState)
+      return [];
+    const delivered = j.checkpoint.piState.delivered ?? [];
+    return (
+      await this.db.query(
+        "SELECT id,payload->>'text' AS text FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' AND payload->>'source' IN ('owner','ask') AND NOT (id::text = ANY($2::text[])) ORDER BY created_at,id",
+        [j.id, delivered],
+      )
+    ).rows.map((r: { id: string; text: string }) => ({
+      id: `inbox:${r.id}`,
+      text: `Owner request: ${r.text}`,
+      held: true as const,
+    }));
+  }
   /** Fix requests the owner sent through Chief for this PR, handled like review feedback. */
   private async ownerRequests(j: CodingJob) {
     return (
@@ -524,7 +543,10 @@ export class CodingAutomation {
         );
         return;
       }
-      const owner = await this.ownerRequests(j);
+      const owner = [
+        ...(await this.ownerRequests(j)),
+        ...(await this.heldInbox(j)),
+      ];
       const feedback = [...owner, ...i.feedback].filter(
         (f) => !d.handled.includes(f.id),
       );
@@ -584,21 +606,24 @@ export class CodingAutomation {
         // A Pi job keeps its checkpoint and sessions: each item goes into the job's inbox,
         // labelled by source, and reaches the same coder session (journal 192).
         const inbox = pi
-          ? batch.map((item, seq) => ({
-              key: `inbox:gh:${item.id}`,
-              payload: {
-                kind: "inbox",
-                // The order within one batch, which shares a creation time.
-                seq,
-                source:
-                  "owner" in item
-                    ? "owner"
-                    : item.id.startsWith("ci:")
-                      ? "ci"
-                      : "review",
-                text: "owner" in item ? item.owner : item.text,
-              },
-            }))
+          ? batch
+              // A held message is already an inbox item; the round only delivers it.
+              .filter((item) => !("held" in item))
+              .map((item, seq) => ({
+                key: `inbox:gh:${item.id}`,
+                payload: {
+                  kind: "inbox",
+                  // The order within one batch, which shares a creation time.
+                  seq,
+                  source:
+                    "owner" in item
+                      ? "owner"
+                      : item.id.startsWith("ci:")
+                        ? "ci"
+                        : "review",
+                  text: "owner" in item ? item.owner : item.text,
+                },
+              }))
           : [];
         const handled = [...d.handled, ...batch.map((f) => f.id)];
         // An owner request is sent once: a retried or resumed round starts with no handled
@@ -739,9 +764,11 @@ export class CodingAutomation {
         );
         return;
       }
-      const fresh = [...(await this.ownerRequests(j)), ...final.feedback].some(
-        (f) => !d.handled.includes(f.id),
-      );
+      const fresh = [
+        ...(await this.ownerRequests(j)),
+        ...(await this.heldInbox(j)),
+        ...final.feedback,
+      ].some((f) => !d.handled.includes(f.id));
       // Mergeability still being computed keeps the owner's tap; the next tick merges.
       if (
         ownerMerge &&

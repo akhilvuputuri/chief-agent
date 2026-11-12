@@ -34,6 +34,8 @@ async function proofFixture(t: any) {
     candidate: string,
     attempt = job.attempt_id,
   ) => {
+    // Calls are told apart by when they were recorded.
+    await new Promise((resolve) => setTimeout(resolve, 3));
     const id = randomUUID();
     const response = {
       id: "msg_review",

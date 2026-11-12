@@ -39,10 +39,10 @@ const settings = codingSettings.parse({
 async function inbox(f: { db: Database; id: string }) {
   return (
     await f.db.query(
-      "SELECT event_key,payload FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' ORDER BY created_at,id",
+      "SELECT id,event_key,payload FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' ORDER BY created_at,id",
       [f.id],
     )
-  ).rows.map((r: any) => ({ key: r.event_key, ...r.payload }));
+  ).rows.map((r: any) => ({ id: r.id, key: r.event_key, ...r.payload }));
 }
 /** Earlier owner-merge feedback rounds, as their requeues recorded them. */
 async function priorRounds(f: { db: Database; id: string }, n: number) {
@@ -1279,14 +1279,20 @@ test("an owner request is sent once, even if a later round starts without its ha
     )
   ).rows[0].payload;
   assert.equal(delivered.deliveredRound, 1);
-  // As after an automatic retry: a new revision is published with no handled list.
+  // As after an automatic retry: a new revision is published with no handled list. Its
+  // coder received the request (the checkpoint lists the inbox item as delivered).
+  const sent = (await inbox(f)).map((i: any) => i.id);
+  const withDelivery = {
+    ...before.checkpoint,
+    piState: { ...before.checkpoint.piState, delivered: sent },
+  };
   await f.db.query(
     "UPDATE coding_jobs SET state='pr_ready',stage='pr_ready',revision=revision+1,attempt_id=$2,result=$3::jsonb,checkpoint=$4::jsonb WHERE id=$1",
     [
       f.id,
       before.attempt_id,
-      JSON.stringify(before.result),
-      JSON.stringify(before.checkpoint),
+      JSON.stringify({ ...before.result, checkpoint: withDelivery }),
+      JSON.stringify(withDelivery),
     ],
   );
   await f.auto.start(await f.job(), "c".repeat(40));
@@ -1326,4 +1332,34 @@ test("requests that would not fit one round together are refused", async (t) => 
     replyAsOwner(f, "fix-11", "b".repeat(5000)),
     /already fill the next round/,
   );
+});
+
+test("an owner message kept while the job was publishing starts a feedback round once the PR is open", async (t) => {
+  const f = await fixture(t);
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'inbox:reply:kept',$2::jsonb,'suppressed')",
+    [
+      f.id,
+      JSON.stringify({
+        kind: "inbox",
+        source: "owner",
+        text: "Also update the docs.",
+      }),
+    ],
+  );
+  f.setInspection({ draft: false });
+  await f.auto.tick();
+  const queued = await f.job();
+  assert.equal(queued.state, "queued");
+  // The kept item itself is what the coder gets; no copy is made.
+  const items = await inbox(f);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].key, "inbox:reply:kept");
+  const handled = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
+      [f.id],
+    )
+  ).rows[0].payload.handled;
+  assert.match(handled[0], /^inbox:/);
 });

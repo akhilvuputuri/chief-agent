@@ -1193,6 +1193,15 @@ test("requests for one job queue for the slot, and Pi's cache warming is recorde
   );
   // The warm request is not counted as an agent call.
   assert.equal((await f.row(job.id)).used_models, before + 3);
+  // A refused warm request is no failure of the job: it is not recorded as a rejection.
+  const rejections = async () =>
+    (
+      await f.db.query(
+        "SELECT count(*)::int AS n FROM coding_events WHERE job_id=$1 AND payload->>'kind'='worker_request_rejected'",
+        [job.id],
+      )
+    ).rows[0].n;
+  const rejectedBefore = await rejections();
   // A warm request must replay the role's previous request: a one-token cap is not enough.
   const other = await send(
     { max_tokens: 1, messages: [{ role: "user", content: "Something else" }] },
@@ -1205,6 +1214,7 @@ test("requests for one job queue for the slot, and Pi's cache warming is recorde
   );
   // Nor does a different cap pass as warming.
   assert.equal((await send({ max_tokens: 100 }, "cache_warm")).statusCode, 400);
+  assert.equal(await rejections(), rejectedBefore);
 });
 
 test("a claim that fails once does not hold the job's place, and waiting is bounded", async (t) => {
