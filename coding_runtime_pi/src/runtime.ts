@@ -287,6 +287,19 @@ export class CodingRuntime {
     this.active = { id, stop, cancelled: false };
     const started = performance.now();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // A cancellation requested through the store stops the checks, as it stops run().
+    const poll = setInterval(() => {
+      void this.options.store
+        .cancellation(id)
+        .then((cancel) => {
+          if (cancel && this.active?.id === id) {
+            this.active.cancelled = true;
+            stop.abort();
+          }
+        })
+        .catch(() => stop.abort());
+    }, 250);
+    poll.unref();
     try {
       const execute = this.options.executor?.(task);
       if (
@@ -335,6 +348,7 @@ export class CodingRuntime {
       await this.event(task, "state", task.summary);
       return task;
     } finally {
+      clearInterval(poll);
       if (timer) clearTimeout(timer);
       task.used.ms =
         (task.used.ms ?? 0) + Math.ceil(performance.now() - started);

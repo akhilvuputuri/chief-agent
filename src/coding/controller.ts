@@ -1320,14 +1320,18 @@ export class CodingController {
       agentGit,
       ...settings
     } = job.settings;
-    // A rebased Pi revision carries its reviewed change (journal 174). Older worker images
-    // drop this unknown field and implement the approved plan again on the new base.
+    // A rebased Pi revision carries its reviewed change (journal 174), and so do later
+    // revisions that only resume it (the owner's coding_resume or the automatic retry) on the
+    // same base. Older worker images drop this unknown field and implement the plan again.
     const carried =
       job.settings.runtime === "pi" && job.mode === "implement"
         ? (
             await this.db.query(
-              "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
-              [job.id, `rebase-change:${job.revision}`],
+              `SELECT e.payload FROM coding_events e WHERE e.job_id=$1 AND e.payload->>'onto'=$3
+                AND e.event_key='rebase-change:'||(SELECT max(v.revision) FROM coding_revisions v
+                  WHERE v.job_id=$1 AND v.revision<=$2
+                    AND NOT (v.request_key LIKE 'auto-retry:%' OR (v.message='Explicit resume' AND v.request_key NOT LIKE 'rebase:%')))`,
+              [job.id, job.revision, job.base_sha],
             )
           ).rows[0]?.payload
         : undefined;

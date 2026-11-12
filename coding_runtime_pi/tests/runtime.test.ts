@@ -310,6 +310,37 @@ test("verify runs the configured checks on an approved build with no model call"
   assert.notEqual(failed.checks[0]?.exitCode, 0);
   assert(failed.artifact?.patch.includes("a * b"));
 });
+test("verify stops when a cancellation is requested through the store", async () => {
+  const f = await fixture();
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: async () => {
+      throw new Error("verify must not call a model");
+    },
+    executor: (t) => localExecutor(t.workspace, join(f.root, "home")),
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Fix sum",
+    checks: ["sleep 30"],
+  });
+  task.intent = "build";
+  task.plan = {
+    revision: task.revision,
+    text: "Change subtraction to addition.",
+    hash: planHash(task, "Change subtraction to addition."),
+  };
+  task.approved = { revision: task.plan.revision, hash: task.plan.hash };
+  await f.store.save(task);
+  const started = Date.now();
+  const verifying = runtime.verify(task.id);
+  // Another process asks to cancel, as the worker's own store request does.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await f.store.requestCancel(task.id);
+  const stopped = await verifying;
+  assert.equal(stopped.status, "cancelled");
+  assert(Date.now() - started < 10000);
+});
 test("outside, credential and symlink paths are denied", async () => {
   const f = await fixture();
   await writeFile(join(f.root, "outside"), "synthetic");

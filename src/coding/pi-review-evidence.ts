@@ -158,20 +158,24 @@ export function piCarriedDelta(
   return treeDelta(execute, from, signal);
 }
 
-/** What main changed between two bases, as `git diff --stat`, or nothing when unavailable. */
+/**
+ * What main changed between two bases: `git diff --stat`, or with `full` the complete diff
+ * (up to 400,000 characters). Nothing when unavailable or larger.
+ */
 export async function piMainChanges(
   execute: Executor,
   from: string,
   to: string,
   signal: AbortSignal,
+  full = false,
 ): Promise<string | undefined> {
   if (!/^[a-f0-9]{40}$/.test(from) || !/^[a-f0-9]{40}$/.test(to))
     return undefined;
   const stat = await execute(
-    `${git} diff --no-ext-diff --no-textconv --no-renames --stat=160 ${from} ${to}`,
+    `${git} diff --no-ext-diff --no-textconv --no-renames ${full ? "" : "--stat=160 "}${from} ${to}`,
     signal,
     120000,
-    100_000,
+    full ? 400_000 : 100_000,
   );
   return stat.exitCode === 0 && !stat.truncated
     ? stat.output.trimEnd() || "(no file changes)"

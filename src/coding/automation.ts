@@ -255,12 +255,12 @@ export class CodingAutomation {
     const carried = {
       kind: "rebase_change",
       from: j.base_sha,
+      onto: main,
       hash: artifactHash(j.result.checkpoint),
       patch: j.result.checkpoint.patch,
       files: j.result.checkpoint.files,
-      summary: Array.from(String(j.result.summary ?? ""))
-        .slice(0, 4000)
-        .join(""),
+      // Already at most 4,000 UTF-16 units, as the outcome schema counts them.
+      summary: String(j.result.summary ?? ""),
       findings: j.result.review?.findings ?? "",
       ...(image ? { image } : {}),
     };

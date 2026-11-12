@@ -634,6 +634,7 @@ test("when main moves, an owner-merge job is rebased automatically with its appr
   assert.deepEqual(change.payload, {
     kind: "rebase_change",
     from: base,
+    onto: moved,
     hash: artifactHash(before.result.checkpoint),
     patch: before.result.checkpoint.patch,
     files: before.result.checkpoint.files,
@@ -663,9 +664,29 @@ test("when main moves, an owner-merge job is rebased automatically with its appr
     findings: "Matches the plan",
   });
   assert.deepEqual(assignment.checkpoint.files, []);
-  // Only the rebased revision carries it.
+  // A resume of the rebased revision (the owner's or the automatic retry) still carries it.
+  await f.db.query(
+    "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,3,'owner-resume','Explicit resume','implement'),($1,4,'auto-retry:'||gen_random_uuid()::text,'Automatic retry','implement')",
+    [f.id],
+  );
+  for (const revision of [3, 4])
+    assert.equal(
+      ((await c.assignment({ ...queued, revision })) as any).rebase?.hash,
+      artifactHash(before.result.checkpoint),
+    );
+  // A later revision of another kind, or another base, does not.
+  await f.db.query(
+    "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,5,'mr-feedback:x','MR feedback','implement'),($1,6,'owner-resume-2','Explicit resume','implement')",
+    [f.id],
+  );
+  for (const revision of [5, 6])
+    assert.equal(
+      ((await c.assignment({ ...queued, revision })) as any).rebase,
+      undefined,
+    );
   assert.equal(
-    ((await c.assignment({ ...queued, revision: 3 })) as any).rebase,
+    ((await c.assignment({ ...queued, base_sha: "e".repeat(40) })) as any)
+      .rebase,
     undefined,
   );
   const budget = (

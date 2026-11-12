@@ -156,6 +156,20 @@ export const checkpoint = z
           })
           .strict()
           .optional(),
+        /**
+         * How this revision's reviewed change reached the new base after a rebase (journal
+         * 174), so a resumed attempt tells the coder and reviewer what happened.
+         */
+        carry: z
+          .object({
+            kind: z.enum(["clean", "conflict", "reimplemented"]),
+            /** Files git left with conflict markers. */
+            conflicts: z.array(z.string().min(1).max(240)).max(500).optional(),
+            /** Conflicting files git could not mark, such as binary files. */
+            unmarked: z.array(z.string().min(1).max(240)).max(500).optional(),
+          })
+          .strict()
+          .optional(),
         reportFailure: z.string().max(500).optional(),
         reportDocument: z
           .object({

@@ -2,9 +2,9 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   Workspace as PiWorkspace,
   localExecutor,
@@ -42,18 +42,53 @@ const notes = Array.from(
   (_, i) => `Synthetic note ${i} about the addition.\n`,
 ).join("");
 
+type Write = ((path: string, text: string) => Promise<void>) & {
+  remove: (path: string) => Promise<void>;
+};
 type Scenario = {
   /** What main changes after the candidate was reviewed. */
-  moveMain: (
-    write: (path: string, text: string) => Promise<void>,
-  ) => Promise<void>;
+  moveMain: (write: Write) => Promise<void>;
   /** The scripted coder; any call fails a scenario that expects none. */
   coder?: (input: any, call: number) => any;
   /** Breaks the carried change's identity, so it cannot be carried. */
   tamper?: boolean;
   /** The job was created on an earlier worker image that the boxes still accept. */
   olderImage?: string;
+  /** Extra files on the old base, and extra changes in the reviewed candidate. */
+  baseFiles?: Record<string, string>;
+  candidateFiles?: Record<string, string>;
+  /** The first attempt stops (as a lost box would) once the clean carry is saved. */
+  interruptAfterCarry?: boolean;
 };
+
+/** Reads the next required task document this session has not been given yet. */
+function readRequired(input: any) {
+  const text = input.messages
+    .map((m: any) =>
+      typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+    )
+    .join("\n");
+  const delivered = new Set(
+    input.messages
+      .filter((m: any) => m.role === "tool")
+      .map((m: any) => {
+        try {
+          return JSON.parse(m.content).id;
+        } catch {
+          return undefined;
+        }
+      }),
+  );
+  for (const match of text.matchAll(
+    /^([a-z][a-z0-9_-]*): [^\n]*; \d+ characters; SHA-256 [a-f0-9]{64}; 1 pages(; optional reference)?/gm,
+  ))
+    if (!match[2] && !delivered.has(match[1]))
+      return reply(`read-${match[1]}-${randomUUID()}`, "read_document", {
+        id: match[1],
+        page: 0,
+      });
+  return undefined;
+}
 
 const reply = (id: string, name: string, args: unknown) => ({
   message: {
@@ -91,13 +126,20 @@ async function rebased(t: TestContext, scenario: Scenario) {
     execFileSync("git", ["-C", source, ...args], { stdio: "pipe" })
       .toString()
       .trim();
-  const write = (path: string, text: string) =>
-    writeFile(join(source, path), text);
+  const write: Write = Object.assign(
+    async (path: string, text: string) => {
+      await mkdir(dirname(join(source, path)), { recursive: true });
+      await writeFile(join(source, path), text);
+    },
+    { remove: (path: string) => rm(join(source, path)) },
+  );
   git("init", "-q");
   git("config", "user.name", "Synthetic");
   git("config", "user.email", "synthetic@example.invalid");
   await write(".gitignore", "node_modules/\n");
   await write("sum.js", sumFile(subtract));
+  for (const [path, text] of Object.entries(scenario.baseFiles ?? {}))
+    await write(path, text);
   await write(
     "test.mjs",
     "import assert from 'node:assert/strict';\nimport { sum } from './sum.js';\nassert.equal(sum(2, 3), 5);\n",
@@ -134,6 +176,8 @@ async function rebased(t: TestContext, scenario: Scenario) {
   await writeFile(join(work, "sum.js"), sumFile(add));
   // Most of a real change is untouched by main; the review should not read it again.
   await writeFile(join(work, "notes.md"), notes);
+  for (const [path, text] of Object.entries(scenario.candidateFiles ?? {}))
+    await writeFile(join(work, path), text);
   const snap = await (
     await new PiWorkspace(work).initialize()
   ).snapshot(
@@ -276,19 +320,26 @@ async function rebased(t: TestContext, scenario: Scenario) {
   t.after(() => app.close());
   await codingApi(app, f.c);
   const origin = await app.listen({ host: "127.0.0.1", port: 0 });
-  await f.c.tick();
-  const running = await f.row(started.id);
-  const assignment = await f.c.assignment(running);
-  await runPiWorker(
-    new NativePiWorkerClient(
+  /** Provisions the queued attempt and runs the real worker on it. */
+  const runWorker = async (interrupt = false) => {
+    await f.c.tick();
+    const running = await f.row(started.id);
+    const assignment: any = await f.c.assignment(running);
+    const client = new NativePiWorkerClient(
       origin,
       running.id,
       f.c.token(running.id, running.attempt_id),
       new AbortController().signal,
-    ),
-    () => {},
-    new AbortController().signal,
-    {
+    );
+    if (interrupt) {
+      const request = client.request.bind(client);
+      client.request = async (path: string, body?: any) => {
+        if (path === "progress" && body?.key?.startsWith("pi:carried:"))
+          throw new Error("Synthetic lost box");
+        return request(path, body);
+      };
+    }
+    await runPiWorker(client, () => {}, new AbortController().signal, {
       prepareRepository: async (directory: string, a: any) => {
         execFileSync("git", [
           "clone",
@@ -306,8 +357,29 @@ async function rebased(t: TestContext, scenario: Scenario) {
           a.baseSha,
         ]);
       },
-    },
-  );
+    }).catch((error) => {
+      if (!interrupt) throw error;
+    });
+    return assignment;
+  };
+  /** The attempt stopped; the owner resumes it, which starts a new revision. */
+  const resume = async () => {
+    await f.db.query(
+      "UPDATE coding_jobs SET state='paused',stage='paused',cleanup='complete',lease=NULL,lease_until=NULL WHERE id=$1",
+      [started.id],
+    );
+    const job = await f.row(started.id);
+    await f.c.call("a", f.run, {
+      operation: "coding_resume",
+      id: started.id,
+      baseRevision: job.revision,
+      requestKey: `resume-${job.revision}`,
+      confirmStale: true,
+    });
+    assert.equal((await f.row(started.id)).revision, job.revision + 1);
+    return runWorker();
+  };
+  const assignment = await runWorker(scenario.interruptAfterCarry);
   const finished = await f.row(started.id);
   /** Publishes the approved candidate and runs the automation to the Merge card. */
   const toMergeCard = async () => {
@@ -317,10 +389,11 @@ async function rebased(t: TestContext, scenario: Scenario) {
     assert.equal((await f.row(started.id)).state, "pr_ready");
     await auto.tick();
     await auto.tick();
+    const { revision } = await f.row(started.id);
     return (
       await f.db.query(
-        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key LIKE 'merge-approval:2:%'",
-        [started.id],
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key LIKE $2",
+        [started.id, `merge-approval:${revision}:%`],
       )
     ).rows.map((r: any) => r.payload);
   };
@@ -343,6 +416,7 @@ async function rebased(t: TestContext, scenario: Scenario) {
     finished,
     progress,
     toMergeCard,
+    resume,
     approvedHash: artifactHash(cp as any),
   };
 }
@@ -631,4 +705,223 @@ test("a rebase on the current image records no image change", async (t) => {
     )
   ).rows[0].payload;
   assert.equal("image" in change, false);
+});
+
+const systemOf = (input: any) =>
+  input.messages.find((m: any) => m.role === "system").content as string;
+
+test("a change git cannot apply leaves the workspace at the base and the approved plan is implemented again", async (t) => {
+  const r = await rebased(t, {
+    // Main moved the module, so the reviewed change to sum.js has nothing to apply to.
+    moveMain: async (write) => {
+      await write("lib/sum.js", sumFile(subtract));
+      await write(
+        "test.mjs",
+        "import assert from 'node:assert/strict';\nimport { sum } from './lib/sum.js';\nassert.equal(sum(2, 3), 5);\n",
+      );
+      await write.remove("sum.js");
+      await write(
+        "package.json",
+        JSON.stringify({
+          name: "synthetic-pi-workspace",
+          version: "1.0.0",
+          type: "module",
+          scripts: {
+            check: "node test.mjs",
+            build: "node --check lib/sum.js",
+            "format:check": "node --check test.mjs",
+          },
+        }),
+      );
+    },
+    coder: (input, call) => {
+      const text = JSON.stringify(input.messages);
+      assert(!text.includes("already implemented in this workspace"));
+      if (call === 1) return reply("coder-1", "read", { path: "notes.md" });
+      if (call === 2) {
+        // Nothing of the reviewed change was left behind, not even its new file.
+        const read = input.messages
+          .filter((m: any) => m.role === "tool")
+          .at(-1);
+        assert(!String(read.content).includes("Synthetic note 0"));
+        return reply("coder-2", "edit", {
+          path: "lib/sum.js",
+          edits: [{ oldText: "a - b", newText: "a + b" }],
+        });
+      }
+      return reply("coder-3", "report", {
+        kind: "done",
+        summary: "Addition fixed in lib/sum.js",
+        detail: "Implemented the approved plan on current main.",
+      });
+    },
+  });
+  assert.deepEqual(r.progress, [
+    "Main moved and the reviewed change could not be carried onto it, so the approved plan is implemented on current main",
+  ]);
+  assert.equal(r.finished.state, "publishing");
+  assert.deepEqual(
+    r.finished.result.checkpoint.files.map((f: any) => f.path),
+    ["lib/sum.js"],
+  );
+  assert.deepEqual(r.finished.result.checkpoint.piState.carry, {
+    kind: "reimplemented",
+  });
+  assert(!systemOf(r.reviewInputs.at(-1)).includes("after a rebase"));
+});
+
+test("main that already contains the reviewed change leaves nothing to merge and makes no model call", async (t) => {
+  const r = await rebased(t, {
+    moveMain: async (write) => {
+      await write("sum.js", sumFile(add));
+      await write("notes.md", notes);
+    },
+  });
+  assert.equal(r.calls.coder + r.calls.reviewer, 0);
+  assert.equal(r.finished.state, "paused");
+  assert.match(
+    r.finished.result.summary,
+    /^Main already contains the reviewed change/,
+  );
+});
+
+test("a clean carry interrupted before its checks resumes after the owner's resume as checks and a delta review, with no implementation call", async (t) => {
+  const r = await rebased(t, {
+    moveMain: (write) => write("sum.js", sumFile(subtract, "sum-module")),
+    interruptAfterCarry: true,
+  });
+  const stopped = await r.f.row(r.id);
+  assert.equal(stopped.checkpoint.piState.phase, "build");
+  assert.deepEqual(stopped.checkpoint.piState.carry, { kind: "clean" });
+  assert.equal(r.calls.reviewer, 0);
+  // coding_resume starts revision 3; the carry still applies to it.
+  const assignment = await r.resume();
+  assert.equal(assignment.revision, 3);
+  assert.equal(assignment.rebase.hash, r.approvedHash);
+  const after = await r.f.row(r.id);
+  assert.equal(r.calls.coder, 0);
+  assert.equal(after.state, "publishing");
+  assert(after.result.checks.every((c: any) => c.exitCode === 0));
+  assert.equal(after.result.checks.length, 4);
+  const system = systemOf(r.reviewInputs.at(-1));
+  assert(system.includes("after a rebase"));
+  assert(system.includes("It applied without conflicts."));
+  assert.equal((await r.toMergeCard()).length, 1);
+});
+
+test("a conflict session that stopped resumes with the conflicts named, and the review knows they were resolved", async (t) => {
+  const resolved = sumFile(`${add} // main`);
+  let failFirst = true;
+  const r = await rebased(t, {
+    moveMain: (write) => write("sum.js", sumFile(`${subtract} // main`)),
+    coder: (input, call) => {
+      if (failFirst) {
+        failFirst = false;
+        throw new Error("Synthetic interrupted generation");
+      }
+      const read = readRequired(input);
+      if (read) return read;
+      const tools = input.messages.filter((m: any) => m.role === "tool");
+      if (!tools.some((m: any) => String(m.content).includes("<<<<<<<")))
+        return reply(`coder-${call}`, "read", { path: "sum.js" });
+      if (!tools.some((m: any) => String(m.content).includes("Successfully")))
+        return reply(`coder-${call}`, "write", {
+          path: "sum.js",
+          content: resolved,
+        });
+      return reply(`coder-${call}`, "report", {
+        kind: "done",
+        summary: "Conflict resolved",
+        detail: "Kept main's comment and the approved addition.",
+      });
+    },
+  });
+  assert.equal(r.finished.state, "paused");
+  assert.deepEqual(r.finished.checkpoint.piState.carry, {
+    kind: "conflict",
+    conflicts: ["sum.js"],
+    unmarked: [],
+  });
+  const assignment = await r.resume();
+  assert.equal(assignment.rebase.hash, r.approvedHash);
+  const resumed = JSON.stringify(r.coderInputs[1].messages);
+  assert.match(resumed, /these files had conflict markers: sum\.js/);
+  assert.match(resumed, /Do not implement the change again from scratch/);
+  const after = await r.f.row(r.id);
+  assert.equal(after.state, "publishing");
+  assert.deepEqual(
+    after.result.checkpoint.files.map((f: any) => [f.path, f.content]),
+    [
+      ["notes.md", notes],
+      ["sum.js", resolved],
+    ],
+  );
+  const system = systemOf(r.reviewInputs.at(-1));
+  assert(system.includes("The merge conflicted in 1 file(s)"));
+  assert(system.includes("sum.js"));
+});
+
+test("conflict markers left in a file the checks never read fail like a check and go back to the coder", async (t) => {
+  const readme = (line: string) => `# Synthetic\n\n${line}\n`;
+  const r = await rebased(t, {
+    baseFiles: { "README.md": readme("Intro.") },
+    candidateFiles: { "README.md": readme("Intro, with addition.") },
+    moveMain: (write) => write("README.md", readme("Intro, from main.")),
+    coder: (input, call) => {
+      const read = readRequired(input);
+      if (read) return read;
+      const text = JSON.stringify(input.messages);
+      if (!text.includes("check_failures"))
+        // The first session claims it is done and leaves the markers.
+        return reply(`coder-${call}`, "report", {
+          kind: "done",
+          summary: "Done",
+          detail: "Claims the conflict is resolved.",
+        });
+      const tools = input.messages.filter((m: any) => m.role === "tool");
+      if (!tools.some((m: any) => String(m.content).includes("Successfully")))
+        return reply(`coder-${call}`, "write", {
+          path: "README.md",
+          content: readme("Intro, from main, with addition."),
+        });
+      return reply(`coder-${call}`, "report", {
+        kind: "done",
+        summary: "Markers removed",
+        detail: "Combined both intro lines.",
+      });
+    },
+  });
+  const repair = r.coderInputs.find((input) =>
+    JSON.stringify(input.messages).includes("check_failures"),
+  );
+  assert(repair);
+  const failures = delivered(
+    r.coderInputs.findLast((input) => delivered(input, "check_failures")),
+    "check_failures",
+  );
+  assert.match(failures, /\$ conflict marker scan \(exit 1\)/);
+  assert.match(failures, /README\.md: <<<<<<< /);
+  assert.equal(r.finished.state, "publishing");
+  assert(r.finished.result.checks.every((c: any) => c.exitCode === 0));
+  assert.equal(
+    r.finished.result.checkpoint.files.find((f: any) => f.path === "README.md")
+      .content,
+    readme("Intro, from main, with addition."),
+  );
+});
+
+test("when main's change touches none of the change's files, the delta review reads main's complete diff", async (t) => {
+  const r = await rebased(t, {
+    moveMain: (write) => write("other.md", "Main's unrelated change.\n"),
+  });
+  assert.equal(r.calls.coder, 0);
+  assert.equal(r.finished.state, "publishing");
+  const review = r.reviewInputs.at(-1);
+  assert(systemOf(review).includes("after a rebase"));
+  const delta = delivered(review, "review_delta");
+  assert.match(
+    delta,
+    /Every file this change touches is byte-identical to the approved candidate\. Main's complete diff/,
+  );
+  assert.match(delta, /\+Main's unrelated change\./);
 });
