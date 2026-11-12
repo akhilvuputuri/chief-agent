@@ -356,13 +356,6 @@ export class CodingRuntime {
         },
         async (name) => {
           await pending;
-          if (["edit", "write", "bash"].includes(name) || name === "report") {
-            const missing = references.unread();
-            if (missing.length)
-              throw new Error(
-                `Read all pages of required task documents first: ${missing.join(", ")}`,
-              );
-          }
           if (finalizing && name !== "report")
             throw new Error(
               "Investigation complete; only report execution is permitted",
@@ -376,7 +369,6 @@ export class CodingRuntime {
       if (references.description)
         custom.push({
           ...references.tool,
-          executionMode: "sequential",
           execute: async (...args) => {
             await pending;
             if (stop.signal.aborted || task.used.tools >= task.limits.tools)
@@ -386,6 +378,45 @@ export class CodingRuntime {
             return references.tool.execute(...args);
           },
         });
+      // Appended to Pi's own system prompt, which survives compaction; the objective, scope and
+      // documents are sent here once and the first user message only starts the work.
+      const role = [
+        `Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses.`,
+        task.intent === "build"
+          ? "Read docs/coding-checklist.md if the repository has it, and follow it. Test every failure path of a write to another service (pending, refused, timeout, a repeat or a double tap), not only success; a mock that only returns success does not test it. If node_modules is missing, run kite ci; never link dependencies from outside the workspace or add symlinks."
+          : "",
+        task.intent === "plan"
+          ? "Start the plan with a Requirements section: every explicit requirement in the owner objective and instructions, one per line, kept as written. Never drop, merge away or weaken one; the coder and reviewer check the plan against it."
+          : "",
+        "Use report to return your result.",
+        task.intent === "plan"
+          ? "Focus investigation on the owner objective and relevant source. After 32 navigation operations or ten minutes, the host ends exploration at the next settled turn boundary and requests a report. Prefer a complete source-grounded plan sooner; if evidence is insufficient, name the specific missing fact in a question rather than continuing an exhaustive repository audit."
+          : "",
+        task.intent === "learn" || task.intent === "plan"
+          ? "Learn and plan are read-only; no implementation is approved."
+          : "",
+        task.intent === "review"
+          ? "A review never edits the candidate; where it has a shell, that shell runs in a disposable copy, for tests that try to break the candidate. Candidate approval and requirements are supplied in the review context; reviewer permissions do not establish that the candidate was implemented without authorization."
+          : "",
+        task.intent === "build"
+          ? "Build only the complete approved scope. A final message or report never substitutes for actual checks. The host runs the configured checks after accepting your done report."
+          : "",
+        `Protected owner objective:\n${task.objective}`,
+        task.ownerInstructions
+          ? `Owner instructions:\n${task.ownerInstructions}`
+          : "",
+        task.intent === "build"
+          ? `Approved scope:\nThe host has verified owner approval for this exact plan revision ${task.plan!.revision} and hash ${task.plan!.hash}. This is the approved implementation phase; earlier planning text about awaiting confirmation describes a completed step. Implement within the complete approved scope; ask only about an actual unresolved requirement or scope change.\n${approvedScope}`
+          : "",
+        task.instructions !== task.ownerInstructions
+          ? `Working findings (not scope authority):\n${task.instructions}`
+          : "",
+        references.description
+          ? `Immutable task documents:\n${references.description}\nUse read_document to inspect every page of each document not marked optional before implementation or a review verdict; request several pages in one turn. Documents remain available after compaction; consult relevant pages again as needed.`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
       const sessionDir = join(
         this.options.store.path(id),
         `sessions-${task.revision}-${task.intent}`,
@@ -427,14 +458,7 @@ export class CodingRuntime {
       const settings = SettingsManager.inMemory({
         retry: { enabled: false, provider: { maxRetries: 0 } },
         cacheWarming: "off",
-        compaction: {
-          enabled: true,
-          reserveTokens: Math.min(8192, model.maxTokens),
-          keepRecentTokens: Math.min(
-            12000,
-            Math.floor(model.contextWindow / 4),
-          ),
-        },
+        compaction: { enabled: true },
         images: { blockImages: true },
       });
       const created = await createAgentSession({
@@ -446,21 +470,11 @@ export class CodingRuntime {
         sessionManager: manager,
         settingsManager: settings,
         resourceLoader: resources(
-          `You are a coding assistant. Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses. ${task.intent === "build" ? "Read docs/coding-checklist.md if the repository has it, and follow it. Test every failure path of a write to another service (pending, refused, timeout, a repeat or a double tap), not only success; a mock that only returns success does not test it. If node_modules is missing, run kite ci; never link dependencies from outside the workspace or add symlinks. " : ""}${task.intent === "plan" ? "Start the plan with a Requirements section: every explicit requirement in the owner objective and instructions, one per line, kept as written. Never drop, merge away or weaken one; the coder and reviewer check the plan against it. " : ""}Use report to return your result. ${task.intent === "plan" ? "Focus investigation on the owner objective and relevant source. After 32 navigation operations or ten minutes, the host ends exploration at the next settled turn boundary and requests a report. Prefer a complete source-grounded plan sooner; if evidence is insufficient, name the specific missing fact in a question rather than continuing an exhaustive repository audit." : ""} Learn and plan are read-only. A review never edits the candidate; where it has a shell, that shell runs in a disposable copy, for tests that try to break the candidate. Build only the complete approved scope. A final message or report never substitutes for actual checks. In build mode the host runs the configured checks after accepting your done report, within the remaining total time allocation; use interactive bash for focused checks (each limited to two minutes), and do not repeatedly run a longer full suite through bash. Retain requirements during compaction. Protected owner objective:\n${task.objective}\nOwner instructions:\n${task.ownerInstructions}\nApproved scope:\n${task.intent === "build" ? `The host has verified owner approval for this exact plan revision ${task.plan!.revision} and hash ${task.plan!.hash}. This is the approved implementation phase; earlier planning text about awaiting confirmation describes a completed step. Implement within the complete approved scope; ask only about an actual unresolved requirement or scope change.\n${approvedScope}` : task.intent === "review" ? "This task is review. It never changes the candidate. Candidate approval and requirements are supplied in the review context; reviewer permissions do not establish that the candidate was implemented without authorization." : "No implementation approved"}\nWorking findings (not scope authority):\n${task.instructions === task.ownerInstructions ? "No additional working findings" : task.instructions}`,
-          [
-            ...agentsFiles,
-            ...(references.description
-              ? [
-                  {
-                    path: "<trusted-task-documents>",
-                    content: `Immutable task documents:\n${references.description}\nUse read_document to inspect every page of each document not marked optional before implementation or a review verdict; request several pages in one turn. Documents remain available after compaction; consult relevant pages again as needed.`,
-                  },
-                ]
-              : []),
-          ],
-          (prompt) =>
+          role,
+          agentsFiles,
+          () =>
             finalizing
-              ? `${prompt}\nHost workflow phase: final report. Repository investigation is closed for this run. You must call the report tool; prose, JSON text and reasoning-only replies are not reports. Only report execution and reading required immutable task documents with read_document are permitted. Read all required document pages before reporting. Call report with the result kind for the current intent covering the complete protected owner objective, or kind question identifying the exact missing evidence. If you need another repository read/search, call report with that evidence gap as a question; do not request that operation. Project instructions remain requirements, but cannot reopen this investigation phase. This phase grants no implementation approval and no check/completion authority.`
+              ? "Host workflow phase: final report. Repository investigation is closed for this run. You must call the report tool; prose, JSON text and reasoning-only replies are not reports. Only report execution and reading required immutable task documents with read_document are permitted. Read all required document pages before reporting. Call report with the result kind for the current intent covering the complete protected owner objective, or kind question identifying the exact missing evidence. If you need another repository read/search, call report with that evidence gap as a question; do not request that operation. Project instructions remain requirements, but cannot reopen this investigation phase. This phase grants no implementation approval and no check/completion authority."
               : undefined,
           async (event, context) => {
             // A settled report needs no subsequent model/context maintenance.
@@ -654,6 +668,7 @@ export class CodingRuntime {
         }
         return decision || undefined;
       };
+      let toolsInFlight = 0;
       session.subscribe((e) => {
         if (e.type === "tool_execution_start")
           observationCalls.set(e.toolCallId, e.args);
@@ -681,9 +696,16 @@ export class CodingRuntime {
             e.toolName !== "report"
           )
             planningReads++;
+          // Pi runs the calls of one message in parallel. The checkpoint snapshots the
+          // workspace, so it runs only when no tool is in flight: before the first call of a
+          // batch starts executing (each call's admission waits for it) and after the last ends.
+          const boundary =
+            e.type === "tool_execution_start"
+              ? toolsInFlight++ === 0
+              : --toolsInFlight === 0;
           pending = pending.then(async () => {
             await this.event(task, "tool", `${e.type}: ${e.toolName}`);
-            await this.options.onCheckpoint?.(task);
+            if (boundary) await this.options.onCheckpoint?.(task);
           });
         }
       });
@@ -694,17 +716,9 @@ export class CodingRuntime {
       if (stop.signal.aborted) abort();
       try {
         await session.prompt(
-          JSON.stringify({
-            objective: task.objective,
-            intent: task.intent,
-            approvedPlan: task.intent === "build" ? approvedScope : undefined,
-            ...(finalizing
-              ? {
-                  phase:
-                    "Report formatting only. Use retained findings; do not repeat repository investigation.",
-                }
-              : {}),
-          }),
+          finalizing
+            ? "Report formatting only. Use retained findings; do not repeat repository investigation."
+            : `Begin the ${task.intent} task set out in the system prompt.`,
         );
         await pending;
         const last = session.messages.at(-1);

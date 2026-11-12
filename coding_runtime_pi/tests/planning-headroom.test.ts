@@ -69,7 +69,7 @@ for (const fixedWindow of [true, false]) {
       // The provider's usage is below Pi's automatic maintenance threshold.
       // Native request construction still reserves provider safety headroom
       // and clamps output below the selected profile before final reporting.
-      const promptTokens = compact ? 100 : 28000;
+      const promptTokens = compact ? 100 : 20000;
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(
         `data: ${JSON.stringify({ ...header, choices: [{ index: 0, delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ ...header, choices: [{ index: 0, delta: {}, finish_reason: truncated ? "length" : compact ? "stop" : "tool_calls" }], usage: { prompt_tokens: promptTokens, completion_tokens: 100, total_tokens: promptTokens + 100 } })}\n\ndata: [DONE]\n\n`,

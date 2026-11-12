@@ -1,7 +1,7 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { access, readdir, stat } from "node:fs/promises";
-import { matchesGlob, relative } from "node:path";
+import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
+import { readdir, stat } from "node:fs/promises";
+import { basename, matchesGlob, relative } from "node:path";
 import { Type } from "typebox";
 import {
   createReadToolDefinition,
@@ -11,12 +11,20 @@ import {
   createFindToolDefinition,
   createLsToolDefinition,
   createBashToolDefinition,
+  DEFAULT_MAX_BYTES,
+  formatSize,
+  truncateHead,
+  truncateLine,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Workspace, type Executor } from "./workspace.js";
 import { reportLimits, reportDocument } from "./report.js";
 import type { Report, Intent } from "./types.js";
 
+/**
+ * Pi's own tools, confined to the workspace through Pi's tool `operations` options. Execution
+ * mode, output truncation and bash timeouts are Pi's defaults (journal 182).
+ */
 export function tools(
   workspace: Workspace,
   intent: Intent,
@@ -25,65 +33,7 @@ export function tools(
   admit: (name: string) => Promise<void>,
 ): ToolDefinition<any, any>[] {
   const cwd = workspace.requestedRoot;
-  const read = async (path: string) => {
-    const data = await workspace.read(path);
-    if (data.includes(0)) throw new Error("Binary content unsupported");
-    return data;
-  };
-  const scopedGrep: ReturnType<typeof createGrepToolDefinition> = {
-    ...createGrepToolDefinition(cwd),
-    execute: async (_id, input, signal) => {
-      const target = await workspace.path(input.path ?? ".");
-      const args = ["--line-number", "--color=never", "--hidden"];
-      if (input.ignoreCase) args.push("--ignore-case");
-      if (input.literal) args.push("--fixed-strings");
-      if (input.glob) args.push("--glob", input.glob);
-      args.push(
-        "--glob",
-        "!**/.git/**",
-        "--glob",
-        "!**/.env",
-        "--glob",
-        "!**/.env.*",
-      );
-      if (input.context)
-        args.push("--context", String(Math.min(5, Math.max(0, input.context))));
-      args.push("--", input.pattern, target);
-      let output = "";
-      try {
-        output = (
-          await promisify(execFile)("rg", args, {
-            cwd,
-            signal,
-            timeout: 10000,
-            maxBuffer: 64000,
-            env: { PATH: process.env.PATH, LANG: "C.UTF-8" },
-          })
-        ).stdout;
-      } catch (error) {
-        if ((error as { code?: number }).code !== 1)
-          throw new Error("Scoped search failed or exceeded its bound");
-      }
-      const allLines = output.split("\n").filter(Boolean);
-      const limit = Math.min(1000, Math.max(1, input.limit ?? 100));
-      const lines = allLines.slice(0, limit);
-      const limited =
-        allLines.length > limit || lines.join("\n").length > 32000;
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              (lines.join("\n").slice(0, 32000) || "No matches") +
-              (limited
-                ? "\n[Results truncated; narrow the query or inspect specific files.]"
-                : ""),
-          },
-        ],
-        details: {},
-      };
-    },
-  };
+  const read = (path: string) => workspace.read(path);
   const list: ToolDefinition<any, any>[] = [
     createReadToolDefinition(cwd, {
       autoResizeImages: false,
@@ -94,22 +44,25 @@ export function tools(
         },
       },
     }),
-    scopedGrep,
+    grep(workspace),
     createFindToolDefinition(cwd, {
       operations: {
         exists: async (p) => {
           await workspace.path(p);
           return true;
         },
+        // Stock find runs fd, which the box does not ship; Pi would download it at run time.
         glob: async (pattern, root, { limit }) => {
           await workspace.path(root);
-          return (await workspace.files())
-            .map((p) => relative(root, `${cwd}/${p}`))
-            .filter(
-              (p) =>
-                p !== ".." && !p.startsWith("../") && matchesGlob(p, pattern),
-            )
-            .slice(0, limit);
+          const found: string[] = [];
+          for await (const file of workspace.files()) {
+            const path = relative(root, `${cwd}/${file}`);
+            if (path === ".." || path.startsWith("../")) continue;
+            if (!matchesGlob(path, pattern)) continue;
+            found.push(path);
+            if (found.length >= limit) break;
+          }
+          return found;
         },
       },
     }),
@@ -201,7 +154,6 @@ export function tools(
   });
   return list.map((tool) => ({
     ...tool,
-    executionMode: "sequential" as const,
     execute: async (
       ...args: Parameters<ToolDefinition<any, any>["execute"]>
     ) => {
@@ -211,19 +163,163 @@ export function tools(
   }));
 }
 
+/**
+ * Stock bash with commands run by the isolated executor, whose environment holds no secrets.
+ * No timeout unless the model passes one; the run's deadline and cancellation abort `signal`.
+ */
 function bash(cwd: string, execute: Executor) {
   return createBashToolDefinition(cwd, {
+    // The executor builds its own environment, so Pi's PI_* variables never reach the command.
     exposeSessionEnvironment: false,
     operations: {
       exec: async (command, _cwd, { signal, onData, timeout }) => {
+        if (
+          timeout !== undefined &&
+          (!Number.isFinite(timeout) ||
+            timeout <= 0 ||
+            timeout * 1000 > 2_147_483_647)
+        )
+          throw new Error(
+            "Invalid timeout: must be a positive number of seconds",
+          );
+        const stop = signal ?? new AbortController().signal;
+        if (stop.aborted) throw new Error("aborted");
         const result = await execute(
           command,
-          signal ?? new AbortController().signal,
-          Math.min((timeout ?? 120) * 1000, 120_000),
+          stop,
+          timeout === undefined ? undefined : timeout * 1000,
+          undefined,
+          (chunk) => onData(Buffer.from(chunk)),
         );
-        onData(Buffer.from(result.output));
+        // Stock bash reports these two outcomes from these exact messages.
+        if (stop.aborted) throw new Error("aborted");
+        if (result.timedOut) throw new Error(`timeout:${timeout}`);
         return { exitCode: result.exitCode };
       },
     },
   });
+}
+
+/**
+ * Stock grep's schema, description and output format, with one difference: stock grep runs
+ * `rg --hidden` over the tree, which reads `.git` and `.env` files that every other tool refuses.
+ */
+function grep(
+  workspace: Workspace,
+): ReturnType<typeof createGrepToolDefinition> {
+  const stock = createGrepToolDefinition(workspace.requestedRoot);
+  return {
+    ...stock,
+    execute: async (_id, input, signal) => {
+      const target = await workspace.path(input.path ?? ".");
+      const directory = (await stat(target)).isDirectory();
+      const context = input.context && input.context > 0 ? input.context : 0;
+      const limit = Math.max(1, input.limit ?? 100);
+      const args = ["--json", "--line-number", "--color=never", "--hidden"];
+      if (input.ignoreCase) args.push("--ignore-case");
+      if (input.literal) args.push("--fixed-strings");
+      if (input.glob) args.push("--glob", input.glob);
+      args.push("--glob", "!**/.git/**", "--glob", "!**/.env");
+      args.push("--glob", "!**/.env.*");
+      if (context) args.push("--context", String(context));
+      args.push("--", input.pattern, target);
+      const name = (path: string) => {
+        const rel = relative(target, path);
+        return directory && rel && !rel.startsWith("..") ? rel : basename(path);
+      };
+      const lines: string[] = [];
+      let matches = 0;
+      let limited = false;
+      let cut = false;
+      await new Promise<void>((accept, reject) => {
+        if (signal?.aborted) return reject(new Error("Operation aborted"));
+        const child = spawn("rg", args, {
+          cwd: workspace.requestedRoot,
+          stdio: ["ignore", "pipe", "pipe"],
+          env: { PATH: process.env.PATH, LANG: "C.UTF-8" },
+        });
+        const abort = () => child.kill();
+        signal?.addEventListener("abort", abort, { once: true });
+        let stderr = "";
+        child.stderr.on("data", (chunk) => (stderr += chunk));
+        createInterface({ input: child.stdout }).on("line", (line) => {
+          if (limited) return;
+          let event: {
+            type?: string;
+            data?: {
+              path?: { text?: string };
+              line_number?: number;
+              lines?: { text?: string };
+            };
+          };
+          try {
+            event = JSON.parse(line);
+          } catch {
+            return;
+          }
+          if (event.type !== "match" && event.type !== "context") return;
+          if (event.type === "match" && ++matches > limit) {
+            matches = limit;
+            limited = true;
+            child.kill();
+            return;
+          }
+          const text = truncateLine(
+            String(event.data?.lines?.text ?? "")
+              .replace(/\r?\n$/, "")
+              .replace(/\r/g, ""),
+          );
+          if (text.wasTruncated) cut = true;
+          const at = name(event.data?.path?.text ?? "");
+          const separator = event.type === "match" ? ":" : "-";
+          lines.push(
+            `${at}${separator}${event.data?.line_number}${separator} ${text.text}`,
+          );
+        });
+        child.on("error", (error) => {
+          signal?.removeEventListener("abort", abort);
+          reject(new Error(`Failed to run ripgrep: ${error.message}`));
+        });
+        child.on("close", (code) => {
+          signal?.removeEventListener("abort", abort);
+          if (signal?.aborted) return reject(new Error("Operation aborted"));
+          if (!limited && code !== 0 && code !== 1)
+            return reject(
+              new Error(stderr.trim() || `ripgrep exited with code ${code}`),
+            );
+          accept();
+        });
+      });
+      if (!matches)
+        return {
+          content: [{ type: "text", text: "No matches found" }],
+          details: undefined,
+        };
+      const truncation = truncateHead(lines.join("\n"), {
+        maxLines: Number.MAX_SAFE_INTEGER,
+      });
+      const notices: string[] = [];
+      if (limited)
+        notices.push(
+          `${limit} matches limit reached. Use limit=${limit * 2} for more, or refine pattern`,
+        );
+      if (truncation.truncated)
+        notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+      if (cut)
+        notices.push(
+          "Some lines truncated to 500 chars. Use read tool to see full lines",
+        );
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              truncation.content +
+              (notices.length ? `\n\n[${notices.join(". ")}]` : ""),
+          },
+        ],
+        details: undefined,
+      };
+    },
+  };
 }
