@@ -7,6 +7,8 @@ Kite 0.2.0 adds `kite build`, which compiles a TypeScript project to the JavaScr
 > Two conditions on the paragraph above: "the same syntax tree" is by Kite's `harness/ast-diff.mjs`, which ignores layout, comments, parentheses and three equivalent spellings; "about 40 ms" is one run on an Apple M4 laptop.
 >
 > **Update, 12 November 2026 ([journal 168](journey/168-kite-builds-typescript.md#release-closure-12-november-2026)):** live in `aac9036` (PR 458). The build step in the two CI jobs fell from a median of 17 s to under 1 s. Not yet tested: a coding job on the new worker image.
+>
+> **Update, 12 November 2026 ([journal 177](journey/177-toolchain-speed-and-scope.md)):** the speed and scope results of the toolchain work of 10–12 November are summarised in one entry, with what was tried and dropped.
 
 # Traces from anywhere, behind a sign-in — prepared, 12 November 2026
 
