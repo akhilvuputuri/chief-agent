@@ -1,3 +1,5 @@
+import { seal } from "../src/secret-box.js";
+import { reportDocument } from "@chief-agent/pi-runtime/report";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -148,7 +150,16 @@ test("agent tokens are issued only to a running, approved implementation attempt
     patch: "fixture",
     summary: "Done",
     files,
-    piState: { version: 1, delivered: [] },
+    piState: {
+      version: 1,
+      delivered: [],
+      reportDocument: reportDocument({
+        kind: "review",
+        summary: "Approved",
+        detail: "Approved",
+        verdict: "APPROVE",
+      }),
+    },
   };
   const candidate = {
     kind: "candidate",
@@ -163,6 +174,30 @@ test("agent tokens are issued only to a running, approved implementation attempt
       patchHash: artifactHash(checkpoint as any),
     },
   };
+  // The host's own sealed record of the reviewer approving this exact candidate (journal 192).
+  const callId = randomUUID();
+  await f.db.query(
+    "INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,state,input,result_box) VALUES($1,$2,$3,'reviewer','fixture','complete',$4::jsonb,$5)",
+    [
+      callId,
+      job.id,
+      job.attempt_id,
+      JSON.stringify({ candidate: artifactHash(checkpoint as any) }),
+      seal(
+        (c as any).resultKey(),
+        JSON.stringify({
+          content: [
+            {
+              type: "tool_use",
+              name: "report",
+              input: { kind: "review", verdict: "APPROVE", detail: "Approved" },
+            },
+          ],
+        }),
+        (c as any).resultScope(job, callId),
+      ),
+    ],
+  );
   // An agent-git job must report the PR it published.
   await assert.rejects(
     c.finish(job, candidate),

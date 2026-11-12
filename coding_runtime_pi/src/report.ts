@@ -10,6 +10,12 @@ export const reportLimits = Object.freeze({
   summary: 4000,
   ask: 300,
   options: 3,
+  /**
+   * One button label. Telegram's Bot API names no maximum for a button's text, but clients cut
+   * a label that does not fit its button; 40 characters on one line fit a full-width button
+   * on a phone, so the owner taps what they read (journal 192).
+   */
+  option: 40,
 });
 export type ReportDocument = Omit<Report, "detail"> & {
   detail: string;
@@ -68,6 +74,11 @@ export function reportDocument(report: Report): ReportDocument {
       throw new Error(
         `options must be at most ${reportLimits.options} non-empty answers the owner can tap`,
       );
+    for (const [index, option] of (report.options ?? []).entries())
+      if (option.length > reportLimits.option || /\n/.test(option))
+        throw new Error(
+          `option ${index + 1} has ${option.length} characters; each option is one line of at most ${reportLimits.option} characters, as a button shows it in full; put the detail in ask or detail`,
+        );
   } else {
     if (report.ask !== undefined || report.options !== undefined)
       throw new Error("ask and options belong to kind ask");

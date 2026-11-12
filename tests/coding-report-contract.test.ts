@@ -226,8 +226,10 @@ for (const { documentLength, terminalRecovery } of [
       const repairing = phase === "build" && all.includes("requested changes");
       let tool: { name: string; arguments: any } | undefined;
       if (phase === "build") {
-        // The owner's request is the coder's first message, whole.
-        assert(all.includes("Synthetic evidence"));
+        // The owner's request is in the coder's system prompt, whole, so compaction keeps it.
+        assert(
+          String(input.messages[0].content).includes("Synthetic evidence"),
+        );
         const steps =
           documentLength === 9357
             ? [
@@ -291,7 +293,13 @@ for (const { documentLength, terminalRecovery } of [
           } else {
             assert.match(last.content, /git diff [a-f0-9]{40} candidate/);
             assert(last.content.includes(commit));
-            assert(last.content.includes("Synthetic evidence"));
+            assert(
+              String(input.messages[0].content).includes("Synthetic evidence"),
+            );
+            assert.match(
+              last.content,
+              /^Candidate under review: [a-f0-9]{64}$/m,
+            );
           }
           tool = {
             name: "bash",

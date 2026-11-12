@@ -139,7 +139,7 @@ export function tools(
   list.push({
     name: "report",
     label: "Report",
-    description: `Hands your result to Chief and ends your turn. Use kind ${result}${role === "reviewer" ? " with verdict APPROVE or REQUEST_CHANGES" : ""} when finished: summary (at most ${reportLimits.summary} characters) and detail (the full ${role === "coder" ? "account of what you changed and how you tested it" : "findings"}, at most ${reportLimits.document} characters). Use kind ask only when you need the owner: ask is one short question of at most ${reportLimits.ask} characters, with up to ${reportLimits.options} options the owner can tap; put any background in detail.`,
+    description: `Hands your result to Chief and ends your turn. Use kind ${result}${role === "reviewer" ? " with verdict APPROVE or REQUEST_CHANGES" : ""} when finished: summary (at most ${reportLimits.summary} characters) and detail (the full ${role === "coder" ? "account of what you changed and how you tested it" : "findings"}, at most ${reportLimits.document} characters). Use kind ask only when you need the owner: ask is one short question of at most ${reportLimits.ask} characters, with up to ${reportLimits.options} options the owner can tap, each one line of at most ${reportLimits.option} characters; put any background in detail.`,
     parameters: Type.Object({
       kind: Type.Union([Type.Literal(result), Type.Literal("ask")]),
       summary: Type.String({ minLength: 1 }),

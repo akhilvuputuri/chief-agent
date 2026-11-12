@@ -1150,6 +1150,53 @@ test("Pi's per-turn effort marker must match the job; a request with no marker r
   });
 });
 
+test("requests for one job queue for the slot, and Pi's cache warming is recorded apart", async (t) => {
+  const { f, job, app, headers, url, settled, calls } = await piJob(t);
+  // Recording each call is slow, so later requests arrive while one is in flight.
+  const query = f.db.query.bind(f.db);
+  (f.db as any).query = async (sql: string, params?: unknown[]) => {
+    if (sql.startsWith("UPDATE coding_jobs SET model_busy=false"))
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    return query(sql, params as any);
+  };
+  const send = (body: Record<string, unknown>, purpose?: string) =>
+    app.inject({
+      method: "POST",
+      url: url(),
+      payload: request(body),
+      headers: {
+        ...headers,
+        ...(purpose ? { "x-runtime-purpose": purpose } : {}),
+      },
+    });
+  const before = (await f.row(job.id)).used_models;
+  // A real request and a warm one together, then two more: none is refused.
+  const replies = await Promise.all([
+    send({}),
+    send({ max_tokens: 1 }, "cache_warm"),
+    send({}),
+    send({}),
+  ]);
+  assert.deepEqual(
+    replies.map((r) => r.statusCode),
+    [200, 200, 200, 200],
+  );
+  await settled();
+  const recorded = await calls();
+  assert.deepEqual(
+    recorded.map((c) => c.state),
+    ["complete", "complete", "complete", "complete"],
+  );
+  assert.equal(
+    recorded.filter((c) => c.input.purpose === "cache_warm").length,
+    1,
+  );
+  // The warm request is not counted as an agent call.
+  assert.equal((await f.row(job.id)).used_models, before + 3);
+  // Only a one-token replay may claim the warming purpose.
+  const forged = await send({ max_tokens: 100 }, "cache_warm");
+  assert.equal(forged.statusCode, 400);
+});
 test("a request sent right after the previous stream ends waits for the slot instead of being refused", async (t) => {
   const { f, app, headers, url, settled, calls } = await piJob(t);
   // Recording the first call is slow; the next request arrives meanwhile.

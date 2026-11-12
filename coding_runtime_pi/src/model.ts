@@ -3,7 +3,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { InMemoryCredentialStore, type Model } from "@earendil-works/pi-ai";
 import type { ModelConfig } from "./types.js";
 
-/** Names the request's purpose (agent turn or compaction summary) for the host's call record. */
+/** Names the request's purpose (agent turn, compaction summary or cache warming) for the host's call record. */
 export const purposeHeader = "x-runtime-purpose";
 
 export type ModelFactory = () => Promise<{
@@ -53,7 +53,14 @@ export function anthropicModel(config: ModelConfig): ModelFactory {
       streamSimple: (model, context, options) =>
         anthropicMessagesApi().streamSimple(model, context, {
           ...options,
-          headers: { ...options?.headers, [purposeHeader]: requestPurpose },
+          headers: {
+            ...options?.headers,
+            // Pi's cache warmer is the one caller that asks for a single output token
+            // (pi-coding-agent 1.1.0, core/cache-warmer.js `refresh`): agent turns use the
+            // model's output limit and compaction its own reserve (journal 192).
+            [purposeHeader]:
+              options?.maxTokens === 1 ? "cache_warm" : requestPurpose,
+          },
         }),
     });
     if (config.apiKey) await runtime.setRuntimeApiKey(provider, config.apiKey);

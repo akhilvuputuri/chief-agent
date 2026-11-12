@@ -197,8 +197,8 @@ export class CodingAutomation {
     await this.phase(j, d, "manual_review", reason, true);
   }
   /**
-   * GitHub reports the PR conflicts with main: re-implement the approved plan on current main
-   * (owner policy, 17 October 2026: the plan approval carries over; checks, review and the
+   * GitHub reports the PR conflicts with main: re-apply the started request on current main
+   * (owner policy, 17 October 2026: the Start carries over; CI, review and the
    * Merge card repeat). Main moving without a conflict never reaches this (journal 180).
    *
    * Interim (journal 180): re-implementing from the plan is the remaining way a conflict is
@@ -238,13 +238,14 @@ export class CodingAutomation {
     // Interim until stage D3's in-box rebase: the job's sessions continue on the new base.
     cp.piState = { version: 1, delivered: cp.piState?.delivered ?? [] };
     const scope = requirementScope({ ...j, checkpoint: cp });
-    const message = `The PR conflicts with main; re-applying on current main ${main}: approved plan carried over (owner policy, 17 October 2026)`;
+    const message = `The PR conflicts with main; re-applying on current main ${main}: the owner's Start carries over (owner policy, 17 October 2026)`;
     const changed = await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',base_sha=$5,summary='The PR conflicts with main; re-applying the approved change on current main before checks, review and the Merge card',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision),
+      `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',base_sha=$5,summary='The PR conflicts with main; re-applying the started change on current main before review, CI and the Merge card',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision),
       budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$6::jsonb,'remainingMs',$7::bigint),'suppressed' FROM changed RETURNING job_id),
       approval AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'rebase-approval:'||revision,jsonb_build_object('decision','approved','approvedScope',$8::text,'carriedFrom',$10::text,'reason','rebase','carriedArtifact',$13::text),'suppressed' FROM changed RETURNING job_id),
-      revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$11,$12,'implement' FROM changed RETURNING job_id)
-      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$11,jsonb_build_object('summary','The PR conflicts with recent changes on main, so Chief is re-applying your approved change on current main, then re-running the checks and review before asking you to merge.') FROM changed ON CONFLICT DO NOTHING RETURNING job_id`,
+      revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$11,$12,'implement' FROM changed RETURNING job_id),
+      told AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'inbox:rebase:'||$5::text||':'||revision,$14::jsonb,'suppressed' FROM changed ON CONFLICT DO NOTHING RETURNING job_id)
+      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$11,jsonb_build_object('summary','The PR conflicts with recent changes on main, so Chief is re-applying your change on current main; review and CI run again before you are asked to merge.') FROM changed ON CONFLICT DO NOTHING RETURNING job_id`,
       [
         j.id,
         j.lease,
@@ -260,6 +261,12 @@ export class CodingAutomation {
         message,
         // The reviewed artifact, so the rebased candidate can be compared with it (journal 115).
         artifactHash(j.result.checkpoint),
+        // The coder's session continues, so it is told what happened (journal 192).
+        JSON.stringify({
+          kind: "inbox",
+          source: "chief",
+          text: `Main moved to ${main} and the pull request conflicted with it. The job's base is now ${main}, and your earlier change was not carried over: the checkout is that base with no changes. Re-apply the change the owner asked for on it, rerun the tests and report done.`,
+        }),
       ],
     );
     if (!changed.rows.length) throw new StageChanged();
@@ -577,10 +584,12 @@ export class CodingAutomation {
         // A Pi job keeps its checkpoint and sessions: each item goes into the job's inbox,
         // labelled by source, and reaches the same coder session (journal 192).
         const inbox = pi
-          ? batch.map((item) => ({
+          ? batch.map((item, seq) => ({
               key: `inbox:gh:${item.id}`,
               payload: {
                 kind: "inbox",
+                // The order within one batch, which shares a creation time.
+                seq,
                 source:
                   "owner" in item
                     ? "owner"
@@ -602,7 +611,7 @@ export class CodingAutomation {
           .update(JSON.stringify(handled))
           .digest("hex");
         await this.db.query(
-          `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='MR feedback returned to leader/coder; fresh independent review is required',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision), budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$5::jsonb,'remainingMs',$6::bigint),'suppressed' FROM changed RETURNING job_id), revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$7,$8,'implement' FROM changed RETURNING job_id), delivered AS (UPDATE coding_events SET payload=payload || jsonb_build_object('deliveredRound',$10::int) WHERE job_id IN (SELECT id FROM changed) AND id=ANY($11::uuid[]) RETURNING job_id), inboxed AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT changed.id,x.key,x.payload,'suppressed' FROM changed, jsonb_to_recordset($12::jsonb) AS x(key text, payload jsonb) ON CONFLICT DO NOTHING RETURNING job_id) INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$7,jsonb_build_object('summary','MR feedback returned to coder; candidate approval is invalidated until fresh checks and review.') FROM changed ON CONFLICT DO NOTHING`,
+          `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='PR feedback went to the coder; review and CI run again before the Merge card',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision), budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$5::jsonb,'remainingMs',$6::bigint),'suppressed' FROM changed RETURNING job_id), revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$7,$8,'implement' FROM changed RETURNING job_id), delivered AS (UPDATE coding_events SET payload=payload || jsonb_build_object('deliveredRound',$10::int) WHERE job_id IN (SELECT id FROM changed) AND id=ANY($11::uuid[]) RETURNING job_id), inboxed AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT changed.id,x.key,x.payload,'suppressed' FROM changed, jsonb_to_recordset($12::jsonb) AS x(key text, payload jsonb) ON CONFLICT DO NOTHING RETURNING job_id) INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$7,jsonb_build_object('summary','PR feedback went to the coder; the change needs a new review and CI before the Merge card.') FROM changed ON CONFLICT DO NOTHING`,
           [
             j.id,
             j.lease,

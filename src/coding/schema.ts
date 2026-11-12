@@ -108,6 +108,18 @@ export const checkpoint = z
             hash: z.string().regex(/^[a-f0-9]{64}$/),
             base: z.string().regex(/^[a-f0-9]{40}$/),
             patch: z.string().max(10_000_000),
+            verdict: z.enum(["APPROVE", "REQUEST_CHANGES"]).optional(),
+          })
+          .strict()
+          .optional(),
+        /**
+         * Where a new box continues (journal 192): the coder finished this candidate and it
+         * waits for review, or the reviewer approved it and it waits to be finished.
+         */
+        next: z
+          .object({
+            step: z.enum(["review", "finish"]),
+            hash: z.string().regex(/^[a-f0-9]{64}$/),
           })
           .strict()
           .optional(),
@@ -121,7 +133,7 @@ export const checkpoint = z
             verdict: z.enum(["APPROVE", "REQUEST_CHANGES"]).optional(),
             ask: z.string().max(reportLimits.ask).optional(),
             options: z
-              .array(z.string().min(1))
+              .array(z.string().min(1).max(reportLimits.option))
               .max(reportLimits.options)
               .optional(),
           })
@@ -153,11 +165,23 @@ export const checkpoint = z
   .strict();
 export const outcome = z
   .object({
-    kind: z.enum(["awaiting_input", "candidate", "paused", "failed"]),
+    /** `no_change`: the coder found nothing to change; the job stops with its summary. */
+    kind: z.enum([
+      "awaiting_input",
+      "candidate",
+      "paused",
+      "failed",
+      "no_change",
+    ]),
     summary: z.string().min(1).max(4000),
     question: z.string().max(2000).default(""),
     /** Answers the owner can tap for a Pi ask (journal 192). */
-    options: z.array(z.string().min(1)).max(reportLimits.options).optional(),
+    options: z
+      .array(z.string().min(1).max(reportLimits.option))
+      .max(reportLimits.options)
+      .optional(),
+    /** Which session asked the question, so the owner's answer goes back to it. */
+    askedBy: z.enum(["coder", "reviewer"]).optional(),
     checkpoint,
     /** Receipts from the legacy runtimes; a Pi coder runs the tests itself (journal 192). */
     checks: z

@@ -42,6 +42,8 @@ export type Task = {
   workspace: string;
   /** The commit the candidate is diffed against; never the workspace's HEAD. */
   base: string;
+  /** The owner's request, appended to Pi's system prompt so compaction never rewrites it. */
+  request?: string;
   summary: string;
   question?: string;
   options?: string[];
@@ -61,6 +63,8 @@ export type StartRequest = {
   role: Role;
   /** A full commit SHA present in the workspace's repository. */
   base: string;
+  /** The owner's request, kept word for word in the system prompt. */
+  request?: string;
 };
 export type ModelConfig = {
   /** An Anthropic model id from Pi's catalogue, such as claude-opus-5-5. */

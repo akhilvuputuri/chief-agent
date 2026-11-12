@@ -253,7 +253,7 @@ for (const {
   { documentLength: 9357, firstCallFailure: true },
   { documentLength: 9357, firstCallFailure: false, reviewerQuestion: true },
 ])
-  test(`independent reviewer recovery preserves ${documentLength || "short"}-character documents (${ownerReply ? "owner reply into the inbox, then build and review" : reviewerQuestion ? "question" : firstCallFailure ? "before first tool" : "format"})`, async (t) => {
+  test(`independent reviewer recovery preserves ${documentLength || "short"}-character documents (${ownerReply ? "owner reply into the inbox, to the session that asked" : reviewerQuestion ? "question" : firstCallFailure ? "before first tool" : "format"})`, async (t) => {
     const f = await fixture(t);
     const root = await mkdtemp(join(tmpdir(), "pi-bridge-fixture-"));
     const source = join(root, "source");
@@ -322,6 +322,7 @@ for (const {
         .slice(0, Math.abs(documentLength) || 62);
     let recovered = false;
     let lastCoderInput: unknown;
+    let lastReviewerInput: unknown;
     const turns = new Map<string, number>();
     f.setGeneration((selected, input) => {
       const system =
@@ -340,10 +341,13 @@ for (const {
         };
       const phase = selected === settings.reviewerModel ? "review" : "build";
       if (phase === "build") lastCoderInput = input.messages;
+      else lastReviewerInput = input.messages;
       const rawCount = turns.get(phase) ?? 0;
       turns.set(phase, rawCount + 1);
       if (phase === "build")
-        assert(JSON.stringify(input.messages).includes("Synthetic evidence"));
+        assert(
+          String(input.messages[0].content).includes("Synthetic evidence"),
+        );
       const count = rawCount;
       if (
         firstCallFailure &&
@@ -391,9 +395,13 @@ for (const {
         tool = approve;
       } else if (phase === "review" && count === 0) {
         const first = String(input.messages.at(-1)?.content);
-        assert(first.includes("The owner started this request"));
+        assert(
+          first.includes("against the owner's request in your instructions"),
+        );
         assert(first.includes(commit));
-        assert(first.includes("Synthetic evidence"));
+        assert(
+          String(input.messages[0].content).includes("Synthetic evidence"),
+        );
         tool = { name: "read", arguments: { path: "sum.js" } };
       } else if (phase === "review" && count === 1)
         tool = reviewerQuestion
@@ -527,15 +535,15 @@ for (const {
       recovered = true;
       turns.set("build", 0);
       turns.set("review", 0);
-      let coderSaw: string;
       await f.c.tick();
       await run();
-      // The coder got the message in its own session, then a review approved the candidate.
-      coderSaw = JSON.stringify(lastCoderInput);
-      assert(coderSaw.includes("The owner's answer to your question"));
-      assert(coderSaw.includes("Also keep the export name"));
-      assert.match(coderSaw, /The owner's request/);
-      assert(turns.get("build")! >= 1);
+      // The reviewer asked (it stopped without a result), so its own session gets the answer,
+      // and its approval follows; the coder is not run again.
+      const reviewerSaw = JSON.stringify(lastReviewerInput);
+      assert(reviewerSaw.includes("The owner's answer to your question"));
+      assert(reviewerSaw.includes("Also keep the export name"));
+      assert.equal(turns.get("build"), 0);
+      void lastCoderInput;
       const rebuilt = await f.row(started.id);
       assert.equal(rebuilt.state, "publishing", rebuilt.summary);
       assert.equal(rebuilt.result.review.verdict, "APPROVE");

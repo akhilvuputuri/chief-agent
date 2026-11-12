@@ -346,6 +346,26 @@ test("an ask is one short question with up to three options; the error names wha
   );
   assert.throws(
     () =>
+      reportDocument({
+        kind: "ask",
+        summary: "s",
+        ask: "Which?",
+        options: ["Short", "x".repeat(41)],
+      }),
+    /option 2 has 41 characters; each option is one line of at most 40 characters/,
+  );
+  assert.throws(
+    () =>
+      reportDocument({
+        kind: "ask",
+        summary: "s",
+        ask: "Which?",
+        options: ["two\nlines"],
+      }),
+    /one line/,
+  );
+  assert.throws(
+    () =>
       reportDocument({ kind: "done", summary: "s".repeat(4001), detail: "d" }),
     /summary has 4001 characters; shorten it to at most 4000/,
   );
@@ -916,4 +936,25 @@ test("a save the host refuses at a turn end stops the run instead of working on 
   assert.equal(stopped.status, "failed");
   assert.match(stopped.summary, /superseded/);
   assert.equal(model.calls(), 1);
+});
+
+test("a message handed over before the session exists arrives with the first prompt", async () => {
+  const f = await fixture();
+  const seen: Context[] = [];
+  let r!: CodingRuntime;
+  let id = "";
+  const handed: boolean[] = [];
+  r = f.runtime(
+    scripted([[report("done", "Saw both.")]], { seen: (c) => seen.push(c) }),
+    {
+      onEvent: async (_t, e) => {
+        if (e.type === "state" && e.text === "Running")
+          handed.push(await r.steer(id, "Early owner note"));
+      },
+    },
+  );
+  id = await f.coder(r);
+  await r.run(id, "Fix sum");
+  assert.deepEqual(handed, [true]);
+  assert.deepEqual(texts(seen[0]!), ["Fix sum", "Early owner note"]);
 });

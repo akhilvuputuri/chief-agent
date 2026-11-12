@@ -626,6 +626,11 @@ test("a PR that conflicts with main is re-applied on current main with its appro
   assert.equal(queued.checkpoint.plan, before.checkpoint.plan);
   assert.deepEqual(queued.checkpoint.piState, { version: 1, delivered: [] });
   assert.equal(f.counts().merges, 0);
+  // The coder's session continues, so an inbox item tells it the base moved (journal 192).
+  const [told] = await inbox(f);
+  assert.equal(told.source, "chief");
+  assert.match(told.text, new RegExp(`base is now ${moved}`));
+  assert.match(told.text, /not carried over/);
   const requirements = new CodingRequirements(
     f.db,
     () => true,
