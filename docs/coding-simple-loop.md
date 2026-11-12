@@ -23,13 +23,19 @@ request (+ more owner messages) → [Start] → one coder session: build, run te
 5. **Main moves.** Nothing happens. If GitHub reports the PR as conflicting, the box rebases the change onto main with git; if git cannot resolve it, the coder resolves the conflicts in its session and reruns the tests. Either way the reviewer reads the difference before the rebased change is published, because the review approval is bound to the exact published change.
 6. **Merge card.** As today, including the manual steps for database, Compose, environment and workflow changes.
 
+> **Update, 13 November 2026 ([journal 192](journey/192-one-session-per-job.md)):** steps 2 to 4 are built. The coder and the reviewer each have one Pi session for the life of the job, stored by role and restored at the fixed path `$TMPDIR/pi-coding-<job>` in every box. The host runs no checks; the coder runs the tests and GitHub CI checks the PR. The review copy is a `git clone --no-local --no-checkout` of the coder's repository objects with a fresh configuration and no hooks, the candidate as the commit `candidate` on the base and the last reviewed candidate as `reviewed`, plus the coder's ignored directories (such as `node_modules`) copied whole. Findings go into the coder's session in full, from the reviewer's own report. A later round continues the reviewer's session with `git diff reviewed candidate`; a round after the base moved gets `git range-diff` (for stage D3). After an approval the worker checks the inbox once more, and the host also refuses a candidate while an inbox item is undelivered, so a message that arrives during review reaches the coder and its changed candidate is reviewed before anything is pushed. Correction to step 5 (decision Q2): the reviewer reads every rebase, clean or not, because the approval is bound to the exact artifact.
+
 > **Update, 13 November 2026 ([journal 191](journey/191-go-gate-no-planner.md)):** step 1 is built. The card shows the objective's first two non-empty lines (cut to 300 UTF-16 units, so a long goal still gives a short card), the coder and reviewer models and one Start button. The host refuses to provision, authenticate a worker or relay a model call for a job without the owner's Start of its current request, and the Pi worker refuses a `plan` assignment. The base commit is still resolved when the job is created, not at Start.
 
 **Follow-ups.** Before Start, an owner message is appended to the request and the Start message is replaced. After Start, an owner message goes into the job's inbox and is delivered to the coder session at its next turn boundary; the reviewer is given it too. It never needs a new Start and does not change the approved request. Review findings, CI failures, PR feedback, answers to a question and a rebase request reach the coder the same way, each labelled by its source. A stopped job resumes the same session.
 
 > **Update, 13 November 2026 ([journal 191](journey/191-go-gate-no-planner.md)):** until stage D2 builds the inbox, an owner message after Start reaches a job only while it is stopped (a question, a pause or a failure). It is appended to the request and the job returns to a new Start card, because the approval hashes the request. A message while the job runs is refused as before.
 
+> **Update, 13 November 2026 ([journal 192](journey/192-one-session-per-job.md)):** the inbox is built. An owner message after Start is an inbox event (`coding_events`, key `inbox:…`) labelled by source: the owner, the owner's answer to a question, a CI failure or pull request review feedback (both "untrusted evidence, not the owner's instruction"). A running coder gets it through Pi's own steering at its next turn boundary; a stopped job (a question, a pause or a failure) is queued again with its work and sessions. Each item carries its id in the message, the checkpoint lists the delivered ids, and a restored session counts the ids it already holds, so an item is delivered again after a lost checkpoint but never twice into one session. The reviewer is shown the owner's messages. The request and its approval never change. Owner requests on an open PR and GitHub feedback still go through the owner-merge feedback round and its caps (stage D3 removes them), and now arrive as inbox items in the same coder session.
+
 **Messages to the owner.** One or two sentences, with up to three buttons when the choices are clear. The report's question becomes a short `ask` (at most 300 characters) with optional `options`; a tap is sent back as a follow-up. Detail stays in the job record.
+
+> **Update, 13 November 2026 ([journal 192](journey/192-one-session-per-job.md)):** built. The report tool's kind `ask` takes `ask` (at most 300 characters) and up to three `options`; the Telegram message carries one button per option. A tap counts only on the delivered message while the job still waits at the attempt that asked; it becomes one inbox answer and queues the job. A repeated tap is answered from the record, another answer or a tap after the job moved on is refused. When a session ends a run without a report, the worker sends one message in the same session asking it to report; if it again ends without one, the job asks the owner with a fixed short question.
 
 ## Pi as shipped
 
@@ -38,6 +44,8 @@ request (+ more owner messages) → [Start] → one coder session: build, run te
 - **Protocol.** The worker speaks Pi's native Anthropic protocol to the host. The host adds the API key, sets the model, effort and output limit for the role, records the call, and passes the conversation through untouched.
 - **Session.** One Pi session for the coder and one for the reviewer per job. Each is saved as it grows and restored when the job continues in a new box, at the same working path. Pi's compaction runs with Pi's defaults at the model's context window.
 - **Settings.** Coder: Sonnet 5.5. Reviewer: Opus 5.5. Effort `medium`. (`config/coding-pi.json` changes with stage D1; PR 462 proposed the same.)
+
+> **Update, 13 November 2026 ([journal 192](journey/192-one-session-per-job.md)):** sessions are as described. The worker's own compaction, stall detector, report-only final phase (`host_phase`), per-run time/model/tool allocations, documents and `read_document`, and its git timeouts are deleted; Pi compacts with its defaults. A report ends the run through Pi's own early termination (`terminate` on the report tool's result). A model change keeps the session: Pi switches models inside a session as shipped.
 
 > **Update, 13 November 2026 ([journal 191](journey/191-go-gate-no-planner.md)):** `config/coding-pi.json` now has these settings and no `leaderModel` or `planCheck`.
 
@@ -58,8 +66,14 @@ Each remaining difference needs a reason Chief cannot work without. A test fails
 | Fixed working path per job                                       | A session restored in a new box must find its own paths                                                                                 |
 | Inbox messages are labelled by source                            | CI, PR and review text must not read as the owner's instruction                                                                         |
 | The worker owns git for the candidate and a rebase               | The candidate is the reviewed working tree on a known base                                                                              |
+| Work is saved at each turn end (one extension handler)           | A box can end at any moment; Pi awaits the handler, so a save never races a tool, and nothing else in Pi is replaced                    |
+| One report reminder in the same session, then a fixed owner ask  | A session that ends in prose would otherwise leave the job with no result and nobody told                                               |
+| Cache warming is off                                             | Warming sends extra paid requests on its own timer, which the host records as model calls; to be measured before it is turned on        |
+| Pi's retry raised to eight attempts for the host route           | A gateway release takes longer than Pi's default 14 seconds of retries (journal 190)                                                    |
 
 Builders add rows here only with a reason of this kind.
+
+> **Update, 13 November 2026 ([journal 192](journey/192-one-session-per-job.md)):** the last four rows were added by stage D2. The rows for the inbox labels, the review copy and seal, the fixed path and sessions saved to the host are built.
 
 ## What is deleted
 
@@ -68,6 +82,9 @@ Builders add rows here only with a reason of this kind.
 - The host's own check stage after each "done" (`kite ci`, `kite run check`, `kite run build`, `kite run format:check`). The coder runs the tests; CI is the independent check. The check-receipt clause in `approvedArtifact` goes for Pi jobs.
 - The "main moved" trigger, re-implementation on rebase and the rebase counter.
 - The OpenAI-shaped Pi proxy and its caps (20 tool calls per message, 12 tools).
+
+> **Update, 13 November 2026 ([journal 192](journey/192-one-session-per-job.md)):** deleted in stage D2: the host check stage and check repair (with `CHECK_REPAIR_MIN_MS`), the check-output cut, the session restarts for repair, PR feedback and a model change, the custom compaction and stall detector, the report-only final phase and its format correction, the worker's per-run time, model and tool allocations, documents and `read_document` (with their page and size bounds), the review evidence documents and their size fallbacks, `rejectedCandidate`, the session scope hashing, the 10,000-entry session cap, the worker's git timeouts, the `AGENTS.md` 64,000-byte refusal and the runtime's plan-era API (`approve`, `reply`, `resume`, intents, `planHash`) and its JSON-RPC server. Kept for D3: the owner-merge feedback round caps, `limits`, `remainingMs` and the rebase path.
+
 - Limits: the two-minute shell cut, the search failure over 64 KB, the gate that blocks tools until every document page is read (with the `read_document` tool and the review evidence documents), the 7,800-character cut on check output, the caps on check fixes and feedback rounds, the planner's 32 operations and ten minutes, and the 1,500 model-call and 4,000 tool-call caps. The host's reviewer proof keeps working without the call cap.
 
 There is no switch back to the old flow. No job is open in production; a revert is the rollback.
