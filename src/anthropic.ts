@@ -525,6 +525,12 @@ export function anthropicUsage(
   const uncached = u?.input_tokens ?? 0;
   const read = u?.cache_read_input_tokens ?? 0;
   const write = u?.cache_creation_input_tokens ?? 0;
+  // A 1-hour cache write costs twice the input price, not the 5-minute write price; the usage
+  // breaks writes down by lifetime when any were 1-hour.
+  const longWrite = Math.min(
+    write,
+    u?.cache_creation?.ephemeral_1h_input_tokens ?? 0,
+  );
   const output = u?.output_tokens ?? 0;
   const reasoning = u?.output_tokens_details?.thinking_tokens;
   return {
@@ -538,7 +544,8 @@ export function anthropicUsage(
     cost:
       (uncached * p.input +
         read * p.cacheRead +
-        write * p.cacheWrite +
+        (write - longWrite) * p.cacheWrite +
+        longWrite * p.input * 2 +
         output * p.output) /
       1e6,
     route: "anthropic-direct",

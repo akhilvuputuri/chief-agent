@@ -114,9 +114,9 @@ export async function codingApi(
               : messages
                 ? 32 * 1024 * 1024
                 : 8_000_000,
-          // Authenticate the larger artifact routes before parsing their bodies.
+          // Authenticate the larger routes before parsing their bodies.
           onRequest: async (req, reply) => {
-            if (path !== "checkpoint" && path !== "finish") return;
+            if (path !== "checkpoint" && path !== "finish" && !messages) return;
             if (
               !z
                 .string()
@@ -129,7 +129,9 @@ export async function codingApi(
             try {
               await controller.authenticate(
                 (req.params as { id: string }).id,
-                req.headers.authorization?.replace(/^Bearer /, "") ?? "",
+                messages
+                  ? String(req.headers["x-api-key"] ?? "")
+                  : (req.headers.authorization?.replace(/^Bearer /, "") ?? ""),
                 path === "finish",
               );
             } catch (error) {
@@ -153,6 +155,12 @@ export async function codingApi(
                 .send({ error: "Invalid worker capability" });
             let job;
             const acknowledgementUntil = Date.now() + 120000;
+            // A worker that goes away stops its model call, including while it waits here.
+            const gone = new AbortController();
+            if (messages)
+              reply.raw.on("close", () => {
+                if (!reply.raw.writableFinished) gone.abort();
+              });
             // Pi's Anthropic client sends its key (the worker capability) as x-api-key.
             const capability = messages
               ? String(req.headers["x-api-key"] ?? "")
@@ -218,11 +226,6 @@ export async function codingApi(
                 );
               }
               if (messages) {
-                // A worker that goes away stops its model call.
-                const gone = new AbortController();
-                reply.raw.on("close", () => {
-                  if (!reply.raw.writableFinished) gone.abort();
-                });
                 const response = await controller.piMessages(
                   job,
                   path.startsWith("pi/reviewer/") ? "reviewer" : "coder",

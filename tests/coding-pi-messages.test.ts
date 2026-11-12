@@ -13,7 +13,9 @@ import {
   TaskStore,
   anthropicModel,
 } from "@chief-agent/pi-runtime";
-import { AnthropicMessagesGateway } from "../src/anthropic.js";
+import { AnthropicMessagesGateway, anthropicUsage } from "../src/anthropic.js";
+import { GATEWAY_RETRY } from "../src/coding/pi-worker.js";
+import { retryDelayMs } from "@earendil-works/pi-ai";
 import { server } from "../src/server.js";
 import { codingApi } from "../src/coding/api.js";
 import { settings, fixture } from "./helpers/coding-fixture.js";
@@ -227,8 +229,11 @@ test("the host relays Pi's request and Anthropic's stream unchanged, deciding on
   );
 });
 
-test("the host refuses another model, other effort, fallbacks, a speed or a malformed request before any call", async (t) => {
+test("the host refuses anything Pi does not send, before any call", async (t) => {
   const { f, app, headers, url, calls, events } = await piJob(t);
+  const tool = (extra: Record<string, unknown>) => ({
+    tools: [{ name: "x", ...extra }],
+  });
   const cases: [Record<string, unknown>, string][] = [
     [{ model: "claude-opus-5" }, "model_not_pinned"],
     [
@@ -240,8 +245,84 @@ test("the host refuses another model, other effort, fallbacks, a speed or a malf
       },
       "effort_not_pinned",
     ],
-    [{ fallbacks: [{ model: "claude-opus-4-8" }] }, "model_option_refused"],
-    [{ speed: "fast" }, "model_option_refused"],
+    // Fields Pi never sends; some would become headers that override the host's.
+    ...[
+      "workspace_id",
+      "user_profile_id",
+      "betas",
+      "mcp_servers",
+      "container",
+      "service_tier",
+      "inference_geo",
+      "context_management",
+      "speed",
+      "fallbacks",
+      "temperature",
+    ].map(
+      (field) =>
+        [{ [field]: "x" }, "messages_field_refused"] as [
+          Record<string, unknown>,
+          string,
+        ],
+    ),
+    [
+      { output_config: { effort: "medium", task_budget: {} } },
+      "messages_field_refused",
+    ],
+    [
+      {
+        messages: [
+          { role: "user", content: "x" },
+          {
+            role: "system",
+            content: [],
+            output_config: { effort: "medium", format: {} },
+          },
+        ],
+      },
+      "messages_field_refused",
+    ],
+    [{ metadata: { user_id: "u", other: 1 } }, "messages_field_refused"],
+    // Server tools run on Anthropic's side; only Pi's own tools may be defined.
+    ...[
+      "web_search_20260209",
+      "web_fetch_20260209",
+      "code_execution_20260521",
+      "mcp_toolset",
+      "computer_toolset_20260801",
+      "memory_20250818",
+    ].map(
+      (type) =>
+        [tool({ type }), "server_tool_refused"] as [
+          Record<string, unknown>,
+          string,
+        ],
+    ),
+    [
+      {
+        messages: [
+          {
+            role: "system",
+            content: [
+              {
+                type: "tool_addition",
+                tool: {
+                  type: "tool_definition",
+                  definition: { type: "web_fetch_20260209", name: "web_fetch" },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      "server_tool_refused",
+    ],
+    [{ tool_choice: { type: "any" } }, "tool_choice_refused"],
+    [{ tool_choice: { type: "tool", name: "report" } }, "tool_choice_refused"],
+    [
+      { tool_choice: { type: "auto", disable_parallel_tool_use: true } },
+      "tool_choice_refused",
+    ],
     [{ max_tokens: "lots" }, "messages_request_invalid"],
     [{ messages: "none" }, "messages_request_invalid"],
   ];
@@ -263,6 +344,19 @@ test("the host refuses another model, other effort, fallbacks, a speed or a malf
     (await events("worker_request_rejected")).map((e) => e.reason).sort(),
     cases.map(([, reason]) => reason).sort(),
   );
+  const beta = await app.inject({
+    method: "POST",
+    url: url(),
+    payload: request(),
+    headers: {
+      ...headers,
+      "anthropic-beta":
+        "mid-conversation-output-config-2026-07-01,mcp-client-2025-11-20",
+    },
+  });
+  assert.equal(beta.statusCode, 400);
+  assert.match(beta.json().error.message, /mcp-client-2025-11-20/);
+  assert.equal(f.messagesRequests().length, 0);
   const purpose = await app.inject({
     method: "POST",
     url: url(),
@@ -432,6 +526,13 @@ async function throughHost(
   t: TestContext,
   respond: (n: number, body: any, res: ServerResponse) => void,
   files: Record<string, string | Buffer> = {},
+  options: {
+    /** The worker's effort, when it should differ from the job's ("medium"). */
+    workerEffort?: "low" | "medium" | "high";
+    /** The host refuses connections for this long before it starts listening. */
+    outageMs?: number;
+    workspaceId?: string;
+  } = {},
 ) {
   const upstream: { headers: Record<string, unknown>; body: any }[] = [];
   const anthropicApi = createServer(async (req, res) => {
@@ -449,6 +550,7 @@ async function throughHost(
   );
   const gateway = new AnthropicMessagesGateway("host-anthropic-key", {
     baseURL: `http://127.0.0.1:${(anthropicApi.address() as AddressInfo).port}`,
+    ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
   });
   const f = await fixture(t, {
     anthropic: {
@@ -477,8 +579,22 @@ async function throughHost(
   const app = server();
   t.after(() => app.close());
   await codingApi(app, f.c);
-  await app.listen({ port: 0, host: "127.0.0.1" });
-  const host = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
+  let port: number;
+  if (options.outageMs) {
+    // A free port that refuses connections until the host starts, as during a restart.
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    port = (probe.address() as AddressInfo).port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    setTimeout(
+      () => void app.listen({ port, host: "127.0.0.1" }),
+      options.outageMs,
+    );
+  } else {
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    port = (app.server.address() as AddressInfo).port;
+  }
+  const host = `http://127.0.0.1:${port}`;
   const token = f.c.token(job.id, job.attempt_id);
   const root = await mkdtemp(join(tmpdir(), "pi-host-protocol-"));
   const workspace = join(root, "work");
@@ -509,7 +625,11 @@ async function throughHost(
       baseUrl: `${host}/coding/worker/${job.id}/pi/coder`,
       apiKey: token,
       maxTokens: 32000,
-      reasoning: "medium",
+      reasoning: options.workerEffort ?? "medium",
+      // Short delays keep the test quick; the worker's own settings are checked separately.
+      ...(options.outageMs
+        ? { retry: { maxRetries: 8, baseDelayMs: 200 } }
+        : {}),
     }),
   });
   const task = await runtime.start({
@@ -721,4 +841,189 @@ test("a failed connection to Anthropic is left to Pi's retry, and an error insid
   const [usage] = await events("model_usage");
   assert.equal(usage.incomplete, true);
   assert.equal(usage.usage.prompt_tokens, 900);
+});
+
+test("a body field the SDK would turn into a header never reaches Anthropic, and the host's workspace is the one sent", async (t) => {
+  const { upstream, result } = await throughHost(
+    t,
+    (n, _body, res) =>
+      sse(res, {
+        content: [
+          n === 1
+            ? toolUse("toolu_read", "read", { path: "sum.js" })
+            : planReport,
+        ],
+      }),
+    {},
+    { workspaceId: "wrkspc_host" },
+  );
+  assert.equal(result.status, "waiting_approval", result.summary);
+  for (const { headers } of upstream)
+    assert.equal(headers["anthropic-workspace-id"], "wrkspc_host");
+  // A forged request with workspace_id in the body is refused before any call.
+  const { f, app, headers, url } = await piJob(t);
+  const forged = await app.inject({
+    method: "POST",
+    url: url(),
+    payload: request({ workspace_id: "wrkspc_attacker" }),
+    headers,
+  });
+  assert.equal(forged.statusCode, 400);
+  assert.match(forged.json().error.message, /workspace_id/);
+  assert.equal(f.messagesRequests().length, 0);
+});
+
+test("a request with a web_fetch server tool and mcp_servers is refused with no upstream call", async (t) => {
+  const { f, app, headers, url, calls } = await piJob(t);
+  const response = await app.inject({
+    method: "POST",
+    url: url(),
+    payload: request({
+      tools: [
+        ...request().tools,
+        { type: "web_fetch_20260209", name: "web_fetch" },
+      ],
+      mcp_servers: [{ type: "url", url: "https://example.invalid", name: "x" }],
+    }),
+    headers,
+  });
+  assert.equal(response.statusCode, 400);
+  assert.equal(f.messagesRequests().length, 0);
+  assert.equal((await calls()).length, 0);
+});
+
+test("Pi's per-turn effort marker must match the job; a request with no marker runs at the job's effort", async (t) => {
+  // A real Pi session whose effort differs from the job's: its first request carries Pi's
+  // marker ("low") and is refused before any call.
+  const refused = await throughHost(
+    t,
+    () => {
+      throw new Error("No request may reach Anthropic");
+    },
+    {},
+    { workerEffort: "low" },
+  );
+  assert.equal(refused.upstream.length, 0);
+  assert.equal(refused.result.status, "paused");
+  const reasons = (
+    await refused.f.db.query(
+      "SELECT payload FROM coding_events WHERE payload->>'kind'='worker_request_rejected'",
+    )
+  ).rows.map((r: any) => r.payload.reason);
+  assert(reasons.includes("effort_not_pinned"), JSON.stringify(reasons));
+  // A request without markers: the top-level effort the host sets is the job's, not Pi's "high".
+  const { f, app, headers, url, settled } = await piJob(t);
+  const body = request({
+    messages: [{ role: "user", content: "Plan the fix" }],
+    output_config: { effort: "high" },
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: url(),
+    payload: body,
+    headers,
+  });
+  assert.equal(response.statusCode, 200);
+  await settled();
+  assert.deepEqual(f.messagesRequests()[0]!.body.output_config, {
+    effort: "medium",
+  });
+});
+
+test("a request sent right after the previous stream ends waits for the slot instead of being refused", async (t) => {
+  const { f, app, headers, url, settled, calls } = await piJob(t);
+  // Recording the first call is slow; the next request arrives meanwhile.
+  let gate!: () => void;
+  const opened = new Promise<void>((resolve) => (gate = resolve));
+  const query = f.db.query.bind(f.db);
+  (f.db as any).query = async (sql: string, params?: unknown[]) => {
+    if (sql.startsWith("UPDATE coding_jobs SET model_busy=false")) await opened;
+    return query(sql, params as any);
+  };
+  const first = await app.inject({
+    method: "POST",
+    url: url(),
+    payload: request(),
+    headers,
+  });
+  assert.equal(first.statusCode, 200);
+  const second = app.inject({
+    method: "POST",
+    url: url(),
+    payload: request(),
+    headers,
+  });
+  setTimeout(gate, 100);
+  assert.equal((await second).statusCode, 200);
+  await settled();
+  assert.deepEqual(
+    (await calls()).map((c) => c.state),
+    ["complete", "complete"],
+  );
+});
+
+test("a host that refuses connections for a while (a gateway restart) does not end the session", async (t) => {
+  const { upstream, result } = await throughHost(
+    t,
+    (n, _body, res) =>
+      sse(res, {
+        content: [
+          n === 1
+            ? toolUse("toolu_read", "read", { path: "sum.js" })
+            : planReport,
+        ],
+      }),
+    {},
+    { outageMs: 1500 },
+  );
+  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(upstream.length, 2);
+});
+
+test("the worker keeps retrying the host for about four minutes, longer than a release takes", () => {
+  let total = 0;
+  for (let attempt = 1; attempt <= GATEWAY_RETRY.maxRetries; attempt++)
+    total += retryDelayMs(
+      {
+        baseDelayMs: 2000,
+        maxAgentDelayMs: 60000,
+        ...GATEWAY_RETRY,
+      } as any,
+      attempt,
+    );
+  assert(total >= 180000, String(total));
+});
+
+test("1-hour cache writes are priced at twice the input price", () => {
+  const prices = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 };
+  const usage = anthropicUsage(
+    {
+      usage: {
+        input_tokens: 100,
+        output_tokens: 10,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 1000,
+        cache_creation: {
+          ephemeral_5m_input_tokens: 400,
+          ephemeral_1h_input_tokens: 600,
+        },
+      } as any,
+    },
+    prices,
+  );
+  assert.equal(usage.cost, (100 * 4 + 400 * 5 + 600 * 4 * 2 + 10 * 20) / 1e6);
+  // Without the breakdown every write is a 5-minute write.
+  assert.equal(
+    anthropicUsage(
+      {
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_creation_input_tokens: 1000,
+        } as any,
+      },
+      prices,
+    ).cost,
+    (1000 * 5) / 1e6,
+  );
 });

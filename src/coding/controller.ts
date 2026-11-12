@@ -72,8 +72,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { anthropicUsage, type AnthropicPrices } from "../anthropic.js";
 import {
   assembleStream,
-  betaList,
   messagesRequest,
+  piBetas,
   refusal,
   relayedError,
   upstreamFailureCode,
@@ -216,6 +216,8 @@ export class CodingController {
     );
   }
   private automation?: CodingAutomation;
+  /** Resolves when a job's current Pi model call frees its slot. */
+  private piSlots = new Map<string, Promise<void>>();
   private inFlightModels = new Map<
     string,
     { jobId: string; controller: AbortController }
@@ -1699,6 +1701,7 @@ export class CodingController {
           ? (job.settings.leaderModel ?? job.settings.model)
           : job.settings.model;
     let body: Record<string, unknown>;
+    let betas: string[];
     let route: ReturnType<CodingAnthropic["route"]>;
     let purpose: "agent" | "compaction" | undefined;
     try {
@@ -1720,6 +1723,7 @@ export class CodingController {
       )
         throw new Error("Invalid model request purpose");
       purpose = request.purpose;
+      betas = piBetas(request.betas);
       body = messagesRequest(raw, {
         model: route.nativeModel,
         effort: job.settings.effort,
@@ -1728,6 +1732,9 @@ export class CodingController {
     } catch (error) {
       return refuse(error);
     }
+    // One call at a time per job: a request that arrives while the previous call is still
+    // finishing waits for its slot instead of being refused.
+    await this.piSlots.get(job.id);
     const callId = randomUUID();
     const claimed = await this.db.query(
       `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+1,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4 RETURNING id)
@@ -1739,7 +1746,8 @@ export class CodingController {
         this.clock(),
         callId,
         effectiveRole,
-        hash(body),
+        // The exact request, serialised once for its hash (no key-sorted copy).
+        createHash("sha256").update(JSON.stringify(body)).digest("hex"),
         // The readable copy; the request itself goes to Anthropic exactly.
         JSON.stringify(
           storable({
@@ -1778,6 +1786,9 @@ export class CodingController {
       jobId: job.id,
       controller: cancellation,
     });
+    let freeSlot!: () => void;
+    const slot = new Promise<void>((resolve) => (freeSlot = resolve));
+    this.piSlots.set(job.id, slot);
     const deadline = AbortSignal.timeout(
       Math.max(
         1,
@@ -1789,12 +1800,20 @@ export class CodingController {
       deadline,
       request.signal,
     ]);
+    let released = false;
     const release = async () => {
+      if (released) return;
+      released = true;
       this.inFlightModels.delete(callId);
-      await this.db.query(
-        "UPDATE coding_jobs SET model_busy=false WHERE id=$1 AND attempt_id=$2",
-        [job.id, job.attempt_id],
-      );
+      try {
+        await this.db.query(
+          "UPDATE coding_jobs SET model_busy=false WHERE id=$1 AND attempt_id=$2",
+          [job.id, job.attempt_id],
+        );
+      } finally {
+        if (this.piSlots.get(job.id) === slot) this.piSlots.delete(job.id);
+        freeSlot();
+      }
     };
     const fail = async (
       code: CodingFailureCode,
@@ -1841,8 +1860,11 @@ export class CodingController {
         live.attempt_id !== job.attempt_id ||
         !this.allowed(job.user_id)
       ) {
-        await fail("model_cancelled");
-        await release();
+        try {
+          await fail("model_cancelled");
+        } finally {
+          await release();
+        }
         return refusal("Coding request cancelled before model dispatch");
       }
       const version = Array.isArray(request.version)
@@ -1851,7 +1873,7 @@ export class CodingController {
       response = await this.anthropic!.send(
         body,
         {
-          betas: betaList(request.betas),
+          betas,
           ...(version && /^\d{4}-\d{2}-\d{2}$/.test(version)
             ? { version }
             : {}),
@@ -1874,7 +1896,7 @@ export class CodingController {
           await fail(abortCode());
           return refusal("Coding model generation cancelled");
         }
-        await fail("model_disconnected");
+        await fail("model_disconnected", { httpStatus: 502 });
         // A transport failure before any reply: Pi's own retry decides whether to send again.
         return refusal("Model provider connection error", 502);
       } finally {
@@ -1882,8 +1904,11 @@ export class CodingController {
       }
     }
     if (!response.body) {
-      await fail("model_provider_failed");
-      await release();
+      try {
+        await fail("model_provider_failed", { httpStatus: 502 });
+      } finally {
+        await release();
+      }
       return refusal("Model provider returned no stream", 502);
     }
     const [toWorker, toHost] = response.body.tee();
@@ -1982,10 +2007,16 @@ export class CodingController {
             responseId = event.message.id?.slice(0, 160);
         },
       );
+      // A stream that reached message_stop finished, whatever happened afterwards (the worker
+      // closing its finished connection aborts the signal too).
+      const aborted = !complete && call.signal.aborted;
+      const abortCode = aborted ? call.abortCode() : undefined;
+      // The stream is over: free the slot before recording, so Pi's next request is not refused.
+      await call.release();
       const usage = message?.usage
         ? anthropicUsage(message, call.prices)
         : undefined;
-      if (complete && message && !call.signal.aborted) {
+      if (complete && message && !aborted) {
         await this.db.query(
           "UPDATE coding_model_calls SET state='complete',result=$2::jsonb,result_box=$3 WHERE id=$1",
           [
@@ -2003,8 +2034,8 @@ export class CodingController {
         const apiError =
           error instanceof Anthropic.APIError ? error : undefined;
         await call.fail(
-          call.signal.aborted
-            ? call.abortCode()
+          abortCode
+            ? abortCode
             : apiError
               ? upstreamFailureCode(apiError.status, apiError.type)
               : "model_disconnected",
@@ -2026,9 +2057,7 @@ export class CodingController {
                 model: call.selected,
                 usage,
                 provider: "Anthropic",
-                ...(complete && !call.signal.aborted
-                  ? {}
-                  : { incomplete: true }),
+                ...(complete && !aborted ? {} : { incomplete: true }),
               }),
             ),
           ],

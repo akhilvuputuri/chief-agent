@@ -80,38 +80,157 @@ export function relayedError(error: InstanceType<typeof Anthropic.APIError>) {
   } satisfies MessagesReply;
 }
 
+/** A host refusal with a fixed reason code for the job record; the message may name a field. */
+export class MessagesRefusal extends Error {
+  constructor(
+    message: string,
+    readonly reason: string,
+  ) {
+    super(message);
+  }
+}
+
 /**
- * The only changes the host makes to a request: the job decides the effort and caps the output,
- * and the box may not pick another model, fallback models or a priced speed. Everything else
- * (messages, system prompt, tools, thinking, cache breakpoints) goes to Anthropic as Pi built it.
+ * The top-level fields Pi's Anthropic client sends for Claude Opus 5.5 and Sonnet 5.5
+ * (pi-ai 1.1.0, `dist/api/anthropic-messages.js`, `buildParams`): model, messages, max_tokens,
+ * stream, system, tools, thinking, output_config, and metadata or tool_choice only when its
+ * caller sets them. `betas` is not a body field there: the SDK sends it as the anthropic-beta
+ * header. `temperature` and `fallbacks` are never sent for these models. The box is untrusted,
+ * so anything else is refused: some fields (workspace_id, user_profile_id, betas) would be
+ * lifted into headers by the SDK, and others turn on paid or server-side features.
+ */
+const BODY_FIELDS = new Set([
+  "model",
+  "messages",
+  "max_tokens",
+  "stream",
+  "system",
+  "tools",
+  "thinking",
+  "output_config",
+  "metadata",
+  "tool_choice",
+]);
+/** Pi's output_config carries only the effort (top level and per-turn markers). */
+const OUTPUT_CONFIG_FIELDS = new Set(["effort"]);
+/**
+ * The beta features Pi's client names for these models (`getBetaFeatures`): the mid-conversation
+ * effort and thinking-binding pair for models with per-message effort, and inline tool changes
+ * when tools change mid-conversation.
+ */
+export const PI_BETAS = new Set([
+  "mid-conversation-output-config-2026-07-01",
+  "thinking-binding-controls-2026-08-01",
+  "inline-tools-2026-09-15",
+]);
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
+/** A tool Pi defines and runs itself; server tools (web, code execution, MCP, computer) are refused. */
+function assertClientTool(tool: unknown) {
+  if (!isObject(tool) || (tool.type !== undefined && tool.type !== "custom"))
+    throw new MessagesRefusal(
+      `Messages request includes a server tool${isObject(tool) && typeof tool.type === "string" ? ` (${tool.type.slice(0, 60)})` : ""}; only Pi's own tools are allowed`,
+      "server_tool_refused",
+    );
+}
+
+function assertOutputConfig(config: unknown, effort: string, where: string) {
+  if (!isObject(config))
+    throw new MessagesRefusal(
+      "Invalid Messages request",
+      "messages_request_invalid",
+    );
+  for (const key of Object.keys(config))
+    if (!OUTPUT_CONFIG_FIELDS.has(key))
+      throw new MessagesRefusal(
+        `Messages request field not allowed: ${where}.${key.slice(0, 60)}`,
+        "messages_field_refused",
+      );
+  if (where !== "output_config" && config.effort !== effort)
+    throw new MessagesRefusal(
+      "Model effort differs from the job's effort",
+      "effort_not_pinned",
+    );
+}
+
+/**
+ * The only changes the host makes to a request: the job decides the effort and caps the output.
+ * The box may send only the fields Pi sends, only Pi's own tools and only an automatic tool
+ * choice. The content of messages, system prompt, tools and thinking goes to Anthropic as Pi
+ * built it.
  */
 export function messagesRequest(
   raw: unknown,
   pinned: { model: string; effort: string; maxTokens: number },
 ): Record<string, unknown> {
-  if (
-    !raw ||
-    typeof raw !== "object" ||
-    Array.isArray(raw) ||
-    !Array.isArray((raw as { messages?: unknown }).messages)
-  )
-    throw new Error("Invalid Messages request");
+  if (!isObject(raw) || !Array.isArray(raw.messages))
+    throw new MessagesRefusal(
+      "Invalid Messages request",
+      "messages_request_invalid",
+    );
   const body = raw as Record<string, unknown> & { messages: unknown[] };
+  for (const key of Object.keys(body))
+    if (!BODY_FIELDS.has(key))
+      throw new MessagesRefusal(
+        `Messages request field not allowed: ${key.slice(0, 60)}`,
+        "messages_field_refused",
+      );
   if (body.model !== pinned.model)
-    throw new Error("Model is not the job's pinned role selection");
-  if ("fallbacks" in body || "speed" in body)
-    throw new Error("Model request names fallback models or a speed");
-  for (const message of body.messages) {
-    const config = (message as { role?: unknown; output_config?: unknown })
-      ?.output_config;
-    if (
-      (message as { role?: unknown })?.role === "system" &&
-      config &&
-      typeof config === "object" &&
-      "effort" in config &&
-      (config as { effort: unknown }).effort !== pinned.effort
+    throw new MessagesRefusal(
+      "Model is not the job's pinned role selection",
+      "model_not_pinned",
+    );
+  if (body.tools !== undefined) {
+    if (!Array.isArray(body.tools))
+      throw new MessagesRefusal(
+        "Invalid Messages request",
+        "messages_request_invalid",
+      );
+    body.tools.forEach(assertClientTool);
+  }
+  if (
+    body.tool_choice !== undefined &&
+    !(
+      isObject(body.tool_choice) &&
+      body.tool_choice.type === "auto" &&
+      Object.keys(body.tool_choice).length === 1
     )
-      throw new Error("Model effort differs from the job's effort");
+  )
+    throw new MessagesRefusal(
+      "Messages request tool_choice must be automatic",
+      "tool_choice_refused",
+    );
+  if (
+    body.metadata !== undefined &&
+    !(
+      isObject(body.metadata) &&
+      Object.keys(body.metadata).every((key) => key === "user_id")
+    )
+  )
+    throw new MessagesRefusal(
+      "Messages request field not allowed: metadata",
+      "messages_field_refused",
+    );
+  if (body.output_config !== undefined)
+    assertOutputConfig(body.output_config, pinned.effort, "output_config");
+  for (const message of body.messages) {
+    if (!isObject(message)) continue;
+    // Pi's per-turn effort markers are system messages carrying output_config.
+    if (message.output_config !== undefined)
+      assertOutputConfig(
+        message.output_config,
+        pinned.effort,
+        "messages[].output_config",
+      );
+    // Tools added mid-conversation are definitions too, so they get the same check.
+    if (Array.isArray(message.content))
+      for (const block of message.content)
+        if (isObject(block) && block.type === "tool_addition")
+          assertClientTool(
+            isObject(block.tool) ? block.tool.definition : undefined,
+          );
   }
   const requested = body.max_tokens;
   if (
@@ -119,16 +238,29 @@ export function messagesRequest(
     !Number.isSafeInteger(requested) ||
     requested < 1
   )
-    throw new Error("Invalid Messages request");
-  const output =
-    body.output_config && typeof body.output_config === "object"
-      ? body.output_config
-      : {};
+    throw new MessagesRefusal(
+      "Invalid Messages request",
+      "messages_request_invalid",
+    );
   return {
     ...body,
     max_tokens: Math.min(requested, pinned.maxTokens),
-    output_config: { ...output, effort: pinned.effort },
+    // Pi hard-codes "high" here; the per-turn markers carry its session effort. Setting the top
+    // level makes a request without markers run at the job's effort too.
+    output_config: { effort: pinned.effort },
   };
+}
+
+/** The beta features Pi's client named; any other value is refused (see PI_BETAS). */
+export function piBetas(header: string | string[] | undefined) {
+  const betas = betaList(header);
+  for (const beta of betas)
+    if (!PI_BETAS.has(beta))
+      throw new MessagesRefusal(
+        `Beta feature not allowed: ${beta.slice(0, 80)}`,
+        "beta_refused",
+      );
+  return betas;
 }
 
 export function betaList(header: string | string[] | undefined) {
