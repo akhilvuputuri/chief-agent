@@ -39,6 +39,14 @@ import {
 
 /** Below this much attempt time, failed checks pause for the owner instead of a repair round. */
 const CHECK_REPAIR_MIN_MS = 10 * 60_000;
+/**
+ * Pi's retry settings for model calls through the host. A release restarts the gateway: about
+ * six seconds measured (journal 150), and the release script waits up to about 2.5 minutes for
+ * health, longer with a rollback. Pi's defaults (three retries: 2, 4 and 8 seconds) give up
+ * after 14 seconds; eight retries (2, 4, 8, 16, 32, then 60 seconds each, Pi's longest
+ * delay) keep trying for about four minutes (journal 190).
+ */
+export const GATEWAY_RETRY = { maxRetries: 8 };
 const assignmentSchema = z.object({
   id: z.string().uuid(),
   attemptId: z.string().uuid(),
@@ -383,6 +391,7 @@ export async function runPiWorker(
       apiKey: workerToken,
       maxTokens: outputAllowance(config, role),
       reasoning: config.effort,
+      retry: GATEWAY_RETRY,
     });
   }
   /**

@@ -18,6 +18,7 @@ import { messagesStream, toolUse } from "./anthropic-sse.js";
 
 for (const scenario of [
   "progress",
+  "compaction-retried",
   "large-scope",
   "stagnant",
   "small-progress",
@@ -54,6 +55,7 @@ for (const scenario of [
       summaries = 0,
       missingScope = false;
     const wireSizes: number[] = [];
+    let overloaded = false;
     const server = createServer(async (req, res) => {
       let raw = "";
       for await (const bytes of req) raw += bytes;
@@ -61,6 +63,18 @@ for (const scenario of [
       const body = JSON.parse(raw),
         compact = !body.tools?.length;
       let page: number | undefined;
+      if (compact && scenario === "compaction-retried" && !overloaded) {
+        // One overloaded reply to the first summary request; Pi's stock retry resends it.
+        overloaded = true;
+        res.writeHead(529, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            type: "error",
+            error: { type: "overloaded_error", message: "Overloaded" },
+          }),
+        );
+        return;
+      }
       if (compact) {
         summaries++;
         if (atomic)
@@ -229,6 +243,7 @@ for (const scenario of [
         baseUrl: `http://127.0.0.1:${(server.address() as any).port}`,
         contextWindow: 40000,
         maxTokens: 16000,
+        retry: { baseDelayMs: 10 },
       }),
       executor: (task) => localExecutor(task.workspace, join(root, "home")),
     });
@@ -258,6 +273,8 @@ for (const scenario of [
       }),
     );
     assert.equal(missingScope, false);
+    if (scenario === "compaction-retried")
+      assert.equal(overloaded, true, "The summary request was retried");
     if (atomicFailure) {
       assert.equal(result.status, "paused");
       assert.match(result.summary, /compaction|summari[sz]/i);

@@ -309,7 +309,7 @@ export class CodingRuntime {
         task.used.models++;
         await this.options.store.save(task);
       };
-      const { runtime, model, reasoning, setRequestPurpose } =
+      const { runtime, model, reasoning, retry, setRequestPurpose } =
         await this.options.model(admitModel);
       const workspace = await new Workspace(task.workspace).initialize();
       await rm(outputs, { recursive: true, force: true });
@@ -463,6 +463,7 @@ export class CodingRuntime {
       const settings = SettingsManager.inMemory({
         cacheWarming: "off",
         compaction: { enabled: true },
+        ...(retry ? { retry } : {}),
       });
       const created = await createAgentSession({
         cwd: task.workspace,
@@ -509,6 +510,7 @@ export class CodingRuntime {
                     { version: 1 },
                   );
                 },
+                settings.getRetrySettings(),
               );
               return { compaction: result };
             } catch (error) {

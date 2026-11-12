@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -106,6 +106,19 @@ for (const investigationTurns of [1, 32])
     assert(result.plan?.text.includes("café"));
     assert.equal(requests.length, investigationTurns + 1);
     assert.equal(result.used.models, investigationTurns + 1);
+    // The capability lives only in the worker's memory: no file the model's tools could read
+    // (workspace, task store, Pi session) contains it.
+    for (const file of await readdir(root, {
+      recursive: true,
+      withFileTypes: true,
+    }))
+      if (file.isFile())
+        assert(
+          !(await readFile(join(file.parentPath, file.name), "utf8")).includes(
+            "synthetic-capability",
+          ),
+          join(file.parentPath, file.name),
+        );
     for (const { headers, body } of requests) {
       // The gateway capability travels as Pi's API key; there is no Anthropic key in the box.
       assert.equal(headers["x-api-key"], "synthetic-capability");

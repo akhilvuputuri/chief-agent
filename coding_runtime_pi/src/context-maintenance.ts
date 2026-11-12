@@ -11,6 +11,7 @@ import {
 import { randomUUID, createHash } from "node:crypto";
 
 type Stream = NonNullable<Parameters<typeof compact>[7]>;
+type Retry = NonNullable<Parameters<typeof compact>[9]>;
 export class ContextMaintenanceFailure extends Error {}
 
 /** Replace old summaries once; validate before Pi appends an immutable entry. */
@@ -20,6 +21,8 @@ export async function compactContext(
   stream: Stream,
   tools: unknown,
   commitEmptyTail: () => string,
+  /** Pi's own retry settings, as Pi's built-in compaction uses them. */
+  retry: Retry,
 ) {
   const model = context.model;
   if (!model)
@@ -151,7 +154,7 @@ export async function compactContext(
     context.thinkingLevel,
     stream,
     auth.env,
-    { enabled: false, maxRetries: 0, baseDelayMs: 0 },
+    retry,
   );
   if (!result.summary.trim())
     throw new ContextMaintenanceFailure(

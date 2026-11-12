@@ -126,6 +126,8 @@ for (const failure of ["truncated", "disconnect", "cancel"] as const) {
         baseUrl: `http://127.0.0.1:${(server.address() as any).port}`,
         contextWindow: 40000,
         maxTokens: 16000,
+        // Pi's default three retries, with short delays to keep the test quick.
+        retry: { baseDelayMs: 10 },
       }),
       executor: (task) => localExecutor(task.workspace, join(root, "home")),
     });
@@ -176,9 +178,11 @@ for (const failure of ["truncated", "disconnect", "cancel"] as const) {
     assert.equal(restored.plan!.hash, plan.plan!.hash);
     assert.equal(restored.used.models, result.used.models);
     assert.equal(restored.sessionFile, result.sessionFile);
+    // A dropped connection is retried by Pi's stock retry (three times) and then stops; a
+    // truncated summary or a cancellation is not retried.
     assert.equal(
       summaries,
-      1,
+      failure === "disconnect" ? 4 : 1,
       "A failed compaction must not be retried implicitly after each subsequent tool turn",
     );
     assert.equal(

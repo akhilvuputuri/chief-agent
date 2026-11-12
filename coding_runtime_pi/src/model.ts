@@ -15,6 +15,7 @@ export type ModelFactory = (admit: () => Promise<void>) => Promise<{
   runtime: ModelRuntime;
   model: Model<any>;
   reasoning?: ModelConfig["reasoning"];
+  retry?: ModelConfig["retry"];
   setRequestPurpose?: (purpose: "agent" | "compaction") => void;
 }>;
 
@@ -72,6 +73,7 @@ export function anthropicModel(config: ModelConfig): ModelFactory {
       runtime,
       model: runtime.getModel(provider, known.id)!,
       reasoning: config.reasoning ?? "high",
+      ...(config.retry ? { retry: config.retry } : {}),
       setRequestPurpose: (purpose) => {
         requestPurpose = purpose;
       },

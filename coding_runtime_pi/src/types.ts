@@ -79,6 +79,15 @@ export type ModelConfig = {
   reasoning?: "low" | "medium" | "high";
   contextWindow?: number;
   maxTokens?: number;
+  /**
+   * Pi's agent retry settings when the endpoint needs other values than Pi's defaults (three
+   * retries from two seconds); unset fields keep Pi's defaults.
+   */
+  retry?: {
+    maxRetries?: number;
+    baseDelayMs?: number;
+    maxAgentDelayMs?: number;
+  };
 };
 export const defaultLimits: Limits = {
   ms: 2_400_000,
