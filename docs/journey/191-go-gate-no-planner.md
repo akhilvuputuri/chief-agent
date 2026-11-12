@@ -91,3 +91,7 @@ Not deployed. The host change needs the gateway release; the worker change reach
 - Stage D2 replaces the interim reply-after-Start with the job inbox, removes the runtime's plan-era API (`learn`/`plan` intents, `approve`, `reply` with its 8,000/24,000 caps, `planHash`, the `approved_plan` document) and the reviewer prompt's receipt cut (its reason, the runtime's 32,000-character refusal, is gone), and rewords `src/coding/progress-text.ts` ("Plan ready for your approval").
 - Stage D3 removes the remaining `leader` plumbing (`coding_model_set` role, `coding_job_update.leaderModel` for squads, `outputAllowance` role, `generate`).
 - The base commit is resolved at `coding_start`, so a Start a day later builds on a day-old base; stage D3's rebase handling covers a conflict.
+
+## Update, 13 November 2026: released and pinned
+
+Merged as `9e4f36f` (PR 483); release run 43306834191 succeeded and the gateway was healthy at `9e4f36f`. GitHub's container job passed on the final head. The worker image built from `9e4f36f` (run 43306397865, `sha256:dfbc5b19…`) is pinned in `config/coding-pi.json` and `config/boxes.json`. No real job has run through the Start card yet.

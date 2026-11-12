@@ -1,7 +1,7 @@
 {
   "repository": "akhilvuputuri/chief-agent",
   "branch": "main",
-  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:7e20574889eb8af923dbcc57860ed11ad4712d4594cfd500f0d835b6258d1f17",
+  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:dfbc5b196d84e8166530e232c2c40f7631f892137e4d7c613d25dee8e77792f5",
   "model": "anthropic/claude-sonnet-5.5",
   "reviewerModel": "anthropic/claude-opus-5.5",
   "effort": "medium",
