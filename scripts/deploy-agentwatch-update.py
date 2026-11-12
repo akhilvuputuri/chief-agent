@@ -259,9 +259,12 @@ def _copy(image, script, mounts):
     The image is one already on the host, and the volume must exist: Docker would otherwise
     pull the one and quietly create the other, empty."""
     run(['docker', 'volume', 'inspect', DATA_VOLUME])
-    run(['docker', 'run', '--rm', '--pull', 'never', '--network', 'none', '--read-only',
+    # A copy is not to be cut short from the keyboard: Ctrl-C reaches every process of the
+    # terminal's group, and the docker client would pass it into the container. So the client
+    # gets a session of its own and is told not to forward signals.
+    run(['docker', 'run', '--rm', '--pull', 'never', '--sig-proxy=false', '--network', 'none', '--read-only',
          '--security-opt', 'no-new-privileges:true', '--user', '0:0',
-         '--entrypoint', 'python', *mounts, image, '-I', '-c', script])
+         '--entrypoint', 'python', *mounts, image, '-I', '-c', script], start_new_session=True)
 
 
 def back_up(image, sha):
@@ -315,8 +318,18 @@ def write_compose(content):
     staged.replace(target)
 
 
+STOP_REQUESTS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+# Set once agentwatch has been stopped, so an interrupt that still gets out is described truly.
+progress = {'stopped': False}
+
+
 def _interrupt(signum, frame):
     raise KeyboardInterrupt
+
+
+def _ignore_stop_requests():
+    for number in STOP_REQUESTS:
+        signal.signal(number, signal.SIG_IGN)
 
 
 def restore_by_hand(path):
@@ -333,6 +346,9 @@ def restore_by_hand(path):
         except Exception:
             raise RuntimeError('The live compose.yaml does not hold a reviewed agentwatch block; nothing changed') from None
         step = 'stopping agentwatch'
+        # Not to be interrupted: a restore cut short leaves the volume part emptied, and a
+        # second one started beside it would collide with it.
+        _ignore_stop_requests()
         try:
             compose('stop', 'agentwatch')
             step = 'putting the copy back'
@@ -344,7 +360,10 @@ def restore_by_hand(path):
         except BaseException:
             raise RuntimeError('Restore failed while ' + step + '; agentwatch may be stopped; the copy in '
                                + str(backup) + ' is unchanged') from None
-        print(json.dumps({'agentwatch': image, 'healthy': True, 'restored': str(backup)}))
+        try:
+            print(json.dumps({'agentwatch': image, 'healthy': True, 'restored': str(backup)}))
+        except OSError:
+            pass
 
 
 def network_gateway():
@@ -540,7 +559,8 @@ def validate_compose(live, staged):
 def main():
     # A stop request (systemctl stop, a closed session) is handled like Ctrl-C: once agentwatch
     # has been stopped, it leads to the rollback, never to an exit half-way.
-    before = {number: signal.getsignal(number) for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    before = {number: signal.getsignal(number) for number in STOP_REQUESTS}
+    progress['stopped'] = False
     for number in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(number, _interrupt)
     try:
@@ -598,6 +618,7 @@ def update():
                 # Stopped first, so the files are complete and nothing is written while they
                 # are copied. From here on a failure, or a request to stop, restores the
                 # previous agentwatch.
+                progress['stopped'] = True
                 compose('stop', 'agentwatch')
                 backup = back_up(previous, sha)
                 write_compose((stage / 'compose.yaml').read_bytes())
@@ -609,11 +630,12 @@ def update():
                     raise RuntimeError('Gateway health failed after the agentwatch update')
             except BaseException:
                 # The rollback is not to be interrupted in its turn.
-                for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-                    signal.signal(number, signal.SIG_IGN)
+                _ignore_stop_requests()
                 step, state = 'restoring compose.yaml', 'agentwatch may be stopped or running the new image'
+                written = 'compose.yaml may be the new one'
                 try:
                     write_compose(old_compose)
+                    written = 'compose.yaml is the previous one'
                     if backup is not None:
                         # The new image may have rewritten the files in a format the previous
                         # one cannot open.
@@ -629,11 +651,13 @@ def update():
                 except BaseException:
                     raise RuntimeError(
                         'Rollback needs operator inspection: it failed while ' + step + '; ' + state
-                        + '; gateway untouched; compose.yaml is the previous one'
+                        + '; gateway untouched; ' + written
                         + ('; the data was not changed' if backup is None else
                            '; the data as it was before the update is in ' + str(backup)
                            + ' (put it back with --restore, docs/lightsail.md)')) from None
                 raise RuntimeError('agentwatch update failed; previous agentwatch restored') from None
+            # The update is done: nothing from here on may make it look otherwise.
+            _ignore_stop_requests()
             try:
                 prune_backups()
             except Exception:
@@ -648,8 +672,11 @@ if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
-        # Only before agentwatch was stopped: after that an interrupt runs the rollback.
-        print('Interrupted before agentwatch was stopped; nothing changed', file=sys.stderr)
+        # After the stop an interrupt runs the rollback; one that still gets here arrived in
+        # the instant before the rollback could shut it out.
+        print('Interrupted after agentwatch was stopped and before the rollback began; inspect agentwatch '
+              '(docs/lightsail.md)' if progress['stopped']
+              else 'Interrupted before agentwatch was stopped; nothing changed', file=sys.stderr)
         sys.exit(1)
     except Exception as error:
         print(str(error) if isinstance(error, RuntimeError) else 'Update failed; inspect the reviewed procedure locally', file=sys.stderr)

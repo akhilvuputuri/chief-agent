@@ -8,6 +8,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -64,7 +65,7 @@ SIGNED_ENV = ('PRIVATE_SENTINEL=must-stay-private\n'
               'AGENTWATCH_API_KEY=' + KEY + '\n')
 UP = ('compose', 'up', '-d', '--no-deps', 'agentwatch')
 STOP = ('compose', 'stop', 'agentwatch')
-HELPER = ('docker', 'run', '--rm', '--pull', 'never', '--network', 'none', '--read-only',
+HELPER = ('docker', 'run', '--rm', '--pull', 'never', '--sig-proxy=false', '--network', 'none', '--read-only',
           '--security-opt', 'no-new-privileges:true', '--user', '0:0', '--entrypoint', 'python')
 VOLUME = ('docker', 'volume', 'inspect', update.DATA_VOLUME)
 PUBLIC = ('        "--allow-host",\n        "traces.example.com",\n'
@@ -99,7 +100,7 @@ class AgentwatchUpdateTests(unittest.TestCase):
                  env='PRIVATE_SENTINEL=must-stay-private\n', open_without_key=False,
                  gateway='172.18.0.1 ', backup_failure=False, restore_failure=False,
                  stop_failure=False, rollback_stop_failure=False, earlier_backups=(),
-                 interrupt_at=None, volume_missing=False, expected=RuntimeError):
+                 interrupt_at=None, volume_missing=False, expected=RuntimeError, live_after=None):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             live = root / 'live'
@@ -187,9 +188,20 @@ class AgentwatchUpdateTests(unittest.TestCase):
                 if args == VOLUME and volume_missing:
                     raise subprocess.CalledProcessError(1, args, stderr='PRIVATE_SENTINEL')
                 if args[:2] == ('docker', 'run'):
+                    # Out of reach of a Ctrl-C at the terminal.
+                    self.assertIs(kwargs.get('start_new_session'), True)
+                    if container['image'] == 'sha256:new' or UP in commands:
+                        self.assertEqual(signal.getsignal(signal.SIGINT), signal.SIG_IGN)
                     return helper(args)
                 if args[:2] == ('docker', 'pull') and interrupt_at == 'pull':
                     raise KeyboardInterrupt
+                if args[:2] == ('docker', 'pull') and interrupt_at == 'signal':
+                    self.assertEqual(signal.getsignal(signal.SIGTERM), update._interrupt)
+                    self.assertEqual(signal.getsignal(signal.SIGHUP), update._interrupt)
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    for _ in range(1000):
+                        pass  # the handler runs between two of these
+                    raise AssertionError('the stop request did not interrupt')
                 if args[:3] == ('docker', 'network', 'inspect'):
                     return subprocess.CompletedProcess(args, 0, stdout=gateway + '\n')
                 if args[:2] == ('docker', 'pull') and pull_failure:
@@ -238,7 +250,6 @@ class AgentwatchUpdateTests(unittest.TestCase):
                     patch.object(update, 'compose', side_effect=compose), \
                     patch.object(update.time, 'sleep'), \
                     contextlib.redirect_stdout(output):
-                import signal
                 handlers = [signal.getsignal(n) for n in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)]
                 if expected_error:
                     with self.assertRaisesRegex(expected, expected_error) as caught:
@@ -295,7 +306,7 @@ class AgentwatchUpdateTests(unittest.TestCase):
                 self.assertEqual(commands.count(UP), 1)
             else:
                 self.assertEqual(output.getvalue(), '')
-                self.assertEqual((live / 'compose.yaml').read_text(), live_compose)
+                self.assertEqual((live / 'compose.yaml').read_text(), live_after or live_compose)
             return commands
 
     def test_success_recreates_only_agentwatch(self):
@@ -608,9 +619,29 @@ class AgentwatchUpdateTests(unittest.TestCase):
         self.assertNotIn(UP, commands)
 
     def test_a_stop_request_is_an_interrupt(self):
-        import signal
         with self.assertRaises(KeyboardInterrupt):
             update._interrupt(signal.SIGTERM, None)
+        # main installs it for the stop requests a terminal does not send: a real SIGTERM
+        # during the pull, before anything is stopped, ends the update with nothing changed.
+        commands = self.scenario(interrupt_at='signal', expected=KeyboardInterrupt, expected_error='^$')
+        self.assertNotIn(STOP, commands)
+        self.assertFalse(update.progress['stopped'])
+
+    def test_a_rollback_that_cannot_write_compose_does_not_say_it_did(self):
+        real = update.write_compose
+        calls = []
+
+        def write(content):
+            calls.append(content)
+            if len(calls) == 2:
+                raise OSError('disk full')
+            return real(content)
+
+        with patch.object(update, 'write_compose', side_effect=write):
+            self.scenario(new_health='unhealthy', live_after=STAGED_COMPOSE,
+                          expected_error='failed while restoring compose.yaml; agentwatch may be stopped or '
+                                         'running the new image; gateway untouched; compose.yaml may be the new one')
+        self.assertEqual(len(calls), 2)
 
     def test_restore_by_hand_puts_a_finished_copy_back(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -633,6 +664,8 @@ class AgentwatchUpdateTests(unittest.TestCase):
 
             def compose(*args, **kwargs):
                 commands.append(('compose', *args))
+                # Not to be interrupted from the first step on.
+                self.assertEqual(signal.getsignal(signal.SIGTERM), signal.SIG_IGN)
                 return subprocess.CompletedProcess(args, 0, stdout='')
 
             def restore_from(path, error=None):
