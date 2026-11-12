@@ -3,6 +3,8 @@
 Work date(s): 2026-11-12. Written/revised: 2026-11-12.
 Status: in progress. Implemented and tested offline on a branch from `1c55cf18`; independent review, merge, the migration 036 operator rollout and the hand-run picker eval are pending.
 
+> **Update, 12 November 2026:** merged as `2910171b` (PR 463) after an independent exact-head review of `dd777f7c` and green CI; migration 036 installed by `scripts/deploy-study-list.py`, the gateway was healthy at `2910171b` with the three tables present, and release run 43239335489 succeeded. The picker eval was run by hand on `dd777f7c` before the merge: 3 runs of 199 scenarios, pooled recall of needed groups 98.4% (tuning 98.2%, held-out 98.7%) against the 0.97 floor, no errors, $0.073. The three scenarios missed in every run (`jobs-8`, `lib-6`, `t-rout-1`) do not involve `links`; `links-correction` was unstable across runs. How the job itself ran is reviewed in [journal 179](179-first-full-coding-job-review.md).
+
 ## User-visible problem and preceding iteration
 
 Reported by the owner: when they shared a link and said "save this", Chief saved it to Reader, even for material they wanted to study (an X thread on agent architectures, a tutorial, a repository). Reader is for offline reading; study material had nowhere of its own. Chief should decide where a link belongs, ask only when it is really unsure (with buttons, not an open question), and keep study material in its own durable list.
