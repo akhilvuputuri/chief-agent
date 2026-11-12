@@ -263,6 +263,8 @@ test("the coding-job profile reports time, usage and tools per attempt and role 
     `Implementation: ${SECRET} failure`,
     `Requirement check 2: ${SECRET}`,
     `${SECRET} free text`,
+    "Requirement check 2: Running review",
+    `Check passed: rm -rf ${SECRET} in 1.0 s`,
     "Check failed: kite run check (exit 1) in 3.0 s",
   ].entries())
     await event(
@@ -383,8 +385,15 @@ test("the coding-job profile reports time, usage and tools per attempt and role 
     [
       "3 33333333",
       "implementing",
+      "Requirement check 2: Running review",
+      "0.0",
+    ],
+    ["3 33333333", "implementing", "Check passed: (other)", "0.0"],
+    [
+      "3 33333333",
+      "implementing",
       "Check failed: kite run check (exit 1) in 3.0 s",
-      "0.3",
+      "0.2",
     ],
   ]);
   assert.deepEqual(
@@ -521,14 +530,41 @@ test("the coding-job profile reports time, usage and tools per attempt and role 
       "runs",
       "requests",
       "answered",
+      "span_min",
       "model_wait_min",
+      "between_calls_min",
       "max_wait_s",
       "with_progress",
       "max_progress_s",
     ]).filter((r) => r[0] === "2 11111111"),
     [
-      ["2 11111111", "coder", "1", "3", "3", "4.7", "220", "1", "210"],
-      ["2 11111111", "reviewer", "1", "2", "1", "0.5", "30", "0", null],
+      // The reviewer's run spans to its unanswered second request: 40 s, 30 s of it waiting.
+      [
+        "2 11111111",
+        "coder",
+        "1",
+        "3",
+        "3",
+        "5.0",
+        "4.7",
+        "0.3",
+        "220",
+        "1",
+        "210",
+      ],
+      [
+        "2 11111111",
+        "reviewer",
+        "1",
+        "2",
+        "1",
+        "0.7",
+        "0.5",
+        "0.2",
+        "30",
+        "0",
+        null,
+      ],
     ],
   );
   assert.deepEqual(
@@ -588,6 +624,6 @@ test("the coding-job profile reports time, usage and tools per attempt and role 
   assert.equal(
     (await pg.query<any>("SELECT count(*)::int AS n FROM coding_events"))
       .rows[0].n,
-    21,
+    23,
   );
 });

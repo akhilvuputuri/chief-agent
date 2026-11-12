@@ -94,7 +94,8 @@ t AS (
     CASE WHEN marker = 'pi' THEN CASE
         WHEN payload->>'summary' ~ '^(Planning|Implementation|Review|Learning) (started|running|ready|completed|paused|failed|cancelled|waiting for your approval|needs your answer)$'
           OR payload->>'summary' = 'Plan ready for your approval' THEN payload->>'summary'
-        WHEN payload->>'summary' ~ '^Check( passed| failed)?: [a-z0-9 :._-]{1,48}( \(exit -?[0-9]+\))?( in [0-9.]+ s)?$'
+        -- The worker's four check commands (src/coding/pi-worker.ts), with exit code and duration.
+        WHEN payload->>'summary' ~ '^Check( passed| failed)?: kite (ci|run check|run build|run format:check)( \(exit -?[0-9]+\))?( in [0-9.]+ s)?$'
           THEN payload->>'summary'
         WHEN payload->>'summary' ~ '^(Planning|Implementation|Review|Learning|Requirement check [0-9]+): (Running [a-z]+|running|ready|completed|paused|failed|cancelled|waiting_approval|waiting_input|Cancelled|Requesting one structured final report|Exact plan approved; build is ready|Scope revised; new plan required)$'
           THEN payload->>'summary'
@@ -242,10 +243,12 @@ SELECT a.n || ' ' || left(r.attempt, 8) AS attempt, r.role, count(*) AS response
   max(tools) AS max, sum(tools) AS tool_calls
 FROM r JOIN att a USING (attempt) GROUP BY a.n, r.attempt, r.role ORDER BY a.n, r.role;
 
-\echo '5b. Tool names (a name outside [A-Za-z0-9._-], or longer than 40, is shown as (other))'
+\echo '5b. Tool names (a name that is not one of the Pi worker''s tools is shown as (other))'
 WITH t AS (
   SELECT attempt_id::text AS attempt, role,
-    CASE WHEN coalesce(tc->'function'->>'name', tc->>'name') ~ '^[A-Za-z0-9._-]{1,40}$'
+    -- coding_runtime_pi/src/tools.ts and documents.ts.
+    CASE WHEN coalesce(tc->'function'->>'name', tc->>'name') IN
+        ('read', 'grep', 'find', 'ls', 'edit', 'write', 'bash', 'report', 'read_document')
       THEN coalesce(tc->'function'->>'name', tc->>'name') ELSE '(other)' END AS tool
   FROM coding_model_calls, jsonb_array_elements(result->'message'->'tool_calls') AS tc
   WHERE job_id = :'profile_job'::uuid AND jsonb_typeof(result->'message'->'tool_calls') = 'array'),

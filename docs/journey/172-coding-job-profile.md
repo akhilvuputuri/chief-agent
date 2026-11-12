@@ -51,6 +51,8 @@ The existing convention for production reads is a `.sql` file run with psql in t
 
 Re-run read-only against production after the fixes: attempt 2's figures are unchanged (coder 173 calls, $19.55, 168 of 173 with one tool call, 169 `bash`: 49 `sed`, 42 `grep`, 25 `python3`, 14 `cat`), no stage summary of `9600af57` falls outside the known labels, and the running fourth attempt shows `(running)`. Attempt 2's reviewer span is 38.8 minutes instead of 38.7, because a run's span now also reaches its last unanswered request.
 
+**Update, 12 November 2026:** the delta review of `cdb115d1` approved, with three tightenings made before merge. A check line is printed only for the worker's four check commands (`kite ci`, `kite run check`, `kite run build`, `kite run format:check`, from `src/coding/pi-worker.ts`) with exit code and duration; any other becomes `Check passed: (other)` or `Check failed: (other)`. Tool names are printed only when they are one of the Pi worker's tools (`read`, `grep`, `find`, `ls`, `edit`, `write`, `bash`, `report`, `read_document`, from `coding_runtime_pi/src/tools.ts` and `documents.ts`). Tests now cover a `Requirement check N: Running review` line, a check line that falls back to `(other)`, and the run span reaching an unanswered request (a reviewer run of 40 s with 30 s of model wait); replacing `greatest` with the earlier `coalesce` fails the test. Re-run read-only against production: all eight check lines of `9600af57` and all its tool names are still printed, and attempt 2's figures are unchanged.
+
 ## Verification and outcome
 
 Tested locally and run read-only against production as above. The comparison it exists for, the first `medium`-effort job against `9600af57`, has not happened yet.
