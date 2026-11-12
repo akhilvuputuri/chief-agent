@@ -1,3 +1,9 @@
+## Worker image for the native protocol and Pi's own tools (13 November 2026)
+
+- **Configuration.** New coding jobs pin worker image `sha256:7e205748…`, built from `991004f` (run 43294388365). It carries the worker side of the native Anthropic protocol ([journal 190](journey/190-pi-native-anthropic-protocol.md)) and Pi's tools and prompt as shipped ([journal 182](journey/182-pi-tools-and-prompt-as-shipped.md)). `previousImages` is emptied: every earlier image speaks the deleted chat-completions route and cannot reach this gateway, and no coding job is open on one. No code, migration or Compose change.
+- **Why.** The gateway at `991004f` serves only the new route, so the previous pin could not run a job.
+- **Deployment.** Not yet recorded as live; a dated note follows on release.
+
 ## Coding jobs speak Pi's native Anthropic protocol (13 November 2026)
 
 - **Code.** The coding worker runs Pi's own Anthropic client against a new host route. The host adds the API key, refuses any model but the role's, sets the job's effort, caps the output allowance, records the call with its cost and relays Anthropic's response stream unchanged; Pi stores each turn and resends it exactly. Pi's stock retry handles rate limits and overloads. Deleted: the OpenAI-shaped Pi proxy with its caps of 20 tool calls per message and 12 tools, the buffered-reply recovery machinery, our per-call timers, the request size limits below Anthropic's own, and the OpenRouter fallback for coding jobs. Creating a Pi job or choosing a coding model now requires a model with a direct Anthropic route. Image reads are stock Pi. No migration or Compose change.
@@ -5,6 +11,8 @@
 - **Deployment.** Host and worker change together: the previous worker image cannot reach the new host route, so no coding job should start between this release and the pin of a worker image built from it. Not yet released.
 - **Trust boundary (review fixes, 13 November).** The host accepts only the request fields, tools (Pi's own, no server tools), automatic tool choice and beta features Pi sends, and authenticates before reading a request body. Model calls through the host retry for about four minutes, so a gateway restart during a release no longer pauses a running job. The call in flight when the gateway restarts is still billed by Anthropic but gets no usage row: it is recorded as uncertain.
 - **Operator note.** A paused Pi job pinned to an older worker image must be moved with `coding_job_update` and `upgradeWorker` before it resumes; none exists in production.
+
+> **Update, 13 November 2026:** merged as `991004f` (PR 479) at the head both independent reviewers approved; release run 43294918807 succeeded and the gateway was healthy at `991004f`. The worker image built from it is pinned by the entry above.
 
 ## Verdicts repair memory; forget by saying so (13 November 2026)
 
