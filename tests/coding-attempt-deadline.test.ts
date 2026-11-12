@@ -6,7 +6,19 @@ import { fixture, settings } from "./helpers/coding-fixture.js";
 // The controller's configuration (the fixture's settings) gives 15 minutes; each job below
 // carries its own snapshot, which is what the provisioning deadline must follow.
 const twoHourImage = `ghcr.io/akhilvuputuri/chief-agent-coding@sha256:${TWO_HOUR_BOX_IMAGES[0]}`;
-const cases = [
+const cases: {
+  name: string;
+  job: Record<string, unknown>;
+  activeMs: number;
+  config?: typeof settings;
+}[] = [
+  {
+    name: "a Pi job given less than a longer configuration",
+    // The production direction: the configuration gives 180 minutes, the job 150.
+    config: { ...settings, limits: { ...settings.limits, ms: 10_800_000 } },
+    job: { runtime: "pi", limits: { ...settings.limits, ms: 9_000_000 } },
+    activeMs: 9_000_000,
+  },
   {
     name: "a Pi job's own limit",
     job: { runtime: "pi", limits: { ...settings.limits, ms: 7_200_000 } },
@@ -27,6 +39,15 @@ const cases = [
     activeMs: 6_000_000,
   },
   {
+    name: "a Pi job under 100 minutes on an image with a two-hour box task deadline",
+    job: {
+      runtime: "pi",
+      image: twoHourImage,
+      limits: { ...settings.limits, ms: 5_400_000 },
+    },
+    activeMs: 5_400_000,
+  },
+  {
     name: "a Python job, which has no Pi ceiling",
     job: {
       runtime: "python",
@@ -36,9 +57,9 @@ const cases = [
     activeMs: 14_400_000,
   },
 ];
-for (const { name, job: changed, activeMs } of cases)
+for (const { name, job: changed, activeMs, config } of cases)
   test(`the provisioning deadline follows ${name}, not the current configuration`, async (t) => {
-    const f = await fixture(t),
+    const f = await fixture(t, config ? { settings: config } : {}),
       started = await f.start(`deadline-${activeMs}`, "plan");
     const snapshot = {
       ...settings,
