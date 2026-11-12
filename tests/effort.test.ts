@@ -654,3 +654,50 @@ test("the first decision also asks whether the message pushes back on the last r
   await picker.decide({ message: "x", previous, progress: progress() });
   assert.equal(bodies[4].questions.redirect, undefined);
 });
+
+test("a message that redirects the last answer is kept on that turn for the nightly learner", async () => {
+  const { pg, db } = await database();
+  const assistant = new Assistant(
+    db,
+    new CustomAgent({
+      generate: async () => ({
+        message: { role: "assistant", content: "It is sunny in Singapore." },
+      }),
+    }),
+    new JobTools(db, { call: async () => ({}) }),
+    { web: true },
+  );
+  const redirects = async () =>
+    (
+      await db.query(
+        "SELECT e.run_id,e.data FROM events e WHERE e.type='turn.redirect' ORDER BY e.id",
+      )
+    ).rows as Array<{ run_id: string; data: { kind: string; by: string } }>;
+  const lastRun = async () =>
+    (
+      await db.query(
+        "SELECT run_id FROM conversation_inputs WHERE user_id='owner' ORDER BY ordinal DESC LIMIT 1",
+      )
+    ).rows[0].run_id as string;
+  try {
+    await assistant.respond("owner", "What is the weather like today?");
+    const first = await lastRun();
+    // A new request says nothing against the answer before it.
+    await assistant.respond("owner", "And what about tomorrow in Penang?");
+    const second = await lastRun();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(await redirects(), []);
+    await assistant.respond("owner", "try again");
+    const third = await lastRun();
+    // The write is not awaited by the turn, which must never wait on feedback.
+    for (let i = 0; i < 50 && !(await redirects()).length; i++)
+      await new Promise((r) => setTimeout(r, 10));
+    const stored = await redirects();
+    assert.equal(stored.length, 1);
+    assert.equal(stored[0]!.run_id, second);
+    assert.deepEqual(stored[0]!.data, { kind: "retry", by: third });
+    assert.notEqual(first, second);
+  } finally {
+    await pg.close();
+  }
+});

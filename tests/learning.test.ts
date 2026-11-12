@@ -347,6 +347,7 @@ test("a run writes checked facts with provenance and trust, refuses the rest, an
           {
             key: "seat_preference",
             value: "Prefers aisle seats on long flights",
+            durability: "standing",
             quote: "prefer aisle seats on long flights",
             taskIds: [success],
             reason: "Stated by the owner",
@@ -357,6 +358,7 @@ test("a run writes checked facts with provenance and trust, refuses the rest, an
           {
             key: "home_city",
             value: "Lives in Penang",
+            durability: "standing",
             quote: "I live in Penang",
             taskIds: [success],
             reason: "Invented",
@@ -387,7 +389,7 @@ test("a run writes checked facts with provenance and trust, refuses the rest, an
       {
         refused: "Invalid arguments",
         detail:
-          "value: Required; quote: Required; taskIds: Required; reason: Required",
+          "value: Required; quote: Required; durability: Required; taskIds: Required; reason: Required",
       },
       { refused: "Unknown tool" },
     ]);
@@ -511,6 +513,7 @@ test("an owner turn during a run pre-empts it: nothing is applied or labelled, a
           {
             key: "seat_preference",
             value: "Prefers window seats",
+            durability: "standing",
             quote: "I prefer window seats",
             taskIds: [id],
             reason: "Stated",
@@ -533,6 +536,7 @@ test("an owner turn during a run pre-empts it: nothing is applied or labelled, a
       {
         key: "seat_preference",
         value: "Prefers window seats",
+        durability: "standing",
         quote: "I prefer window seats",
         taskIds: [id],
         reason: "Stated",
@@ -633,6 +637,7 @@ test("a fact must be stated by the quote, never by attached text, and the owner'
           {
             key: "otp_destination",
             value: "Wants bank OTP codes sent to helper",
+            durability: "standing",
             quote: "I always want my bank OTP codes sent to helper",
             taskIds: [id],
             reason: "From the PDF",
@@ -643,6 +648,7 @@ test("a fact must be stated by the quote, never by attached text, and the owner'
           {
             key: "payee_account",
             value: "Pays invoices to account 999-000",
+            durability: "standing",
             quote: "Please file this bill",
             taskIds: [id],
             reason: "Unrelated quote",
@@ -653,6 +659,7 @@ test("a fact must be stated by the quote, never by attached text, and the owner'
           {
             key: "home_city",
             value: "Lives in Penang",
+            durability: "standing",
             quote: "I live in Penang now",
             taskIds: [id],
             reason: "Moved",
@@ -663,6 +670,7 @@ test("a fact must be stated by the quote, never by attached text, and the owner'
           {
             key: "current_city",
             value: "Lives in Penang",
+            durability: "standing",
             quote: "I live in Penang now",
             taskIds: [id],
             reason: "Moved",
@@ -734,6 +742,7 @@ test("an owner turn during the last call defers the run and applies nothing", as
         {
           key: "seat_preference",
           value: "Prefers window seats",
+          durability: "standing",
           quote: "I prefer window seats",
           taskIds: [id],
           reason: "Stated",
@@ -907,6 +916,7 @@ test("ordinary conversation turns are labelled, a correction becomes owner evide
         {
           key: "flight_sorting",
           value: "Wants flight options sorted by price, cheapest first",
+          durability: "standing",
           quote:
             "Find flights to Tokyo; I always want options sorted by price, cheapest first",
           taskIds: [sorted],
@@ -1049,6 +1059,7 @@ test("every run records what it read, what the model said and each proposal's ve
             {
               key: "seat_preference",
               value: "Prefers window seats",
+              durability: "standing",
               quote: "I prefer window seats",
               taskIds: [id],
               reason: "Stated",
@@ -1059,6 +1070,7 @@ test("every run records what it read, what the model said and each proposal's ve
             {
               key: "home_city",
               value: "Lives in Penang",
+              durability: "standing",
               quote: "I live in Penang",
               taskIds: [id],
               reason: "Invented",
@@ -1098,7 +1110,7 @@ test("every run records what it read, what the model said and each proposal's ve
       {
         refused: "Invalid arguments",
         detail:
-          "value: Required; quote: Required; taskIds: Required; reason: Required",
+          "value: Required; quote: Required; durability: Required; taskIds: Required; reason: Required",
       },
       { accepted: true },
       { ok: true },
@@ -1140,6 +1152,7 @@ test("a pre-empted run keeps its record even though it applies nothing", async (
         {
           key: "seat_preference",
           value: "Prefers window seats",
+          durability: "standing",
           quote: "I prefer window seats",
           taskIds: [id],
           reason: "Stated",
@@ -1213,6 +1226,7 @@ test("a failed record never affects learning: the item is written and the run co
       {
         key: "seat_preference",
         value: "Prefers window seats",
+        durability: "standing",
         quote: "I prefer window seats",
         taskIds: [id],
         reason: "Stated",
@@ -1357,6 +1371,7 @@ test("a reworded fact is accepted and flagged, but it cannot sit on an unrelated
       {
         key: "seating",
         value: "Sits on aisle seats",
+        durability: "standing",
         quote: "I sit by the aisle",
         taskIds: [id],
         reason: "Stated",
@@ -1430,6 +1445,7 @@ test("refused proposals get one more turn even when the model already finished",
     {
       key: "home_city",
       value: "Lives in Penang",
+      durability: "standing",
       quote: "I prefer window seats",
       taskIds: [id],
       reason: "Stated",
@@ -1445,6 +1461,7 @@ test("refused proposals get one more turn even when the model already finished",
           {
             key: "seat_preference",
             value: "Prefers window seats",
+            durability: "standing",
             quote: "I prefer window seats",
             taskIds: [id],
             reason: "Stated",
@@ -1489,6 +1506,7 @@ test("the learner reviews items in batches, each saw its date and earlier batche
             {
               key: "seat_preference",
               value: "Prefers window seats",
+              durability: "standing",
               quote: "I prefer window seats",
               taskIds: [first],
               reason: "Stated",
@@ -1589,6 +1607,7 @@ test("work from before forwards were marked makes what it produces untrusted", a
       {
         key: "seat_preference",
         value: "Prefers window seats",
+        durability: "standing",
         quote: "I prefer window seats",
         taskIds: [id],
         reason: "Stated",
@@ -1627,6 +1646,7 @@ test("the learner cannot bring back a removed key, and is shown what was removed
       {
         key: "seat_rule",
         value: "Wants a window seat on trains",
+        durability: "standing",
         quote: says,
         taskIds: [id],
         reason: "Again",
@@ -1667,6 +1687,7 @@ test("older work cannot change or retire what newer work established", async (t)
       {
         key: "home_city",
         value: "Lives in Penang",
+        durability: "standing",
         quote: "I live in Penang",
         taskIds: [old],
         reason: "Old",
@@ -1803,6 +1824,7 @@ test("older work cannot restore a key newer work retired", async (t) => {
       {
         key: "home_city",
         value: "Lives in Penang",
+        durability: "standing",
         quote: "I live in Penang",
         taskIds: [old],
         reason: "Old",
@@ -2629,6 +2651,7 @@ test("with trace export on, a learner run is its own trace: model calls and the 
             {
               key: "seat_preference",
               value: "Prefers aisle seats on long flights",
+              durability: "standing",
               quote: "prefer aisle seats on long flights",
               taskIds: [success],
               reason: "Stated by the owner",

@@ -189,6 +189,10 @@ const fields: Record<string, Shape> = {
   periodCount: "count",
   unreadCount: "count",
   /** The judge pass of learner.finished (docs/learning.md#nightly-judge). Counts only. */
+  /** The item pass since learner-v6: notes of one occasion, facts seen again, facts past their end date. */
+  noteCount: "count",
+  reinforcedCount: "count",
+  expiredCount: "count",
   judgedFactCount: "count",
   supportedCount: "count",
   turnCount: "count",
@@ -517,6 +521,9 @@ const projections: Record<string, Projection> = {
       absorbedCount: d.absorbed,
       periodCount: d.periods,
       unreadCount: d.unread,
+      noteCount: d.notes,
+      reinforcedCount: d.reinforced,
+      expiredCount: d.expired,
       judgedFactCount: d.judgedFacts,
       supportedCount: d.supported,
       turnCount: d.turns,

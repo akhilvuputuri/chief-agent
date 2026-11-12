@@ -9,7 +9,9 @@
 
 import { z } from "zod";
 
-export const JUDGE_PROMPT_VERSION = "judge-v1";
+// judge-v2 (13 November 2026): facts carry their kind (a note of one occasion, or an end
+// date) and each message its day, and a preference seen on separate days counts as supported.
+export const JUDGE_PROMPT_VERSION = "judge-v2";
 
 export const JUDGE_LIMITS = {
   /** Learned facts checked a night; a backlog spreads over nights. */
@@ -58,7 +60,11 @@ export interface JudgeFact {
   revisionId: string;
   key: string;
   value: string;
-  messages: string[];
+  /** A note of one occasion, or the last day a time-bound fact holds; neither for a standing fact. */
+  note?: boolean;
+  until?: string;
+  /** The owner's messages it cites, each with the day of the work when that is recorded. */
+  messages: Array<{ day?: string; text: string }>;
 }
 
 /** A memory item that was in the context of at least one turn of the batch. */
@@ -107,6 +113,7 @@ facts: each is a saved fact about the owner, with the owner's message or message
 - overstated: the owner said something close, but the fact goes further. It turns a one-off request into a standing preference, widens the scope, adds a detail, or drops a condition.
 - unsupported: the messages do not say this. The words are someone else's (forwarded, quoted or pasted text), a question, a hypothetical, or about something else.
 - contradicted: the messages say the opposite.
+A fact with "note": true records one occasion, not a preference: it is supported when the owner asked or said that on that occasion, and overstated only when it words it as a habit or adds to it. A fact with "until" holds only through that day: judge also whether the owner set that limit. Any other fact claims something standing. It is supported when the owner says it generally, or when messages from separate days each show the same choice; a single request or question makes it overstated.
 
 turns: each is one conversation turn: what the owner wrote, Chief's final reply, the tools Chief called in order with whether each succeeded, and in "memories" the ids of the memory items that were in Chief's context. List only the memories that were relevant to the turn: ones that bear on this request so directly that an assistant who knew them should have acted on them here. Sharing a topic or a word is not enough. Most memories are irrelevant to most turns, and an empty list is the usual answer. For each relevant memory say how Chief used it:
 - followed: the reply or the tool calls visibly do what the memory says.
@@ -164,6 +171,8 @@ export function judgePrompt(batch: JudgeBatch) {
           facts: batch.facts.map((f) => ({
             id: f.id,
             fact: f.value,
+            ...(f.note ? { note: true } : {}),
+            ...(f.until ? { until: f.until } : {}),
             ownerMessages: f.messages,
           })),
         }
