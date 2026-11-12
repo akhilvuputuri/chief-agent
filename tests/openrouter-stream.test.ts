@@ -27,6 +27,72 @@ const chunk = (delta: unknown, finish: string | null = null) => ({
   choices: [{ index: 0, delta, finish_reason: finish }],
 });
 
+test("the complete-response policy rejects nonempty incomplete upstream choices", async () => {
+  for (const finish of [
+    "length",
+    "content_filter",
+    "error",
+    "unexpected",
+    null,
+    undefined,
+  ]) {
+    for (const message of [
+      { role: "assistant", content: "Partial prose" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "partial-report",
+            type: "function",
+            function: {
+              name: "report",
+              arguments: JSON.stringify({
+                kind: "plan",
+                summary: "Incomplete",
+                detail: "Parseable but incomplete scope",
+              }),
+            },
+          },
+        ],
+      },
+    ]) {
+      const adapter = new OpenRouter(
+        "fixture-key",
+        "fixture/model",
+        2,
+        10,
+        async (_url, options) => {
+          const body = JSON.parse(String(options?.body));
+          assert.equal(body.max_tokens, 8000);
+          assert.equal(body.requireComplete, undefined);
+          assert.deepEqual(body.provider.max_price, {
+            prompt: 2,
+            completion: 10,
+          });
+          return Response.json({
+            choices: [{ message, finish_reason: finish }],
+            usage: { cost: 0 },
+          });
+        },
+      );
+      await assert.rejects(
+        adapter.generate({
+          messages: [{ role: "user", content: "fixture" }],
+          tools: [],
+          reasoning: "high",
+          signal: new AbortController().signal,
+          requireComplete: true,
+        }),
+        (error: any) =>
+          error instanceof ModelError &&
+          error.diagnostics.failureCode === "incomplete" &&
+          error.diagnostics.finishReason === (finish ?? null),
+      );
+    }
+  }
+});
+
 test("complete-response opt-in retains clean generations and leaves ordinary nonstream behavior unchanged", async () => {
   for (const finish of ["stop", "tool_calls", "length"]) {
     const adapter = new OpenRouter(
