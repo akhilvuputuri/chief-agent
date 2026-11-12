@@ -345,15 +345,29 @@ export async function runPiWorker(
         : [];
     if (conflicts.length) {
       // A file git could not mark (a binary file, say) must not be described as marked.
+      const pattern = "'^(<{7}|>{7})( |$)'";
       const marked = await initial(
-        `grep -lE '^(<{7}|>{7})( |$)' -- ${conflicts.map(shellQuote).join(" ")}`,
+        `grep -lE ${pattern} -- ${conflicts.map(shellQuote).join(" ")}`,
         stop,
         120000,
         1_000_000,
       );
-      const withMarkers = new Set(
-        marked.exitCode === 0 ? marked.output.split("\n").filter(Boolean) : [],
-      );
+      // grep exits 1 when nothing matches and 2 when a file cannot be read; then each file
+      // is asked alone, and one that cannot be read counts as marked, so the marker scan
+      // still checks it after the coder's session.
+      const withMarkers = new Set<string>();
+      if ([0, 1].includes(marked.exitCode) && !marked.truncated)
+        for (const path of marked.output.split("\n").filter(Boolean))
+          withMarkers.add(path);
+      else
+        for (const path of conflicts) {
+          const one = await initial(
+            `grep -qE ${pattern} -- ${shellQuote(path)}`,
+            stop,
+            120000,
+          );
+          if (one.exitCode !== 1) withMarkers.add(path);
+        }
       return {
         kind: "conflict",
         conflicts: conflicts.filter((p) => withMarkers.has(p)),
@@ -399,7 +413,10 @@ export async function runPiWorker(
       {
         command: "conflict marker scan",
         exitCode: 1,
-        output: `Conflict markers remain in files git's merge left conflicted:\n${hits.slice(0, 50).join("\n")}`,
+        output: cutText(
+          `Conflict markers remain in files git's merge left conflicted:\n${hits.slice(0, 50).join("\n")}`,
+          8000,
+        ),
       },
       ...task.checks,
     ].slice(0, 4);

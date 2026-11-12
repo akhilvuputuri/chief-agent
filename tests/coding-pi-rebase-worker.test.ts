@@ -925,3 +925,43 @@ test("when main's change touches none of the change's files, the delta review re
   );
   assert.match(delta, /\+Main's unrelated change\./);
 });
+
+test("a conflict git cannot mark, such as a file main made binary, is named as unmarked and not as holding markers", async (t) => {
+  const r = await rebased(t, {
+    baseFiles: { "data.txt": "line one\nline two\n" },
+    candidateFiles: { "data.txt": "line one\nline two changed\n" },
+    moveMain: (write) => write("data.txt", "bin\0ary\n"),
+    coder: (input, call) => {
+      const read = readRequired(input);
+      if (read) return read;
+      const tools = input.messages.filter((m: any) => m.role === "tool");
+      if (!tools.some((m: any) => String(m.content).includes("Successfully")))
+        return reply(`coder-${call}`, "write", {
+          path: "data.txt",
+          content: "line one\nline two changed\n",
+        });
+      return reply(`coder-${call}`, "report", {
+        kind: "done",
+        summary: "Kept the reviewed text file",
+        detail: "Replaced main's binary data with the approved text.",
+      });
+    },
+  });
+  const conflicts = delivered(r.coderInputs[1], "rebase_conflicts");
+  assert.doesNotMatch(conflicts, /contain git's conflict markers/);
+  assert.match(
+    conflicts,
+    /These files conflict, but git could not mark them \(binary files, for example\), so they contain no markers\.[^\n]*\n- data\.txt\n/,
+  );
+  const first = JSON.stringify(r.coderInputs[0].messages);
+  assert.doesNotMatch(first, /remove every conflict marker/);
+  assert.equal(r.finished.state, "publishing");
+  assert.deepEqual(r.finished.result.checkpoint.piState.carry, {
+    kind: "conflict",
+    conflicts: [],
+    unmarked: ["data.txt"],
+  });
+  const system = systemOf(r.reviewInputs.at(-1));
+  assert(system.includes("The merge conflicted in 1 file(s)"));
+  assert(system.includes("data.txt"));
+});
