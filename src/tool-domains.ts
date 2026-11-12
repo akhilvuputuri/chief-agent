@@ -13,6 +13,7 @@ export const CORE_OPERATIONS = new Set([
   "observation_read",
   "source_read",
   "memory_set",
+  "memory_forget",
   "memory_list",
   "web_search",
   "web_read",

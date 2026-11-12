@@ -217,6 +217,11 @@ const fields: Record<string, Shape> = {
   checkModelCalls: "count",
   checkRefusedCount: "count",
   unprovenCount: "count",
+  /** The repair pass of learner.finished (docs/learning.md#nightly-repair). Counts only. */
+  candidateCount: "count",
+  narrowedCount: "count",
+  keptCount: "count",
+  untouchedCount: "count",
   disagreedCount: "count",
 };
 
@@ -563,6 +568,10 @@ const projections: Record<string, Projection> = {
       checkModelCalls: d.checkModelCalls,
       checkRefusedCount: d.checkRefused,
       unprovenCount: d.unproven,
+      candidateCount: d.candidates,
+      narrowedCount: d.narrowed,
+      keptCount: d.kept,
+      untouchedCount: d.untouched,
       disagreedCount: d.disagreed,
     },
   ],

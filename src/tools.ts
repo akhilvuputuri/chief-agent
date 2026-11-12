@@ -492,6 +492,22 @@ export class JobTools {
       });
       return { saved: true, revision: saved.revision };
     }
+    if (a.operation === "memory_forget") {
+      // A retirement by the owner: a new revision, kept in the history, and a key the
+      // learner may not propose again. Any active key, a learned procedure included.
+      const retired = await new MemoryStore(db).retire(
+        user,
+        a.key,
+        {
+          origin: "owner",
+          reason: a.reason ?? "The owner asked Chief to forget this",
+        },
+        { runId: run },
+      );
+      return retired
+        ? { forgotten: true, key: a.key }
+        : { forgotten: false, reason: "No memory is saved under that key" };
+    }
     // Handled by the agent loop; it never reaches the domain dispatcher.
     if (a.operation === "tools_load") throw new Error("Operation unavailable");
     if (a.operation === "public_browser") {

@@ -333,10 +333,11 @@ export function shownInTurn(turn: JudgeTurn, evidence: string) {
   const quote = plain(evidence);
   if (turn.calls.some((c) => plain(c.call) === quote)) return true;
   if (quote.replace(/ /g, "").length < EVIDENCE_MIN) return false;
+  // Whole words: "nt the wee" is in "sent the weekly report" and quotes nothing.
   return [
     turn.reply,
     ...turn.calls.flatMap((c) => [c.input ?? "", c.result ?? ""]),
-  ].some((text) => plain(text).includes(quote));
+  ].some((text) => ` ${plain(text)} `.includes(` ${quote} `));
 }
 
 /**

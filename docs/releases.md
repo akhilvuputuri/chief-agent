@@ -1,3 +1,9 @@
+## Verdicts repair memory; forget by saying so (13 November 2026)
+
+- **Code.** A fourth nightly pass, the repair (`repair-v1`): learned facts the judge found overstated are rewritten to say only what the owner said, usually as a note of one occasion, and unsupported or contradicted ones may be retired. It runs only while the judge's record against planted errors passes a gate (at least 8 broken copies and 8 controls in 14 days, 75% caught, at most 25% of controls faulted), on at most 5 facts a night, as revisions of one learner run that a rollback undoes. Chief gains `memory_forget` and is told to correct or forget a memory in the same turn when the owner says it is wrong. `scripts/memory-ledger.sql` ranks learned memory for pruning. Evidence quotes must match whole words. No database or Compose change.
+- **Why.** The 12 facts the judge found overstated were still in every turn, nothing read a verdict, and the owner could change memory only through a coding session. Owner approval to build it: 13 November. See [journal 185](journey/185-verdicts-repair-memory.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## The memory judge checks itself (13 November 2026)
 
 - **Code.** Judge prompt `judge-v3`. A judged turn shows each call's input and result cut short, the exchange before it and the owner's next message. `followed` and `contradicted` need a quote the host can find in the turn. Memories are shuffled, with one planted decoy per batch. A turn lists what the owner had to tell Chief again. After the night's verdicts, the host plants broken copies of supported facts to see whether the judge catches them, and judges a few items again twice with the same model; the facts among them go once to a second model. None of it changes memory or a recorded verdict. No database or Compose change.

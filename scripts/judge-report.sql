@@ -24,6 +24,8 @@ WHERE v.verdict<>'supported' ORDER BY v.verdict, v.key;
 -- 3. Each memory key: judged turns it was in the context of, how often it was relevant,
 -- and how it was used then. A key never relevant is a candidate for pruning, or for leaving
 -- out of turns it does not concern.
+-- claimed_contradicted counts the times the judge said Chief acted against the item but
+-- gave no quote the host could find, so it was recorded as unclear.
 WITH turns AS (
   SELECT DISTINCT ON (data->>'turnRunId') data FROM events
   WHERE type='judge.turn' AND data->>'state'='judged'
@@ -38,12 +40,14 @@ used AS (
     count(*) FILTER (WHERE u->>'use'='followed') AS followed,
     count(*) FILTER (WHERE u->>'use'='ignored') AS ignored,
     count(*) FILTER (WHERE u->>'use'='contradicted') AS contradicted,
-    count(*) FILTER (WHERE u->>'use'='unclear') AS unclear
+    count(*) FILTER (WHERE u->>'use'='unclear') AS unclear,
+    count(*) FILTER (WHERE u->>'claimed'='contradicted') AS claimed_contradicted
   FROM turns t CROSS JOIN LATERAL jsonb_array_elements(t.data->'relevant') AS u
   GROUP BY u->>'key')
 SELECT 'use' AS row, c.key, c.in_context, coalesce(u.relevant,0) AS relevant,
   coalesce(u.followed,0) AS followed, coalesce(u.ignored,0) AS ignored,
-  coalesce(u.contradicted,0) AS contradicted, coalesce(u.unclear,0) AS unclear
+  coalesce(u.contradicted,0) AS contradicted, coalesce(u.unclear,0) AS unclear,
+  coalesce(u.claimed_contradicted,0) AS claimed_contradicted
 FROM context c LEFT JOIN used u ON u.key=c.key
 ORDER BY coalesce(u.relevant,0) DESC, c.key;
 

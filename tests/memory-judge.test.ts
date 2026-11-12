@@ -595,8 +595,9 @@ test("the judge checks a new fact against the message it cites, and a turn again
     ["facts", "overstated", "1"],
     ["fact", "gym", "no_source", "null"],
     ["fact", "seat", "overstated", "A one-off request for this trip"],
-    ["use", "seat", "2", "1", "0", "0", "1", "0"],
-    ["use", "home", "2", "0", "0", "0", "0", "0"],
+    // The last column counts claims of "contradicted" the host found no proof of.
+    ["use", "seat", "2", "1", "0", "0", "1", "0", "0"],
+    ["use", "home", "2", "0", "0", "0", "0", "0", "0"],
     // Two judged turns carried the planted memory, and it was never called relevant.
     ["decoy", "2", "0"],
   ]);
