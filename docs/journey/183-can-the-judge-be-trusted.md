@@ -69,6 +69,8 @@ The counts will be small: up to four bases a night and six items judged again.
 
 Not released. Pending: independent review, merge, the automatic release, and the first nights.
 
+> **Update, 13 November 2026:** [PR 475](https://github.com/akhilvuputuri/chief-agent/pull/475) merged at the approved head `8934f151` as `8127632`, after CI passed. The independent review approved `d4afd0f1`, then confirmed the merge of main at `8934f151` changed nothing of this PR. Release run 43272924532 finished at 01:47 SGT on 13 November; the gateway reported `RELEASE_SHA` `8127632`, healthy, with no error lines in its first minutes, and `judgeSecondRoute` `openrouter` at startup. Still pending: the first nights, and a read of the probe, decoy and repeat counts. The review left low notes for the next batch: evidence matches fragments of words, and an unproven "contradicted" shows in the report only as `unclear`.
+
 ## Follow-up and next iteration
 
 - Read a week of probe, decoy and repeat counts before deciding whether verdicts may narrow overstated facts (batch 3, the owner's decision).
