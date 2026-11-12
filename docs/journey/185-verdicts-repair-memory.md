@@ -61,6 +61,8 @@ Tested only. A scripted model shows the plumbing and the host's checks, not what
 
 Not released. Pending: independent review, merge, the automatic release, and the first nights.
 
+> **Update, 13 November 2026:** [PR 478](https://github.com/akhilvuputuri/chief-agent/pull/478) merged at the approved head `1b900ea2` as `a869463`, after CI passed. The independent review approved `c292d5e7`, then the merge of main and the context-fixture change at `9d57b767`, then the prompt wording at `1b900ea2`. Release run 43280621237 finished at 02:32 SGT on 13 November; the gateway reported `RELEASE_SHA` `a869463`, healthy, with no error lines in its first minutes. Still pending: the gate opening, the repair's first night, and whether Chief uses `memory_forget` only when the owner asks.
+
 ## Follow-up and next iteration
 
 - The repair's model and the judge are the same model, so a rewrite may simply match the judge's taste. The planted errors and the second model's cross-check on facts are the only outside checks.

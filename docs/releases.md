@@ -4,6 +4,8 @@
 - **Why.** The 12 facts the judge found overstated were still in every turn, nothing read a verdict, and the owner could change memory only through a coding session. Owner approval to build it: 13 November. See [journal 185](journey/185-verdicts-repair-memory.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
 
+> **Update, 13 November 2026:** merged as `a869463` (PR 478) at the head the independent review approved (`1b900ea2`, after one round of requested changes and a CI failure, both recorded in journal 185). Live from 02:32 SGT on 13 November by release run 43280621237; the gateway reported `a869463`, healthy, with no error lines in its first minutes. The repair cannot run until the current judge prompt has a planted-error record that passes the gate, so not before its second night.
+
 ## The memory judge checks itself (13 November 2026)
 
 - **Code.** Judge prompt `judge-v3`. A judged turn shows each call's input and result cut short, the exchange before it and the owner's next message. `followed` and `contradicted` need a quote the host can find in the turn. Memories are shuffled, with one planted decoy per batch. A turn lists what the owner had to tell Chief again. After the night's verdicts, the host plants broken copies of supported facts to see whether the judge catches them, and judges a few items again twice with the same model; the facts among them go once to a second model. None of it changes memory or a recorded verdict. No database or Compose change.
