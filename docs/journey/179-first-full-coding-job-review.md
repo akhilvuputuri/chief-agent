@@ -87,6 +87,8 @@ Alternatives considered: a lower context window (rejected, see plan item 4); dro
 
 ## Plan
 
+> **Update, 13 November 2026 (owner review):** the owner judged several of the prepared fixes below to treat symptoms, and they were looked at again from scratch. PR 469 kept the "main moved" trigger and only made the reaction cheaper; PR 465 re-added by hand the tool rules lost by replacing Pi's prompt and added a hard failure over 20 tool calls; PR 464 capped jobs on worker images that no open job uses; PR 466 stored thinking summaries in the proxy format that is being replaced. All four were closed. The plan now is the one in [the loop design](../coding-simple-loop.md) (PR 468): main moving is not an event, Pi runs as shipped, one session per job, the listed limits removed. PRs 462 and 467 stay. The list below is the 12 November record.
+
 **Already built, awaiting release (no coding job is open):**
 
 - PR 469: carry the reviewed change onto new main with `git apply --3way` and re-review only the difference. Would have avoided most of the $68.
