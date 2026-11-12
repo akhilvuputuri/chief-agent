@@ -59,4 +59,15 @@ Not released. The worker image must be rebuilt and pinned with this runtime, and
 
 - The profile script (`scripts/coding-job-profile.sql` on `origin/coding-job-profile`) reads `result->'message'->'tool_calls'`; it needs `result->'content'` with `tool_use` blocks. The orchestrator will update it.
 - The manual acceptance kits (`scripts/pi-acceptance/`, `scripts/fixtures/pi-report-proxy.mjs`) still describe the OpenRouter route and the terminal-recovery probe; they need porting or retiring.
+
+> **Update, 13 November 2026:** retired. The runner, broker, provider helper and report proxy and their tests are deleted; the workload manifest, oracle template, `prepare-oracle.mjs`, `metrics.mjs` (its test passes) and recorded results are kept unchanged ([verification contract](../pi-runtime-verification.md)).
+
 - Measure on the first job: cache reads per call, cost per role and whether `thinking_dropped` stays at zero.
+
+## Update, 13 November 2026: after rebasing onto `81276321`
+
+Rebased onto main with builder C's piece ([journal 182](182-pi-tools-and-prompt-as-shipped.md)); there were no conflicts.
+
+- **Retry, tested.** The question was whether `runtime.ts`, which ends the agent loop on an error turn, stops Pi's stock retry. Measured with a throwaway probe against a fake Messages API: a 429 with `retry-after: 1` on the second request was resent and the plan finished (`waiting_approval`, three requests); a 529 on every later request was resent three times (Pi's default) and then paused the task after about 14 seconds. Ending the loop run does not pre-empt the retry, because Pi's session retries after the agent run ends, so no code change was needed beyond correcting the comment there. A permanent test now runs a real Pi session through the host route with a 429 then success: the retry carries the same messages, the session continues, and the calls are recorded `complete`, `uncertain`, `complete` with one `model_rate_limited` (429) rejection.
+- **Images.** `images: { blockImages: true }` (in `runtime.ts`) and `autoResizeImages: false` (in `tools.ts`) existed only because the OpenAI-shaped proxy could not carry images; both are removed, so image reads are Pi's defaults. Tested through the host: a PNG read by the model reaches the fake API as a base64 `image` block in the `tool_result`. Not tested: Pi's image resizing (it runs in a worker thread) inside the real sandbox under the process guard.
+- **The test not counted as a pass** is `tests/box-docker.test.ts`, skipped unless `CHIEF_BOX_DOCKER_IMAGE` is set; it is skipped on main too.
