@@ -121,11 +121,11 @@ GitHub reports step times to the second; after the switch each step started and 
 
 **Reviewer's check.** The reviewer built both projects with `tsc` and with `kite run build` and found the same 250 files with no syntax-tree difference. It confirmed from Kite's v0.1.3 source that `kite build` there is an unknown command.
 
-**Corrections to the Build switch section,** from the same review:
+**Corrections to the Build switch section and its release record,** from the same review:
 
 - esbuild 0.28.2 stays in the image's production `node_modules`, as a dependency of `@earendil-works/chord`; it is not only tsx that brings it. Only Chief's own use of it is gone.
-- "Every coding job spent about 20 s" is an estimate from the CI jobs. A coding job's own build time was not measured.
+- The release record said "every coding job spent about 20 s". That is an estimate from the CI jobs; a coding job's own build time was not measured.
 
 **Still not tested:** a coding job on the new worker image.
 
-**Kite follow-up.** A peer session once saw `kite ci` fail with "Directory not empty" when Finder wrote `.DS_Store` into `node_modules` during removal. Kite now tries such a removal up to five times ([PR 14](https://github.com/akhilvuputuri/kite/pull/14), merged as `9cdba4d`, not yet released). Its reviewer reproduced the race on macOS: 47 of 50 plain removals failed and 50 of 50 succeeded with the retry.
+**Kite follow-up.** A peer session once saw `kite ci` fail with "Directory not empty" when Finder wrote `.DS_Store` into `node_modules` during removal. Kite now tries such a removal up to five times ([PR 14](https://github.com/akhilvuputuri/kite/pull/14), merged as `9cdba4d`, not yet released). Its reviewer, in a local session whose figures are not on the pull request, reported reproducing the race on macOS with a test program: 47 of 50 plain removals failed and 50 of 50 succeeded with the retry.
