@@ -4,7 +4,8 @@ import { test } from "node:test";
 import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
 
 // scripts/coding-job-profile.sql is run with psql against production. Here its SQL runs
-// against the migrated schema: psql meta-commands are dropped, the variables are filled in,
+// against the migrated schema: psql meta-commands are dropped, the variables are filled in
+// (quoted as psql's :'name' quotes them),
 // and each statement's rows are kept under the section number its \echo heading gives.
 async function profileStatements(job: string, prefix: string) {
   const text = await readFile("scripts/coding-job-profile.sql", "utf8");
@@ -22,7 +23,7 @@ async function profileStatements(job: string, prefix: string) {
         section,
         sql: buffer
           .replaceAll(":'profile_job'", `'${job}'`)
-          .replaceAll(":'job'", `'${prefix}'`),
+          .replaceAll(":'job'", `'${prefix.replaceAll("'", "''")}'`),
       });
       buffer = "";
     }
@@ -36,6 +37,7 @@ const JOB = "9600af57-0000-4000-8000-000000000001";
 const OTHER = "9600af58-0000-4000-8000-000000000002";
 const PLAN = "22222222-2222-4222-8222-222222222222";
 const BUILD = "11111111-1111-4111-8111-111111111111";
+const RUN = "33333333-3333-4333-8333-333333333333";
 const T0 = Date.parse("2026-11-12T01:00:00Z");
 const at = (seconds: number) => new Date(T0 + seconds * 1000).toISOString();
 
@@ -72,6 +74,10 @@ function bash(command: string) {
     type: "function",
     function: { name: "bash", arguments: JSON.stringify({ command }) },
   };
+}
+
+function tool(name: string, args: unknown) {
+  return { id: "t", type: "function", function: { name, arguments: args } };
 }
 
 test("the coding-job profile reports time, usage and tools per attempt and role without printing contents", async (t) => {
@@ -246,9 +252,72 @@ test("the coding-job profile reports time, usage and tools per attempt and role 
   );
   await event(`${BUILD}:paused`, { summary: SECRET }, 601);
 
-  const ambiguous = await profileStatements(JOB, "9600af5");
-  const found = ambiguous.find((s) => s.sql.includes("profile_found"))!;
-  assert.equal((await pg.query<any>(found.sql)).rows[0].profile_found, false);
+  // The running attempt: no end marker yet, free-text summaries, odd tool arguments and
+  // usage values that are not numbers.
+  await pg.query(
+    "UPDATE coding_jobs SET state='running',stage='implementing',attempt_id=$2 WHERE id=$1",
+    [JOB, RUN],
+  );
+  for (const [n, summary] of [
+    "Implementation started",
+    `Implementation: ${SECRET} failure`,
+    `Requirement check 2: ${SECRET}`,
+    `${SECRET} free text`,
+    "Check failed: kite run check (exit 1) in 3.0 s",
+  ].entries())
+    await event(
+      `${RUN}:pi:r:${n}`,
+      { stage: "implementing", summary },
+      1000 + n,
+    );
+  const odd = await request(
+    RUN,
+    "coder",
+    1010,
+    answer([
+      tool("bash", "not json {"),
+      tool("bash", { command: "/usr/bin/git status" }),
+      bash("./scripts/acme-private-deploy.sh --go"),
+      bash("ab12cd34ef56gh78 run"),
+      bash("sk-ant+abc run"),
+      bash("cd /x\nsed -n 1p f && ls"),
+      tool("bad name!", "{}"),
+    ]),
+  );
+  await event(
+    `${RUN}:model-progress:1`,
+    { kind: "model_progress", role: "coder", callId: odd, elapsedMs: "soon" },
+    1015,
+  );
+  await event(
+    `${RUN}:model:1`,
+    {
+      kind: "model_usage",
+      role: "coder",
+      model: "anthropic/claude-opus-5.5",
+      usage: {
+        cost: "n/a",
+        route: "anthropic-direct",
+        prompt_tokens: "x",
+        completion_tokens: 10,
+        completion_tokens_details: { reasoning_tokens: 5 },
+      },
+    },
+    1020,
+  );
+
+  for (const [prefix, none] of [
+    ["9600af5", false],
+    ["ffffffff", true],
+    ["9600af57' OR true --", true],
+  ] as const) {
+    const found = (await profileStatements(JOB, prefix)).find((s) =>
+      s.sql.includes("profile_found"),
+    )!;
+    const match = (await pg.query<any>(found.sql)).rows[0];
+    assert.equal(match.profile_found, false, prefix);
+    assert.equal(match.profile_none, none, prefix);
+  }
 
   const rows: Record<string, any[]> = {};
   for (const { section, sql } of await profileStatements(JOB, "9600af57")) {
@@ -278,7 +347,7 @@ test("the coding-job profile reports time, usage and tools per attempt and role 
       "image_tail",
       "current_attempt",
     ]),
-    [["9600af57", "paused", "medium", "180", "59701d7620ef", "11111111"]],
+    [["9600af57", "running", "medium", "180", "59701d7620ef", "33333333"]],
   );
   assert.deepEqual(
     pick("2", ["attempt", "wall_min", "ended", "rejected", "model_requests"]),
@@ -291,6 +360,7 @@ test("the coding-job profile reports time, usage and tools per attempt and role 
         "gateway_restart x1",
         "coder 3, reviewer 2 (1 not complete)",
       ],
+      ["3 33333333", "0.3", "(running)", null, "coder 1"],
     ],
   );
   assert.deepEqual(pick("2b", ["attempt", "what", "detail", "min_to_next"]), [
@@ -306,6 +376,16 @@ test("the coding-job profile reports time, usage and tools per attempt and role 
     ["2 11111111", "reviewing", "Review started", "1.7"],
     ["2 11111111", "rejected", "model gateway_restart", "0.0"],
     ["2 11111111", "paused", null, "0.0"],
+    ["3 33333333", "implementing", "Implementation started", "0.0"],
+    ["3 33333333", "implementing", "Implementation: (other)", "0.0"],
+    ["3 33333333", "implementing", "Requirement check 2: (other)", "0.0"],
+    ["3 33333333", "implementing", "(other)", "0.0"],
+    [
+      "3 33333333",
+      "implementing",
+      "Check failed: kite run check (exit 1) in 3.0 s",
+      "0.3",
+    ],
   ]);
   assert.deepEqual(
     pick("3", [
@@ -358,14 +438,26 @@ test("the coding-job profile reports time, usage and tools per attempt and role 
         "anthropic-direct",
       ],
       [
+        "3 33333333",
+        "coder",
+        "1",
+        "0.00",
+        "0",
+        "0",
+        "10",
+        "5",
+        "50",
+        "anthropic-direct",
+      ],
+      [
         "all",
         "coder",
-        "3",
+        "4",
         "0.60",
         "6000",
         "5700",
-        "600",
-        "500",
+        "610",
+        "505",
         "83",
         "anthropic-direct",
       ],
@@ -396,13 +488,13 @@ test("the coding-job profile reports time, usage and tools per attempt and role 
       [
         "all",
         "all",
-        "5",
+        "6",
         "1.15",
         "11500",
         "11000",
-        "700",
-        "565",
-        "81",
+        "710",
+        "570",
+        "80",
         "anthropic-direct",
       ],
     ],
@@ -445,16 +537,24 @@ test("the coding-job profile reports time, usage and tools per attempt and role 
       ["1 22222222", "leader", "1", "0", "1", "0", "0"],
       ["2 11111111", "coder", "3", "0", "2", "1", "0"],
       ["2 11111111", "reviewer", "1", "1", "0", "0", "0"],
+      ["3 33333333", "coder", "1", "0", "0", "0", "1"],
     ],
   );
   assert.deepEqual(pick("5b", ["attempt", "role", "by_name"]), [
     ["1 22222222", "leader", "read 1"],
     ["2 11111111", "coder", "bash 3, read 1"],
+    ["3 33333333", "coder", "bash 6, (other) 1"],
   ]);
-  assert.deepEqual(pick("5c", ["attempt", "role", "first_word", "calls"]), [
+  // A program is shown without its directory; a path-like script name, a token-like word
+  // and anything outside the allowed characters are grouped. A cd prefix ends at a newline.
+  assert.deepEqual(pick("5c", ["attempt", "role", "program", "calls"]), [
     ["2 11111111", "coder", "(assignment)", "1"],
     ["2 11111111", "coder", "grep", "1"],
     ["2 11111111", "coder", "sed", "1"],
+    ["3 33333333", "coder", "(other)", "3"],
+    ["3 33333333", "coder", "(none)", "1"],
+    ["3 33333333", "coder", "cd", "1"],
+    ["3 33333333", "coder", "git", "1"],
   ]);
   assert.deepEqual(
     pick("6", [
@@ -478,15 +578,16 @@ test("the coding-job profile reports time, usage and tools per attempt and role 
         String(`${SECRET} summary`.length),
       ],
       ["2 11111111", "reviewer", "1", "0", "0", "0", "0"],
+      ["3 33333333", "coder", "1", "0", "0", "0", "0"],
     ],
   );
-  // Prompts, replies, tool arguments, thinking text, objectives and summaries outside the
-  // worker's fixed progress labels never reach the output.
+  // Prompts, replies, tool arguments, thinking text, objectives, end-of-attempt summaries and
+  // free text in stage summaries never reach the output.
   assert.doesNotMatch(JSON.stringify(rows), new RegExp(SECRET));
   // Read-only: nothing was written.
   assert.equal(
     (await pg.query<any>("SELECT count(*)::int AS n FROM coding_events"))
       .rows[0].n,
-    14,
+    21,
   );
 });

@@ -1,8 +1,9 @@
 -- Where one coding job's time and money went, per attempt and role: phases, model usage,
--- latency, tool use and thinking summaries (docs/coding.md#profiling-a-job, journal 172).
--- Read-only: SELECTs inside a read-only transaction. It prints counts, token sums, costs,
--- durations, fixed stage labels and a bash command's first word; never prompts, message
--- text, other tool arguments, thinking text, secrets or the environment.
+-- latency, tool use and thinking summaries (docs/coding.md#profiling-a-job--12-november-2026,
+-- journal 172). Read-only: SELECTs inside a read-only transaction with short timeouts. It
+-- prints counts, token sums, costs, durations, known stage labels, tool names and a bash
+-- command's name; anything else in those places is shown as "(other)". It never prints
+-- prompts, message text, tool arguments, thinking text, secrets or the environment.
 --
 --   ssh chief-prod 'sudo docker exec -i hermes-companion-postgres-1 sh -c "psql -X -v job=9600af57 -U \$POSTGRES_USER -d \$POSTGRES_DB"' < scripts/coding-job-profile.sql
 --
@@ -18,10 +19,17 @@
 \quit
 \endif
 BEGIN READ ONLY;
-SELECT count(*) = 1 AND :'job' ~ '^[0-9a-f-]{4,36}$' AS profile_found, min(id::text) AS profile_job FROM coding_jobs WHERE id::text LIKE :'job' || '%' \gset
+-- coding_model_calls has no job_id index: give up rather than hold up a migration.
+SET LOCAL statement_timeout = '60s';
+SET LOCAL lock_timeout = '2s';
+SELECT count(*) = 1 AS profile_found, count(*) = 0 AS profile_none, min(id::text) AS profile_job FROM coding_jobs
+  WHERE :'job' ~ '^[0-9a-f-]{4,36}$' AND id::text LIKE :'job' || '%' \gset
 \if :profile_found
+\elif :profile_none
+\echo 'No coding job matches that id prefix.'
+\quit
 \else
-\echo 'No single coding job matches that id prefix.'
+\echo 'Several coding jobs match that id prefix; give a longer one.'
 \quit
 \endif
 
@@ -32,7 +40,7 @@ SELECT left(id::text, 8) AS job, state, stage, revision, mode,
   settings->>'runtime' AS runtime, settings->>'effort' AS effort,
   settings->>'leaderModel' AS leader_model, settings->>'model' AS coder_model,
   settings->>'reviewerModel' AS reviewer_model,
-  round((settings->'limits'->>'ms')::numeric / 60000) AS limit_minutes,
+  round(CASE WHEN jsonb_typeof(settings->'limits'->'ms') = 'number' THEN (settings->'limits'->'ms')::numeric END / 60000) AS limit_minutes,
   settings->'limits'->>'models' AS limit_model_calls, settings->'limits'->>'tools' AS limit_tool_calls,
   settings->>'maxOutputTokens' AS max_output_tokens,
   settings->>'reviewerMaxOutputTokens' AS reviewer_max_output_tokens,
@@ -56,9 +64,10 @@ SELECT a.n || ' ' || left(a.attempt, 8) AS attempt,
   to_char(a.started AT TIME ZONE 'UTC', 'MM-DD HH24:MI:SS') AS started_utc,
   to_char(a.last_activity AT TIME ZONE 'UTC', 'MM-DD HH24:MI:SS') AS last_utc,
   round(extract(epoch FROM a.last_activity - a.started) / 60, 1) AS wall_min,
-  (SELECT string_agg(marker, ',' ORDER BY created_at) FROM e
-    WHERE e.attempt = a.attempt AND marker IN ('finished', 'paused', 'pr', 'cancelled'))
-    || CASE WHEN j.attempt_id::text = a.attempt AND j.state IN ('provisioning', 'running') THEN ' (running)' ELSE '' END AS ended,
+  nullif(concat_ws(' ',
+    (SELECT string_agg(marker, ',' ORDER BY created_at) FROM e
+      WHERE e.attempt = a.attempt AND marker IN ('finished', 'paused', 'pr', 'cancelled')),
+    CASE WHEN j.attempt_id::text = a.attempt AND j.state IN ('provisioning', 'running') THEN '(running)' END), '') AS ended,
   (SELECT string_agg(code || ' x' || n, ', ' ORDER BY code) FROM (
     SELECT coalesce(payload->>'code', '?') AS code, count(*) AS n FROM e
     WHERE e.attempt = a.attempt AND payload->>'kind' = 'worker_request_rejected' GROUP BY 1) r) AS rejected,
@@ -79,8 +88,19 @@ t AS (
   SELECT attempt, created_at,
     CASE WHEN marker = 'pi' THEN coalesce(payload->>'stage', '')
       WHEN payload->>'kind' = 'worker_request_rejected' THEN 'rejected' ELSE marker END AS what,
-    -- Stage summaries are the worker's fixed progress labels (src/coding/progress-text.ts).
-    CASE WHEN marker = 'pi' THEN left(payload->>'summary', 60)
+    -- A stage summary is shown only when it is one of the known progress labels
+    -- (src/coding/progress-text.ts, src/coding/pi-worker.ts); a failure can carry free text
+    -- (an error message), so anything else keeps only a known prefix, or none.
+    CASE WHEN marker = 'pi' THEN CASE
+        WHEN payload->>'summary' ~ '^(Planning|Implementation|Review|Learning) (started|running|ready|completed|paused|failed|cancelled|waiting for your approval|needs your answer)$'
+          OR payload->>'summary' = 'Plan ready for your approval' THEN payload->>'summary'
+        WHEN payload->>'summary' ~ '^Check( passed| failed)?: [a-z0-9 :._-]{1,48}( \(exit -?[0-9]+\))?( in [0-9.]+ s)?$'
+          THEN payload->>'summary'
+        WHEN payload->>'summary' ~ '^(Planning|Implementation|Review|Learning|Requirement check [0-9]+): (Running [a-z]+|running|ready|completed|paused|failed|cancelled|waiting_approval|waiting_input|Cancelled|Requesting one structured final report|Exact plan approved; build is ready|Scope revised; new plan required)$'
+          THEN payload->>'summary'
+        WHEN payload->>'summary' ~ '^(Planning|Implementation|Review|Learning|Requirement check [0-9]+|Check passed|Check failed|Check): '
+          THEN substring(payload->>'summary' FROM '^([^:]+): ') || ': (other)'
+        ELSE '(other)' END
       WHEN payload->>'kind' = 'worker_request_rejected'
         THEN concat_ws(' ', payload->>'phase', payload->>'code', payload->>'timeoutKind')
       WHEN marker = 'paused' THEN payload->>'cause' END AS detail
@@ -95,13 +115,17 @@ ORDER BY t.created_at;
 \echo '3. Model usage (model_usage events): thinking_pct is reasoning of completion tokens, cached_pct cache reads of prompt tokens'
 WITH u AS (
   SELECT split_part(event_key, ':', 1) AS attempt, coalesce(payload->>'role', '?') AS role, payload->>'model' AS model,
-    coalesce((payload->>'incomplete')::boolean, false) AS incomplete, payload->'usage'->>'route' AS route,
-    coalesce((payload->'usage'->>'cost')::numeric, 0) AS cost,
-    coalesce((payload->'usage'->>'prompt_tokens')::bigint, 0) AS prompt,
-    coalesce((payload->'usage'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0) AS cached,
-    coalesce((payload->'usage'->'prompt_tokens_details'->>'cache_write_tokens')::bigint, 0) AS cache_write,
-    coalesce((payload->'usage'->>'completion_tokens')::bigint, 0) AS completion,
-    coalesce((payload->'usage'->'completion_tokens_details'->>'reasoning_tokens')::bigint, 0) AS reasoning
+    payload->'incomplete' = 'true'::jsonb AS incomplete, left(payload->'usage'->>'route', 40) AS route,
+    -- A value that is not a JSON number counts as 0 rather than stopping the report.
+    CASE WHEN jsonb_typeof(payload->'usage'->'cost') = 'number' THEN (payload->'usage'->'cost')::numeric ELSE 0 END AS cost,
+    CASE WHEN jsonb_typeof(payload->'usage'->'prompt_tokens') = 'number' THEN (payload->'usage'->'prompt_tokens')::numeric ELSE 0 END AS prompt,
+    CASE WHEN jsonb_typeof(payload->'usage'->'prompt_tokens_details'->'cached_tokens') = 'number'
+      THEN (payload->'usage'->'prompt_tokens_details'->'cached_tokens')::numeric ELSE 0 END AS cached,
+    CASE WHEN jsonb_typeof(payload->'usage'->'prompt_tokens_details'->'cache_write_tokens') = 'number'
+      THEN (payload->'usage'->'prompt_tokens_details'->'cache_write_tokens')::numeric ELSE 0 END AS cache_write,
+    CASE WHEN jsonb_typeof(payload->'usage'->'completion_tokens') = 'number' THEN (payload->'usage'->'completion_tokens')::numeric ELSE 0 END AS completion,
+    CASE WHEN jsonb_typeof(payload->'usage'->'completion_tokens_details'->'reasoning_tokens') = 'number'
+      THEN (payload->'usage'->'completion_tokens_details'->'reasoning_tokens')::numeric ELSE 0 END AS reasoning
   FROM coding_events WHERE job_id = :'profile_job'::uuid AND payload->>'kind' = 'model_usage'),
 att AS (
   SELECT attempt, row_number() OVER (ORDER BY min(created_at)) AS n FROM (
@@ -132,8 +156,9 @@ c AS (SELECT *, sum(change) OVER (PARTITION BY attempt ORDER BY created_at, id R
 runs AS (SELECT attempt, run, min(created_at) AS first_request FROM c GROUP BY 1, 2),
 u AS (
   SELECT split_part(event_key, ':', 1) AS attempt, coalesce(payload->>'role', '?') AS role, created_at,
-    coalesce((payload->'usage'->>'completion_tokens')::bigint, 0) AS completion,
-    coalesce((payload->'usage'->'completion_tokens_details'->>'reasoning_tokens')::bigint, 0) AS reasoning
+    CASE WHEN jsonb_typeof(payload->'usage'->'completion_tokens') = 'number' THEN (payload->'usage'->'completion_tokens')::numeric ELSE 0 END AS completion,
+    CASE WHEN jsonb_typeof(payload->'usage'->'completion_tokens_details'->'reasoning_tokens') = 'number'
+      THEN (payload->'usage'->'completion_tokens_details'->'reasoning_tokens')::numeric ELSE 0 END AS reasoning
   FROM coding_events WHERE job_id = :'profile_job'::uuid AND payload->>'kind' = 'model_usage'),
 ur AS (
   SELECT u.*, (SELECT c.run FROM c WHERE c.attempt = u.attempt AND c.role = u.role AND c.created_at <= u.created_at
@@ -172,8 +197,9 @@ u AS (
   SELECT split_part(event_key, ':', 1) AS attempt, payload->>'role' AS role, created_at
   FROM coding_events WHERE job_id = :'profile_job'::uuid AND payload->>'kind' = 'model_usage'),
 p AS (
-  SELECT payload->>'callId' AS call_id, max((payload->>'elapsedMs')::bigint) AS elapsed_ms
-  FROM coding_events WHERE job_id = :'profile_job'::uuid AND payload->>'kind' = 'model_progress' GROUP BY 1),
+  SELECT payload->>'callId' AS call_id, max((payload->'elapsedMs')::numeric) AS elapsed_ms
+  FROM coding_events WHERE job_id = :'profile_job'::uuid AND payload->>'kind' = 'model_progress'
+    AND jsonb_typeof(payload->'elapsedMs') = 'number' GROUP BY 1),
 w AS (
   SELECT c.attempt, c.role, c.run, c.created_at,
     (SELECT min(u.created_at) FROM u WHERE u.attempt = c.attempt AND u.role = c.role
@@ -181,7 +207,7 @@ w AS (
     p.elapsed_ms
   FROM c LEFT JOIN p ON p.call_id = c.id::text),
 r AS (
-  SELECT attempt, role, run, extract(epoch FROM coalesce(max(answered_at), max(created_at)) - min(created_at)) AS span
+  SELECT attempt, role, run, extract(epoch FROM greatest(max(answered_at), max(created_at)) - min(created_at)) AS span
   FROM w GROUP BY 1, 2, 3),
 rs AS (SELECT attempt, role, count(*) AS runs, sum(span) AS span FROM r GROUP BY 1, 2),
 att AS (
@@ -216,9 +242,11 @@ SELECT a.n || ' ' || left(r.attempt, 8) AS attempt, r.role, count(*) AS response
   max(tools) AS max, sum(tools) AS tool_calls
 FROM r JOIN att a USING (attempt) GROUP BY a.n, r.attempt, r.role ORDER BY a.n, r.role;
 
-\echo '5b. Tool names'
+\echo '5b. Tool names (a name outside [A-Za-z0-9._-], or longer than 40, is shown as (other))'
 WITH t AS (
-  SELECT attempt_id::text AS attempt, role, left(coalesce(tc->'function'->>'name', tc->>'name', '?'), 40) AS tool
+  SELECT attempt_id::text AS attempt, role,
+    CASE WHEN coalesce(tc->'function'->>'name', tc->>'name') ~ '^[A-Za-z0-9._-]{1,40}$'
+      THEN coalesce(tc->'function'->>'name', tc->>'name') ELSE '(other)' END AS tool
   FROM coding_model_calls, jsonb_array_elements(result->'message'->'tool_calls') AS tc
   WHERE job_id = :'profile_job'::uuid AND jsonb_typeof(result->'message'->'tool_calls') = 'array'),
 att AS (
@@ -231,7 +259,7 @@ SELECT a.n || ' ' || left(x.attempt, 8) AS attempt, x.role, sum(x.calls) AS tool
 FROM (SELECT attempt, role, tool, count(*) AS calls FROM t GROUP BY 1, 2, 3) x JOIN att a USING (attempt)
 GROUP BY a.n, x.attempt, x.role ORDER BY a.n, x.role;
 
-\echo '5c. bash commands by first word (after any leading ( or { and cd ... && or ;); chars is the whole command''s length'
+\echo '5c. bash commands by program name (the first word after any leading ( or { and cd ... && or ;, without its directory); chars is the whole command''s length'
 WITH b AS (
   SELECT attempt_id::text AS attempt, role,
     CASE jsonb_typeof(tc->'function'->'arguments')
@@ -243,19 +271,21 @@ WITH b AS (
     AND tc->'function'->>'name' = 'bash'),
 w AS (
   SELECT attempt, role, length(command) AS chars,
-    substring(regexp_replace(coalesce(command, ''), '^[\s({]*(cd\s+[^;&|]*(&&|;)[\s({]*)*', '') FROM '^([^\s;&|()<>{}]+)') AS word
+    substring(regexp_replace(coalesce(command, ''), '^[ \t({]*(cd[ \t]+[^;&|\n]*(&&|;)[ \t({]*)*', '') FROM '^([^\s;&|()<>{}]+)') AS word
   FROM b),
 att AS (
   SELECT attempt, row_number() OVER (ORDER BY min(created_at)) AS n FROM (
     SELECT split_part(event_key, ':', 1) AS attempt, created_at FROM coding_events
     WHERE job_id = :'profile_job'::uuid AND event_key ~ '^[0-9a-f-]{36}:'
     UNION ALL SELECT attempt_id::text, created_at FROM coding_model_calls WHERE job_id = :'profile_job'::uuid) a GROUP BY attempt)
--- Only a plain command name is printed: an assignment or anything unusual is grouped, never shown.
+-- Only a short plain program name is printed, without its directory. An assignment, a long
+-- name, or a token-like word (16 or more characters mixing letters and digits) is grouped.
 SELECT a.n || ' ' || left(w.attempt, 8) AS attempt, w.role,
   CASE WHEN w.word IS NULL THEN '(none)' WHEN w.word LIKE '%=%' THEN '(assignment)'
-    WHEN w.word ~ '^[A-Za-z0-9._/+-]{1,32}$' THEN w.word ELSE '(other)' END AS first_word,
+    WHEN w.name ~ '^[A-Za-z0-9._-]{1,20}$' AND NOT (length(w.name) >= 16 AND w.name ~ '[0-9]' AND w.name ~ '[A-Za-z]')
+      THEN w.name ELSE '(other)' END AS program,
   count(*) AS calls, round(avg(chars)) AS avg_chars, max(chars) AS max_chars
-FROM w JOIN att a USING (attempt)
+FROM (SELECT *, regexp_replace(word, '^.*/', '') AS name FROM w) w JOIN att a USING (attempt)
 GROUP BY a.n, w.attempt, w.role, 3 ORDER BY a.n, w.role, count(*) DESC, 3;
 
 \echo '6. Thinking in responses: reasoning_details entries and non-empty summaries (count and characters only)'
