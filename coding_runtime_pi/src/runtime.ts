@@ -463,7 +463,6 @@ export class CodingRuntime {
       const settings = SettingsManager.inMemory({
         cacheWarming: "off",
         compaction: { enabled: true },
-        images: { blockImages: true },
       });
       const created = await createAgentSession({
         cwd: task.workspace,
@@ -571,8 +570,10 @@ export class CodingRuntime {
                 : `${reason} Submitted report and validation feedback retained in the session.`;
           }
         }
-        // Pi's outer session can recover a length/error response through
-        // compaction even when its ordinary retry setting is disabled.
+        // Pi's outer session can recover a length/error response through compaction;
+        // that is switched off here. An error turn ends this run of the agent loop, and Pi's
+        // stock retry then resends a retryable failure (journal 184); only a failure that
+        // outlasts its retries pauses the task.
         if (["error", "aborted", "length"].includes(turn.message.stopReason))
           settings.setCompactionEnabled(false);
         const decision = await finishTurn?.(turn, signal);

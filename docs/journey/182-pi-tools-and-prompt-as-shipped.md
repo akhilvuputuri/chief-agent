@@ -84,3 +84,5 @@ Not measured: whether a real coding job now uses `read`/`edit`, issues several c
 - The planning budget (32 navigation operations or ten minutes) and the final-report phase remain in `runtime.ts`; they are host-loop mechanics for the session restructure.
 - The per-run tool and model allocations remain.
 - `images: { blockImages: true }` and `autoResizeImages: false` remain until the native model protocol carries images.
+
+> **Update, 13 November 2026 ([journal 184](184-pi-native-anthropic-protocol.md)):** with the native Anthropic protocol both overrides are removed, so image reads follow Pi's defaults (resized and sent as image blocks). Tested: a PNG the model reads reaches the fake Messages API as a base64 `image` block inside the `tool_result`.

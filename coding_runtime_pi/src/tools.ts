@@ -60,9 +60,7 @@ export function tools(
     return workspace.path(path);
   };
   const list: ToolDefinition<any, any>[] = [
-    // Images are not sent while the model proxy is OpenAI-shaped (journal 182).
     createReadToolDefinition(cwd, {
-      autoResizeImages: false,
       operations: {
         readFile: async (p) => readFile(await readable(p)),
         access: async (p) => {

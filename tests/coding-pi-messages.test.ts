@@ -2,7 +2,7 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import Anthropic from "@anthropic-ai/sdk";
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
@@ -424,35 +424,22 @@ test("Pi jobs and coding model choices must use a model Chief calls directly at 
   );
 });
 
-test("through the host, Pi resends the first response's content blocks byte for byte", async (t) => {
+/**
+ * A real Pi session in a git workspace, through the real host route and the Anthropic SDK, to a
+ * local fake of the Messages API. `respond` answers the n-th upstream request (1-based).
+ */
+async function throughHost(
+  t: TestContext,
+  respond: (n: number, body: any, res: ServerResponse) => void,
+  files: Record<string, string | Buffer> = {},
+) {
   const upstream: { headers: Record<string, unknown>; body: any }[] = [];
-  const turns: FakeTurn[] = [
-    {
-      id: "msg_first",
-      content: [
-        { type: "thinking", thinking: "", signature: "Zmlyc3Qtc2lnbmF0dXJl" },
-        { type: "text", text: "Reading the café source" },
-        toolUse("toolu_first", "read", { path: "sum.js" }),
-      ],
-    },
-    {
-      id: "msg_second",
-      content: [
-        { type: "thinking", thinking: "Summary", signature: "c2Vjb25k" },
-        toolUse("toolu_report", "report", {
-          kind: "plan",
-          summary: "Fix café sum",
-          detail: "Use addition in sum.js and check sum(2,3)=5.",
-        }),
-      ],
-    },
-  ];
   const anthropicApi = createServer(async (req, res) => {
     let text = "";
     for await (const chunk of req) text += chunk;
-    upstream.push({ headers: req.headers, body: JSON.parse(text) });
-    res.writeHead(200, { "content-type": "text/event-stream" });
-    res.end(messagesStream(turns[upstream.length - 1]!));
+    const body = JSON.parse(text);
+    upstream.push({ headers: req.headers, body });
+    respond(upstream.length, body, res);
   });
   await new Promise<void>((resolve) =>
     anthropicApi.listen(0, "127.0.0.1", resolve),
@@ -499,6 +486,8 @@ test("through the host, Pi resends the first response's content blocks byte for 
   const git = (...args: string[]) =>
     execFileSync("git", ["-C", workspace, ...args], { stdio: "pipe" });
   await writeFile(join(workspace, "sum.js"), "// synthetic\n");
+  for (const [name, content] of Object.entries(files))
+    await writeFile(join(workspace, name), content);
   git("init", "-q");
   git("add", ".");
   git(
@@ -528,6 +517,51 @@ test("through the host, Pi resends the first response's content blocks byte for 
     objective: "Plan the synthetic fix",
   });
   const result = await runtime.run(task.id);
+  for (let i = 0; i < 200; i++) {
+    if (!(await f.row(job.id)).model_busy) break;
+    await delay(10);
+  }
+  const recorded = (
+    await f.db.query(
+      "SELECT state,result FROM coding_model_calls WHERE job_id=$1 ORDER BY created_at,id",
+      [job.id],
+    )
+  ).rows;
+  return { upstream, result, recorded, token, f, job };
+}
+
+const sse = (res: ServerResponse, turn: FakeTurn) => {
+  res.writeHead(200, { "content-type": "text/event-stream" });
+  res.end(messagesStream(turn));
+};
+const planReport = toolUse("toolu_report", "report", {
+  kind: "plan",
+  summary: "Fix café sum",
+  detail: "Use addition in sum.js and check sum(2,3)=5.",
+});
+
+test("through the host, Pi resends the first response's content blocks byte for byte", async (t) => {
+  const turns: FakeTurn[] = [
+    {
+      id: "msg_first",
+      content: [
+        { type: "thinking", thinking: "", signature: "Zmlyc3Qtc2lnbmF0dXJl" },
+        { type: "text", text: "Reading the café source" },
+        toolUse("toolu_first", "read", { path: "sum.js" }),
+      ],
+    },
+    {
+      id: "msg_second",
+      content: [
+        { type: "thinking", thinking: "Summary", signature: "c2Vjb25k" },
+        planReport,
+      ],
+    },
+  ];
+  const { upstream, result, recorded, token } = await throughHost(
+    t,
+    (n, _body, res) => sse(res, turns[n - 1]!),
+  );
   assert.equal(result.status, "waiting_approval", result.summary);
   assert.equal(upstream.length, 2);
   // The second request carries the first response's blocks exactly as Anthropic sent them.
@@ -552,16 +586,6 @@ test("through the host, Pi resends the first response's content blocks byte for 
     assert.equal(body.max_tokens, 32000);
     assert.deepEqual(body.output_config, { effort: "medium" });
   }
-  for (let i = 0; i < 200; i++) {
-    if (!(await f.row(job.id)).model_busy) break;
-    await delay(10);
-  }
-  const recorded = (
-    await f.db.query(
-      "SELECT state,result FROM coding_model_calls WHERE job_id=$1 ORDER BY created_at,id",
-      [job.id],
-    )
-  ).rows;
   assert.deepEqual(
     recorded.map((r: any) => r.state),
     ["complete", "complete"],
@@ -570,6 +594,84 @@ test("through the host, Pi resends the first response's content blocks byte for 
     recorded.map((r: any) => r.result.content),
     turns.map((turn) => turn.content),
   );
+});
+
+test("a 429 mid-session is retried by Pi's stock retry and the session carries on", async (t) => {
+  const { upstream, result, recorded, f } = await throughHost(
+    t,
+    (n, _body, res) => {
+      if (n === 2) {
+        res.writeHead(429, {
+          "content-type": "application/json",
+          "retry-after": "1",
+        });
+        res.end(
+          JSON.stringify({
+            type: "error",
+            error: { type: "rate_limit_error", message: "Rate limited" },
+          }),
+        );
+        return;
+      }
+      sse(res, {
+        content: [
+          n === 1
+            ? toolUse("toolu_read", "read", { path: "sum.js" })
+            : planReport,
+        ],
+      });
+    },
+  );
+  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(upstream.length, 3);
+  // The retry is the same request: the failed call never entered the session.
+  assert.deepEqual(upstream[2]!.body.messages, upstream[1]!.body.messages);
+  assert.deepEqual(
+    recorded.map((r: any) => r.state),
+    ["complete", "uncertain", "complete"],
+  );
+  const rejected = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE payload->>'kind'='worker_request_rejected'",
+    )
+  ).rows.map((r: any) => r.payload);
+  assert.deepEqual(
+    rejected.map((e: any) => [e.code, e.providerStatus]),
+    [["model_rate_limited", 429]],
+  );
+});
+
+test("an image the model reads reaches Anthropic as an image block", async (t) => {
+  // A 1x1 PNG.
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  const { upstream, result } = await throughHost(
+    t,
+    (n, _body, res) =>
+      sse(res, {
+        content: [
+          n === 1
+            ? toolUse("toolu_img", "read", { path: "pixel.png" })
+            : planReport,
+        ],
+      }),
+    { "pixel.png": png },
+  );
+  assert.equal(result.status, "waiting_approval", result.summary);
+  const results = upstream[1]!.body.messages.flatMap((m: any) =>
+    Array.isArray(m.content)
+      ? m.content.filter((b: any) => b.type === "tool_result")
+      : [],
+  );
+  const image = results
+    .flatMap((r: any) => (Array.isArray(r.content) ? r.content : []))
+    .find((b: any) => b.type === "image");
+  assert(image, JSON.stringify(results));
+  assert.equal(image.source.type, "base64");
+  assert.equal(image.source.media_type, "image/png");
+  assert(image.source.data.length > 0);
 });
 
 test("a failed connection to Anthropic is left to Pi's retry, and an error inside the stream is recorded", async (t) => {
