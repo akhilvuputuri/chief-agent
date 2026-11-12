@@ -283,8 +283,14 @@ export class CodingController {
       return false;
     const calls = (
       await db.query(
-        "SELECT id,attempt_id,result_box,created_at > COALESCE((SELECT max(created_at) FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' AND payload->>'source' IN ('owner','ask')),'-infinity'::timestamptz) AS after_owner FROM coding_model_calls WHERE job_id=$1 AND role='reviewer' AND state='complete' AND result_box IS NOT NULL AND input->>'candidate'=$2 AND COALESCE(input->>'purpose','agent')='agent' ORDER BY created_at DESC,id DESC",
-        [job.id, artifactHash(result.checkpoint)],
+        "SELECT id,attempt_id,result_box,created_at > COALESCE((SELECT max(created_at) FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' AND payload->>'source' IN ('owner','ask') AND created_at < COALESCE((SELECT created_at FROM coding_events WHERE job_id=$1 AND event_key=$3),'infinity'::timestamptz)),'-infinity'::timestamptz) AS after_owner FROM coding_model_calls WHERE job_id=$1 AND role='reviewer' AND state='complete' AND result_box IS NOT NULL AND input->>'candidate'=$2 AND COALESCE(input->>'purpose','agent')='agent' ORDER BY created_at DESC,id DESC",
+        // The publication commit fixes which owner messages the approval covered: one kept
+        // while publishing goes to the PR's feedback round instead (journal 192).
+        [
+          job.id,
+          artifactHash(result.checkpoint),
+          `${job.attempt_id}:publish-approved`,
+        ],
       )
     ).rows;
     for (const call of calls) {
@@ -1160,7 +1166,10 @@ export class CodingController {
       if (added === "held")
         return {
           ...(await this.status(user, job.id)),
-          note: "The job's change is being published right now, so this message was kept and is applied after publication: on the PR once it is open, or by the next attempt if publishing fails.",
+          note:
+            job.settings.prWorkflow === "owner_merge"
+              ? "The job's change is being published right now, so this message was kept and is applied after publication: in a follow-up round on the PR once it is open, or when the job continues if publishing does not complete."
+              : "The job's change is being published right now, so this message was kept; it is applied when the job continues.",
         };
     } else if (["awaiting_input", "paused", "failed"].includes(job.state)) {
       await this.assertFreshOrConfirmed(job, a, RESTARTABLE);
@@ -1562,6 +1571,9 @@ export class CodingController {
       throw new Error("Inbox delivery must name this job's own messages");
   }
   async save(job: CodingJob, raw: unknown) {
+    // After the publication commit the checkpoint is final (journal 192).
+    if (job.stage === "publishing")
+      throw new Error("The candidate is committed for publication");
     const c = storableCheckpoint(checkpoint.parse(raw));
     this.validateReportCheckpoint(job, c);
     if (
@@ -1822,7 +1834,11 @@ export class CodingController {
             [job.id, `${job.attempt_id}:publish-approved`],
           )
         ).rows[0]?.hash;
-        if (approved !== artifactHash(r.checkpoint))
+        // The checkpoint stored at the commit, exactly: its delivered list included.
+        if (
+          approved !== artifactHash(r.checkpoint) ||
+          canonicalJson(r.checkpoint) !== canonicalJson(job.checkpoint)
+        )
           throw new Error(
             "Publication of this candidate was not approved first",
           );

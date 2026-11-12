@@ -43,6 +43,7 @@ const bash = (command: string) => ({ name: "bash", arguments: { command } });
 async function piJob(
   t: TestContext,
   scripts: { coder: Script; reviewer: Script },
+  extra: Record<string, unknown> = {},
 ) {
   const f = await fixture(t);
   const root = await mkdtemp(join(tmpdir(), "pi-one-session-"));
@@ -73,6 +74,7 @@ async function piJob(
         runtime: "pi",
         squad: false,
         autoMerge: false,
+        ...extra,
       }),
       base,
     ],
@@ -924,7 +926,8 @@ test("a follow-up and the candidate's finish never cross: the message holds the 
     // Publication was committed first: the message is kept for after it, and the owner told.
     assert.equal(job.stage, "publishing");
     assert.equal(replied.status, "fulfilled");
-    assert.match((replied as any).value.note, /applied after publication/);
+    // Without the owner-merge workflow no PR feedback round is promised.
+    assert.match((replied as any).value.note, /applied when the job continues/);
     assert.equal(items.length, 1);
   } else {
     // The message landed first: the candidate was held back for it.
@@ -1224,7 +1227,7 @@ test("progress cannot take a job out of publishing, and a message then is kept a
   });
   assert.equal((await j.row()).stage, "publishing");
   const replied: any = await j.reply("Also update the docs.", "during-push");
-  assert.match(replied.note, /applied after publication/);
+  assert.match(replied.note, /applied when the job continues/);
   const [item] = await j.inbox();
   assert.equal(item.payload.source, "owner");
   // The box dies before it pushes: the stage is no longer publishing while it is paused.
@@ -1263,4 +1266,136 @@ test("the fence quotes after every kind of line separator", () => {
       JSON.stringify(lines),
     );
   }
+});
+
+test("a message kept while publishing does not break the publication, and starts exactly one feedback round on the PR", async (t) => {
+  const j = await piJob(
+    t,
+    {
+      coder: (_i, turn) =>
+        [
+          edit("a - b", "a + b"),
+          report("done", "Added."),
+          {
+            name: "write",
+            arguments: { path: "DOCS.md", content: "sum adds\n" },
+          },
+          report("done", "Docs updated."),
+        ][turn]!,
+      reviewer: () => report("review", "Correct.", { verdict: "APPROVE" }),
+    },
+    { prWorkflow: "owner_merge" },
+  );
+  // The owner's message lands right after the host committed the publication.
+  const approve = j.f.c.approvePublication.bind(j.f.c);
+  let held: any;
+  j.f.c.approvePublication = async (row: any, raw: any) => {
+    const answer = await approve(row, raw);
+    if (answer.accepted && !held)
+      held = await j.reply("Also update the docs.", "while-publishing");
+    return answer;
+  };
+  (j.f.publisher as any).publish = async () => ({
+    url: "https://github.com/example/repo/pull/7",
+    head: "b".repeat(40),
+    tree: "c".repeat(40),
+  });
+  await j.run();
+  assert.match(held.note, /applied after publication/);
+  let job = await j.row();
+  // The real proof accepted the committed approval: the job is recorded as published.
+  assert.equal(job.state, "publishing", job.summary);
+  for (let i = 0; i < 3; i++) await j.f.c.tick();
+  job = await j.row();
+  assert.equal(job.state, "pr_ready", job.summary);
+  const [kept] = await j.inbox();
+  assert.equal(kept.payload.source, "owner");
+  assert(!job.checkpoint.piState.delivered.includes(kept.id));
+  // The automation, with the host's real proof, starts the feedback round instead of parking.
+  const { CodingAutomation } = await import("../src/coding/automation.js");
+  const auto = new CodingAutomation(
+    j.f.db,
+    {
+      outcome: async () => ({}) as any,
+      inspect: async () =>
+        ({
+          head: "b".repeat(40),
+          tree: "c".repeat(40),
+          base: j.base,
+          main: j.base,
+          merged: false,
+          closed: false,
+          draft: false,
+          mergeable: true,
+          checks: "pending",
+          feedback: [],
+          unresolvedThreads: 0,
+        }) as any,
+      ready: async () => {},
+      attest: async () => {},
+      merge: async () => ({ sha: "d".repeat(40) }),
+      release: async () => "pending",
+    } as any,
+    () => true,
+    (row) => (j.f.c as any).hasReviewerProof(row),
+    () => new Date(),
+  );
+  await auto.tick();
+  await auto.tick();
+  job = await j.row();
+  assert.equal(job.state, "queued", job.summary);
+  assert.equal(
+    (
+      await j.f.db.query(
+        "SELECT count(*)::int AS n FROM coding_revisions WHERE job_id=$1 AND request_key LIKE 'mr-feedback:%'",
+        [j.id],
+      )
+    ).rows[0].n,
+    1,
+  );
+  // The round reaches the coder labelled as the owner's, and the changed candidate needs a
+  // new approval, newer than the kept message, before it is published again.
+  const reviews = j.turns.reviewer;
+  await j.run();
+  assert.match(
+    text(j.inputs.coder[2]),
+    new RegExp(
+      `\\[inbox:${kept.id} From the owner; [0-9a-f]{16}\\]\\\\n> Also update the docs\\.`,
+    ),
+  );
+  assert.equal(j.turns.reviewer, reviews + 1);
+  job = await j.row();
+  assert.equal(job.state, "publishing", job.summary);
+  assert.equal(job.checkpoint.files.length, 2);
+});
+
+test("after the publication commit the checkpoint is final", async (t) => {
+  const { j, record, candidate } = await committed(t);
+  await record();
+  await j.f.c.approvePublication(await j.row(), candidate);
+  const publishing = await j.row();
+  await j.reply("Later note.", "late");
+  const [item] = await j.inbox();
+  // The box cannot mark the kept message delivered...
+  await assert.rejects(
+    j.f.c.save(publishing, {
+      ...candidate.checkpoint,
+      piState: { ...candidate.checkpoint.piState, delivered: [item.id] },
+    }),
+    /committed for publication/,
+  );
+  // ...nor finish with a checkpoint other than the committed one.
+  await assert.rejects(
+    j.f.c.finish(publishing, {
+      ...candidate,
+      checkpoint: {
+        ...candidate.checkpoint,
+        piState: { ...candidate.checkpoint.piState, delivered: [item.id] },
+      },
+    }),
+    /not approved first|own messages/,
+  );
+  assert.deepEqual(await j.f.c.finish(publishing, candidate), {
+    accepted: true,
+  });
 });
