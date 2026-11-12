@@ -1,3 +1,10 @@
+## Shared links: study list or Reader (12 November 2026)
+
+- **Code.** Chief classifies a shared link as study material or offline reading and saves it to a new study list, to Reader, or both, with a choice card when unsure. Written by coding job `9600af57` (PR 463).
+- **Migration.** `db/036_study_resources.sql` adds three tables and changes no existing one; installed by the reviewed operator rollout `scripts/deploy-study-list.py`.
+- **Why.** Everything shared was going to Reader. See [journal 178](journey/178-study-list-link-classification.md); the job's cost and duration are reviewed in [journal 179](journey/179-first-full-coding-job-review.md).
+- **Deployment.** Merged as `2910171b`; rollout and release run 43239335489 succeeded on 12 November and the gateway was healthy at `2910171b`. Picker eval before merge: pooled recall 98.4% against the 0.97 floor. No link has been saved through it yet.
+
 ## Coding attempts may run three hours (12 November 2026)
 
 - **Configuration.** New Pi coding jobs get 180 minutes per attempt instead of 150, the most one attempt may run. Model and tool-call limits, models and effort are unchanged. No code, migration or Compose change.

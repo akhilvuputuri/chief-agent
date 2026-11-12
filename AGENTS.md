@@ -83,6 +83,18 @@ For the owned fixed Python coding squad, the owner-authorized automatic workflow
 - Each new machine needs its own authorized GitHub login. Repository read access alone does not prove merge or Actions permission. Use the shared GitHub deployment path from local and cloud tasks alike.
 - Current work and checkpoint branches are indexed in docs/current-work.md. Use draft PRs for work in progress; a checkpoint is not a tested release. Push resumable work with exact remaining checks instead of leaving the only copy on one laptop.
 
+## Fix causes, not symptoms
+
+When something is slow, costly, flaky or failing, find what causes it and fix that. This came out of the review of the first full coding job ([journal 179](docs/journey/179-first-full-coding-job-review.md)), where most of the waste traced to things we had added around Pi.
+
+- **Safety boundaries are not symptoms.** Approval cards, owner-merge and review gates, release guards, credential and permission scoping, sandbox isolation and the integration boundaries above are never "limits" to remove under this section; changing any of them still needs the owner's explicit decision.
+- **Find the mechanism first.** Trace the problem to the specific code or setting that produces it, with evidence: a line, a trace or a measurement. Ask "what did we add or change that causes this?" before "what can we add to contain it?".
+- **Remove or correct the cause; do not add a guard over it.** A cap, cut-off, retry, budget, truncation or extra stage that hides the effect is a symptom fix. If you propose one anyway, say that it is one and why the cause cannot be fixed.
+- **When we wrap a tool that works well for others, suspect our differences from its defaults.** List them and try removing them before tuning around them.
+- **Add a limit only after real usage shows the need and the limit addresses the cause.** Record the incident that justified it. In any incident, treat existing operational limits (time, context, tool-call, rebase) as suspects: jobs have stopped on our own time, context, tool-call and rebase limits more often than on real faults.
+- **A big number is not a problem by itself.** Before proposing to shrink context, turns or tokens, ask what the number costs and what produces it. Do not trade result quality for a smaller metric.
+- **Fix an obvious, understood inefficiency without waiting to size the saving.** Measure afterwards, on real usage.
+
 ## Documentation is a dated log
 
 Docs record how Chief got to where it is; they are not the source of truth for how it works now. The code and `config/` are. Check them before relying on any statement in a doc, a handover or a journal.
