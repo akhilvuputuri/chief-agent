@@ -102,6 +102,23 @@ const hash = (v: unknown) =>
   createHash("sha256").update(canonicalJson(v)).digest("hex");
 /** The longest one Pi attempt runs, inside the box task's four-hour deadline. */
 const PI_ATTEMPT_MS = 10_800_000;
+/**
+ * Worker image digests built before #357 (29 October 2026) that the coding box profile still
+ * accepts for jobs snapshotted on them. A box runs its image's own agent, and theirs kills a
+ * task after two hours, so their attempts keep the 100-minute ceiling they had then. Every
+ * later image carries the four-hour task deadline, so this list never grows.
+ */
+export const TWO_HOUR_BOX_IMAGES: readonly string[] = [
+  "e8f1c2cdb38efa0514c9e49627e948c65143f9a6f452201d0259b06491a7dddb", // 6ab96c0
+  "2fd65df0435207659473420dc061f4bf1151510b42c862ec09d0f3f0db496887", // 15e6def
+  "34987193b3cb1b710092c8af998407a222da225a8000743b422f85b24beecb8d", // 0a78485
+];
+const TWO_HOUR_BOX_ATTEMPT_MS = 6_000_000;
+/** The longest one Pi attempt on this worker image may run. */
+const piAttemptCeiling = (image: string) =>
+  TWO_HOUR_BOX_IMAGES.includes(image.slice(-64))
+    ? TWO_HOUR_BOX_ATTEMPT_MS
+    : PI_ATTEMPT_MS;
 /** The identity a Pi worker derives for a phase or session of this job's approved work. */
 const piIdentity = (
   job: CodingJob,
@@ -196,10 +213,14 @@ export class CodingController {
   private activeMs(job: CodingJob) {
     // Per-attempt operational ceiling. Pi attempts run in EC2 boxes, whose task deadline is
     // four hours; three hours leaves ample room for the worker's start inside it. (It was
-    // 40 minutes under CodeBuild's 45-minute cap.) Legacy runtimes keep their allocation.
+    // 40 minutes under CodeBuild's 45-minute cap.) Images with a two-hour box task deadline
+    // keep 100 minutes. Legacy runtimes keep their allocation. The provisioning claim in
+    // tick() computes the same ceiling in SQL.
     return Math.min(
       job.settings.limits.ms,
-      job.settings.runtime === "pi" ? PI_ATTEMPT_MS : job.settings.limits.ms,
+      job.settings.runtime === "pi"
+        ? piAttemptCeiling(job.settings.image)
+        : job.settings.limits.ms,
     );
   }
   private automation?: CodingAutomation;
@@ -973,6 +994,14 @@ export class CodingController {
     if (job.settings.runtime === "pi" && (a.limits?.ms ?? 0) > PI_ATTEMPT_MS)
       throw new ToolValidationError(
         "That time limit is above the most one attempt can run",
+      );
+    // Checked against the image the job will run, so upgradeWorker lifts it.
+    if (
+      job.settings.runtime === "pi" &&
+      (a.limits?.ms ?? 0) > piAttemptCeiling(next.image)
+    )
+      throw new ToolValidationError(
+        "This job's worker image stops a task after two hours, so its time limit can be at most 100 minutes; move it to the current worker image (upgradeWorker) to allow more",
       );
     const hasLeader = job.settings.squad || job.settings.runtime === "pi";
     const changes = [
@@ -2173,16 +2202,20 @@ export class CodingController {
         )
       ).rows[0];
       if (!j) {
+        // Until the first heartbeat, the deadline is the claimed job's own active time
+        // (activeMs, from its settings snapshot, not the current configuration) plus five
+        // minutes to start the box. The job is chosen inside the statement, so the same
+        // ceiling is computed here in SQL.
         j = (
           await this.db.query(
-            `UPDATE coding_jobs SET state='provisioning',stage='provisioning',attempt_id=$1,heartbeat_at=$2,attempt_deadline=$3,cleanup='pending',lease=$4,lease_until=now()+interval '3 minutes' WHERE id=(SELECT id FROM coding_jobs WHERE state='queued' AND NOT EXISTS(SELECT 1 FROM coding_jobs WHERE state IN ('provisioning','running','publishing') OR cleanup='pending') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`,
+            `UPDATE coding_jobs SET state='provisioning',stage='provisioning',attempt_id=$1,heartbeat_at=$2,attempt_deadline=$2::timestamptz + ((LEAST((settings->'limits'->>'ms')::bigint,CASE WHEN settings->>'runtime'='pi' THEN CASE WHEN right(settings->>'image',64)=ANY($4::text[]) THEN $5::bigint ELSE $6::bigint END ELSE (settings->'limits'->>'ms')::bigint END) + 300000) * interval '1 millisecond'),cleanup='pending',lease=$3,lease_until=now()+interval '3 minutes' WHERE id=(SELECT id FROM coding_jobs WHERE state='queued' AND NOT EXISTS(SELECT 1 FROM coding_jobs WHERE state IN ('provisioning','running','publishing') OR cleanup='pending') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`,
             [
               randomUUID(),
               this.clock(),
-              new Date(
-                this.clock().getTime() + this.settings.limits.ms + 300000,
-              ),
               randomUUID(),
+              TWO_HOUR_BOX_IMAGES,
+              TWO_HOUR_BOX_ATTEMPT_MS,
+              PI_ATTEMPT_MS,
             ],
           )
         ).rows[0];

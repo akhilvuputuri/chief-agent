@@ -1,3 +1,9 @@
+## Coding deadlines follow each job's settings (12 November 2026)
+
+- **Code.** Host only. Before its first heartbeat, a coding attempt's deadline comes from the job's own settings snapshot instead of the current configuration. Jobs on the three accepted worker images built before PR 357 (`sha256:e8f1c2cd…`, `sha256:2fd65df0…`, `sha256:34987193…`), whose box kills a task after two hours, run at most 100 minutes per attempt, and `coding_job_update` refuses a longer limit on them unless it also uses `upgradeWorker`. No worker image, configuration, migration or Compose change: the deadlines are host logic, and the worker images are unchanged.
+- **Why.** Found by independent review, not observed in production. See [journal 173](journey/173-coding-deadline-fixes.md).
+- **Deployment.** Not yet recorded as live; a dated note follows on release.
+
 ## Coding attempts may run three hours (12 November 2026)
 
 - **Configuration.** New Pi coding jobs get 180 minutes per attempt instead of 150, the most one attempt may run. Model and tool-call limits, models and effort are unchanged. No code, migration or Compose change.

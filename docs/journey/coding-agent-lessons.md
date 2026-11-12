@@ -421,3 +421,15 @@ Evidence boundary:
 - **Measured:** token, cache and cost figures for one job, and 30-day totals.
 - **Tested:** synthetic jobs with larger pages and a second review round on the delta.
 - **Estimated, not measured:** the saving, roughly $10 of $16 on that job.
+
+## A job's deadlines come from its own snapshot and its own image — 12 November 2026
+
+[Journal 173](173-coding-deadline-fixes.md). Independent review found two places where a job's time limit and the limit that applied could disagree. Until the first heartbeat, the host's deadline used the current configuration's limit, not the job's. And a paused job could be raised to three hours on a worker image whose box agent, copied from that image, kills a task after two.
+
+- Every limit a job runs under should be read from its snapshot, including the ones set before the worker starts.
+- A limit enforced inside the box comes from the job's image, not from the host's current code; a host-side ceiling must account for the oldest image still accepted.
+
+Evidence boundary:
+
+- **Tested:** synthetic jobs whose limits differ from the configuration, and updates on a two-hour image.
+- **Not observed in production:** neither disagreement has been seen on a real job.

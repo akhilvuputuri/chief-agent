@@ -10,6 +10,7 @@ import {
 } from "../src/coding/box-sandbox.js";
 import type { BoxController } from "../src/boxes/controller.js";
 import type { Database } from "../src/db.js";
+import { TWO_HOUR_BOX_IMAGES } from "../src/coding/controller.js";
 
 const json = (path: string) =>
   JSON.parse(
@@ -35,4 +36,16 @@ test("the reviewed coding and box configuration passes the coding sandbox startu
     taskCommand: file.ec2.coding?.taskCommand,
   });
   assert.ok(sandbox instanceof BoxSandbox);
+});
+
+// Images built before #357 kill a box task after two hours; the controller caps their
+// attempts at 100 minutes. New jobs must never start on one.
+test("new coding jobs never start on a worker image with a two-hour box task deadline", () => {
+  const coding = loadBoxesFile(new URL("../config/boxes.json", import.meta.url))
+    .profiles.coding!;
+  const digest = (image: string) => image.slice(-64);
+  for (const image of [json("coding-pi.json").image, coding.image])
+    assert.equal(TWO_HOUR_BOX_IMAGES.includes(digest(image)), false);
+  for (const image of TWO_HOUR_BOX_IMAGES)
+    assert.match(image, /^[0-9a-f]{64}$/);
 });

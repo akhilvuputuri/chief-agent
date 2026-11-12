@@ -9,7 +9,10 @@ import { codingApi } from "../src/coding/api.js";
 import { runPiWorker, NativePiWorkerClient } from "../src/coding/pi-worker.js";
 import { server } from "../src/server.js";
 import { reviewDocumentReader } from "./helpers/pi-review-documents.js";
-import { CodingController } from "../src/coding/controller.js";
+import {
+  CodingController,
+  TWO_HOUR_BOX_IMAGES,
+} from "../src/coding/controller.js";
 import {
   CodingRequirements,
   requirementScope,
@@ -363,6 +366,27 @@ test("a limit is refused when it cannot take effect", async (t) => {
     update({ limits: { ms: 14_400_000 } }),
     /most one attempt/,
   );
+});
+
+test("a job on an image with a two-hour box task deadline cannot be raised past 100 minutes", async (t) => {
+  const { f, row, update, id } = await setup(t, "build");
+  const old = `ghcr.io/akhilvuputuri/chief-agent-coding@sha256:${TWO_HOUR_BOX_IMAGES[0]}`;
+  await f.db.query(
+    "UPDATE coding_jobs SET settings=jsonb_set(settings,'{image}',to_jsonb($2::text)) WHERE id=$1",
+    [id, old],
+  );
+  await assert.rejects(
+    update({ limits: { ms: 7_200_000 } }),
+    /stops a task after two hours/,
+  );
+  assert.equal((await row()).settings.limits.ms, settings.limits.ms);
+  await update({ limits: { ms: 6_000_000 } }, "within");
+  assert.equal((await row()).settings.limits.ms, 6_000_000);
+  // Moving to the current worker image lifts it to the three-hour ceiling.
+  await update({ upgradeWorker: true, limits: { ms: 10_800_000 } }, "moved");
+  const moved = await row();
+  assert.equal(moved.settings.image, settings.image);
+  assert.equal(moved.settings.limits.ms, 10_800_000);
 });
 
 test("a job update refuses active jobs, stale revisions, ineligible models and other owners", async (t) => {
