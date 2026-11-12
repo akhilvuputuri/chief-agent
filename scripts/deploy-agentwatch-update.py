@@ -26,6 +26,7 @@ import pathlib
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -41,26 +42,59 @@ DATA_VOLUME = 'hermes-companion_agentwatch-data'
 # the same conversations as the traces.
 BACKUPS = pathlib.Path('/var/backups/agentwatch-update')
 KEPT_BACKUPS = 3
-# Run inside a throwaway container from the previous agentwatch image, with no network. Each
-# keeps a file's owner, since agentwatch does not run as root. The restore empties /data first:
-# a write-ahead log the new image left behind would otherwise be replayed into the old file.
-COPY_OUT = (
-    'import os, shutil\n'
-    'for name in sorted(os.listdir("/data")):\n'
-    '    source, target = "/data/" + name, "/backup/" + name\n'
-    '    shutil.copy2(source, target)\n'
-    '    found = os.stat(source)\n'
-    '    os.chown(target, found.st_uid, found.st_gid)\n'
+# A copy's directory: the UTC time it was made and the commit being installed. While it is being
+# written it carries PARTIAL, so a copy that did not finish is never taken for one that did.
+COPY_NAME = re.compile(r'[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}')
+PARTIAL = '.partial'
+DATABASE = 'agentwatch.duckdb'
+# Run inside a throwaway container from an agentwatch image, with no network. Files, directories
+# and links are copied as they are, each keeping its owner (agentwatch does not run as root),
+# mode and times. Anything else (a device, a socket) stops the copy, and so the update, before
+# agentwatch changes: a copy that silently left something out is worse than none.
+_COPY_TREE = (
+    'import os, shutil, stat\n'
+    'def copy(source, target):\n'
+    '    found = os.lstat(source)\n'
+    '    if stat.S_ISLNK(found.st_mode):\n'
+    '        os.symlink(os.readlink(source), target)\n'
+    '    elif stat.S_ISDIR(found.st_mode):\n'
+    '        os.mkdir(target)\n'
+    '        for name in sorted(os.listdir(source)):\n'
+    '            copy(source + "/" + name, target + "/" + name)\n'
+    '        shutil.copystat(source, target)\n'
+    '    elif stat.S_ISREG(found.st_mode):\n'
+    '        shutil.copy2(source, target)\n'
+    '    else:\n'
+    '        raise SystemExit("neither a file, a directory nor a link: " + source)\n'
+    '    os.chown(target, found.st_uid, found.st_gid, follow_symlinks=False)\n'
 )
-COPY_BACK = (
-    'import os, shutil\n'
+# agentwatch leaves scratch directories beside its database when it is killed (DuckDB's
+# `<database>.tmp`, and `agentwatch-*` from re-reading stored spans). They hold nothing a restart
+# needs and can be large, so the copy leaves them out.
+COPY_OUT = _COPY_TREE + (
+    'for name in sorted(os.listdir("/data")):\n'
+    '    source = "/data/" + name\n'
+    '    scratch = name.endswith(".tmp") or name.startswith("agentwatch-")\n'
+    '    if scratch and os.path.isdir(source) and not os.path.islink(source):\n'
+    '        continue\n'
+    '    copy(source, "/backup/" + name)\n'
+    'if not os.path.isfile("/backup/' + DATABASE + '"):\n'
+    '    raise SystemExit("no database to copy")\n'
+)
+# The restore empties /data first: a write-ahead log or scratch directory the new image left
+# behind must not meet the old file. It refuses to empty anything unless the copy holds a
+# database, and removes whatever it finds, directories included.
+COPY_BACK = _COPY_TREE + (
+    'if not os.path.isfile("/backup/' + DATABASE + '"):\n'
+    '    raise SystemExit("the copy holds no database")\n'
     'for name in os.listdir("/data"):\n'
-    '    os.remove("/data/" + name)\n'
+    '    path = "/data/" + name\n'
+    '    if os.path.isdir(path) and not os.path.islink(path):\n'
+    '        shutil.rmtree(path)\n'
+    '    else:\n'
+    '        os.unlink(path)\n'
     'for name in sorted(os.listdir("/backup")):\n'
-    '    source, target = "/backup/" + name, "/data/" + name\n'
-    '    shutil.copy2(source, target)\n'
-    '    found = os.stat(source)\n'
-    '    os.chown(target, found.st_uid, found.st_gid)\n'
+    '    copy("/backup/" + name, "/data/" + name)\n'
 )
 AGENTWATCH_REPOSITORY = 'ghcr.io/akhilvuputuri/agentwatch'
 SERVICE_LINE = re.compile(rb'^  agentwatch:[ \t]*\n', re.M)
@@ -221,31 +255,96 @@ def agentwatch_ingests(key=None):
 
 def _copy(image, script, mounts):
     """Runs one of the copy scripts as root in a container from `image`, cut off from the
-    network. Root, because the backup directory is root's and the files are agentwatch's."""
-    run(['docker', 'run', '--rm', '--network', 'none', '--read-only', '--user', '0:0',
-         '--entrypoint', 'python', *mounts, image, '-c', script])
+    network. Root, because the backup directory is root's and the files are agentwatch's.
+    The image is one already on the host, and the volume must exist: Docker would otherwise
+    pull the one and quietly create the other, empty."""
+    run(['docker', 'volume', 'inspect', DATA_VOLUME])
+    run(['docker', 'run', '--rm', '--pull', 'never', '--network', 'none', '--read-only',
+         '--security-opt', 'no-new-privileges:true', '--user', '0:0',
+         '--entrypoint', 'python', *mounts, image, '-I', '-c', script])
 
 
 def back_up(image, sha):
-    """Copies agentwatch's data files (it must be stopped) to a new directory and returns it."""
+    """Copies agentwatch's data files (it must be stopped) to a new directory and returns it.
+    The directory gets its name only once the copy is complete; a copy that fails is removed."""
     BACKUPS.mkdir(mode=0o700, parents=True, exist_ok=True)
     BACKUPS.chmod(0o700)
     target = BACKUPS / (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + sha[:12])
-    target.mkdir(mode=0o700)
-    _copy(image, COPY_OUT, ['--volume', DATA_VOLUME + ':/data:ro', '--volume', str(target) + ':/backup'])
+    if target.exists():
+        raise RuntimeError('a copy with this name exists')
+    partial = target.with_name(target.name + PARTIAL)
+    if partial.exists():
+        shutil.rmtree(partial)
+    partial.mkdir(mode=0o700)
+    try:
+        _copy(image, COPY_OUT, ['--volume', DATA_VOLUME + ':/data:ro', '--volume', str(partial) + ':/backup'])
+        if not (partial / DATABASE).is_file():
+            raise RuntimeError('the copy holds no database')
+        partial.rename(target)
+    except BaseException:
+        shutil.rmtree(partial, ignore_errors=True)
+        raise
     return target
 
 
 def restore(image, backup):
-    """Puts a backup's files back in place of whatever is in the volume (agentwatch stopped)."""
+    """Puts a copy's files back in place of whatever is in the volume (agentwatch stopped)."""
     _copy(image, COPY_BACK, ['--volume', DATA_VOLUME + ':/data', '--volume', str(backup) + ':/backup:ro'])
 
 
+def complete_copies():
+    """The finished copies, oldest first: their names start with a UTC time."""
+    if not BACKUPS.is_dir():
+        return []
+    return sorted(path for path in BACKUPS.iterdir()
+                  if COPY_NAME.fullmatch(path.name) and path.is_dir() and not path.is_symlink())
+
+
 def prune_backups():
-    """Keeps the newest KEPT_BACKUPS. Their names start with a UTC time, so they sort by age."""
-    found = sorted(path for path in BACKUPS.iterdir() if path.is_dir())
-    for old in found[:-KEPT_BACKUPS]:
+    """Keeps the newest KEPT_BACKUPS finished copies, and nothing else is touched: a directory
+    by any other name is someone's own."""
+    for old in complete_copies()[:-KEPT_BACKUPS]:
         shutil.rmtree(old)
+
+
+def write_compose(content):
+    """Replaces the live compose.yaml in one step, so it is never half-written."""
+    target = LIVE / 'compose.yaml'
+    staged = target.with_name('.compose.yaml.agentwatch-update')
+    staged.write_bytes(content)
+    staged.replace(target)
+
+
+def _interrupt(signum, frame):
+    raise KeyboardInterrupt
+
+
+def restore_by_hand(path):
+    """`--restore <copy>`: puts a copy made by this procedure back and starts the agentwatch
+    the live compose.yaml names. For after a rollback that could not finish."""
+    backup = pathlib.Path(path)
+    if (backup.parent != BACKUPS or not COPY_NAME.fullmatch(backup.name) or backup.is_symlink()
+            or not (backup / DATABASE).is_file()):
+        raise RuntimeError('Not a finished copy made by this procedure; nothing changed')
+    with open(LOCK, 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            image = validate_block(split_compose((LIVE / 'compose.yaml').read_bytes(), 'Live')[1])
+        except Exception:
+            raise RuntimeError('The live compose.yaml does not hold a reviewed agentwatch block; nothing changed') from None
+        step = 'stopping agentwatch'
+        try:
+            compose('stop', 'agentwatch')
+            step = 'putting the copy back'
+            restore(image, backup)
+            step = 'starting agentwatch'
+            compose('up', '-d', '--no-deps', 'agentwatch')
+            if not agentwatch_healthy():
+                raise RuntimeError('unhealthy')
+        except BaseException:
+            raise RuntimeError('Restore failed while ' + step + '; agentwatch may be stopped; the copy in '
+                               + str(backup) + ' is unchanged') from None
+        print(json.dumps({'agentwatch': image, 'healthy': True, 'restored': str(backup)}))
 
 
 def network_gateway():
@@ -439,8 +538,24 @@ def validate_compose(live, staged):
 
 
 def main():
+    # A stop request (systemctl stop, a closed session) is handled like Ctrl-C: once agentwatch
+    # has been stopped, it leads to the rollback, never to an exit half-way.
+    before = {number: signal.getsignal(number) for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    for number in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(number, _interrupt)
+    try:
+        if len(sys.argv) == 3 and sys.argv[1] == '--restore':
+            return restore_by_hand(sys.argv[2])
+        return update()
+    finally:
+        for number, handler in before.items():
+            signal.signal(number, handler)
+
+
+def update():
     if len(sys.argv) != 3 or not re.fullmatch('[0-9a-f]{40}', sys.argv[2]):
-        raise RuntimeError('Usage: deploy-agentwatch-update.py <git-archive.tar> <exact reviewed main SHA>')
+        raise RuntimeError('Usage: deploy-agentwatch-update.py <git-archive.tar> <exact reviewed main SHA>'
+                           ' | --restore <copy directory>')
     archive_path, sha = sys.argv[1:]
     with open(LOCK, 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -481,41 +596,61 @@ def main():
             backup = None
             try:
                 # Stopped first, so the files are complete and nothing is written while they
-                # are copied. From here on a failure restores the previous agentwatch.
+                # are copied. From here on a failure, or a request to stop, restores the
+                # previous agentwatch.
                 compose('stop', 'agentwatch')
                 backup = back_up(previous, sha)
-                (LIVE / 'compose.yaml').write_bytes((stage / 'compose.yaml').read_bytes())
+                write_compose((stage / 'compose.yaml').read_bytes())
                 compose('up', '-d', '--no-deps', 'agentwatch')
                 if not agentwatch_healthy():
                     raise RuntimeError('agentwatch failed startup health')
                 agentwatch_ingests(key)
                 if not gateway_healthy():
                     raise RuntimeError('Gateway health failed after the agentwatch update')
-            except Exception:
+            except BaseException:
+                # The rollback is not to be interrupted in its turn.
+                for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+                    signal.signal(number, signal.SIG_IGN)
+                step, state = 'restoring compose.yaml', 'agentwatch may be stopped or running the new image'
                 try:
-                    (LIVE / 'compose.yaml').write_bytes(old_compose)
+                    write_compose(old_compose)
                     if backup is not None:
                         # The new image may have rewritten the files in a format the previous
                         # one cannot open.
+                        step = 'stopping the new agentwatch'
                         compose('stop', 'agentwatch')
+                        step, state = 'putting its data back', 'agentwatch is stopped and its volume may be part emptied'
                         restore(previous, backup)
+                    step, state = 'starting the previous agentwatch', 'agentwatch is stopped'
                     compose('up', '-d', '--no-deps', 'agentwatch')
+                    step, state = 'checking the previous agentwatch', 'the previous agentwatch was started but is not healthy'
                     if not agentwatch_healthy() or agentwatch_image_id() != previous:
                         raise RuntimeError('Rollback health failed')
-                except Exception:
-                    raise RuntimeError('Rollback needs operator inspection; gateway untouched; agentwatch volume kept'
-                                       + ('' if backup is None else '; its data as it was is in ' + str(backup))) from None
+                except BaseException:
+                    raise RuntimeError(
+                        'Rollback needs operator inspection: it failed while ' + step + '; ' + state
+                        + '; gateway untouched; compose.yaml is the previous one'
+                        + ('; the data was not changed' if backup is None else
+                           '; the data as it was before the update is in ' + str(backup)
+                           + ' (put it back with --restore, docs/lightsail.md)')) from None
                 raise RuntimeError('agentwatch update failed; previous agentwatch restored') from None
             try:
                 prune_backups()
             except Exception:
                 pass  # an old copy left behind is not a failed update
-            print(json.dumps({'agentwatch': image, 'healthy': True, 'backup': str(backup)}))
+            try:
+                print(json.dumps({'agentwatch': image, 'healthy': True, 'backup': str(backup)}))
+            except OSError:
+                pass  # nowhere to print to (a closed session) does not undo a finished update
 
 
 if __name__ == '__main__':
     try:
         main()
+    except KeyboardInterrupt:
+        # Only before agentwatch was stopped: after that an interrupt runs the rollback.
+        print('Interrupted before agentwatch was stopped; nothing changed', file=sys.stderr)
+        sys.exit(1)
     except Exception as error:
         print(str(error) if isinstance(error, RuntimeError) else 'Update failed; inspect the reviewed procedure locally', file=sys.stderr)
         sys.exit(1)
