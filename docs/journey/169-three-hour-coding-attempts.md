@@ -46,3 +46,19 @@ The job was not stuck or looping; it was slow because Opus 5.5 at `high` effort 
 ## Deployment status
 
 Not yet released. Job `9600af57` is paused at review round 1 with its candidate and session saved; resuming continues the review.
+
+## Effort lowered to medium (12 November 2026)
+
+The owner chose `medium` for new Pi jobs after reading the evidence above. `effort` in `config/coding-pi.json` is `medium` for all three roles; per-role effort still needs a code change. Jobs keep the effort they were created with, so `9600af57` stays at `high`. Whether `medium` keeps quality on this repository's large changes is untested; compare the next job's review findings, thinking tokens and wall time with `9600af57`.
+
+## How the coder and reviewer used tools (12 November 2026)
+
+**Measured, production `coding_model_calls` for job `9600af57`, before the resume:** the coder's tools were `read`, `grep`, `find`, `ls`, `edit`, `write`, `bash`, `report` and `read_document`.
+
+- **One tool call per turn.** 173 of 179 coder responses and 71 of 78 reviewer responses asked for exactly one tool. The planner, with no shell, asked for two or three at a time in 12 of its 15.
+- **Shell instead of the file tools.** All but 12 of the coder's tool calls were `bash`: 49 `sed`, 42 `grep`, 14 `cat`, and 25 `python3` scripts averaging 2,543 characters that edited files. It called `edit` zero times and `read` once. The reviewer made 67 `bash` calls, mostly `grep`, `sed` and `cat`.
+- **The prompt says nothing about either.** The Pi runtime replaces Pi's default system prompt with Chief's (`coding_runtime_pi/src/runtime.ts`), which asks for real checks and scope but gives no guidance on choosing tools or batching independent reads.
+
+**Hypothesis, not tested:** each extra turn costs a full model call with its thinking, and each edit script is written out as output tokens at about 100 a second. Telling the coder and reviewer to use `read` and `edit` and to batch independent reads in one turn could cut the number of turns substantially. That is a worker change, so it needs a new worker image and a pin.
+
+**Thinking is counted but not visible.** Each call's thinking tokens are recorded (`model_usage` events), but under the API's default display the thinking text is empty, so why a call thought for four minutes cannot be read afterwards. Asking for summarized thinking costs nothing extra, since thinking is billed the same under every display setting.

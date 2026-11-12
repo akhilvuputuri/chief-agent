@@ -1,3 +1,9 @@
+## Coding jobs at medium effort (12 November 2026)
+
+- **Configuration.** New Pi coding jobs run their planner, coder and reviewer at `medium` effort instead of `high`. Models, limits and the worker image are unchanged; existing jobs keep their effort. No code, migration or Compose change.
+- **Why.** On job `9600af57`, 83% of the coder's output and 96% of the reviewer's was thinking at `high`. Owner-approved 12 November. See [journal 169](journey/169-three-hour-coding-attempts.md#effort-lowered-to-medium-12-november-2026).
+- **Deployment.** Not yet recorded as live; a dated note follows on release.
+
 ## Coding attempts may run three hours (12 November 2026)
 
 - **Configuration.** New Pi coding jobs get 180 minutes per attempt instead of 150, the most one attempt may run. Model and tool-call limits, models and effort are unchanged. No code, migration or Compose change.
