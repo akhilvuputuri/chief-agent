@@ -25,12 +25,12 @@ From the review's research pass (sources in its notes, not independently verifie
 
 ## Diagnosis and alternatives
 
-- **Planted errors (fact judge).** Each night the host takes up to three facts the judge has called supported and makes copies broken in fixed ways: negated ("It is not true that: …"), an invented detail appended, another fact's messages, and for a note, the occasion worded as a standing rule. Beside each goes an unchanged copy. The right answer is known without anyone labelling: a broken copy should not be supported, a control should. They are judged in a batch of their own and never stored. Limit: the edits are crude, so a judge that catches all of them may still miss subtler overstatement; and a base the judge wrongly called supported makes a bad control.
+- **Planted errors (fact judge).** Each night the host takes up to four facts the judge has called supported. Each gives an unchanged control and one copy broken in a fixed way: negated ("It is not true that: …"), an invented detail appended, another fact's messages, or for a note, the occasion worded as a standing rule. The right answer is known without anyone labelling: a broken copy should not be supported, a control should. Controls and broken copies are judged in separate batches and never stored. Limit: the edits are crude, so a judge that catches all of them may still miss subtler overstatement; and a base the judge wrongly called supported makes a bad control.
 - **A planted decoy (turn judge).** One of three fixed, plausible memories about nothing in the owner's life is added to each batch of turns. Calling it relevant is a judge error. It is counted and stripped before anything is recorded.
-- **Evidence for a claim of use.** `followed` and `contradicted` need a quote, and the host checks the quote is in the reply or a call. This cannot prove the verdict right, but it stops one made from nothing. `ignored` and `unclear` assert an absence and need none.
+- **Evidence for a claim of use.** `followed` and `contradicted` need a quote, and the host checks the quote is in the reply or a call. A claim it cannot find is recorded as `unclear`, with what was claimed, and counted. This cannot prove a verdict right, but it stops one made from nothing. `ignored` and `unclear` assert an absence and need none.
 - **More to see.** Each call's input and result, cut short and scrubbed; the exchange before the turn; the owner's next message and how the turn loop read it. A procedure about how to call a tool could otherwise only be judged `unclear`.
 - **No position.** Memories are shuffled per batch by a hash, so an item's place says nothing.
-- **Repeats and a second model.** A few of the night's facts and turns are judged again: twice by the same model and once by a model of another family. Disagreement is recorded, and the recorded verdict stays the first pass's. Alternative considered: move the judge back to another family. Rejected: the owner chose Opus 5.5 for it on 11 November; a cross-check on a sample keeps that choice and still measures how much the choice matters.
+- **Repeats and a second model.** A few of the night's facts and turns are judged again, twice by the same model. The facts are judged once more by a model of another family, which is sent facts and the owner's messages only: a turn's tool calls can hold email or calendar content, and sending those to a second provider is a decision for the owner, not a side effect of a check. Disagreement is recorded, and the recorded verdict stays the first pass's. Alternative considered: move the judge back to another family. Rejected: the owner chose Opus 5.5 for it on 11 November; a cross-check on a sample keeps that choice and still measures how much the choice matters.
 - **Restated.** The judge also lists memories whose content the owner had to tell Chief again. That is a direct sign a memory in context is not being used.
 - **Rejected: human spot-checks.** The owner-experience research suggested one hand check of the judge. The owner will not label, and planted errors answer the same question each night.
 
@@ -43,7 +43,15 @@ From the review's research pass (sources in its notes, not independently verifie
 - Tests ([tests/memory-judge.test.ts](../../tests/memory-judge.test.ts)), scripted models on a test database: the evidence check; what a turn shows; decoy counted and stripped; how probes are built; a full night with probes, two repeats and a second model that disagrees; a failing check leaving the night completed; the report queries.
 - A test found one defect before review: cutting a call's whole result to a length let one long field crowd out the short ones. Each field is cut first now.
 - Design: [learning](../learning.md#nightly-judge), dated note of 13 November.
-- Independent review: pending.
+- Independent review (Claude Opus 5.5) requested changes on `f01396a2`. It confirmed that no probe, decoy, repeat or second-model result can reach a recorded verdict, the progress marks, trace export or memory, and found these in the checks themselves:
+  - Blocking: the evidence check refused true quotes. A call's input and result reach the judge as JSON inside JSON, so a quote of them is escaped differently from the text the host compared it with; with one retry a batch, enough refusals left a batch with no verdict, which fails the night and repeats. The comparison is now on letters and digits only, and an unfound claim is recorded as `unclear` instead of refused.
+  - Evidence of three characters ("the", "one") passed. At least six letters or digits are needed now, or a call's exact name.
+  - A repeat that returned nothing was dropped and so counted as agreement. It is recorded as `missed`.
+  - A failure of the optional second model threw away the repeats already made. It is caught on its own.
+  - The checks' model calls and refusals were added to the night's counts. They are counted apart.
+  - The second model would have been sent tool inputs and results through another provider, which the docs did not say. It is now sent facts and the owner's messages only.
+  - A control sat beside its own broken copy in one batch, so the copy could be found by comparison. They are judged in separate batches, one broken copy per base.
+  - Smaller: a redirect label could sit beside an unrelated next message; a decoy listed as restated was not counted; a wrong journal number in a comment; a handover bullet rewritten in place.
 
 ## Verification and outcome
 
@@ -53,9 +61,9 @@ Tested only. The scripted judges return what the tests tell them to, so the test
 - how often it calls a decoy relevant;
 - how often a repeat or the second model disagrees;
 - whether `openai/gpt-6.1-sol` returns well-formed tool calls through Chief's OpenRouter adapter (it has not run there);
-- the cost of the extra calls: one probe batch and up to three check passes a night.
+- the cost of the extra calls: two probe batches, two repeats and one second-model pass a night.
 
-The counts will be small: about three bases a night and six items judged again.
+The counts will be small: up to four bases a night and six items judged again.
 
 ### Release closure
 
