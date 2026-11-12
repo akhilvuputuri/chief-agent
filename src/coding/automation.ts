@@ -4,7 +4,7 @@ import type { Database } from "../db.js";
 import type { CodingJob } from "./controller.js";
 import { errorFields, opsLog } from "../ops-log.js";
 import { artifactHash } from "./github.js";
-import { requirementScope, requirementScopes } from "./requirements.js";
+import { requirementScope } from "./requirements.js";
 import {
   MergeRefused,
   approvedArtifact,
@@ -209,8 +209,8 @@ export class CodingAutomation {
     // Carry over only an approval the owner actually gave for this exact scope.
     const approved = (
       await this.db.query(
-        "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload->>'decision'='approved' AND payload->>'approvedScope'=ANY($2::text[]) LIMIT 1",
-        [j.id, requirementScopes(j)],
+        "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload->>'decision'='approved' AND payload->>'approvedScope'=$2 LIMIT 1",
+        [j.id, requirementScope(j)],
       )
     ).rows.length;
     if (!approved) {

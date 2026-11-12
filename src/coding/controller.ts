@@ -24,7 +24,7 @@ import {
 import {
   CodingRequirements,
   requirementScope,
-  requirementScopes,
+  startCard,
 } from "./requirements.js";
 import { CodingMergeApprovals } from "./merge-approvals.js";
 import type { AgentGitHubTokens, AgentToken } from "./agent-github.js";
@@ -41,7 +41,6 @@ import {
   checkpoint,
   outcome,
   workerEvent,
-  assertCodingBrief,
   modelCallTimeoutMs,
   outputAllowance,
   type CodingAction,
@@ -614,13 +613,11 @@ export class CodingController {
       };
     }
     if (a.operation === "coding_start") {
-      assertCodingBrief(a.objective, a.context);
       if (!this.settings.image)
         throw new Error("Coding runtime image is not configured");
       const fingerprint = hash({
         objective: a.objective,
         context: a.context,
-        mode: a.mode,
       });
       const prior = (
         await this.db.query(
@@ -641,23 +638,37 @@ export class CodingController {
       const preferred = await modelPreferences(this.db, user, this.settings);
       const selected = {
         ...this.settings,
-        leaderModel:
-          this.settings.squad || this.settings.runtime === "pi"
-            ? preferred.leader
+        // Only the legacy squad has a leader; a Pi job is one coder and one reviewer (journal 191).
+        leaderModel: this.settings.squad
+          ? preferred.leader
+          : this.settings.runtime === "pi"
+            ? undefined
             : this.settings.leaderModel,
         model: preferred.coder,
         reviewerModel: preferred.reviewer,
       };
+      if (selected.leaderModel === undefined) delete selected.leaderModel;
       this.assertDirectPiModels(selected, "No job was started.");
       // Agent publication is snapshotted only when the separate agent App is configured.
       if (selected.agentGit && !this.agentGit) delete selected.agentGit;
       const id = randomUUID();
+      // The job waits for the owner's Start (journal 191): no box, no model and no tick work
+      // until then. Its first Start card is written in the same statement.
+      const waiting = {
+        id,
+        objective: a.objective,
+        context: a.context,
+        revision: 1,
+        checkpoint: { plan: "", patch: "", summary: "", files: [] },
+      } as unknown as CodingJob;
       const made = await this.db.query(
         `WITH made AS (
-        INSERT INTO coding_jobs(id,user_id,request_key,request_hash,origin_run,thread_id,objective,context,mode,base_sha,settings)
-        SELECT $1,$2,$3,$4,$5,(SELECT (metadata->>'threadId')::bigint FROM conversation_inputs WHERE user_id=$2 AND run_id=$5 ORDER BY ordinal LIMIT 1),$6,$7,$8,$9,$10::jsonb
+        INSERT INTO coding_jobs(id,user_id,request_key,request_hash,origin_run,thread_id,objective,context,mode,state,stage,summary,checkpoint,base_sha,settings)
+        SELECT $1,$2,$3,$4,$5,(SELECT (metadata->>'threadId')::bigint FROM conversation_inputs WHERE user_id=$2 AND run_id=$5 ORDER BY ordinal LIMIT 1),$6,$7,'plan','plan_ready','awaiting_start','Waiting for the owner to tap Start',$8::jsonb,$9,$10::jsonb
         ON CONFLICT(user_id,request_key) DO NOTHING RETURNING id
-      ) INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,1,$3,$6,$8 FROM made RETURNING job_id`,
+      ), revised AS (
+        INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,1,$3,$6,'plan' FROM made RETURNING job_id
+      ) INSERT INTO coding_events(job_id,event_key,payload) SELECT job_id,'requirements:1:start',$11::jsonb FROM revised RETURNING job_id`,
         [
           id,
           user,
@@ -666,9 +677,10 @@ export class CodingController {
           run,
           a.objective,
           a.context,
-          "plan",
+          JSON.stringify(waiting.checkpoint),
           base,
           JSON.stringify(selected),
+          JSON.stringify(startCard(waiting)),
         ],
       );
       if (!made.rows.length) {
@@ -762,10 +774,6 @@ export class CodingController {
       job.settings.prWorkflow === "owner_merge"
     )
       return this.requestPrChanges(user, job, a);
-    if (a.operation === "coding_reply" && a.mode === "implement")
-      throw new ToolValidationError(
-        "Implementation requires confirmed requirements. Use coding_resume to request the confirmation card, or coding_reply in plan mode to revise requirements.",
-      );
     if (
       a.operation === "coding_resume" &&
       job.state === "plan_ready" &&
@@ -840,43 +848,64 @@ export class CodingController {
     const message =
       a.operation === "coding_reply" ? a.message : "Explicit resume";
     if (prior) {
-      if (
-        prior.revision !== a.baseRevision + 1 ||
-        prior.message !== message ||
-        (a.operation === "coding_reply" && a.mode && prior.mode !== a.mode)
-      )
+      if (prior.revision !== a.baseRevision + 1 || prior.message !== message)
         throw new ToolValidationError("Coding revision request key conflict");
       return this.status(user, a.id);
     }
     await this.assertFreshOrConfirmed(job, a, RESTARTABLE);
-    if (
-      a.operation === "coding_reply" &&
-      job.context.length + message.length + 18 > 24000
-    )
-      throw new ToolValidationError(
-        "Coding follow-up exceeds the supported brief size; prepare a new bounded job",
-      );
-    assertCodingBrief(
-      job.objective,
+    // A message from the owner is appended to the request, and the job waits for a new Start
+    // card: the old card's scope no longer matches, so it cannot start the changed request.
+    // After Start this is interim (journal 191): a stopped job returns to a Start card.
+    // The worker's session and review identities hash the request, so a changed request starts
+    // its build phase afresh: the files, patch and tool count are kept, the review and session
+    // state is not (otherwise review recovery would refuse the changed identity).
+    const pi = job.checkpoint.piState;
+    const followUp =
       a.operation === "coding_reply"
-        ? job.context + "\nOwner follow-up: " + message
-        : job.context,
-    );
-    const changed = await this.db.query(
-      `WITH changed AS (
-      UPDATE coding_jobs SET revision=revision+1,mode=COALESCE($5,mode),context=CASE WHEN $7 THEN context || E'\nOwner follow-up: ' || $4 ELSE context END,state='queued',stage='queued',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
-      WHERE id=$1 AND user_id=$2 AND revision=$3 AND ${RESTARTABLE} RETURNING id,revision,mode
-    ) INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$6,$4,mode FROM changed RETURNING job_id`,
-      [
-        a.id,
-        user,
-        a.baseRevision,
-        message,
-        a.operation === "coding_reply" ? "plan" : null,
-        a.requestKey,
-        a.operation === "coding_reply",
-      ],
-    );
+        ? ({
+            ...job,
+            revision: job.revision + 1,
+            context: `${job.context}\nOwner follow-up: ${message}`,
+            checkpoint: pi
+              ? {
+                  ...job.checkpoint,
+                  piState: {
+                    version: 1,
+                    toolsUsed: pi.toolsUsed,
+                    ...(pi.mrFeedback ? { mrFeedback: pi.mrFeedback } : {}),
+                  },
+                }
+              : job.checkpoint,
+          } as CodingJob)
+        : undefined;
+    const changed = followUp
+      ? await this.db.query(
+          `WITH changed AS (
+      UPDATE coding_jobs SET revision=revision+1,mode='plan',context=$5,checkpoint=$10::jsonb,state='plan_ready',stage='awaiting_start',summary='Waiting for the owner to tap Start',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
+      WHERE id=$1 AND user_id=$2 AND revision=$3 AND context=$8 AND checkpoint=$9::jsonb AND ${RESTARTABLE} RETURNING id,revision,mode
+    ), revised AS (
+      INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$6,$4,mode FROM changed RETURNING job_id
+    ) INSERT INTO coding_events(job_id,event_key,payload) SELECT job_id,'requirements:'||($3::int+1)||':'||$6,$7::jsonb FROM revised RETURNING job_id`,
+          [
+            a.id,
+            user,
+            a.baseRevision,
+            message,
+            followUp.context,
+            a.requestKey,
+            JSON.stringify(startCard(followUp)),
+            job.context,
+            JSON.stringify(job.checkpoint),
+            JSON.stringify(followUp.checkpoint),
+          ],
+        )
+      : await this.db.query(
+          `WITH changed AS (
+      UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
+      WHERE id=$1 AND user_id=$2 AND revision=$3 AND state!='plan_ready' AND mode='implement' AND ${RESTARTABLE} RETURNING id,revision,mode
+    ) INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$5,$4,mode FROM changed RETURNING job_id`,
+          [a.id, user, a.baseRevision, message, a.requestKey],
+        );
     if (!changed.rows.length)
       // Nothing was written: a precondition, not an uncertain action, so the turn can continue.
       throw new ToolValidationError(
@@ -934,12 +963,9 @@ export class CodingController {
       };
     }
     const changed =
-      pi.phase === "build"
-        ? job.mode === "implement" && job.settings.model !== next.model
-        : pi.phase === "plan" &&
-          job.mode === "plan" &&
-          (job.settings.leaderModel ?? job.settings.model) !==
-            (next.leaderModel ?? next.model);
+      pi.phase === "build" &&
+      job.mode === "implement" &&
+      job.settings.model !== next.model;
     return changed
       ? { ...kept, sessionScope: hash([pi.sessionScope, requestKey]) }
       : undefined;
@@ -977,7 +1003,7 @@ export class CodingController {
       throw new ToolValidationError(
         "Coding revision changed; read coding_status and retry with the current revision",
       );
-    if (a.leaderModel && !job.settings.squad && job.settings.runtime !== "pi")
+    if (a.leaderModel && !job.settings.squad)
       throw new ToolValidationError("This job has no leader model to change");
     if (
       a.upgradeWorker &&
@@ -999,9 +1025,8 @@ export class CodingController {
       throw new ToolValidationError(
         "That time limit is above the most one attempt can run",
       );
-    const hasLeader = job.settings.squad || job.settings.runtime === "pi";
     const changes = [
-      ...(hasLeader
+      ...(job.settings.squad
         ? [
             [
               "Planner",
@@ -1048,17 +1073,25 @@ export class CodingController {
       : job.checkpoint;
     const approved =
       job.mode === "implement" && (await this.requirements.approved(job));
+    // A job waiting for Start shows its models on the Start card, so a model change replaces
+    // the card: the revision moves on, and the card the owner saw can no longer start it.
+    const waiting = job.state === "plan_ready" && job.mode === "plan";
+    const recard =
+      waiting &&
+      (next.model !== job.settings.model ||
+        next.reviewerModel !== job.settings.reviewerModel);
     const updated = await this.db.query(
       `WITH changed AS (
-        UPDATE coding_jobs SET settings=$4::jsonb,checkpoint=$5::jsonb
-        WHERE id=$1 AND user_id=$2 AND revision=$3 AND ${RESTARTABLE} AND settings=$6::jsonb AND checkpoint=$7::jsonb RETURNING id
-      ), carried AS (
-        -- Earlier approvals hashed the settings, so carry one to the scope that does not.
-        INSERT INTO coding_events(job_id,event_key,payload,delivery)
-        SELECT id,$8::text,jsonb_build_object('decision','approved','approvedScope',$9::text,'reason','settings_change'),'suppressed'
-        FROM changed WHERE $10::boolean RETURNING job_id
+        UPDATE coding_jobs SET settings=$4::jsonb,checkpoint=$5::jsonb,revision=revision+CASE WHEN $10::boolean THEN 1 ELSE 0 END
+        WHERE id=$1 AND user_id=$2 AND revision=$3 AND ${RESTARTABLE} AND settings=$6::jsonb AND checkpoint=$7::jsonb RETURNING id,revision
+      ), revised AS (
+        INSERT INTO coding_revisions(job_id,revision,request_key,message,mode)
+        SELECT id,revision,$8::text,'Owner changed the models before Start','plan' FROM changed WHERE $10::boolean RETURNING job_id
+      ), card AS (
+        INSERT INTO coding_events(job_id,event_key,payload)
+        SELECT id,'requirements:'||revision||':'||$8::text,$11::jsonb FROM changed WHERE $10::boolean RETURNING job_id
       ) INSERT INTO coding_events(job_id,event_key,payload)
-        SELECT id,$11::text,$12::jsonb FROM changed RETURNING job_id`,
+        SELECT id,$8::text,$9::jsonb FROM changed RETURNING job_id`,
       [
         job.id,
         user,
@@ -1067,9 +1100,6 @@ export class CodingController {
         JSON.stringify(checkpoint),
         JSON.stringify(job.settings),
         JSON.stringify(job.checkpoint),
-        `settings-approval:${a.requestKey}`,
-        requirementScope(job),
-        approved,
         key,
         JSON.stringify({
           kind: "settings_change",
@@ -1080,8 +1110,18 @@ export class CodingController {
             .map(([field, from, to]) => `${field}: ${from} → ${to}`)
             .join(
               "; ",
-            )}.${restarted ? " That step restarts in a fresh session; finished work is kept." : ""}${approved ? " Your approval of the requirements still stands." : ""} The job stays stopped until you resume it.`,
+            )}.${restarted ? " That step restarts in a fresh session; finished work is kept." : ""}${approved ? " Your Start of the request still stands." : ""}${
+            waiting
+              ? recard
+                ? " A new Start card follows; tap Start on it to begin."
+                : " The job still waits for you to tap Start."
+              : " The job stays stopped until you resume it."
+          }`,
         }),
+        recard,
+        JSON.stringify(
+          startCard({ ...job, revision: job.revision + 1, checkpoint }),
+        ),
       ],
     );
     if (!updated.rows.length)
@@ -1251,8 +1291,10 @@ export class CodingController {
           new Date(job.attempt_deadline).getTime() <= this.clock().getTime()))
     )
       throw new WorkerRefused("Invalid worker capability");
-    if (job.mode === "implement" && !(await this.requirements.approved(job)))
-      throw new WorkerRefused("Requirements are not approved");
+    // Nothing runs before the owner's Start, and a build needs the owner's approval of the
+    // exact request (journal 191).
+    if (job.mode !== "implement" || !(await this.requirements.approved(job)))
+      throw new WorkerRefused("The owner has not started this request");
     if (!job.sandbox_id && (!includeFinished || active.includes(job.state))) {
       if (job.state === "provisioning")
         throw new SandboxAcknowledgementPending();
@@ -1262,18 +1304,11 @@ export class CodingController {
   }
   /** Pi jobs call Claude directly at Anthropic (journal 190): refuse a model without that route. */
   private assertDirectPiModels(
-    settings: Pick<
-      CodingSettings,
-      "runtime" | "model" | "leaderModel" | "reviewerModel"
-    >,
+    settings: Pick<CodingSettings, "runtime" | "model" | "reviewerModel">,
     outcome: string,
   ) {
     if (settings.runtime !== "pi") return;
-    for (const model of new Set([
-      settings.leaderModel ?? settings.model,
-      settings.model,
-      settings.reviewerModel,
-    ]))
+    for (const model of new Set([settings.model, settings.reviewerModel]))
       if (!this.anthropic?.route(model))
         throw new ToolValidationError(
           `Coding jobs call Claude directly at Anthropic, and ${model} is not a Claude model Chief calls directly (config/model-policy.json lists them, such as anthropic/claude-opus-5.5 and anthropic/claude-sonnet-5.5). ${outcome}`,
@@ -1333,14 +1368,12 @@ export class CodingController {
       ...(job.settings.runtime === "pi"
         ? {
             nativeModels: Object.fromEntries(
-              [
-                job.settings.leaderModel ?? job.settings.model,
-                job.settings.model,
-                job.settings.reviewerModel,
-              ].flatMap((model) => {
-                const route = this.anthropic?.route(model);
-                return route ? [[model, route.nativeModel]] : [];
-              }),
+              [job.settings.model, job.settings.reviewerModel].flatMap(
+                (model) => {
+                  const route = this.anthropic?.route(model);
+                  return route ? [[model, route.nativeModel]] : [];
+                },
+              ),
             ),
           }
         : {}),
@@ -1457,8 +1490,6 @@ export class CodingController {
           "Review session must match the candidate, scope and round",
         );
     }
-    if (document?.kind === "plan" && document.detail !== c.plan)
-      throw new Error("Plan document must match the complete saved plan");
     if (
       document?.kind === "review" &&
       document.verdict === "REQUEST_CHANGES" &&
@@ -1475,7 +1506,7 @@ export class CodingController {
         !(await this.requirements.approved(job)))
     )
       throw new Error(
-        "Approved requirements are immutable; revise and confirm a new plan first",
+        "The started request is immutable; a change needs a new Start first",
       );
     validateFiles(c.files);
     if (
@@ -1602,19 +1633,12 @@ export class CodingController {
         !(await this.requirements.approved(job)))
     )
       throw new Error("Implementation needs the exact approved requirements");
-    if (
-      r.kind === "plan_ready" &&
-      (job.mode !== "plan" || !r.checkpoint.plan.trim())
-    )
-      throw new Error("Planning must produce a non-empty requirement brief");
     if (!active.includes(job.state)) {
       if (job.result && hash(job.result) === hash(r)) return { accepted: true };
       throw new Error("Worker attempt superseded");
     }
     if (new Date(job.attempt_deadline).getTime() <= this.clock().getTime())
       throw new Error("Worker allocation expired");
-    if (job.mode === "plan" && r.kind === "candidate")
-      throw new Error("Plan-only job cannot publish code");
     if (
       r.kind === "candidate" &&
       (r.review?.verdict !== "APPROVE" ||
@@ -1642,18 +1666,7 @@ export class CodingController {
         JSON.stringify(r.checkpoint),
         JSON.stringify(r),
         `${job.attempt_id}:finished`,
-        JSON.stringify(
-          r.kind === "plan_ready"
-            ? {
-                requirements: {
-                  revision: job.revision,
-                  scope: requirementScope({ ...job, checkpoint: r.checkpoint }),
-                  artifact: artifactHash(r.checkpoint),
-                  plan: r.checkpoint.plan,
-                },
-              }
-            : {},
-        ),
+        "{}",
         JSON.stringify(job.checkpoint),
       ],
     );
@@ -1692,14 +1705,8 @@ export class CodingController {
           : "Coding request rejected; inspect job state before retrying",
       );
     };
-    const effectiveRole =
-      role === "coder" && job.mode === "plan" ? "leader" : role;
     const selected =
-      effectiveRole === "reviewer"
-        ? job.settings.reviewerModel
-        : effectiveRole === "leader"
-          ? (job.settings.leaderModel ?? job.settings.model)
-          : job.settings.model;
+      role === "reviewer" ? job.settings.reviewerModel : job.settings.model;
     let body: Record<string, unknown>;
     let betas: string[];
     let route: ReturnType<CodingAnthropic["route"]>;
@@ -1707,12 +1714,6 @@ export class CodingController {
     try {
       if (job.settings.runtime !== "pi")
         throw new Error("Native Pi endpoint requires a Pi job");
-      if (
-        role === "reviewer" &&
-        job.mode !== "implement" &&
-        !(job.mode === "plan" && job.settings.planCheck)
-      )
-        throw new Error("Reviewer model requires approved implementation");
       route = this.anthropic?.route(selected);
       if (!route)
         throw new Error("Pi coding model has no direct Anthropic route");
@@ -1727,7 +1728,7 @@ export class CodingController {
       body = messagesRequest(raw, {
         model: route.nativeModel,
         effort: job.settings.effort,
-        maxTokens: outputAllowance(job.settings, effectiveRole),
+        maxTokens: outputAllowance(job.settings, role),
       });
     } catch (error) {
       return refuse(error);
@@ -1750,7 +1751,7 @@ export class CodingController {
         job.settings.limits.models,
         this.clock(),
         callId,
-        effectiveRole,
+        role,
         // The exact request, serialised once for its hash (no key-sorted copy).
         createHash("sha256").update(JSON.stringify(body)).digest("hex"),
         // The readable copy; the request itself goes to Anthropic exactly.
@@ -1919,7 +1920,7 @@ export class CodingController {
     const [toWorker, toHost] = response.body.tee();
     void this.recordPiStream(job, {
       callId,
-      role: effectiveRole,
+      role,
       purpose,
       selected,
       prices: route.prices,
@@ -2556,13 +2557,14 @@ export class CodingController {
           return;
         }
         try {
+          // No box starts before the owner's Start of the exact request (journal 191).
           if (
-            j.mode === "implement" &&
+            j.mode !== "implement" ||
             !(await this.requirements.approved(j))
           ) {
             await this.stopped(
               j,
-              "Requirements must be confirmed before implementation",
+              "The owner must tap Start on the current request before any work",
               false,
             );
             return;
@@ -2825,7 +2827,8 @@ export class CodingController {
       target: import("../delivery-routing.js").Destination,
       text: string,
       approval?: import("./delivery.js").CodingApproval,
-      document?: import("./delivery.js").CodingDocument,
+      /** Text shown as written, never parsed as markup. */
+      plain?: string,
     ) => Promise<unknown>,
     options: {
       /** Edits a status message in place; without it, each progress run is a new message. */
@@ -2882,7 +2885,7 @@ export class CodingController {
               j.mode !== "plan" ||
               j.revision !== req.revision ||
               j.checkpoint.plan !== req.plan ||
-              !requirementScopes(j).includes(req.scope) ||
+              requirementScope(j) !== req.scope ||
               artifactHash(j.checkpoint) !== req.artifact))
         ) {
           await this.db.query(
@@ -2900,18 +2903,6 @@ export class CodingController {
           return;
         }
         await this.closeStatus(e.id);
-        const attachment =
-          req && j.settings.runtime === "pi"
-            ? {
-                filename: `coding-plan-r${req.revision}.md`,
-                content: `# Coding requirements — revision ${req.revision}\n\n## Original request\n${j.objective}\n\n## Context\n${j.context}\n\n${j.checkpoint.piState?.planCheck?.gaps ? `## Requirement check found gaps\n${j.checkpoint.piState.planCheck.gaps}\n\n` : ""}## Complete plan\n${req.plan}\n\n## Execution\nPlanner: ${j.settings.leaderModel ?? j.settings.model}\nCoder: ${j.settings.model}\nReviewer: ${j.settings.reviewerModel}\nDraft PR for owner review.\n\nScope: ${req.scope}\nJob: ${e.job_id}\n`,
-              }
-            : undefined;
-        const summaryPreview = Array.from(String(j.summary ?? ""))
-          .slice(0, 180)
-          .join("");
-        // The owner taps Start without reading the plan; the reviewer checked it first.
-        const check = j.checkpoint.piState?.planCheck;
         const id = (model: string) => Array.from(model).slice(0, 60).join("");
         // Telegram counts UTF-16 units, so emoji-heavy text is cut by units, not characters.
         const units = (text: string, max: number) => {
@@ -2922,25 +2913,18 @@ export class CodingController {
           }
           return out;
         };
-        const objectiveLine = units(
-          String(j.objective).split("\n")[0] ?? "",
-          160,
-        );
-        const checkLine =
-          check?.status === "passed"
-            ? "The reviewer checked the plan against your request. "
-            : check?.status === "revised"
-              ? "The reviewer checked the plan against your request, and it was revised once to keep every requirement. "
-              : check?.status === "gaps"
-                ? "Some of your requirements may be missing; they are listed in the attached plan. Tap Change to fix them first. "
-                : check?.status === "revised_unchecked"
-                  ? "The plan was revised once for missing requirements, but the recheck could not finish. "
-                  : check?.status === "unavailable"
-                    ? "The requirement check could not finish. "
-                    : "";
-        const preview = units(summaryPreview, 180);
-        const caption = attachment
-          ? `${check?.status === "gaps" ? "**Ready to start, but the requirement check found gaps**" : "**Ready to start coding**"}\n\n${objectiveLine}\n\n${preview}\n\n${checkLine}Planner: ${id(j.settings.leaderModel ?? j.settings.model)}. Coder: ${id(j.settings.model)}. Reviewer: ${id(j.settings.reviewerModel)}. Tap Start to begin, or Change to adjust it. The full plan is attached; this card stays valid for 24 hours.\n\nJob: ${e.job_id}`
+        // The Start card (journal 191): the goal, who builds and reviews it, one Start button.
+        // The goal and model ids are the owner's and the profile's text: cut first, then sent
+        // as written, so neither markup in them nor a cut through it changes the card.
+        const goal = String(j.objective)
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .slice(0, 2)
+          .join("\n");
+        const caption = req ? "**Ready to start**" : undefined;
+        const plain = req
+          ? `${units(goal, 300)}\n\nCoder: ${id(j.settings.model)}. Reviewer: ${id(j.settings.reviewerModel)}.`
           : undefined;
         // Without the owner-merge workflow no Merge card repeats the coder's summary, so the
         // first PR notice carries it (bounded like the Merge card).
@@ -2961,10 +2945,8 @@ export class CodingController {
           codingDestination(e.payload),
           caption ??
             [
-              req
-                ? `**Coding plan — revision ${req.revision}**`
-                : `Coding job ${e.job_id}`,
-              !req && typeof e.payload.summary === "string"
+              `Coding job ${e.job_id}`,
+              typeof e.payload.summary === "string"
                 ? e.payload.summary.slice(0, 1500)
                 : undefined,
               typeof e.payload.question === "string"
@@ -2974,10 +2956,6 @@ export class CodingController {
               typeof coderSummary === "string" && coderSummary
                 ? `Coder's own summary (not verified by Chief): ${Array.from(coderSummary).slice(0, 800).join("")}`
                 : undefined,
-              req ? req.plan : undefined,
-              req
-                ? `**Execution**\nLeader: ${j.settings.leaderModel ?? j.settings.model}\nCoder: ${j.settings.model}\nReviewer: ${j.settings.reviewerModel}\n${j.settings.autoMerge ? "Ordinary changes may merge after exact-artifact review and GitHub checks; protected changes stop for explicit review." : "Draft PR for owner review."}\n\nApprove this scope, or reply directly to this message with yes. To revise it, tell Chief what to change. Confirmation stays valid for 24 hours.\nJob: ${e.job_id}`
-                : undefined,
             ]
               .filter(Boolean)
               .join("\n\n"),
@@ -2986,7 +2964,7 @@ export class CodingController {
             : merge
               ? { kind: "merge", id: e.id }
               : undefined,
-          attachment,
+          plain,
         );
         if (req || merge) {
           const receipt = sent as { message_id?: number } | undefined;

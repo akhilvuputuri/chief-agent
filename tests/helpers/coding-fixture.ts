@@ -18,11 +18,7 @@ import { selectCodingBackend } from "../../src/coding/backend.js";
 import { squadScope } from "../../src/coding/squad-state.js";
 import { ModelError, OpenRouter } from "../../src/model.js";
 import { formatTelegram } from "../../src/telegram-format.js";
-import {
-  codingSettings,
-  outcome,
-  assertCodingBrief,
-} from "../../src/coding/schema.js";
+import { codingSettings, outcome } from "../../src/coding/schema.js";
 import { codingApi } from "../../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -155,7 +151,7 @@ export const settings = codingSettings.parse({
 export const base = "a".repeat(40);
 export const candidate = () => {
   const c = {
-    plan: "Fix the fixture",
+    plan: "",
     patch: "fixture diff",
     summary: "Fixture changed",
     files: [
@@ -346,37 +342,27 @@ export async function fixture(
     undefined,
     anthropic,
   );
-  // Most controller tests seed an already-approved implementation phase;
-  // separate lifecycle tests below exercise real planning/delivery/confirmation.
-  const start = async (
-    key = "request",
-    mode: "plan" | "implement" = "implement",
-  ) => {
+  // coding_start leaves a job waiting for the owner's Start (journal 191). Most controller
+  // tests need a started job, so the fixture records the owner's Start directly; pass
+  // `waiting` to keep the job at its Start card.
+  const start = async (key = "request", waiting = false) => {
     const result = (await c.call("a", run, {
       operation: "coding_start",
       requestKey: key,
       objective: "Fix a synthetic bug",
       context: "Synthetic evidence",
-      mode,
     })) as any;
-    if (mode === "implement" && result.mode === "plan") {
+    if (!waiting && result.state === "plan_ready") {
       await db.query(
-        "UPDATE coding_jobs SET mode='implement',checkpoint=$2::jsonb WHERE id=$1",
-        [
-          result.id,
-          JSON.stringify({
-            plan: "Fix the fixture",
-            patch: "",
-            summary: "",
-            files: [],
-          }),
-        ],
+        "UPDATE coding_jobs SET mode='implement',state='queued',stage='queued',summary='Started by the owner; implementation queued' WHERE id=$1",
+        [result.id],
       );
       const job = (
         await db.query("SELECT * FROM coding_jobs WHERE id=$1", [result.id])
       ).rows[0];
+      // The Start card becomes the owner's recorded decision.
       await db.query(
-        "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'fixture-approved',$2::jsonb,'suppressed') ON CONFLICT DO NOTHING",
+        "UPDATE coding_events SET event_key='fixture-approved',payload=$2::jsonb,delivery='suppressed' WHERE job_id=$1 AND payload ? 'requirements'",
         [
           job.id,
           JSON.stringify({
@@ -440,66 +426,42 @@ export async function fixture(
     },
   };
 }
-export async function requirementBrief(
+/**
+ * coding_start, then the delivered Start card (journal 191): nothing is provisioned and no
+ * model runs before the owner's Start.
+ */
+export async function startCard(
   f: Awaited<ReturnType<typeof fixture>>,
-  key = "real-plan",
-  plan = "Scope: requested feature. Acceptance: synthetic tests pass.",
+  key = "real-start",
+  objective = "Build the requested feature",
 ) {
   const job: any = await f.c.call("a", f.run, {
     operation: "coding_start",
     requestKey: key,
-    objective: "Build the requested feature",
+    objective,
     context: "Synthetic scope",
-    mode: "implement",
   });
-  assert.equal(job.mode, "plan");
-  await f.c.tick();
-  const running = await f.row(job.id);
-  await f.c.finish(running, {
-    kind: "plan_ready",
-    summary: "Brief prepared",
-    checkpoint: {
-      plan,
-      patch: "",
-      summary: "Brief prepared",
-      files: [],
-    },
-  });
+  assert.equal(job.state, "plan_ready");
+  assert.equal(job.stage, "awaiting_start");
   await f.c.tick();
   await f.c.tick();
+  assert.equal(f.creates(), 0);
+  assert.equal(f.modelCalls(), 0);
   let messageId = 100;
   let approvalId = "";
-  let brief = "";
-  await f.c.deliver(async (_user, target, text, id) => {
-    assert.deepEqual(target, { kind: "topic", topic: "coding" });
-    if (id) {
-      approvalId = id.id;
-      brief = text;
-    }
-    return { message_id: ++messageId };
-  });
-  await f.c.deliver(async (_user, target, text, id) => {
-    assert.deepEqual(target, { kind: "topic", topic: "coding" });
-    if (id) {
-      approvalId = id.id;
-      brief = text;
-    }
-    return { message_id: ++messageId };
-  });
-  assert(
-    approvalId,
-    JSON.stringify({
-      job: await f.row(job.id),
-      events: (
-        await f.db.query(
-          "SELECT event_key,payload,delivery FROM coding_events WHERE job_id=$1",
-          [job.id],
-        )
-      ).rows,
-    }),
-  );
-  assert(brief.includes(plan));
-  return { jobId: job.id, approvalId, messageId, brief };
+  let card = "";
+  // Earlier jobs' notices may be delivered first.
+  for (let i = 0; i < 5 && !approvalId; i++)
+    await f.c.deliver(async (_user, target, text, id, plain) => {
+      assert.deepEqual(target, { kind: "topic", topic: "coding" });
+      if (id) {
+        approvalId = id.id;
+        card = plain ? `${text}\n\n${plain}` : text;
+      }
+      return { message_id: ++messageId };
+    });
+  assert(approvalId, "Start card was not delivered");
+  return { jobId: job.id as string, approvalId, messageId, card };
 }
 
 /** An Anthropic route for controllers a test builds itself; it never sends a request. */

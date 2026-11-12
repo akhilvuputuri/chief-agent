@@ -6,6 +6,8 @@ A TypeScript library and CLI for repository learning, planning and explicitly ap
 
 Planning uses a focused investigation pass: after 32 navigation operations or ten minutes, at the next settled turn boundary (three quarters of a shorter remaining time allocation). Then at most two final turns return a complete source-grounded plan or a specific question about missing evidence. Checkpoints settle before the handoff. Advertised planning definitions remain stable, while tool admission permits only report execution in finalization. A valid settled plan ends immediately; failed/truncated responses cannot trigger native post-run compaction recovery. One format correction is permitted after a definite tool/admission rejection or completed nonempty prose. Provider failure, truncation and cancellation are not retried. Repeated prose-only endings pause after the bounded correction. Invalid/ignored reporting pauses with a concrete retained-investigation explanation without authorizing implementation. The standalone default active allocation is 40 minutes; model/tool allocations remain 400/1,000. Clients may supply their own allocations.
 
+> **Update, 13 November 2026 ([journal 191](../docs/journey/191-go-gate-no-planner.md)):** the planning budget (32 navigation operations or ten minutes) and the planner's Requirements-section instruction are removed; a planning run ends when the model reports. The objective and instructions have no length limit. Chief's coding jobs no longer plan.
+
 ## Setup
 
 Use Node 22.19.0 or newer. The worker and CI pin 22.23.4 (its bundled undici 6.29.1 fixes a fetch hang on corrupt gzip bodies, journal 126). Install without dependency lifecycle scripts:

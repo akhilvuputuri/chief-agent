@@ -29,11 +29,7 @@ import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError, OpenRouter } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
-import {
-  codingSettings,
-  outcome,
-  assertCodingBrief,
-} from "../src/coding/schema.js";
+import { codingSettings, outcome } from "../src/coding/schema.js";
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -60,7 +56,7 @@ import {
   base,
   candidate,
   fixture,
-  requirementBrief,
+  startCard,
 } from "./helpers/coding-fixture.js";
 test("required dependency installation keeps the package store outside the captured checkout", async () => {
   const root = await mkdtemp(join(tmpdir(), "chief-kite-home-"));

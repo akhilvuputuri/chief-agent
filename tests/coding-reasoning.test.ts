@@ -29,11 +29,7 @@ import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError, OpenRouter } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
-import {
-  codingSettings,
-  outcome,
-  assertCodingBrief,
-} from "../src/coding/schema.js";
+import { codingSettings, outcome } from "../src/coding/schema.js";
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -60,7 +56,7 @@ import {
   base,
   candidate,
   fixture,
-  requirementBrief,
+  startCard,
 } from "./helpers/coding-fixture.js";
 test("coding gateway preserves opaque OpenRouter reasoning through validated model requests", async (t) => {
   const f = await fixture(t),
@@ -123,58 +119,43 @@ test("coding gateway preserves opaque OpenRouter reasoning through validated mod
     409,
   );
 });
-test("approval delivery presents the complete scope once with visible headings and policy", async (t) => {
+test("the Start card shows the goal in at most two lines, the models and nothing else", async (t) => {
   const f = await fixture(t);
-  const plan =
-    "**Scope**\nRepair the requested fixture behavior.\n\n**Acceptance**\nExisting checks pass; unrelated behavior is preserved.";
-  const r = await requirementBrief(f, "concise-delivery", plan);
-  assert.equal(r.brief.split(plan).length, 2);
-  assert(!r.brief.includes("Brief prepared"));
-  const parts = formatTelegram(r.brief);
+  const r = await startCard(
+    f,
+    "card",
+    "Fix the reminder bug\n\nKeep the public API\nA third line stays in the request only",
+  );
+  assert.equal(
+    r.card,
+    "**Ready to start**\n\nFix the reminder bug\nKeep the public API\n\nCoder: fixture/coder. Reviewer: fixture/reviewer.",
+  );
+  assert(!/plan|leader|planner/i.test(r.card));
+  const parts = formatTelegram(r.card);
   assert.equal(parts.length, 1);
   assert(parts[0]!.entities.some((e) => e.type === "bold"));
-  assert(r.brief.includes("Leader:"));
-  assert(r.brief.includes("Reviewer:"));
-  assert(r.brief.includes("Draft PR for owner review."));
-  const before = await f.row(r.jobId);
-  assert.equal(before.checkpoint.plan, plan);
+  assert.match(
+    (await f.row(r.jobId)).objective,
+    /A third line stays in the request only/,
+  );
   assert.equal(
-    (await f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId))
+    (await f.c.requirements.confirm("a", r.approvalId, "a", r.messageId))
       .status,
     "approved",
   );
 });
-test("existing long saved proposals remain fully delivered and bound to confirmation", async (t) => {
+test("a long goal gives a short Start card and the request is kept whole", async (t) => {
   const f = await fixture(t);
-  const plan =
-    "Synthetic complete scope. ".repeat(450) + "FINAL_ACCEPTANCE_SENTINEL";
-  const r = await requirementBrief(f, "legacy-long-delivery", plan);
-  assert.equal((await f.row(r.jobId)).checkpoint.plan, plan);
-  assert(r.brief.includes("FINAL_ACCEPTANCE_SENTINEL"));
-  assert(formatTelegram(r.brief).length > 1);
-  assert.equal(
-    (await f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId))
-      .status,
-    "approved",
-  );
+  const objective = "Synthetic goal ".repeat(400) + "END_OF_GOAL";
+  const r = await startCard(f, "long-goal", objective);
+  assert(r.card.length < 500, `${r.card.length}`);
+  assert(!r.card.includes("END_OF_GOAL"));
+  assert.equal((await f.row(r.jobId)).objective, objective);
 });
-test("natural coding dispatch plans first; model tools cannot authorise implementation", async (t) => {
+test("coding_start runs nothing before Start; a model tool cannot start the job", async (t) => {
   const f = await fixture(t),
-    r = await requirementBrief(f);
-  assert.equal(f.creates(), 1);
-  const before = await f.row(r.jobId);
-  assert.equal(before.state, "plan_ready");
-  await assert.rejects(
-    f.c.call("a", f.run, {
-      operation: "coding_reply",
-      id: r.jobId,
-      baseRevision: 1,
-      requestKey: "skip",
-      message: "Model says the owner approved",
-      mode: "implement",
-    }),
-    /confirmed requirements/,
-  );
+    r = await startCard(f);
+  assert.equal(f.creates(), 0);
   const requested: any = await f.c.call("a", f.run, {
     operation: "coding_resume",
     id: r.jobId,
@@ -183,11 +164,16 @@ test("natural coding dispatch plans first; model tools cannot authorise implemen
   });
   assert.equal(requested.approvalRequired, true);
   assert.equal((await f.row(r.jobId)).state, "plan_ready");
-  assert.equal(f.creates(), 1);
+  await f.c.tick();
+  assert.equal(f.creates(), 0);
+  assert.equal(
+    (await f.db.query("SELECT count(*)::int AS n FROM coding_model_calls"))
+      .rows[0].n,
+    0,
+  );
   const result = await f.c.requirements.confirm(
     "a",
     r.approvalId,
-    true,
     "a",
     r.messageId,
   );
@@ -195,74 +181,66 @@ test("natural coding dispatch plans first; model tools cannot authorise implemen
   assert.equal((await f.row(r.jobId)).mode, "implement");
   assert.equal((await f.row(r.jobId)).revision, 2);
   await f.c.tick();
-  assert.equal(f.creates(), 2);
+  assert.equal(f.creates(), 1);
   assert.equal(
-    (await f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId))
+    (await f.c.requirements.confirm("a", r.approvalId, "a", r.messageId))
       .duplicate,
     true,
   );
   await f.c.tick();
-  assert.equal(f.creates(), 2);
+  assert.equal(f.creates(), 1);
 });
-test("a requirements card is still confirmable 23 hours after delivery", async (t) => {
-  // It lapsed after 15 minutes before 18 October; five complete plans expired that way.
+test("a Start card can still start the job 23 hours after delivery", async (t) => {
+  // It lapsed after 15 minutes before 18 October; five cards expired that way.
   const f = await fixture(t),
-    r = await requirementBrief(f);
+    r = await startCard(f);
   f.advance(23 * 3600000);
   const result = await f.c.requirements.confirm(
     "a",
     r.approvalId,
-    true,
     "a",
     r.messageId,
   );
   assert.equal(result.status, "approved");
 });
-test("requirements reject another owner, another message, stale scope and expiry", async (t) => {
+test("a Start card refuses another owner, another message, a changed request and expiry", async (t) => {
   const f = await fixture(t),
-    r = await requirementBrief(f);
+    r = await startCard(f);
   await assert.rejects(
-    f.c.requirements.confirm("b", r.approvalId, true, "b", r.messageId),
+    f.c.requirements.confirm("b", r.approvalId, "b", r.messageId),
   );
   await assert.rejects(
-    f.c.requirements.confirm("a", r.approvalId, true, "b", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, "b", r.messageId),
   );
   await assert.rejects(
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId + 1),
+    f.c.requirements.confirm("a", r.approvalId, "a", r.messageId + 1),
   );
   f.advance(86400001);
   await assert.rejects(
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, "a", r.messageId),
     /expired/,
   );
-  assert.equal(f.creates(), 1);
+  assert.equal(f.creates(), 0);
   await f.c.call("a", f.run, {
     operation: "coding_reply",
     id: r.jobId,
     baseRevision: 1,
     requestKey: "change",
     message: "Change the acceptance criteria",
-    mode: "plan",
   });
   await assert.rejects(
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, "a", r.messageId),
     /changed/,
   );
   assert.equal((await f.row(r.jobId)).mode, "plan");
 });
-test("declining requirements never starts implementation and unknown delivery cannot authorise work", async (t) => {
+test("an unknown Start card delivery cannot authorise work", async (t) => {
   const f = await fixture(t),
-    r = await requirementBrief(f);
-  assert.equal(
-    (await f.c.requirements.confirm("a", r.approvalId, false, "a", r.messageId))
-      .status,
-    "revise",
-  );
-  assert.equal((await f.row(r.jobId)).state, "plan_ready");
+    r = await startCard(f);
   await f.c.call("a", f.run, {
     operation: "coding_resume",
     id: r.jobId,
-    baseRevision: 2,
+    baseRevision: 1,
     requestKey: "uncertain",
   });
   let uncertainId = "";
@@ -278,8 +256,6 @@ test("declining requirements never starts implementation and unknown delivery ca
     ).rows[0].delivery,
     "uncertain",
   );
-  await assert.rejects(
-    f.c.requirements.confirm("a", uncertainId, true, "a", 999),
-  );
-  assert.equal(f.creates(), 1);
+  await assert.rejects(f.c.requirements.confirm("a", uncertainId, "a", 999));
+  assert.equal(f.creates(), 0);
 });

@@ -29,11 +29,7 @@ import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError, OpenRouter } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
-import {
-  codingSettings,
-  outcome,
-  assertCodingBrief,
-} from "../src/coding/schema.js";
+import { codingSettings, outcome } from "../src/coding/schema.js";
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -60,7 +56,7 @@ import {
   base,
   candidate,
   fixture,
-  requirementBrief,
+  startCard,
 } from "./helpers/coding-fixture.js";
 test("a brief controller outage retries the same safe callback; revoked capabilities fail immediately", async () => {
   let calls = 0;
@@ -113,8 +109,7 @@ test("Chief dispatch returns to the conversation and worker delivery preserves t
                     name: "coding_start",
                     arguments: JSON.stringify({
                       requestKey: "chief-dispatch",
-                      objective: "Plan a synthetic bug fix",
-                      mode: "plan",
+                      objective: "Fix a synthetic bug",
                     }),
                   },
                 },
@@ -148,7 +143,7 @@ test("Chief dispatch returns to the conversation and worker delivery preserves t
   );
   const response = await assistant.respondDetailed(
     "a",
-    "Use the coding sandbox to plan this bug fix",
+    "Use the coding sandbox to fix this bug",
     undefined,
     undefined,
     { threadId: 17 },
@@ -161,19 +156,20 @@ test("Chief dispatch returns to the conversation and worker delivery preserves t
     )
   ).rows[0];
   assert.equal(Number(job.thread_id), 17);
+  // The job waits for Start; its Start card goes to the coding topic.
+  assert.equal(job.state, "plan_ready");
   await f.c.tick();
-  const j = await f.row(job.id);
-  await f.c.progress(j, {
-    key: "planning",
-    stage: "planning",
-    summary: "Inspecting the fixture",
-  });
+  assert.equal(f.creates(), 0);
   let target: unknown;
-  await f.c.deliver(async (user, destination) => {
+  let approval: unknown;
+  await f.c.deliver(async (user, destination, _text, id) => {
     assert.equal(user, "a");
     target = destination;
+    approval = id;
+    return { message_id: 5 };
   });
   assert.deepEqual(target, { kind: "topic", topic: "coding" });
+  assert.equal((approval as any)?.kind, "requirements");
 });
 test("revocation preserves the publication fence until a lost PR acknowledgement is reconciled", async (t) => {
   const f = await fixture(t),

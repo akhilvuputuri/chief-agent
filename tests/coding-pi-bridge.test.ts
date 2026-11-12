@@ -29,11 +29,7 @@ import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError, OpenRouter } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
-import {
-  codingSettings,
-  outcome,
-  assertCodingBrief,
-} from "../src/coding/schema.js";
+import { codingSettings, outcome } from "../src/coding/schema.js";
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -60,17 +56,17 @@ import {
   base,
   candidate,
   fixture,
-  requirementBrief,
+  startCard,
 } from "./helpers/coding-fixture.js";
-test("a reply to the exact brief confirms once; approved requirements cannot change in a worker checkpoint", async (t) => {
+test("a yes reply to the exact Start card starts once; the started request cannot change in a worker checkpoint", async (t) => {
   const f = await fixture(t),
-    r = await requirementBrief(f);
+    r = await startCard(f);
   assert.equal(
-    await f.c.requirements.confirmReply("a", "a", r.messageId + 1, true),
+    await f.c.requirements.confirmReply("a", "a", r.messageId + 1),
     undefined,
   );
   assert.equal(
-    (await f.c.requirements.confirmReply("a", "a", r.messageId, true))!.status,
+    (await f.c.requirements.confirmReply("a", "a", r.messageId))!.status,
     "approved",
   );
   await f.c.tick();
@@ -90,8 +86,8 @@ test("a reply to the exact brief confirms once; approved requirements cannot cha
 });
 test("approved implementation resumes retain the same requirements without a model-granted approval", async (t) => {
   const f = await fixture(t),
-    r = await requirementBrief(f);
-  await f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId);
+    r = await startCard(f);
+  await f.c.requirements.confirm("a", r.approvalId, "a", r.messageId);
   const scope = (await f.row(r.jobId)).context;
   await f.c.tick();
   f.advance(1200000);
@@ -109,55 +105,31 @@ test("approved implementation resumes retain the same requirements without a mod
   });
   assert.equal((await f.row(r.jobId)).context, scope);
   await f.c.tick();
-  assert.equal(f.creates(), 3);
+  assert.equal(f.creates(), 2);
 });
-test("missing approval pauses a legacy implementation before provisioning and concurrent confirmation queues once", async (t) => {
+test("a queued job without the owner's Start pauses before provisioning and concurrent Starts queue once", async (t) => {
   const f = await fixture(t),
-    job = await f.start("unapproved", "plan");
-  await f.db.query("UPDATE coding_jobs SET mode='implement' WHERE id=$1", [
-    job.id,
-  ]);
+    job = await f.start("unapproved", true);
+  await f.db.query(
+    "UPDATE coding_jobs SET mode='implement',state='queued',stage='queued' WHERE id=$1",
+    [job.id],
+  );
   await f.c.tick();
   assert.equal(f.creates(), 0);
   assert.equal((await f.row(job.id)).state, "paused");
-  const r = await requirementBrief(f, "confirmed");
+  const r = await startCard(f, "confirmed");
   const results = await Promise.allSettled([
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, "a", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, "a", r.messageId),
   ]);
   assert(results.some((result) => result.status === "fulfilled"));
   assert.equal((await f.row(r.jobId)).revision, 2);
-  await f.c.tick();
-  assert.equal(f.creates(), 2);
-});
-test("decline advances the locked revision and a concurrent approve cannot overwrite it", async (t) => {
-  const f = await fixture(t),
-    r = await requirementBrief(f);
-  const results = await Promise.allSettled([
-    f.c.requirements.confirm("a", r.approvalId, false, "a", r.messageId),
-    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
-  ]);
-  assert.equal(results[0].status, "fulfilled");
-  assert.equal(results[1].status, "rejected");
-  const current = await f.row(r.jobId);
-  assert.equal(current.revision, 2);
-  assert.equal(current.mode, "plan");
-  assert.equal(current.state, "plan_ready");
-  assert.equal(
-    (
-      await f.db.query(
-        "SELECT payload->>'decision' AS decision FROM coding_events WHERE id=$1",
-        [r.approvalId],
-      )
-    ).rows[0].decision,
-    "revise",
-  );
   await f.c.tick();
   assert.equal(f.creates(), 1);
 });
 test("Pi sessions append encrypted immutable entries and survive attempt changes", async (t) => {
   const f = await fixture(t);
-  const started = await f.start("pi-session", "plan");
+  const started = await f.start("pi-session");
   await f.c.tick();
   let job = await f.row(started.id);
   await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [

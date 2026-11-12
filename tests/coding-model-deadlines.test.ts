@@ -29,11 +29,7 @@ import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError, OpenRouter } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
-import {
-  codingSettings,
-  outcome,
-  assertCodingBrief,
-} from "../src/coding/schema.js";
+import { codingSettings, outcome } from "../src/coding/schema.js";
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -60,13 +56,13 @@ import {
   base,
   candidate,
   fixture,
-  requirementBrief,
+  startCard,
 } from "./helpers/coding-fixture.js";
 // The Pi Messages route's deadline is covered in coding-pi-messages.test.ts.
 for (const runtime of ["python"])
   test(`${runtime} remaining job deadline aborts a stalled model and exposes its exact timeout category`, async (t) => {
     const f = await fixture(t);
-    const job: any = await f.start("deadline-stream", "plan");
+    const job: any = await f.start("deadline-stream");
     await f.c.tick();
     const row = await f.row(job.id);
     // The fixture host clock is stable, so the remaining allocation is deterministic.
@@ -107,7 +103,7 @@ for (const runtime of ["python"])
   });
 test("empty provider answers permit a fresh generation but never replay the uncertain call", async (t) => {
   const f = await fixture(t);
-  const job: any = await f.start("empty-model", "plan");
+  const job: any = await f.start("empty-model");
   await f.c.tick();
   await f.db.query(
     'UPDATE coding_jobs SET settings=settings || \'{"harnessVersion":2,"squad":true}\'::jsonb WHERE id=$1',
@@ -168,7 +164,7 @@ test("empty provider answers permit a fresh generation but never replay the unce
 });
 test("a refusal says the model declined, with its category, and records the billed usage", async (t) => {
   const f = await fixture(t);
-  const job: any = await f.start("refused-model", "plan");
+  const job: any = await f.start("refused-model");
   await f.c.tick();
   await f.db.query(
     'UPDATE coding_jobs SET settings=settings || \'{"harnessVersion":2,"squad":true}\'::jsonb WHERE id=$1',
@@ -254,7 +250,7 @@ test("a refusal says the model declined, with its category, and records the bill
 });
 test("new harness exposes a bounded transient model category without provider error text", async (t) => {
   const f = await fixture(t);
-  const job: any = await f.start("transient-model", "plan");
+  const job: any = await f.start("transient-model");
   await f.c.tick();
   await f.db.query(
     'UPDATE coding_jobs SET settings=settings || \'{"harnessVersion":2,"squad":true}\'::jsonb WHERE id=$1',
@@ -351,16 +347,17 @@ test("worker rejection status is bounded, owner-scoped and fenced to the current
 });
 test("late finish rejection remains visible for the same completed attempt", async (t) => {
   const f = await fixture(t),
-    job = await f.start("late-finish", "plan");
+    job = await f.start("late-finish");
   await f.c.tick();
   const j = await f.row(job.id),
     app = server();
   t.after(() => app.close());
   await codingApi(app, f.c);
   await f.c.finish(j, {
-    kind: "plan_ready",
-    summary: "Synthetic ready plan",
-    checkpoint: { ...j.checkpoint, plan: "Synthetic complete requirements" },
+    kind: "awaiting_input",
+    summary: "Synthetic question",
+    question: "Which helper should the fix use?",
+    checkpoint: j.checkpoint,
   });
   const request = {
     method: "POST" as const,
@@ -371,7 +368,7 @@ test("late finish rejection remains visible for the same completed attempt", asy
   const rejected = await app.inject(request);
   assert.equal(rejected.statusCode, 409);
   const status = await f.c.status("a", j.id);
-  assert.equal(status.state, "plan_ready");
+  assert.equal(status.state, "awaiting_input");
   assert.equal(status.lastFailure.phase, "finish");
   assert.equal(status.lastFailure.code, "invalid_worker_payload");
   assert(!JSON.stringify(status).includes("Secret must not appear"));

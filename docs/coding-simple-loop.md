@@ -23,7 +23,11 @@ request (+ more owner messages) → [Start] → one coder session: build, run te
 5. **Main moves.** Nothing happens. If GitHub reports the PR as conflicting, the box rebases the change onto main with git; if git cannot resolve it, the coder resolves the conflicts in its session and reruns the tests. Either way the reviewer reads the difference before the rebased change is published, because the review approval is bound to the exact published change.
 6. **Merge card.** As today, including the manual steps for database, Compose, environment and workflow changes.
 
+> **Update, 13 November 2026 ([journal 191](journey/191-go-gate-no-planner.md)):** step 1 is built. The card shows the objective's first two non-empty lines (cut to 300 UTF-16 units, so a long goal still gives a short card), the coder and reviewer models and one Start button. The host refuses to provision, authenticate a worker or relay a model call for a job without the owner's Start of its current request, and the Pi worker refuses a `plan` assignment. The base commit is still resolved when the job is created, not at Start.
+
 **Follow-ups.** Before Start, an owner message is appended to the request and the Start message is replaced. After Start, an owner message goes into the job's inbox and is delivered to the coder session at its next turn boundary; the reviewer is given it too. It never needs a new Start and does not change the approved request. Review findings, CI failures, PR feedback, answers to a question and a rebase request reach the coder the same way, each labelled by its source. A stopped job resumes the same session.
+
+> **Update, 13 November 2026 ([journal 191](journey/191-go-gate-no-planner.md)):** until stage D2 builds the inbox, an owner message after Start reaches a job only while it is stopped (a question, a pause or a failure). It is appended to the request and the job returns to a new Start card, because the approval hashes the request. A message while the job runs is refused as before.
 
 **Messages to the owner.** One or two sentences, with up to three buttons when the choices are clear. The report's question becomes a short `ask` (at most 300 characters) with optional `options`; a tap is sent back as a follow-up. Detail stays in the job record.
 
@@ -34,6 +38,8 @@ request (+ more owner messages) → [Start] → one coder session: build, run te
 - **Protocol.** The worker speaks Pi's native Anthropic protocol to the host. The host adds the API key, sets the model, effort and output limit for the role, records the call, and passes the conversation through untouched.
 - **Session.** One Pi session for the coder and one for the reviewer per job. Each is saved as it grows and restored when the job continues in a new box, at the same working path. Pi's compaction runs with Pi's defaults at the model's context window.
 - **Settings.** Coder: Sonnet 5.5. Reviewer: Opus 5.5. Effort `medium`. (`config/coding-pi.json` changes with stage D1; PR 462 proposed the same.)
+
+> **Update, 13 November 2026 ([journal 191](journey/191-go-gate-no-planner.md)):** `config/coding-pi.json` now has these settings and no `leaderModel` or `planCheck`.
 
 ### Differences from stock Pi
 
@@ -65,6 +71,8 @@ Builders add rows here only with a reason of this kind.
 - Limits: the two-minute shell cut, the search failure over 64 KB, the gate that blocks tools until every document page is read (with the `read_document` tool and the review evidence documents), the 7,800-character cut on check output, the caps on check fixes and feedback rounds, the planner's 32 operations and ten minutes, and the 1,500 model-call and 4,000 tool-call caps. The host's reviewer proof keeps working without the call cap.
 
 There is no switch back to the old flow. No job is open in production; a revert is the rollback.
+
+> **Update, 13 November 2026 ([journal 191](journey/191-go-gate-no-planner.md)):** stage D1 deleted the planning attempt, the Pi planner model, the plan check and repair, the Requirements section, the plan attachment, the Change button and the earlier approval scope. It also removed limits this list did not name: the character limits on `coding_start` and `coding_reply`, `assertCodingBrief`, the follow-up size check and the Pi runtime's objective and instructions refusals. The `leader` plumbing (the squad's role, `coding_model_set` and `coding_job_update` for a squad, the `coding_model_calls` role value) stays for the legacy runtimes and stage D3, and the runtime's plan-era API stays until stage D2. D1 keeps no new difference from stock Pi.
 
 ## What stays
 

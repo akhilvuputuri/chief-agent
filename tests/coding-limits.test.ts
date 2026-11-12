@@ -53,7 +53,7 @@ test("checkpoints and publishing accept large changes: 1 MB files, 500 files, 10
 test("a Pi session entry may be as large as one model request", async (t) => {
   const { fixture, settings } = await import("./helpers/coding-fixture.js");
   const f = await fixture(t);
-  const started = await f.start("big-session", "plan");
+  const started = await f.start("big-session");
   await f.c.tick();
   let job = await f.row(started.id);
   await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [

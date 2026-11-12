@@ -1,8 +1,18 @@
+## Coding jobs start at a Start card, with no planner (13 November 2026)
+
+- **Code.** `coding_start` creates the job waiting for Start and sends the goal in one or two lines, the coder and reviewer models and one Start button. No model runs and no box starts before Start. A message before Start is appended to the request and replaces the card; a tap on the earlier card is refused. The planner, the plan check and plan repair are deleted from the host and the worker, with the plan attachment, the Change button, `leaderModel` and `planCheck`, and the length caps on the request. The host still refuses a build without the owner's approval of the exact request. No migration or Compose change.
+- **Configuration.** Coder `anthropic/claude-sonnet-5.5`, reviewer `anthropic/claude-opus-5.5`, effort `medium`.
+- **Interim.** Until the next stage, a reply after Start on a stopped job is appended to the request and returns the job to a new Start card.
+- **Why.** The owner does not read plans and wants a go gate, then one session. See [journal 191](journey/191-go-gate-no-planner.md) and [the design](coding-simple-loop.md).
+- **Deployment.** Host and worker change together; a worker image built from this merge is pinned right after. Not yet released.
+
 ## Worker image for the native protocol and Pi's own tools (13 November 2026)
 
 - **Configuration.** New coding jobs pin worker image `sha256:7e205748…`, built from `991004f` (run 43294388365). It carries the worker side of the native Anthropic protocol ([journal 190](journey/190-pi-native-anthropic-protocol.md)) and Pi's tools and prompt as shipped ([journal 182](journey/182-pi-tools-and-prompt-as-shipped.md)). `previousImages` is emptied: every earlier image speaks the deleted chat-completions route and cannot reach this gateway, and no coding job is open on one. No code, migration or Compose change.
 - **Why.** The gateway at `991004f` serves only the new route, so the previous pin could not run a job.
 - **Deployment.** Not yet recorded as live; a dated note follows on release.
+
+> **Update, 13 November 2026:** merged as `5076b7d` (PR 482); release run 43296491934 succeeded, the gateway was healthy at `5076b7d` and the server's `config/coding-pi.json` carried `sha256:7e205748…`. No coding job has run on it.
 
 ## Coding jobs speak Pi's native Anthropic protocol (13 November 2026)
 

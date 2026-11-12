@@ -29,7 +29,7 @@ test("storable text drops NUL and replaces lone surrogates, keeping whole charac
 
 test("a model reply or request with text Postgres cannot store is kept, and the worker gets it exactly", async (t) => {
   const f = await fixture(t);
-  const job: any = await f.start("storable-model", "plan");
+  const job: any = await f.start("storable-model");
   await f.c.tick();
   const active = await f.row(job.id);
   await f.c.heartbeat(active);
@@ -77,9 +77,9 @@ test("a model reply or request with text Postgres cannot store is kept, and the 
   assert.equal(((await f.c.status("a", job.id)) as any).lastFailure, undefined);
 });
 
-test("worker summaries and plans with such text are stored; code with it is refused, not changed", async (t) => {
+test("worker summaries and questions with such text are stored; code with it is refused, not changed", async (t) => {
   const f = await fixture(t);
-  const job: any = await f.start("storable-finish", "plan");
+  const job: any = await f.start("storable-finish");
   await f.c.tick();
   const running = await f.row(job.id);
   // Code must stay exact: content, a path or the patch with such text is refused.
@@ -90,12 +90,13 @@ test("worker summaries and plans with such text are stored; code with it is refu
   ])
     await assert.rejects(
       f.c.finish(running, {
-        kind: "plan_ready",
-        summary: "Brief prepared",
+        kind: "awaiting_input",
+        summary: "Question prepared",
+        question: "Which helper?",
         checkpoint: {
-          plan: "Scope: synthetic.",
+          plan: "",
           patch: "",
-          summary: "Brief prepared",
+          summary: "Question prepared",
           files: [],
           ...code,
         },
@@ -103,18 +104,20 @@ test("worker summaries and plans with such text are stored; code with it is refu
       (error: Error) => rejectionReason(error) === "exact_content_not_storable",
     );
   await f.c.finish(running, {
-    kind: "plan_ready",
-    summary: `Brief prepared; ${nul}`,
+    kind: "awaiting_input",
+    summary: `Question prepared; ${nul}`,
+    question: `Keep ${lone}`,
     checkpoint: {
-      plan: `Scope: ${lone}`,
+      plan: "",
       patch: "",
-      summary: "Brief prepared",
+      summary: `Checkpoint: ${lone}`,
       files: [],
     },
   });
   const row = await f.row(job.id);
-  assert.equal(row.summary, "Brief prepared; regex /^[^-\u001f]+$/");
-  assert.equal(row.checkpoint.plan, "Scope: half an emoji �.");
+  assert.equal(row.summary, "Question prepared; regex /^[^-\u001f]+$/");
+  assert.equal(row.question, "Keep half an emoji �.");
+  assert.equal(row.checkpoint.summary, "Checkpoint: half an emoji �.");
 });
 
 test("a value Postgres refuses is named, not unclassified", () => {
@@ -134,7 +137,7 @@ test("a value Postgres refuses is named, not unclassified", () => {
 
 test("worker progress with such text is stored", async (t) => {
   const f = await fixture(t);
-  const job: any = await f.start("storable-progress", "plan");
+  const job: any = await f.start("storable-progress");
   await f.c.tick();
   const running = await f.row(job.id);
   await f.c.progress(running, {
@@ -182,7 +185,7 @@ test("a report document is bound to its hash, so one with a NUL is refused, not 
 
 test("on the Pi route, a reply with such text reaches Pi exactly and is stored readably", async (t) => {
   const f = await fixture(t);
-  const started: any = await f.start("storable-pi", "plan");
+  const started: any = await f.start("storable-pi");
   await f.c.tick();
   await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
     started.id,

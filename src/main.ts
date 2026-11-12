@@ -1,4 +1,3 @@
-import { InputFile } from "grammy";
 import { MediaOutbox } from "./media-outbox.js";
 import { sendRunMedia } from "./telegram-media.js";
 import { editCodingStatus, sendCodingDelivery } from "./coding/delivery.js";
@@ -1311,31 +1310,23 @@ const routineTimer = setInterval(() => {
     );
   void coding
     ?.deliver(
-      async (user, target, text, approval, document) =>
-        sendCodingDelivery(text, approval, document, {
-          text: (part, keyboard) =>
-            topics.deliver(user, target, (extra) =>
-              bot.api.sendMessage(user, part.text, {
-                ...extra,
-                entities: part.entities,
-                link_preview_options: { is_disabled: true },
-                ...(keyboard ? { reply_markup: keyboard } : {}),
-              }),
-            ),
-          document: (file, caption, keyboard) =>
-            topics.deliver(user, target, (extra) =>
-              bot.api.sendDocument(
-                user,
-                new InputFile(Buffer.from(file.content, "utf8"), file.filename),
-                {
+      async (user, target, text, approval, plain) =>
+        sendCodingDelivery(
+          text,
+          approval,
+          {
+            text: (part, keyboard) =>
+              topics.deliver(user, target, (extra) =>
+                bot.api.sendMessage(user, part.text, {
                   ...extra,
-                  caption: caption.text,
-                  caption_entities: caption.entities,
+                  entities: part.entities,
+                  link_preview_options: { is_disabled: true },
                   ...(keyboard ? { reply_markup: keyboard } : {}),
-                },
+                }),
               ),
-            ),
-        }),
+          },
+          plain,
+        ),
       {
         // Progress edits one status message in place (journal 115).
         edit: (user, messageId, text) =>

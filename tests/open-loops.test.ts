@@ -44,7 +44,7 @@ async function fixture() {
     );
     return id;
   };
-  /** A requirements card as the controller writes it: the attempt's ":finished" event by default. */
+  /** A Start card as the controller writes it (event key shapes vary; only the payload matters). */
   const card = async (
     jobId: string,
     {
@@ -194,8 +194,8 @@ test("the first card, delivered as the attempt's finished event, is reported ope
   const lapsed = await f.job({ age: "1 hour" });
   await f.card(lapsed, { confirmUntil: hour(-1) });
   assert.deepEqual(await awaiting(f.db), [
-    "requirements card expired; offer a fresh one (coding_resume)",
-    "owner to confirm the requirements card",
+    "Start card expired; offer a fresh one (coding_resume)",
+    "owner to tap Start on the Start card; a message before Start is added to the request (coding_reply)",
   ]);
 });
 test("a re-sent requirements: card counts too, but only for the job's current revision", async () => {
@@ -206,19 +206,8 @@ test("a re-sent requirements: card counts too, but only for the job's current re
   const stale = await f.job({ revision: 3, age: "1 hour" });
   await f.card(stale, { revision: 2 });
   assert.deepEqual(await awaiting(f.db), [
-    "plan ready but its card is not delivered yet; read coding_status before offering one",
-    "owner to confirm the requirements card",
-  ]);
-});
-test("a plan the owner asked to change is reported as such, not offered again", async () => {
-  const f = await fixture();
-  const revised = await f.job({
-    revision: 3,
-    summary: "Requirements need revision; tell Chief what to change",
-  });
-  await f.card(revised, { revision: 2, decision: "revise" });
-  assert.deepEqual(await awaiting(f.db), [
-    "owner asked for changes to the plan; ask what to change, then revise it (coding_reply)",
+    "waiting for Start but its card is not delivered yet; read coding_status before offering one",
+    "owner to tap Start on the Start card; a message before Start is added to the request (coding_reply)",
   ]);
 });
 test("questions, pauses, merge cards and stopped PRs say what the owner needs; worker text stays separate", async () => {
@@ -293,7 +282,7 @@ test("decided, old, other-owner and long-failed jobs are left out; a recent fail
     [
       ["failed; offer to retry or start fresh", "provider error"],
       [
-        "plan ready but its card is not delivered yet; read coding_status before offering one",
+        "waiting for Start but its card is not delivered yet; read coding_status before offering one",
         "summary",
       ],
     ],
@@ -594,7 +583,7 @@ test("a replacement card still being sent after an expired one is reported as no
     );
   assert.deepEqual(await awaiting(f.db), [
     "merge card not delivered yet; read coding_status before telling the owner to act",
-    "plan ready but its card is not delivered yet; read coding_status before offering one",
+    "waiting for Start but its card is not delivered yet; read coding_status before offering one",
   ]);
 });
 test("a re-send whose delivery failed does not hide the live card before it", async () => {
@@ -611,7 +600,7 @@ test("a re-send whose delivery failed does not hide the live card before it", as
     ],
   );
   assert.deepEqual(await awaiting(f.db), [
-    "owner to confirm the requirements card",
+    "owner to tap Start on the Start card; a message before Start is added to the request (coding_reply)",
   ]);
 });
 test("a re-send still pending does not hide an earlier card that is still confirmable", async () => {
@@ -628,7 +617,7 @@ test("a re-send still pending does not hide an earlier card that is still confir
     ],
   );
   assert.deepEqual(await awaiting(f.db), [
-    "owner to confirm the requirements card",
+    "owner to tap Start on the Start card; a message before Start is added to the request (coding_reply)",
   ]);
 });
 

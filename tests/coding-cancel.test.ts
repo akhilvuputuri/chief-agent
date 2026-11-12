@@ -160,9 +160,9 @@ test("cancelling a job with a published PR fails with the reason and leaves it u
   assert.equal((await f.row(waiting)).state, "cancelled");
 });
 
-test("a waiting plan is cancellable, even while another job holds the worker slot", async (t) => {
+test("a job waiting for Start is cancellable, even while another job holds the worker slot", async (t) => {
   const f = await fixture(t);
-  const plan = await f.start("plan", "plan");
+  const plan = await f.start("plan");
   await f.db.query(
     "UPDATE coding_jobs SET state='plan_ready',stage='plan_ready',attempt_id=$2,cleanup='complete' WHERE id=$1",
     [plan.id, randomUUID()],
@@ -181,7 +181,7 @@ test("a waiting plan is cancellable, even while another job holds the worker slo
 
 /** A paused job that last changed `age` ago. */
 async function parked(f: Fixture, key: string, age: string, state = "paused") {
-  const job = await f.start(key, "plan");
+  const job = await f.start(key);
   await f.db.query(
     `UPDATE coding_jobs SET state=$2,stage=$2,attempt_id=$3,cleanup='complete',updated_at=now()-$4::interval WHERE id=$1`,
     [job.id, state, randomUUID(), age],
@@ -245,7 +245,11 @@ test("a reply that restarts a stale job also needs the confirmation", async (t) 
     /coding_reply needs the owner's explicit/,
   );
   assert.equal((await f.row(old.id)).state, "awaiting_input");
-  assert.equal(((await reply({ confirmStale: true })) as any).state, "queued");
+  // The answer joins the request and the job waits for a new Start (interim, journal 191).
+  assert.equal(
+    ((await reply({ confirmStale: true })) as any).state,
+    "plan_ready",
+  );
 });
 
 test("continuing a stale owner-merge PR needs the confirmation", async (t) => {
@@ -300,7 +304,7 @@ test("a stale job that cannot be restarted gets its own reason, not a confirmati
     flow: "owner_merge",
     stage: "awaiting_merge_approval",
   });
-  const cancelled = (await f.start("gone", "plan")).id as string;
+  const cancelled = (await f.start("gone")).id as string;
   await f.db.query(
     "UPDATE coding_jobs SET state='cancelled',stage='cancelled' WHERE id=$1",
     [cancelled],

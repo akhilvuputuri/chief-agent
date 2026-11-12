@@ -55,7 +55,7 @@ async function checksFixedAfter(t: any, wrongRounds: number, ms?: number) {
   git("add", ".");
   git("commit", "-qm", "Fixture");
   const commit = git("rev-parse", "HEAD").toString().trim();
-  const started = await f.start("pi-check-repair", "plan");
+  const started = await f.start("pi-check-repair", true);
   await f.db.query(
     "UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3 WHERE id=$1",
     [
@@ -205,10 +205,6 @@ async function checksFixedAfter(t: any, wrongRounds: number, ms?: number) {
       { prepareRepository },
     );
   };
-  await f.c.tick();
-  await run();
-  await f.c.tick();
-  await f.c.tick();
   let receipt = 100;
   let approvalId = "";
   let approvedMessage = 0;
@@ -222,7 +218,7 @@ async function checksFixedAfter(t: any, wrongRounds: number, ms?: number) {
       return { message_id };
     });
   assert(approvalId);
-  await f.c.requirements.confirm("a", approvalId, true, "a", approvedMessage);
+  await f.c.requirements.confirm("a", approvalId, "a", approvedMessage);
   await f.c.tick();
   return { f, id: started.id as string, run, repairDocs, edits: () => edits };
 }

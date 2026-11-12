@@ -29,11 +29,7 @@ import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError, OpenRouter } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
-import {
-  codingSettings,
-  outcome,
-  assertCodingBrief,
-} from "../src/coding/schema.js";
+import { codingSettings, outcome } from "../src/coding/schema.js";
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -60,7 +56,7 @@ import {
   base,
   candidate,
   fixture,
-  requirementBrief,
+  startCard,
 } from "./helpers/coding-fixture.js";
 test("model calls are counted once, persist evidence and never replay an uncertain request", async (t) => {
   const f = await fixture(t),
@@ -127,7 +123,7 @@ test("progress duplicates do not rewrite later state and uncertain Telegram deli
 });
 test("worker dispatch waits for confirmed sandbox acknowledgement", async (t) => {
   const f = await fixture(t),
-    job = await f.start("pending-timeout-receipt", "plan");
+    job = await f.start("pending-timeout-receipt");
   const create = f.provider.create;
   let release!: () => void;
   const receipt = new Promise<void>((resolve) => {
@@ -165,7 +161,7 @@ test("immutable Node and Pi workers receive a delayed valid launch assignment wi
   for (const runtime of ["node", "pi"] as const) {
     await t.test(runtime, async (t) => {
       const f = await fixture(t),
-        job = await f.start(`delayed-${runtime}-receipt`, "plan");
+        job = await f.start(`delayed-${runtime}-receipt`);
       const create = f.provider.create;
       let release!: () => void;
       const receipt = new Promise<void>((resolve) => {

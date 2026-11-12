@@ -29,11 +29,7 @@ import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError, OpenRouter } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
-import {
-  codingSettings,
-  outcome,
-  assertCodingBrief,
-} from "../src/coding/schema.js";
+import { codingSettings, outcome } from "../src/coding/schema.js";
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -60,11 +56,11 @@ import {
   base,
   candidate,
   fixture,
-  requirementBrief,
+  startCard,
 } from "./helpers/coding-fixture.js";
 test("two-hour Pi settings get their full two hours, under the three-hour ceiling and four-hour box task deadline", async (t) => {
   const f = await fixture(t),
-    job = await f.start("pi-bounded-attempt", "plan");
+    job = await f.start("pi-bounded-attempt");
   const historical = {
     ...settings,
     runtime: "pi",
@@ -97,7 +93,7 @@ test("two-hour Pi settings get their full two hours, under the three-hour ceilin
 });
 test("Pi output allowance is captured per job and cannot be changed by caller hints", async (t) => {
   const f = await fixture(t),
-    started = await f.start("pi-output-snapshot", "plan");
+    started = await f.start("pi-output-snapshot");
   const current = {
     ...settings,
     runtime: "pi",
@@ -150,7 +146,7 @@ test("expanded coding allocations survive assignment, provisioning, status and c
     );
   }
   const f = await fixture(t),
-    job = await f.start("expanded", "plan");
+    job = await f.start("expanded");
   await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
     job.id,
     JSON.stringify(expanded),
@@ -175,7 +171,7 @@ test("expanded coding allocations survive assignment, provisioning, status and c
       revision: live.revision,
       attemptId: live.attempt_id,
       scopeHash: squadScope(live, live.checkpoint.plan),
-      phase: "planning",
+      phase: "idle",
       candidateVersion: 0,
       candidateHash: "",
       toolsUsed: 800,
@@ -226,7 +222,6 @@ test("dispatch is owner-scoped, foreground-only and idempotent against the origi
       requestKey: "request",
       objective: "different",
       context: "",
-      mode: "implement",
     }),
     /different request/,
   );

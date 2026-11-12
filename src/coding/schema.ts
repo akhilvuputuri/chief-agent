@@ -2,7 +2,6 @@ import { squadState } from "./squad-schema.js";
 import { runtimeMemory } from "./memory-schema.js";
 import { z } from "zod";
 import { MAX_OUTPUT_TOKENS } from "../model.js";
-import { ToolValidationError } from "../tool-errors.js";
 import { reportLimits, reportDocument } from "@chief-agent/pi-runtime/report";
 
 const id = z.string().uuid();
@@ -10,9 +9,8 @@ export const codingStart = z
   .object({
     operation: z.literal("coding_start"),
     requestKey: z.string().min(1).max(100),
-    objective: z.string().min(1).max(8000),
-    context: z.string().max(16000).default(""),
-    mode: z.enum(["plan", "implement"]),
+    objective: z.string().min(1),
+    context: z.string().default(""),
   })
   .strict();
 export const codingStatus = z
@@ -24,8 +22,7 @@ export const codingReply = z
     id,
     baseRevision: z.number().int().positive(),
     requestKey: z.string().min(1).max(100),
-    message: z.string().min(1).max(8000),
-    mode: z.enum(["plan", "implement"]).optional(),
+    message: z.string().min(1),
     /** Only when the owner explicitly asked, in this conversation, to resume or answer this job. */
     confirmStale: z.boolean().optional(),
   })
@@ -102,7 +99,7 @@ export const checkpoint = z
       .object({
         version: z.literal(1),
         toolsUsed: z.number().int().min(0).max(5000),
-        phase: z.enum(["plan", "build", "review"]).optional(),
+        phase: z.enum(["build", "review"]).optional(),
         reviewRound: z.number().int().min(1).max(1000).optional(),
         rejectedCandidate: z
           .string()
@@ -134,20 +131,6 @@ export const checkpoint = z
           .regex(/^[a-f0-9]{64}$/)
           .optional(),
         findings: z.string().max(reportLimits.document).optional(),
-        /** What the reviewer's check of the plan against the owner's request found. */
-        planCheck: z
-          .object({
-            status: z.enum([
-              "passed",
-              "revised",
-              "revised_unchecked",
-              "gaps",
-              "unavailable",
-            ]),
-            gaps: z.string().max(reportLimits.document).optional(),
-          })
-          .strict()
-          .optional(),
         /** Untrusted merge-request feedback for one owner-merge repair round. */
         mrFeedback: z
           .object({
@@ -194,13 +177,7 @@ export const checkpoint = z
   .strict();
 export const outcome = z
   .object({
-    kind: z.enum([
-      "plan_ready",
-      "awaiting_input",
-      "candidate",
-      "paused",
-      "failed",
-    ]),
+    kind: z.enum(["awaiting_input", "candidate", "paused", "failed"]),
     summary: z.string().min(1).max(4000),
     question: z.string().max(2000).default(""),
     checkpoint,
@@ -273,8 +250,7 @@ export const codingSettings = z
     runtime: z.enum(["node", "python", "pi"]).optional(),
     harnessVersion: z.literal(2).optional(),
     effort: z.enum(["low", "medium", "high"]),
-    // Coder and planner allowance. One planning report holds a plan document of up to
-    // 32,000 characters plus high-effort reasoning; 16,000 tokens could not (journal 156).
+    // Coder allowance (journal 156).
     maxOutputTokens: z
       .number()
       .int()
@@ -295,8 +271,6 @@ export const codingSettings = z
     agentGit: z.boolean().optional(),
     /** Host-only operator switch (default on): re-queue a job once after a classified transient pause. */
     autoRetryTransientOnce: z.boolean().optional(),
-    /** Pi: the reviewer checks the plan against the owner's request before the Start card. */
-    planCheck: z.boolean().optional(),
     limits: z
       .object({
         ms: z.number().int().positive().max(14_400_000),
@@ -369,27 +343,4 @@ export function outputAllowance(
   return role === "reviewer"
     ? (settings.reviewerMaxOutputTokens ?? Math.min(coder, 16000))
     : coder;
-}
-
-/** Reserve room for model/tool schema and a complete current call group. */
-export function assertCodingBrief(
-  objective: string,
-  context: string,
-  plan = "",
-  summary = "",
-) {
-  const content = JSON.stringify({
-    objective,
-    context,
-    savedPlan: plan,
-    savedSummary: summary,
-  });
-  if (
-    Buffer.byteLength(
-      JSON.stringify({ messages: [{ role: "user", content }] }),
-    ) > 70000
-  )
-    throw new ToolValidationError(
-      "Coding brief is too large for one run; provide a shorter objective/context or a concise implementation brief. The original request and saved plan are retained.",
-    );
 }

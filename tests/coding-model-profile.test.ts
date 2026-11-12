@@ -1,5 +1,4 @@
 import { reviewDocumentReader } from "./helpers/pi-review-documents.js";
-import { documentPageChars } from "@chief-agent/pi-runtime";
 import { reportDocument } from "@chief-agent/pi-runtime/report";
 import { execFileSync } from "node:child_process";
 import {
@@ -31,11 +30,7 @@ import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError, OpenRouter } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
-import {
-  codingSettings,
-  outcome,
-  assertCodingBrief,
-} from "../src/coding/schema.js";
+import { codingSettings, outcome } from "../src/coding/schema.js";
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -62,7 +57,7 @@ import {
   base,
   candidate,
   fixture,
-  requirementBrief,
+  startCard,
   unusedAnthropic,
 } from "./helpers/coding-fixture.js";
 test("coding model-role commands snapshot new Pi jobs without changing existing jobs or other roles", async (t) => {
@@ -112,7 +107,6 @@ test("coding model-role commands snapshot new Pi jobs without changing existing 
       requestKey,
       objective: "Plan a synthetic fix",
       context: "Fixture",
-      mode: "plan",
     })) as any;
   const original = await start("original-pi-models");
   const saved = (await f.row(original.id)).settings;
@@ -135,7 +129,8 @@ test("coding model-role commands snapshot new Pi jobs without changing existing 
     }
     const fresh = await start(`model-${index}`);
     const snapshot = (await f.row(fresh.id)).settings;
-    assert.equal(snapshot.leaderModel, choice.id);
+    // A Pi job has no planner (journal 191): the leader preference does not apply to it.
+    assert.equal(snapshot.leaderModel, undefined);
     assert.equal(snapshot.model, choice.id);
     assert.equal(snapshot.reviewerModel, choice.id);
     assert.equal(snapshot.runtime, "pi");
@@ -163,7 +158,7 @@ test("coding model-role commands snapshot new Pi jobs without changing existing 
 });
 test("Pi report documents bind checkpoint content and support the full escaped transport envelope", async (t) => {
   const f = await fixture(t);
-  const started = await f.start("pi-document-wire", "plan");
+  const started = await f.start("pi-document-wire");
   await f.c.tick();
   await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
     started.id,
@@ -177,12 +172,12 @@ test("Pi report documents bind checkpoint content and support the full escaped t
   const job = await f.row(started.id);
   const detail = "Complete scope " + "\u0001".repeat(31985);
   const doc = reportDocument({
-    kind: "plan",
+    kind: "done",
     summary: "Complete stored document",
     detail,
   });
   const body = {
-    plan: detail,
+    plan: "",
     patch: "\u0001".repeat(400000),
     summary: doc.summary,
     files: [],
@@ -214,8 +209,11 @@ test("Pi report documents bind checkpoint content and support the full escaped t
     /identity/,
   );
   await assert.rejects(
-    f.c.save(await f.row(job.id), { ...body, plan: "different complete plan" }),
-    /match/,
+    f.c.save(await f.row(job.id), {
+      ...body,
+      plan: "a plan the owner never saw",
+    }),
+    /immutable/,
   );
   const entry = {
     type: "message",
@@ -226,7 +224,7 @@ test("Pi report documents bind checkpoint content and support the full escaped t
         {
           type: "toolCall",
           name: "report",
-          arguments: { kind: "plan", summary: doc.summary, detail },
+          arguments: { kind: "done", summary: doc.summary, detail },
         },
       ],
     },
@@ -242,13 +240,21 @@ test("Pi report documents bind checkpoint content and support the full escaped t
     [entry],
   );
 });
-for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
+for (const {
+  documentLength,
+  firstCallFailure,
+  reviewerQuestion = false,
+  ownerReply = false,
+} of [
   { documentLength: 0, firstCallFailure: false },
+  // A reply to a job stopped in review returns it to a Start card; after Start the build
+  // runs afresh and reaches review (journal 191).
+  { documentLength: 0, firstCallFailure: false, ownerReply: true },
   { documentLength: 9357, firstCallFailure: false },
   { documentLength: 9357, firstCallFailure: true },
   { documentLength: 9357, firstCallFailure: false, reviewerQuestion: true },
 ])
-  test(`independent reviewer recovery preserves ${documentLength || "short"}-character documents (${reviewerQuestion ? "question" : firstCallFailure ? "before first tool" : "format"})`, async (t) => {
+  test(`independent reviewer recovery preserves ${documentLength || "short"}-character documents (${ownerReply ? "owner reply, then Start" : reviewerQuestion ? "question" : firstCallFailure ? "before first tool" : "format"})`, async (t) => {
     const f = await fixture(t);
     const root = await mkdtemp(join(tmpdir(), "pi-bridge-fixture-"));
     const source = join(root, "source");
@@ -292,7 +298,7 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
     git("add", ".");
     git("commit", "-qm", "Fixture");
     const commit = git("rev-parse", "HEAD").toString().trim();
-    const started = await f.start("pi-e2e", "plan");
+    const started = await f.start("pi-e2e", true);
     const profile = {
       ...settings,
       runtime: "pi",
@@ -301,24 +307,13 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
       // Catalog windows of real models. Without them the fixture models fall back to 32,000
       // tokens, and Pi's default compaction threshold (journal 182) compacts the review evidence.
       contextWindows: Object.fromEntries(
-        [
-          settings.leaderModel ?? settings.model,
-          settings.model,
-          settings.reviewerModel,
-        ].map((id) => [id, 128000]),
+        [settings.model, settings.reviewerModel].map((id) => [id, 128000]),
       ),
     };
     await f.db.query(
       "UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3 WHERE id=$1",
       [started.id, JSON.stringify(profile), commit],
     );
-    const fullPlan =
-      "Change sum.js subtraction to addition; preserve exported API; run check/build/format checks."
-        .padEnd(
-          Math.abs(documentLength) || 90,
-          documentLength < 0 ? "字\n" : " Scope retained.",
-        )
-        .slice(0, Math.abs(documentLength) || 90);
     const fullReview =
       "The checked fixture implements addition and preserves the API."
         .padEnd(
@@ -326,9 +321,6 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
           documentLength < 0 ? "界\n" : " Evidence retained.",
         )
         .slice(0, Math.abs(documentLength) || 62);
-    const pages = documentLength
-      ? Math.ceil(fullPlan.length / documentPageChars)
-      : 0;
     let recovered = false;
     const readEvidence = reviewDocumentReader();
     const turns = new Map<string, number>();
@@ -347,20 +339,17 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
               "## Goal\nReview the candidate.\n## Progress\nEvidence read so far is retained.",
           },
         };
-      const phase =
-        selected === settings.reviewerModel
-          ? "review"
-          : system.includes("Current intent: build")
-            ? "build"
-            : "plan";
+      const phase = selected === settings.reviewerModel ? "review" : "build";
       const rawCount = turns.get(phase) ?? 0;
       turns.set(phase, rawCount + 1);
-      const reading = phase !== "plan" && rawCount < pages;
       if (phase === "build")
-        assert(system.includes("host has verified owner approval"));
-      let count = phase === "plan" ? rawCount : rawCount - pages;
-      if (recovered && phase === "review" && !reading && !firstCallFailure)
-        count++;
+        assert(
+          system.includes(
+            "host has verified that the owner started this exact request",
+          ),
+        );
+      let count = rawCount;
+      if (recovered && phase === "review" && !firstCallFailure) count++;
       if (
         firstCallFailure &&
         !recovered &&
@@ -378,17 +367,6 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
         }
       }
       let tool: { name: string; arguments: any } | undefined;
-      if (phase === "plan" && count === 0)
-        tool = { name: "read", arguments: { path: "sum.js" } };
-      if (phase === "plan" && count === 1)
-        tool = {
-          name: "report",
-          arguments: {
-            kind: "plan",
-            summary: "Fix addition",
-            detail: fullPlan,
-          },
-        };
       if (phase === "build" && count === 0)
         tool = {
           name: "edit",
@@ -407,17 +385,11 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
           },
         };
       if (phase === "review" && count === 0) {
-        assert(system.includes("historical starting state and desired change"));
+        assert(system.includes("The approved scope is the owner's request"));
         assert(!system.includes("No implementation approved"));
-        assert(system.includes("host validated owner approval"));
+        assert(system.includes("host validated the owner's Start"));
         assert(system.includes(commit));
-        assert(
-          system.includes(
-            documentLength
-              ? "approved_plan"
-              : "Change sum.js subtraction to addition",
-          ),
-        );
+        assert(system.includes("Synthetic evidence"));
         tool = { name: "read", arguments: { path: "sum.js" } };
       }
       if (phase === "review" && count === 1)
@@ -434,28 +406,6 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
             ...(reviewerQuestion ? {} : { verdict: "APPROVE" }),
           },
         };
-      if (reading)
-        tool = {
-          name: "read_document",
-          arguments: { id: "approved_plan", page: rawCount },
-        };
-      if (phase !== "plan" && !reading && pages) {
-        const delivered = input.messages
-          .filter((m: any) => m.role === "tool")
-          .map((m: any) => m.content)
-          .filter(
-            (c: any) =>
-              typeof c === "string" && c.includes('"id":"approved_plan"'),
-          )
-          .map((c: any) => JSON.parse(c));
-        assert.equal(
-          delivered
-            .slice(-pages)
-            .map((d: any) => d.text)
-            .join(""),
-          fullPlan,
-        );
-      }
       return {
         message: {
           role: "assistant",
@@ -505,28 +455,21 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
         { prepareRepository },
       );
     };
-    await f.c.tick();
-    await run();
-    assert.equal((await f.row(started.id)).state, "plan_ready");
-    await f.c.tick();
-    await f.c.tick();
     let receipt = 100;
     let approvalId = "";
     let approvedMessage = 0;
     for (let i = 0; i < 10 && !approvalId; i++)
-      await f.c.deliver(async (_owner, _target, text, id, document) => {
+      await f.c.deliver(async (_owner, _target, text, id) => {
         const message_id = ++receipt;
         if (id) {
-          assert(document?.content.includes(fullPlan));
-          assert.equal(formatTelegram(text, 1024).length, 1);
-          assert(document?.content.includes("Original request"));
+          assert.match(text, /^\*\*Ready to start\*\*/);
           approvalId = id.id;
           approvedMessage = message_id;
         }
         return { message_id };
       });
     assert(approvalId);
-    await f.c.requirements.confirm("a", approvalId, true, "a", approvedMessage);
+    await f.c.requirements.confirm("a", approvalId, "a", approvedMessage);
     await f.c.tick();
     await run();
     let paused = await f.row(started.id);
@@ -557,6 +500,50 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
     await f.c.tick();
     await f.c.tick();
     paused = await f.row(started.id);
+    if (ownerReply) {
+      const replied: any = await f.c.call("a", f.run, {
+        operation: "coding_reply",
+        id: paused.id,
+        baseRevision: paused.revision,
+        requestKey: "owner-reply-in-review",
+        message: "Also keep the export name",
+      });
+      assert.equal(replied.state, "plan_ready");
+      const waiting = await f.row(paused.id);
+      // Files are kept; the review and session state is not.
+      assert.deepEqual(waiting.checkpoint.files, paused.checkpoint.files);
+      assert.equal(waiting.checkpoint.piState.phase, undefined);
+      assert.equal(waiting.checkpoint.piState.reviewCandidate, undefined);
+      assert.equal(waiting.checkpoint.piState.sessionScope, undefined);
+      let card = "";
+      let cardMessage = 0;
+      for (let i = 0; i < 10 && !card; i++)
+        await f.c.deliver(async (_owner, _target, _text, id) => {
+          const message_id = ++receipt;
+          if (id) {
+            card = id.id;
+            cardMessage = message_id;
+          }
+          return { message_id };
+        });
+      assert(card);
+      await f.c.requirements.confirm("a", card, "a", cardMessage);
+      recovered = true;
+      turns.set("build", 0);
+      turns.set("review", 0);
+      await f.c.tick();
+      await run();
+      // The build ran again in a fresh session, then review approved it.
+      assert.equal(turns.get("build"), 2);
+      const rebuilt = await f.row(started.id);
+      assert.equal(rebuilt.state, "publishing", rebuilt.summary);
+      assert.equal(rebuilt.result.review.verdict, "APPROVE");
+      assert.match(
+        rebuilt.context,
+        /Owner follow-up: Also keep the export name/,
+      );
+      return;
+    }
     await f.c.call("a", f.run, {
       operation: "coding_resume",
       id: paused.id,
@@ -593,7 +580,7 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
     const result = await f.row(started.id);
     assert.equal(result.state, "publishing");
     assert.equal(result.result.review.verdict, "APPROVE");
-    assert.equal(result.checkpoint.plan, fullPlan);
+    assert.equal(result.checkpoint.plan, "");
     assert.equal(result.result.review.findings, fullReview);
     assert.equal(result.checkpoint.piState.reportDocument.detail, fullReview);
     assert.equal(result.checkpoint.piState.reportDocument.version, 1);

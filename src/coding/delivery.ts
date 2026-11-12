@@ -1,26 +1,24 @@
 import { formatTelegram, type FormattedMessage } from "../telegram-format.js";
 import type { InlineKeyboardMarkup } from "grammy/types";
 import { StatusMessageGone } from "./notices.js";
-export type CodingDocument = { filename: string; content: string };
 /** Which owner decision a delivered message's buttons answer. */
 export type CodingApproval = { kind: "requirements" | "merge"; id: string };
 type Receipt = { message_id: number };
-/** One document message binds the full brief and its approval buttons atomically. */
+/**
+ * Sends a coding message; the buttons go on its last part, whose receipt binds the decision.
+ * `plain` is owner or worker text shown as written after the formatted text, never parsed
+ * as markup (the Start card's goal).
+ */
 export async function sendCodingDelivery(
   text: string,
   approval: CodingApproval | undefined,
-  document: CodingDocument | undefined,
   transport: {
     text: (
       part: FormattedMessage,
       keyboard?: InlineKeyboardMarkup,
     ) => Promise<Receipt>;
-    document: (
-      document: CodingDocument,
-      caption: FormattedMessage,
-      keyboard?: InlineKeyboardMarkup,
-    ) => Promise<Receipt>;
   },
+  plain?: string,
 ): Promise<Receipt> {
   const keyboard =
     approval?.kind === "requirements"
@@ -30,10 +28,6 @@ export async function sendCodingDelivery(
               {
                 text: "Start",
                 callback_data: `cod:yes:${approval.id}`,
-              },
-              {
-                text: "Change",
-                callback_data: `cod:no:${approval.id}`,
               },
             ],
           ],
@@ -48,18 +42,14 @@ export async function sendCodingDelivery(
             ],
           }
         : undefined;
-  if (document) {
-    const captions = formatTelegram(text, 1024);
-    if (captions.length !== 1)
-      throw new Error("Coding document caption exceeds its presentation bound");
-    if (
-      Buffer.from(document.content, "utf8").toString("utf8") !==
-      document.content
-    )
-      throw new Error("Coding document contains invalid Unicode");
-    return transport.document(document, captions[0]!, keyboard);
-  }
   const parts = formatTelegram(text);
+  if (plain) {
+    const end = parts.at(-1)!;
+    const joined = `${end.text}\n\n${plain}`;
+    if (joined.length > 4096)
+      throw new Error("Coding message exceeds its presentation bound");
+    parts[parts.length - 1] = { text: joined, entities: end.entities };
+  }
   let last: Receipt | undefined;
   for (const [index, part] of parts.entries())
     last = await transport.text(

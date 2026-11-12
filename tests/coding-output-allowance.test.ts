@@ -63,7 +63,7 @@ test("the shipped profile leaves room for the largest report plus heavy reasonin
 
 test("each role's model call is sent its own allowance", async (t) => {
   const f = await fixture(t);
-  const started: any = await f.start("output-allowance", "plan");
+  const started: any = await f.start("output-allowance");
   await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
     started.id,
     JSON.stringify({ ...pi, maxOutputTokens: 128000, planCheck: true }),
