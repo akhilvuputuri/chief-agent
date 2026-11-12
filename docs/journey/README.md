@@ -177,6 +177,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 12 November | [168 — Kite builds TypeScript](168-kite-builds-typescript.md): can Kite build Chief's TypeScript, and is its output the same as tsc's? | Kite 0.2.0 pinned; 250 files match tsc's syntax tree; Chief's build not yet switched. Update, 12 November: build switched to `kite build` and the worker image with Kite 0.2.0 pinned; not yet released. Update, 12 November: live in `aac9036`; the CI build step fell from a median of 17 s to under 1 s |
 | 12 November | [169 — Three-hour coding attempts](169-three-hour-coding-attempts.md): why did the first Opus coding job run out of time? | Not stuck: 83% of the coder's output was thinking at `high` effort, at about 100 tokens a second. New jobs get 180 minutes; lowering effort left to the owner. Not yet released |
 | 12 November | [177 — Toolchain speed and scope](177-toolchain-speed-and-scope.md): what did three days of toolchain work buy in speed and scope? | Summary of released work in journals 158, 159, 165 and 168. Test steps fell from 617 s to 324–397 s in CI and a serial run from 285.6 s to 170.7–175.6 s; Kite now builds TypeScript; the one CI run measured was no shorter, because the image job sets its length |
+| 12 November | [178 — Shared links: study list or Reader](178-study-list-link-classification.md): can Chief decide whether a shared link is study material or offline reading, instead of saving everything to Reader? | Tested offline: Jev classifies, unsure links get Study list / Reader / Both buttons, a new study list (migration 036); review, picker eval and rollout pending |
 
 ## Coding-agent learning path
 
@@ -261,6 +262,6 @@ Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python 
 
 MCP integrations: [67 — Remote MCP connectors](67-mcp-connectors.md), [15 — Portable plugins](15-portable-plugins.md).
 
-Article targets: [67 — Reader MCP](67-mcp-connectors.md) → [69 — Shared link resolution](69-link-resolution.md).
+Article targets: [67 — Reader MCP](67-mcp-connectors.md) → [69 — Shared link resolution](69-link-resolution.md) → [178 — Study list or Reader](178-study-list-link-classification.md).
 
 - 13 October 2026: [83 — Sustained Pi context verification](83-pi-context-verification.md) — failing native budget/compaction reproductions and representative acceptance gates; Gemini coder convergence diagnosed; owner-selected lean release in progress.

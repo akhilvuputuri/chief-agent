@@ -639,6 +639,43 @@ function decodeBody(bytes: Buffer, contentType: string | undefined) {
   }
 }
 
+/** Title, site name and description a page states about itself (Open Graph, then
+ * <title>/<meta name=description>), plus a short excerpt of its paragraph text. Every
+ * value is cleaned display text or null; nothing is inferred. Linear scans only. */
+export function pageMeta(html: string, excerptChars = 1500) {
+  const head = html.slice(0, 500_000);
+  const metas = take(elements(head, "meta", false), 200).map((e) => e.open);
+  const meta = (key: string) => {
+    for (const open of metas) {
+      const name = (attr(open, "property") ?? attr(open, "name") ?? "")
+        .trim()
+        .toLowerCase();
+      if (name === key) {
+        const value = cleanText(attr(open, "content") ?? "", 500);
+        if (value) return value;
+      }
+    }
+    return null;
+  };
+  const titleTag = take(elements(head, "title"), 1)[0]?.inner;
+  const paragraphs = take(elements(head, "p"), 40)
+    .map((e) => cleanText(e.inner ?? "", excerptChars))
+    .filter((p) => p.length > 40);
+  const excerpt = cleanText(paragraphs.join(" "), excerptChars);
+  return {
+    title:
+      meta("og:title") ??
+      meta("twitter:title") ??
+      (titleTag ? cleanText(titleTag, 300) || null : null),
+    site: meta("og:site_name"),
+    description:
+      meta("og:description") ??
+      meta("description") ??
+      meta("twitter:description"),
+    excerpt: excerpt || null,
+  };
+}
+
 /** True when the document's root element is an RSS, RDF or Atom feed. */
 export function looksLikeFeed(body: string) {
   const root = /<(?![?!])(?:[\w.-]+:)?([\w.-]+)/.exec(body.slice(0, 5000));

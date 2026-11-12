@@ -27,6 +27,7 @@ export const readOperations = new Set([
   "mcp_tools",
   "mcp_read",
   "mcp_operation",
+  "study_list",
   "tools_load",
   "finish_turn",
   "feed_read",

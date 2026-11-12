@@ -10,6 +10,7 @@ import {
   saveItem,
 } from "./news.js";
 import { errorFields, opsLog } from "./ops-log.js";
+import { choiceCard } from "./links.js";
 import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
@@ -72,6 +73,7 @@ export function telegram(
   const controls = new SerialQueue();
   const preparation = new PreparationQueue(2);
   const ids = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+  const linkChoiceWork = new Set<Promise<unknown>>();
   routeUnthreadedToMain(bot.api, topics, ids);
   if (assistant.tools?.responsibilities) {
     const responsibilities = assistant.tools.responsibilities;
@@ -428,6 +430,68 @@ export function telegram(
       await ctx
         .editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
         .catch(() => {});
+  });
+  // Link choice (docs/links.md): Study list / Reader / Both, when Chief was unsure where a
+  // shared link belongs. Never queued behind the model. The row is claimed with a lease, and a
+  // result that is not final keeps the buttons so a later tap settles it with the same request.
+  bot.callbackQuery(/^lk:([0-9a-f-]{36}):(s|r|b)$/, async (ctx) => {
+    if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+    const user = String(ctx.from.id);
+    const id = ctx.match[1]!;
+    const choice = ({ s: "study", r: "reader", b: "both" } as const)[
+      ctx.match[2] as "s" | "r" | "b"
+    ];
+    const links = assistant.tools?.linkTools;
+    await ctx
+      .answerCallbackQuery({
+        text: links ? "Saving…" : "Link saving isn't available right now.",
+      })
+      .catch(() => {});
+    if (!links) return;
+    const card = ctx.callbackQuery.message;
+    const show = async (text: string, keep: boolean) => {
+      const row = keep
+        ? (
+            await db
+              .query("SELECT * FROM link_choices WHERE id=$1 AND user_id=$2", [
+                id,
+                user,
+              ])
+              .catch(() => ({ rows: [] as any[] }))
+          ).rows[0]
+        : undefined;
+      const buttons = keep
+        ? ((row ? choiceCard(row).buttons : undefined) ??
+          (card && "reply_markup" in card
+            ? card.reply_markup?.inline_keyboard
+            : undefined))
+        : [];
+      await ctx
+        .editMessageText(text.slice(0, 4000), {
+          link_preview_options: { is_disabled: true },
+          ...(buttons ? { reply_markup: { inline_keyboard: buttons } } : {}),
+        })
+        .catch(() => {});
+    };
+    // A Reader save can take a minute (link resolution, then Reader's import status), so it
+    // finishes outside the handler instead of holding one of the runner's update slots.
+    const work = links
+      .applyChoice(user, id, choice)
+      .catch((error) => {
+        opsLog("links.choice_failed", "warn", errorFields(error));
+        return {
+          final: false,
+          claimed: false,
+          message:
+            "Result uncertain: I couldn't confirm what was saved. Tap a button again to settle it safely.",
+        };
+      })
+      .then((outcome) => show(outcome.message, !outcome.final))
+      .catch((error) =>
+        opsLog("links.choice_reply_failed", "warn", errorFields(error)),
+      );
+    linkChoiceWork.add(work);
+    void work.finally(() => linkChoiceWork.delete(work));
   });
   // News Save: saves a delivered item to Reader, never queued behind the model.
   // The callback is answered at once; the keyboard shows the outcome.
@@ -1171,6 +1235,14 @@ export function telegram(
             replyThread,
             reply.runId,
           );
+          await sendLinkChoices(
+            bot,
+            db,
+            user,
+            deliveryGuard,
+            replyThread,
+            reply.runId,
+          );
           await sendPortfolioApprovals(
             bot,
             db,
@@ -1325,7 +1397,11 @@ export function telegram(
   bot.catch((error) =>
     opsLog("telegram.handler_failed", "error", errorFields(error.error)),
   );
-  return Object.assign(bot, { topics });
+  return Object.assign(bot, {
+    topics,
+    /** Settles once in-flight link-choice taps have finished (tests). */
+    linkChoicesIdle: () => Promise.all([...linkChoiceWork]),
+  });
 }
 
 const approvalSends = new SerialQueue();
@@ -1408,6 +1484,93 @@ export function sendLibraryApprovals(
   return approvalSends.run(user, () =>
     sendLibraryApprovalsOnce(bot, db, user, guard, thread, run),
   );
+}
+/**
+ * Link-choice cards (docs/links.md): a link Chief was unsure about, with Study list / Reader /
+ * Both buttons. Sent after the reply, from the interactive and the background delivery path.
+ * The row is claimed before sending; an interrupted send is kept as uncertain, never resent.
+ */
+export function sendLinkChoices(
+  bot: Bot,
+  db: Database,
+  user: string,
+  guard?: () => Promise<boolean>,
+  thread?: number,
+  run?: string,
+) {
+  return approvalSends.run(user, async () => {
+    if (guard && !(await guard())) return;
+    const rows = (
+      await db
+        .query(
+          "SELECT * FROM link_choices WHERE user_id=$1 AND delivery='pending' AND state='open' AND created_at>now()-interval '1 day' ORDER BY created_at",
+          [user],
+        )
+        .catch(() => ({ rows: [] as any[] }))
+    ).rows;
+    const family = run
+      ? new Set(
+          (
+            await db.query(
+              `SELECT id FROM runtime_runs WHERE user_id=$1 AND id IN ${runFamily()}`,
+              [user, run],
+            )
+          ).rows.map((r) => r.id),
+        )
+      : new Set();
+    for (const row of rows) {
+      if (guard && !(await guard())) return;
+      const claimed = await db.query(
+        "UPDATE link_choices SET delivery='sending' WHERE id=$1 AND user_id=$2 AND delivery='pending' RETURNING id",
+        [row.id, user],
+      );
+      if (!claimed.rows.length) continue;
+      const card = choiceCard(row);
+      const here = family.has(row.run_id) ? thread : undefined;
+      let message;
+      try {
+        message = await sendApprovalMessage(
+          bot,
+          user,
+          card.text,
+          {
+            ...inThread(here),
+            link_preview_options: { is_disabled: true },
+            reply_markup: { inline_keyboard: card.buttons },
+          },
+          guard,
+        );
+      } catch (error) {
+        const code = (error as { error_code?: number }).error_code;
+        // A definite refusal sent nothing and can be tried again; anything else is kept.
+        await db.query(
+          "UPDATE link_choices SET delivery=$3 WHERE id=$1 AND user_id=$2 AND delivery='sending'",
+          [
+            row.id,
+            user,
+            typeof code === "number" && code >= 400 && code < 500
+              ? "pending"
+              : "uncertain",
+          ],
+        );
+        opsLog("links.card_failed", "warn", errorFields(error));
+        continue;
+      }
+      await db.query(
+        message
+          ? "UPDATE link_choices SET delivery='sent',chat_message_id=$3,thread_id=$4 WHERE id=$1 AND user_id=$2"
+          : "UPDATE link_choices SET delivery='pending' WHERE id=$1 AND user_id=$2 AND delivery='sending'",
+        message
+          ? [
+              row.id,
+              user,
+              message.message_id,
+              sentThread(message, here) ?? null,
+            ]
+          : [row.id, user],
+      );
+    }
+  });
 }
 /**
  * Portfolio cards Chief proposed. A connect card's IBKR link is created here, at send time,

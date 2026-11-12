@@ -98,6 +98,8 @@ the URL after extraction failure; it is never replaced
 with an invented summary. `already_saved` with a null submission ID is not polled.
 Cancellation does not delete an accepted article.
 
+> **Update, 12 November 2026 ([journal 178](journey/178-study-list-link-classification.md)):** a link the owner shares to save now goes through `link_save`, which classifies it as study material or offline reading first; Reader is used only for offline reading, and study material goes to the study list. `link_save` still reaches Reader through this `save_link` grant, with one canonical URL for both the key lookup and the payload. See [links](links.md).
+
 Public discovery was measured on 8 October 2026 using the new SDK: protocol
 2025-06-18, server `offline-reader` 0.1.0 and the exact three tools. Authenticated
 production saves and idempotent retries were verified on 8 October 2026. Shared

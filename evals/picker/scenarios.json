@@ -1223,10 +1223,47 @@
     "split": "held-out"
   },
   {
-    "id": "mcp-reader-save",
+    "id": "links-reader-save",
     "message": "Save this article to Reader for offline reading: https://example.org/article",
-    "gold": ["mcp"],
+    "gold": ["links"],
     "split": "tuning"
+  },
+  {
+    "id": "links-study-cue",
+    "message": "save this for AI learning https://x.com/someone/status/1234567890",
+    "gold": ["links"],
+    "split": "tuning"
+  },
+  {
+    "id": "links-plain-save",
+    "message": "save this https://example.com/blog/building-voice-agents",
+    "gold": ["links"],
+    "split": "tuning"
+  },
+  {
+    "id": "links-study-list",
+    "message": "what's on my AI study list?",
+    "gold": ["links"],
+    "split": "tuning"
+  },
+  {
+    "id": "links-correction",
+    "message": "no, move it to Reader",
+    "gold": ["links"],
+    "split": "held-out",
+    "prior": [
+      {
+        "user": "save this https://example.com/essay-on-cities",
+        "assistant": "Saved to your study list. Say \"move it to Reader\" to change.",
+        "tools": ["link_save"]
+      }
+    ]
+  },
+  {
+    "id": "links-bookmark-repo",
+    "message": "bookmark this repo for later https://github.com/example/agent-kit",
+    "gold": ["links"],
+    "split": "held-out"
   },
   {
     "id": "mcp-reader-brief",
