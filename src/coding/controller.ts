@@ -283,14 +283,11 @@ export class CodingController {
       return false;
     const calls = (
       await db.query(
-        "SELECT id,attempt_id,result_box,created_at > COALESCE((SELECT max(created_at) FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' AND payload->>'source' IN ('owner','ask') AND created_at < COALESCE((SELECT created_at FROM coding_events WHERE job_id=$1 AND event_key=$3),'infinity'::timestamptz)),'-infinity'::timestamptz) AS after_owner FROM coding_model_calls WHERE job_id=$1 AND role='reviewer' AND state='complete' AND result_box IS NOT NULL AND input->>'candidate'=$2 AND COALESCE(input->>'purpose','agent')='agent' ORDER BY created_at DESC,id DESC",
+        "SELECT id,attempt_id,result_box,created_at > COALESCE((SELECT max(created_at) FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' AND payload->>'source' IN ('owner','ask') AND COALESCE(payload->>'heldBy','')<>$3::text),'-infinity'::timestamptz) AS after_owner FROM coding_model_calls WHERE job_id=$1 AND role='reviewer' AND state='complete' AND result_box IS NOT NULL AND input->>'candidate'=$2 AND COALESCE(input->>'purpose','agent')='agent' ORDER BY created_at DESC,id DESC",
         // The publication commit fixes which owner messages the approval covered: one kept
-        // while publishing goes to the PR's feedback round instead (journal 192).
-        [
-          job.id,
-          artifactHash(result.checkpoint),
-          `${job.attempt_id}:publish-approved`,
-        ],
+        // while this attempt was publishing (held by it) goes to the PR's feedback round
+        // instead; every other owner message must be older than the approval (journal 192).
+        [job.id, artifactHash(result.checkpoint), String(job.attempt_id)],
       )
     ).rows;
     for (const call of calls) {
@@ -1136,7 +1133,7 @@ export class CodingController {
       const added = await transaction(this.db, async (db) => {
         const now = (
           await db.query(
-            "SELECT state,stage,revision FROM coding_jobs WHERE id=$1 AND user_id=$2 FOR UPDATE",
+            "SELECT state,stage,revision,attempt_id FROM coding_jobs WHERE id=$1 AND user_id=$2 FOR UPDATE",
             [job.id, user],
           )
         ).rows[0];
@@ -1144,9 +1141,11 @@ export class CodingController {
         // for after it: the next attempt gets it if the push fails, and the PR's feedback
         // round once the PR is open (journal 192).
         if (now?.stage === "publishing" || now?.state === "publishing") {
+          // Marked as held by the attempt whose publication was committed: that approval does
+          // not cover it, a later attempt's must (journal 192). Not a timestamp comparison.
           await db.query(
-            "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,$2,$3::jsonb,'suppressed') ON CONFLICT DO NOTHING",
-            [job.id, key, payload],
+            "INSERT INTO coding_events(job_id,event_key,payload,delivery,created_at) VALUES($1,$2,$3::jsonb || jsonb_build_object('heldBy',$4::text),'suppressed',clock_timestamp()) ON CONFLICT DO NOTHING",
+            [job.id, key, payload, now.attempt_id],
           );
           return "held";
         }
@@ -1156,8 +1155,10 @@ export class CodingController {
           !["queued", "provisioning", "running"].includes(now.state)
         )
           return now?.state as string | undefined;
+        // Stamped when written under the row lock, not when the transaction began, so its
+        // order against a reviewer call (claimed under the same lock) is the real one.
         await db.query(
-          "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,$2,$3::jsonb,'suppressed') ON CONFLICT DO NOTHING",
+          "INSERT INTO coding_events(job_id,event_key,payload,delivery,created_at) VALUES($1,$2,$3::jsonb,'suppressed',clock_timestamp()) ON CONFLICT DO NOTHING",
           [job.id, key, payload],
         );
         return "added";
@@ -2012,7 +2013,7 @@ export class CodingController {
     try {
       claimed = await this.db.query(
         `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+CASE WHEN $9 THEN 0 ELSE 1 END,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4 RETURNING id)
-      INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input) SELECT $5,id,$2,$6,$7,$8::jsonb FROM claimed RETURNING id`,
+      INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input,created_at) SELECT $5,id,$2,$6,$7,$8::jsonb,clock_timestamp() FROM claimed RETURNING id`,
         [
           job.id,
           job.attempt_id,

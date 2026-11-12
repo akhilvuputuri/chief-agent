@@ -1268,7 +1268,7 @@ test("the fence quotes after every kind of line separator", () => {
   }
 });
 
-test("a message kept while publishing does not break the publication, and starts exactly one feedback round on the PR", async (t) => {
+test("a message kept while publishing does not break the publication, even stamped before the commit, and starts exactly one feedback round on the PR", async (t) => {
   const j = await piJob(
     t,
     {
@@ -1286,13 +1286,22 @@ test("a message kept while publishing does not break the publication, and starts
     },
     { prWorkflow: "owner_merge" },
   );
-  // The owner's message lands right after the host committed the publication.
+  // The owner's message is written right after the host committed the publication, but its
+  // transaction began first: with a transaction-start stamp it carries a time before the
+  // commit record (and after the approving review). Stamped so here, deterministically.
   const approve = j.f.c.approvePublication.bind(j.f.c);
   let held: any;
+  let committedAttempt = "";
   j.f.c.approvePublication = async (row: any, raw: any) => {
     const answer = await approve(row, raw);
-    if (answer.accepted && !held)
+    if (answer.accepted && !held) {
+      committedAttempt = row.attempt_id;
       held = await j.reply("Also update the docs.", "while-publishing");
+      await j.f.db.query(
+        "UPDATE coding_events SET created_at=(SELECT created_at - interval '1 millisecond' FROM coding_events WHERE job_id=$1 AND event_key=$2) WHERE job_id=$1 AND event_key='inbox:reply:while-publishing'",
+        [j.id, `${row.attempt_id}:publish-approved`],
+      );
+    }
     return answer;
   };
   (j.f.publisher as any).publish = async () => ({
@@ -1310,6 +1319,15 @@ test("a message kept while publishing does not break the publication, and starts
   assert.equal(job.state, "pr_ready", job.summary);
   const [kept] = await j.inbox();
   assert.equal(kept.payload.source, "owner");
+  // Marked as held by the attempt whose publication was committed, not judged by its time.
+  assert.equal(kept.payload.heldBy, committedAttempt);
+  // In any other attempt the same reply counts: the earlier approval does not cover it.
+  const { randomUUID } = await import("node:crypto");
+  assert.equal(
+    await (j.f.c as any).hasReviewerProof({ ...job, attempt_id: randomUUID() }),
+    false,
+  );
+  assert.equal(await (j.f.c as any).hasReviewerProof(job), true);
   assert(!job.checkpoint.piState.delivered.includes(kept.id));
   // The automation, with the host's real proof, starts the feedback round instead of parking.
   const { CodingAutomation } = await import("../src/coding/automation.js");
