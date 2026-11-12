@@ -83,7 +83,7 @@ The sandbox is not the cause: tool time is a tenth of model time. The cost has f
 - `medium` effort and a Sonnet 5.5 coder keep quality on this repository. Untested here.
 - With layers 1–3 fixed, a change of this size should take 60–90 minutes and $10–20. This is a target to verify with `scripts/coding-job-profile.sql` (PR 467), not a measurement.
 
-Alternatives considered: a lower context window alone (bounds cache reads but compaction is lossy and rewrites the cache; test, do not assume); dropping review (rejected: it found three real bugs); raising limits further (treats the symptom).
+Alternatives considered: a lower context window (rejected, see plan item 4); dropping review (rejected: it found three real bugs); raising limits further (treats the symptom).
 
 ## Plan
 
@@ -98,7 +98,7 @@ Alternatives considered: a lower context window alone (bounds cache reads but co
 1. One session per job (design in [PR 468](https://github.com/akhilvuputuri/chief-agent/pull/468)): no planner or plan check; repairs and check failures continue the coder's session; the reviewer's later rounds continue its session and read only the delta, in a checkout that keeps its dependencies.
 2. Use Pi closer to how it ships: append to Pi's prompt instead of replacing it, shorten ours and send the objective once; let read-only tools run in parallel; let `bash` run the full suite (a longer cap) so the coder stops polling.
 3. Carry thinking between turns, by speaking Pi's native Anthropic protocol through the proxy or by mapping the blocks. An earlier attempt at this was stopped by the model provider's safeguards; it needs the owner's decision on how to proceed.
-4. Bound the context (trial a 200,000–300,000-token window) and measure cache reads and quality.
+4. No context cap. A 200,000-token request costs about $0.04 to re-read from cache; the $31.60 of cache reads came from 1,104 calls, two-thirds of them in rebuilds and fresh sessions, not from the size of each request. Compaction is lossy and rewrites the cache at 25 times the read price, and nothing measured shows quality falling at 300,000 tokens. Send the objective and plan once, watch context size and cache reads per job with the profile script, and revisit only if a job shows a problem. (Owner review, 12 November: growing context to the model's limit is normal for coding agents, and a cap risks worse results.)
 5. Process: hold merges to main while a job is open until PR 469 is live; move a job to the current worker image on rebase (in PR 469).
 
 Each step is to be measured on one real job with the profile script before the next.
