@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fixture, settings } from "./helpers/coding-fixture.js";
+import { ModelError } from "../src/model.js";
 import { runPiWorker, NativePiWorkerClient } from "../src/coding/pi-worker.js";
 import { requirementScope } from "../src/coding/requirements.js";
 import { codingApi } from "../src/coding/api.js";
@@ -66,7 +67,11 @@ test("an owner-merge feedback round gives the Pi coder the untrusted MR feedback
   let first: any;
   f.setGeneration((_model, input) => {
     first ??= input;
-    throw new Error("Synthetic interrupted generation");
+    // The provider refuses the call (a 400 Pi does not retry), so the round stops after the
+    // first request, which is all this test inspects.
+    throw new ModelError("Synthetic refused generation", false, {
+      httpStatus: 400,
+    });
   });
   const app = server();
   t.after(() => app.close());

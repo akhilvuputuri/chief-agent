@@ -289,7 +289,7 @@ export async function fixture(
           type: "error",
           error: {
             type:
-              typeof status === "number"
+              typeof status === "number" && status >= 500
                 ? "api_error"
                 : "invalid_request_error",
             message: "Synthetic provider failure",
