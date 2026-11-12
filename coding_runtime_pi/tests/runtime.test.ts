@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, readFile, symlink, mkdir } from "node:fs/promises";
+import {
+  mkdtemp,
+  writeFile,
+  readFile,
+  symlink,
+  mkdir,
+  realpath,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -16,6 +23,8 @@ import {
   localExecutor,
   type ModelFactory,
 } from "../src/index.js";
+import { tools } from "../src/tools.js";
+import { documents } from "../src/documents.js";
 
 function scripted(
   replies: Array<Array<{ name: string; arguments: Record<string, unknown> }>>,
@@ -1008,7 +1017,7 @@ test("oversize report failure is precise, retained, bounded and explicitly resum
   assert.equal(recovered.approved, undefined);
 });
 
-test("approved long scope must be read completely before edits or completion", async () => {
+test("a long approved scope is a task document, not a precondition for other tools", async () => {
   const f = await fixture();
   const detail = "Fix sum and pass the real test. ".padEnd(
     9357,
@@ -1025,24 +1034,26 @@ test("approved long scope must be read completely before edits or completion", a
   });
   const planned = await planner.run(task.id);
   await planner.approve(task.id, 1, planned.plan!.hash);
-  const edit = {
-    name: "edit",
-    arguments: {
-      path: "sum.js",
-      edits: [{ oldText: "a - b", newText: "a + b" }],
-    },
-  };
+  const prompts: string[] = [];
   const builder = new CodingRuntime({
     store: f.store,
-    // A plan is at most 32,000 characters, one read_document page (journal 167): an edit and a
-    // completion before that page is read are both refused.
-    model: scripted([
-      [edit],
-      [report("done", "Premature completion")],
-      [{ name: "read_document", arguments: { id: "approved_plan", page: 0 } }],
-      [edit],
-      [report("done", "Complete approved change implemented.")],
-    ]),
+    // Journal 182: unread pages of approved_plan no longer refuse edit, bash or report.
+    model: scripted(
+      [
+        [
+          {
+            name: "edit",
+            arguments: {
+              path: "sum.js",
+              edits: [{ oldText: "a - b", newText: "a + b" }],
+            },
+          },
+        ],
+        [report("done", "Complete approved change implemented.")],
+      ],
+      undefined,
+      (prompt) => prompts.push(prompt),
+    ),
     executor: (t) => localExecutor(t.workspace, join(f.root, "home")),
   });
   const result = await builder.run(task.id);
@@ -1052,15 +1063,10 @@ test("approved long scope must be read completely before edits or completion", a
     .split("\n")
     .filter(Boolean)
     .map((s) => JSON.parse(s));
-  const denied = session.filter(
-    (e) => e.message?.role === "toolResult" && e.message.isError,
-  );
-  assert.equal(denied.length, 2);
   assert(
-    denied.every((e) =>
-      JSON.stringify(e.message.content).includes("Read all pages"),
-    ),
+    !session.some((e) => e.message?.role === "toolResult" && e.message.isError),
   );
+  assert(prompts[0]?.includes("Read every page of approved_plan"));
   assert.equal(result.plan!.text, detail);
 });
 
@@ -1245,4 +1251,333 @@ test("configured checks use decreasing remaining task time beyond the interactiv
   assert(timeouts[0]! > 120000 && timeouts[0]! < 840000);
   assert(timeouts[1]! < timeouts[0]!);
   assert(result.used.ms >= 60000);
+});
+
+// Journal 182: Pi's prompt, tool execution mode and bash timeout are used as shipped. These fail
+// if a replaced prompt, a forced execution mode or a default command timeout comes back.
+async function approvedBuild(
+  f: Awaited<ReturnType<typeof fixture>>,
+  ms?: number,
+  referenceDocuments?: Array<{ id: string; title: string; text: string }>,
+) {
+  const planner = new CodingRuntime({
+    store: f.store,
+    model: scripted([[report("plan", "Fix sum and test it.")]]),
+  });
+  const task = await planner.start({
+    workspace: f.workspace,
+    objective: "Fix sum",
+    checks: ["node test.mjs"],
+    ...(ms ? { limits: { ms } } : {}),
+    ...(referenceDocuments ? { referenceDocuments } : {}),
+  });
+  const plan = await planner.run(task.id);
+  await planner.approve(task.id, 1, plan.plan!.hash);
+  return task.id;
+}
+test("a build session runs Pi's own prompt, execution mode and bash as shipped", async () => {
+  const f = await fixture();
+  const id = await approvedBuild(f);
+  const prompts: string[] = [];
+  const built = await new CodingRuntime({
+    store: f.store,
+    model: scripted(
+      [[report("done", "Nothing to change.")]],
+      undefined,
+      (prompt) => prompts.push(prompt),
+    ),
+    executor: (t) => localExecutor(t.workspace, join(f.root, "home")),
+  }).run(id);
+  assert.equal(built.report?.kind, "done");
+  // Pi skips its tool list and tool rules when a custom prompt replaces its own.
+  assert.match(prompts[0]!, /Use read to examine files instead of cat or sed/);
+  assert.match(prompts[0]!, /- edit: /);
+  assert.match(prompts[0]!, /Protected owner objective:/);
+  const timeouts: Array<number | undefined> = [];
+  const list = tools(
+    await new Workspace(f.workspace).initialize(),
+    "build",
+    async (_command, _signal, timeoutMs) => {
+      timeouts.push(timeoutMs);
+      return { exitCode: 0, output: "" };
+    },
+    () => {},
+    async () => {},
+  );
+  const docs = documents([{ id: "notes", title: "Notes", text: "Synthetic" }]);
+  for (const tool of [...list, docs.tool])
+    assert.equal(tool.executionMode, undefined, tool.name);
+  const bash = list.find((t) => t.name === "bash")!;
+  await bash.execute(
+    "b",
+    { command: "true" },
+    undefined,
+    undefined,
+    undefined as any,
+  );
+  assert.deepEqual(timeouts, [undefined]);
+});
+test("parallel tool calls overlap and checkpoints wait for the whole batch", async () => {
+  const f = await fixture();
+  // A task document registers the runtime's read_document wrapper; one sequential tool in the
+  // batch would make Pi run every call of the message one at a time.
+  const id = await approvedBuild(f, undefined, [
+    { id: "notes", title: "Notes", text: "Synthetic evidence" },
+  ]);
+  let running = 0;
+  let most = 0;
+  const atCheckpoint: number[] = [];
+  const built = await new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      [
+        { name: "bash", arguments: { command: "sleep 0.4" } },
+        { name: "read_document", arguments: { id: "notes", page: 0 } },
+        { name: "bash", arguments: { command: "sleep 0.4" } },
+      ],
+      [report("done", "Ran two commands.")],
+    ]),
+    executor: (t) => {
+      const execute = localExecutor(t.workspace, join(f.root, "home"));
+      return async (...args) => {
+        most = Math.max(most, ++running);
+        try {
+          return await execute(...args);
+        } finally {
+          running--;
+        }
+      };
+    },
+    onCheckpoint: async () => {
+      atCheckpoint.push(running);
+    },
+  }).run(id);
+  assert.equal(built.report?.kind, "done");
+  assert.equal(most, 2);
+  // One checkpoint before the batch, one after it, one at the end of the run.
+  assert(atCheckpoint.length >= 3);
+  assert(
+    atCheckpoint.every((n) => n === 0),
+    JSON.stringify(atCheckpoint),
+  );
+});
+test("the run deadline kills a command that has no timeout", async () => {
+  const f = await fixture();
+  const id = await approvedBuild(f, 3000);
+  const started = Date.now();
+  const built = await new CodingRuntime({
+    store: f.store,
+    model: scripted([[{ name: "bash", arguments: { command: "sleep 60" } }]]),
+    executor: (t) => localExecutor(t.workspace, join(f.root, "home")),
+  }).run(id);
+  assert.equal(built.status, "paused");
+  assert(Date.now() - started < 15000);
+});
+test("grep is confined to the workspace and truncates like stock grep", async () => {
+  const f = await fixture();
+  await writeFile(join(f.workspace, ".env"), "NEEDLE=secret\n");
+  await writeFile(join(f.workspace, ".env.local"), "NEEDLE=secret\n");
+  await writeFile(join(f.workspace, ".git", "description"), "NEEDLE\n");
+  await writeFile(
+    join(f.workspace, "many.txt"),
+    Array.from(
+      { length: 300 },
+      (_, i) => `NEEDLE ${i} ${"x".repeat(400)}`,
+    ).join("\n"),
+  );
+  const grep = tools(
+    await new Workspace(f.workspace).initialize(),
+    "plan",
+    undefined,
+    () => {},
+    async () => {},
+  ).find((t) => t.name === "grep")!;
+  const run = async (input: Record<string, unknown>) =>
+    (
+      await grep.execute(
+        "g",
+        { pattern: "NEEDLE", ...input },
+        undefined,
+        undefined,
+        undefined as any,
+      )
+    ).content[0].text as string;
+  const limited = await run({});
+  assert.match(limited, /^many\.txt:1: NEEDLE 0 /);
+  assert.match(limited, /100 matches limit reached/);
+  assert(!/\.env|\.git/.test(limited));
+  assert.match(await run({ limit: 1000 }), /50\.0KB limit reached/);
+  await assert.rejects(run({ path: ".env" }));
+  await assert.rejects(run({ path: "../" }));
+});
+test("the final-report phase adds a section to Pi's own prompt instead of replacing it", async () => {
+  const f = await fixture();
+  const prompts: string[] = [];
+  const runtime = new CodingRuntime({
+    store: f.store,
+    // Prose instead of a report moves the run into the final-report phase.
+    model: scripted(
+      [[], [report("plan", "Fix sum and test it.")]],
+      undefined,
+      (prompt) => prompts.push(prompt),
+    ),
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Fix sum",
+  });
+  const planned = await runtime.run(task.id);
+  assert.equal(planned.status, "waiting_approval");
+  const final = prompts.at(-1)!;
+  // A forced replacement prompt is sent as one opaque text, without Pi's sections.
+  assert.match(
+    final,
+    /"host_phase":"<host_phase>\\nHost workflow phase: final report/,
+  );
+  assert.match(final, /Use read to examine files instead of cat or sed/);
+});
+test("the command executor arms no timer when no timeout is given", async () => {
+  const f = await fixture();
+  const execute = localExecutor(f.workspace, join(f.root, "home"));
+  const delays: Array<number | undefined> = [];
+  const original = globalThis.setTimeout;
+  globalThis.setTimeout = ((handler: any, delay?: number, ...rest: any[]) => {
+    delays.push(delay);
+    return original(handler, delay, ...rest);
+  }) as typeof setTimeout;
+  try {
+    const done = await execute("true", new AbortController().signal);
+    assert.equal(done.exitCode, 0);
+    assert.equal(done.timedOut, false);
+  } finally {
+    globalThis.setTimeout = original;
+  }
+  assert.deepEqual(
+    delays.filter((d) => (d ?? 0) >= 1000),
+    [],
+  );
+  const timed = await execute("sleep 5", new AbortController().signal, 50);
+  assert.equal(timed.timedOut, true);
+});
+test("read returns an image as an image, not its bytes as text", async () => {
+  const f = await fixture();
+  // A valid 1x1 PNG.
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  await writeFile(join(f.workspace, "pixel.png"), png);
+  const read = tools(
+    await new Workspace(await realpath(f.workspace)).initialize(),
+    "plan",
+    undefined,
+    () => {},
+    async () => {},
+  ).find((t) => t.name === "read")!;
+  const result = await read.execute(
+    "r",
+    { path: "pixel.png" },
+    undefined,
+    undefined,
+    undefined as any,
+  );
+  const text = result.content
+    .filter((c: any) => c.type === "text")
+    .map((c: any) => c.text)
+    .join("");
+  assert.match(text, /Read image file \[image\/png\]/);
+  assert(!text.includes("PNG\r\n"));
+  assert(!text.includes("IHDR"));
+});
+test("truncated bash output is readable from the run's output directory and removed after the run", async () => {
+  const f = await fixture();
+  const outputs = join(f.root, "outputs");
+  await mkdir(outputs);
+  await writeFile(join(f.root, "outside"), "not readable");
+  const previous = process.env.TMPDIR;
+  process.env.TMPDIR = outputs;
+  try {
+    const list = tools(
+      await new Workspace(await realpath(f.workspace)).initialize(),
+      "build",
+      localExecutor(f.workspace, join(f.root, "home")),
+      () => {},
+      async () => {},
+      outputs,
+    );
+    const bash = list.find((t) => t.name === "bash")!;
+    const read = list.find((t) => t.name === "read")!;
+    const ran = await bash.execute(
+      "b",
+      { command: "seq 1 30000" },
+      undefined,
+      undefined,
+      undefined as any,
+    );
+    const path = /Full output: ([^\]]+)\]/.exec(ran.content[0].text)![1]!;
+    assert(path.startsWith(outputs + "/"));
+    const full = await read.execute(
+      "r",
+      { path, offset: 29999 },
+      undefined,
+      undefined,
+      undefined as any,
+    );
+    assert.match(full.content[0].text, /^29999\n30000/);
+    for (const denied of [
+      join(f.root, "outside"),
+      join(outputs, "..", "outside"),
+    ])
+      await assert.rejects(
+        read.execute(
+          "r",
+          { path: denied },
+          undefined,
+          undefined,
+          undefined as any,
+        ),
+      );
+    // Only read reaches the directory.
+    const grep = list.find((t) => t.name === "grep")!;
+    await assert.rejects(
+      grep.execute(
+        "g",
+        { pattern: "1", path },
+        undefined,
+        undefined,
+        undefined as any,
+      ),
+    );
+  } finally {
+    if (previous === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previous;
+  }
+  const id = await approvedBuild(f);
+  const before = process.env.TMPDIR;
+  const built = await new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      [{ name: "bash", arguments: { command: "seq 1 30000" } }],
+      [report("done", "Printed a long sequence.")],
+    ]),
+    executor: (t) => localExecutor(t.workspace, join(f.root, "home")),
+  }).run(id);
+  assert.equal(built.report?.kind, "done");
+  assert.equal(process.env.TMPDIR, before);
+  await assert.rejects(readFile(join(f.store.path(id), "outputs", ".")));
+  assert(!built.artifact?.files.some((file) => file.path.includes("pi-bash")));
+});
+test("concurrent saves of one task land in call order", async () => {
+  const f = await fixture();
+  const runtime = new CodingRuntime({ store: f.store, model: scripted([]) });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Fix sum",
+  });
+  await Promise.all(
+    Array.from({ length: 40 }, (_, i) =>
+      f.store.save({ ...task, summary: `save ${i}` }),
+    ),
+  );
+  assert.equal((await f.store.get(task.id)).summary, "save 39");
 });

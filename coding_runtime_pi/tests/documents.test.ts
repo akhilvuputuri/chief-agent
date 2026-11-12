@@ -3,14 +3,13 @@ import assert from "node:assert/strict";
 import { documents } from "../src/documents.js";
 import { documentPageChars, reportDocument } from "../src/report.js";
 
-test("reference documents require every valid page and start unread in a replacement attempt", async () => {
+test("reference documents page every character, including a split surrogate pair", async () => {
   // A surrogate pair sits across the first page boundary.
   const text =
     "字".repeat(documentPageChars - 1) +
     "😀" +
     "tail".repeat(documentPageChars);
   const d = documents([{ id: "approved_plan", title: "Exact scope", text }]);
-  assert.deepEqual(d.unread(), ["approved_plan"]);
   await assert.rejects(
     d.tool.execute(
       "bad",
@@ -34,7 +33,6 @@ test("reference documents require every valid page and start unread in a replace
   };
   await read(0);
   await read(0);
-  assert.deepEqual(d.unread(), ["approved_plan"]);
   const result: string[] = [];
   for (
     let page = 0;
@@ -47,11 +45,6 @@ test("reference documents require every valid page and start unread in a replace
       result[i] = chunk.text[i - chunk.from];
   }
   assert.equal(result.join(""), text);
-  assert.deepEqual(d.unread(), []);
-  assert.deepEqual(
-    documents([{ id: "approved_plan", title: "Exact scope", text }]).unread(),
-    ["approved_plan"],
-  );
 });
 test("report identity binds full content and verdict independently of summary presentation", () => {
   const base = {
@@ -98,8 +91,6 @@ test("complete maximum-size immutable evidence is paged without relaxing report 
       restored[i] = chunk.text[i - chunk.from];
   }
   assert.equal(restored.join(""), text);
-  assert.deepEqual(evidence.unread(), []);
-  assert.deepEqual(documents(input).unread(), ["candidate_diff"]);
   assert.throws(() => documents([{ ...input[0]!, text: text + "X" }]));
   assert.throws(() =>
     documents(
@@ -120,7 +111,7 @@ test("complete maximum-size immutable evidence is paged without relaxing report 
   );
 });
 
-test("an optional document can be read but is not required before work or a verdict", async () => {
+test("an optional document is marked as optional reading in the description", async () => {
   const d = documents([
     { id: "review_delta", title: "Changed since review", text: "delta" },
     {
@@ -132,13 +123,10 @@ test("an optional document can be read but is not required before work or a verd
   ]);
   assert.match(d.description, /candidate_diff: .*3 pages; optional reference/);
   assert.doesNotMatch(d.description, /review_delta: .*optional/);
-  assert.deepEqual(d.unread(), ["review_delta"]);
   const read = (id: string, page: number) =>
     d.tool.execute("call", { id, page }, undefined, undefined, {} as any);
   await read("candidate_diff", 1);
-  assert.deepEqual(d.unread(), ["review_delta"]);
   await read("review_delta", 0);
-  assert.deepEqual(d.unread(), []);
   // One page now carries what took eight: a 300,000-character diff is 10 pages, not 75.
   assert.equal(documentPageChars, 32000);
 });

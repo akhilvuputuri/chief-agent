@@ -1,3 +1,9 @@
+## Coding worker runs Pi's tools and prompt as shipped (13 November 2026)
+
+- **Code.** In the coding worker, Pi builds its own system prompt (tool list and tool rules) and our role text is appended; the owner's request is sent once. Tools run in parallel as in stock Pi, with the workspace checkpoint taken only when no tool is running. `bash` has no time limit unless the model passes one; the run deadline and cancellation still stop a command. `grep` truncates like stock Pi, `read` detects images, and large command output goes to a per-run directory that `read` can open. The gate that blocked tools until every document page was read, the 2 MB read refusal and the 20,000-file limit are removed. Workspace confinement is unchanged. No host, migration or Compose change.
+- **Why.** In job `9600af57`, 96% of coder turns requested one tool and 93% of its tool calls were shell commands. See [journal 182](journey/182-pi-tools-and-prompt-as-shipped.md) and [journal 179](journey/179-first-full-coding-job-review.md).
+- **Deployment.** Worker source only. It reaches coding jobs when a worker image built from it is pinned; not yet built or pinned.
+
 ## One request is not a preference: fact kinds, notes and end dates (13 November 2026)
 
 - **Code.** Learner prompt `learner-v6`: each fact says whether it is standing, a note of one occasion or time-bound. Notes are kept out of every turn's context until a repeat on another day makes them a preference. A standing fact on one day's evidence is flagged when it is worded as a habit or rests on a question. Facts keep the messages and days that support them. Time-bound facts are retired the night after their end date. The owner's redirects (asked again, rephrased, pushed back) are stored and count as pitfalls, and the next message is shown beside each turn. Judge prompt `judge-v2` reads a fact's kind and every supporting message with its day. No database or Compose change.
@@ -9,6 +15,8 @@
 - **Code.** An owner-merge coding job's PR is no longer re-implemented when main moves. It goes to its Merge card and merges at the reviewed head like any PR. Only a conflict reported by GitHub, with main actually moved, runs the existing re-apply path, which stays as an interim. The two-rebase cap is removed. While GitHub recomputes whether the PR can merge, the Merge card and a recorded tap are kept. Host only; no worker image, migration or Compose change.
 - **Why.** Job `9600af57` was rebuilt twice because main moved, once for a docs-only commit: $68 of its $104. See [journal 180](journey/180-main-moving-is-not-an-event.md) and [journal 179](journey/179-first-full-coding-job-review.md).
 - **Deployment.** Not yet recorded as live; a dated note follows on release.
+
+> **Update, 13 November 2026:** merged as `62f8a4f` (PR 472); release run 43265516644 succeeded and the gateway was healthy at `62f8a4f`. Correction to journal 180's wording: a stale conflict reading with main unmoved does not simply wait for the next tick; the job returns to awaiting CI, which drops a recorded Merge tap, and the existing one-hour wait can then park it for manual review.
 
 ## Shared links: study list or Reader (12 November 2026)
 
