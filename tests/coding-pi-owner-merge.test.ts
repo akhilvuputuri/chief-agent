@@ -101,7 +101,8 @@ async function fixture(
     unresolvedThreads: 0,
   };
   let merges = 0,
-    readies = 0;
+    readies = 0,
+    release: "pending" | "success" | "failure" = "pending";
   let onInspect: (() => Promise<void>) | undefined;
   const repository = {
     outcome: async () => inspection,
@@ -120,7 +121,7 @@ async function fixture(
       merges++;
       return { sha: merged };
     },
-    release: async () => "pending" as const,
+    release: async () => release,
   };
   const auto = new CodingAutomation(
     db,
@@ -176,6 +177,8 @@ async function fixture(
     onNextInspect: (hook: () => Promise<void>) => (onInspect = hook),
     setInspection: (i: Partial<PrInspection>) =>
       (inspection = { ...inspection, ...i }),
+    setRelease: (v: typeof release) => (release = v),
+    advance: (ms: number) => (now = new Date(now.getTime() + ms)),
     counts: () => ({ merges, readies }),
   };
 }
@@ -578,7 +581,7 @@ test("each Pi owner-merge feedback round gets a fresh active window even after t
   assert.equal(queued.used_models, 12);
 });
 
-test("when main moves, an owner-merge job is rebased automatically with its approval carried over", async (t) => {
+test("a PR that conflicts with main is re-applied on current main with its approval carried over (interim, journal 180)", async (t) => {
   const f = await fixture(t, { version: 1, toolsUsed: 20, reviewRound: 2 });
   const before = await f.job();
   await f.db.query(
@@ -592,7 +595,12 @@ test("when main moves, an owner-merge job is rebased automatically with its appr
     ],
   );
   const moved = "f".repeat(40);
-  f.setInspection({ checks: "passed", draft: false, main: moved });
+  f.setInspection({
+    checks: "passed",
+    draft: false,
+    main: moved,
+    mergeable: false,
+  });
   await f.auto.tick();
   const queued = await f.job();
   assert.equal(queued.state, "queued");
@@ -631,7 +639,7 @@ test("when main moves, an owner-merge job is rebased automatically with its appr
   assert.equal(budget.remainingMs, 900000);
   const notice = (
     await f.db.query(
-      "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND payload->>'summary' LIKE 'Main moved since this job started%'",
+      "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND payload->>'summary' LIKE 'The PR conflicts with recent changes on main%'",
       [f.id],
     )
   ).rows;
@@ -639,7 +647,7 @@ test("when main moves, an owner-merge job is rebased automatically with its appr
   assert.equal(notice[0].delivery, "pending");
 });
 
-/** Rebases the fixture job onto a moved main and starts its new attempt. */
+/** Re-applies the fixture job on a moved, conflicting main and starts its new attempt. */
 async function rebasedAttempt(f: Awaited<ReturnType<typeof fixture>>) {
   const before = await f.job();
   await f.db.query(
@@ -652,7 +660,12 @@ async function rebasedAttempt(f: Awaited<ReturnType<typeof fixture>>) {
       }),
     ],
   );
-  f.setInspection({ checks: "passed", draft: false, main: "f".repeat(40) });
+  f.setInspection({
+    checks: "passed",
+    draft: false,
+    main: "f".repeat(40),
+    mergeable: false,
+  });
   await f.auto.tick();
   await f.db.query(
     "UPDATE coding_jobs SET state='running',stage='implementing',attempt_id=$2,attempt_deadline=$3 WHERE id=$1",
@@ -770,24 +783,129 @@ test("a rebase whose candidate differs at all is recorded as not identical", asy
   assert.equal(rebased[0].matched, false);
 });
 
-test("automatic rebases stop after two rounds and hand back to the owner", async (t) => {
+test("a conflicting PR is re-applied however many times main conflicted before", async (t) => {
   const f = await fixture(t);
-  for (const n of [1, 2])
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'owner-approved',$2::jsonb,'suppressed')",
+    [
+      f.id,
+      JSON.stringify({
+        decision: "approved",
+        approvedScope: requirementScope(await f.job()),
+      }),
+    ],
+  );
+  for (const n of [1, 2, 3])
     await f.db.query(
-      "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,$2,$3,'Rebase onto current main earlier','implement')",
+      "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,$2,$3,'Earlier re-apply','implement')",
       [f.id, 10 + n, `rebase:earlier-${n}`],
     );
-  f.setInspection({ checks: "passed", draft: false, main: "f".repeat(40) });
+  f.setInspection({
+    checks: "passed",
+    draft: false,
+    main: "f".repeat(40),
+    mergeable: false,
+  });
   await f.auto.tick();
   const job = await f.job();
-  assert.equal(job.state, "pr_ready");
-  assert.equal(job.stage, "manual_review");
-  assert.match(job.summary, /two automatic rebases/);
+  assert.equal(job.state, "queued");
+  assert.equal(job.base_sha, "f".repeat(40));
 });
 
-test("a rebase never carries over a scope the owner did not approve, and blocked PRs are not rebased", async (t) => {
+test("main moving with a clean merge changes nothing: the card, the tap, the merge and the release all proceed (journal 180)", async (t) => {
   const f = await fixture(t);
-  f.setInspection({ checks: "passed", draft: false, main: "f".repeat(40) });
+  const moved = "f".repeat(40);
+  // A docs-only commit lands on main before the PR is even marked ready.
+  f.setInspection({ main: moved, base: moved });
+  await f.auto.tick();
+  assert.equal(f.counts().readies, 1);
+  assert.equal((await f.job()).stage, "awaiting_ci");
+  f.setInspection({ checks: "passed" });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_merge_approval");
+  const card = await f.deliverCard();
+  assert.deepEqual(card.payload.merge, { revision: 1, head, tree });
+  // Main moves again while the card waits; still nothing to do.
+  const later = "e".repeat(40);
+  f.setInspection({ main: later, base: later });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_merge_approval");
+  await f.approvals.confirm("owner", card.id, true, "owner", 55);
+  await f.auto.tick();
+  assert.equal(f.counts().merges, 1);
+  const merging = await f.job();
+  assert.equal(merging.stage, "release_pending");
+  // Nothing about the job was rebuilt: same revision, base, head and saved change.
+  assert.equal(merging.revision, 1);
+  assert.equal(merging.base_sha, base);
+  assert.equal(merging.head_sha, head);
+  assert.equal(merging.checkpoint.files.length, 1);
+  const rebuilt = (
+    await f.db.query(
+      "SELECT 1 FROM coding_revisions WHERE job_id=$1 AND request_key LIKE 'rebase:%'",
+      [f.id],
+    )
+  ).rows;
+  assert.equal(rebuilt.length, 0);
+  // The release is tracked by the merge commit GitHub made on the moved main.
+  f.setRelease("success");
+  await f.auto.tick();
+  const deployed = await f.job();
+  assert.equal(deployed.stage, "deployed");
+  assert.match(deployed.summary, new RegExp(merged));
+});
+
+test("unknown mergeability waits without dropping the card or the owner's tap, and is never a conflict", async (t) => {
+  const f = await fixture(t);
+  f.setInspection({ checks: "passed" });
+  await f.auto.tick();
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_merge_approval");
+  const card = await f.deliverCard();
+  // Main moved; GitHub is recomputing mergeability. Hours pass.
+  f.setInspection({ main: "f".repeat(40), mergeable: null });
+  f.advance(2 * 3600000);
+  await f.auto.tick();
+  const waiting = await f.job();
+  assert.equal(waiting.stage, "awaiting_merge_approval");
+  assert.equal(waiting.state, "pr_ready");
+  await f.approvals.confirm("owner", card.id, true, "owner", 55);
+  await f.auto.tick();
+  const approved = await f.job();
+  assert.equal(approved.stage, "merge_approved");
+  assert.equal(approved.revision, 1);
+  assert.equal(f.counts().merges, 0);
+  // Mergeability turns unknown again between the first and final reads of the merge tick.
+  f.setInspection({ mergeable: true });
+  f.onNextInspect(async () => {
+    f.onNextInspect(async () => {
+      f.setInspection({ mergeable: null });
+    });
+  });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "merge_approved");
+  assert.equal(f.counts().merges, 0);
+  f.setInspection({ mergeable: true });
+  await f.auto.tick();
+  assert.equal(f.counts().merges, 1);
+  assert.equal((await f.job()).stage, "release_pending");
+  const cards = (
+    await f.db.query(
+      "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload ? 'merge'",
+      [f.id],
+    )
+  ).rows;
+  assert.equal(cards.length, 1);
+});
+
+test("a re-apply never carries over a scope the owner did not approve", async (t) => {
+  const f = await fixture(t);
+  f.setInspection({
+    checks: "passed",
+    draft: false,
+    main: "f".repeat(40),
+    mergeable: false,
+  });
   await f.auto.tick();
   // The fixture job has no recorded approval for its scope.
   const job = await f.job();

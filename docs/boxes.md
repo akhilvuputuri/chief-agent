@@ -248,6 +248,8 @@ Starting a box creates infrastructure and spends money. `agent_run` is classed a
   - Devin feedback → repair;
   - main moved → rebase.
 
+  > **Update, 13 November 2026 ([journal 180](journey/180-main-moving-is-not-an-event.md)):** main moving alone no longer starts a round; only a PR that GitHub reports as conflicting with main is re-applied.
+
   Each round runs in the same box if it is running, starts it if it is stopped, and falls back to a fresh box if neither works. Every round begins with the trust reset above.
 
 - **Concurrency.** Coding defaults to 2 running EC2 boxes; stopped boxes count against a separate retention cap. On the existing CodeBuild path, coding stays at 1.
