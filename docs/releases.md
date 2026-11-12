@@ -5,6 +5,8 @@
 - **Why.** The judge is the only quality signal on memory, shares a model with what it judges, and had never been checked; the owner labels nothing. See [journal 183](journey/183-can-the-judge-be-trusted.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
 
+> **Update, 13 November 2026:** merged as `8127632` (PR 475) at the head the independent review approved (`8934f151`, after one round of requested changes recorded in journal 183). Live from 01:47 SGT on 13 November by release run 43272924532; the gateway reported `8127632`, healthy, with no error lines in its first minutes, and `model.routes` showed `judgeRoute` `anthropic-direct` and `judgeSecondRoute` `openrouter`. The first night with these checks is 13 November.
+
 ## Coding worker runs Pi's tools and prompt as shipped (13 November 2026)
 
 - **Code.** In the coding worker, Pi builds its own system prompt (tool list and tool rules) and our role text is appended; the owner's request is sent once. Tools run in parallel as in stock Pi, with the workspace checkpoint taken only when no tool is running. `bash` has no time limit unless the model passes one; the run deadline and cancellation still stop a command. `grep` truncates like stock Pi, `read` detects images, and large command output goes to a per-run directory that `read` can open. The gate that blocked tools until every document page was read, the 2 MB read refusal and the 20,000-file limit are removed. Workspace confinement is unchanged. No host, migration or Compose change.
