@@ -1,4 +1,4 @@
--- What the nightly judge has found (docs/learning.md#nightly-judge). Read-only: four SELECTs.
+-- What the nightly judge has found (docs/learning.md#nightly-judge). Read-only: eight SELECTs.
 -- Keys and the judge's reasons are the owner's private data; keep the output off the repo.
 --
 --   psql -At -F ' | ' < scripts/judge-report.sql
@@ -50,3 +50,34 @@ ORDER BY coalesce(u.relevant,0) DESC, c.key;
 -- 4. Judge runs, newest first: state, counts and how far each has read.
 SELECT 'run' AS row, started_at, state, summary FROM learner_runs
 WHERE prompt_version LIKE 'judge-%' ORDER BY started_at DESC LIMIT 14;
+
+-- 5. The judge checked against planted errors, last 30 days: copies of supported facts the
+-- host broke in a known way. "caught" is a verdict other than supported; for the unchanged
+-- control copies it is a false alarm.
+SELECT 'probe' AS row, data->>'mutation' AS mutation, count(*) AS probes,
+  count(*) FILTER (WHERE data->>'verdict' NOT IN ('supported','missed')) AS caught,
+  count(*) FILTER (WHERE data->>'verdict'='missed') AS missed
+FROM events WHERE type='judge.probe' AND created_at>now()-interval '30 days'
+GROUP BY data->>'mutation' ORDER BY data->>'mutation';
+
+-- 6. Planted decoy memories, last 30 days: judged turns that carried one, and how many times
+-- the judge called it relevant.
+SELECT 'decoy' AS row, count(*) AS turns,
+  count(*) FILTER (WHERE (data->>'decoyHit')::boolean) AS called_relevant
+FROM events WHERE type='judge.turn' AND data->>'state'='judged'
+  AND created_at>now()-interval '30 days';
+
+-- 7. Verdicts judged again, last 30 days: how often the same model repeated its first
+-- verdict, and how often the second model agreed with it.
+SELECT 'check' AS row, data->>'kind' AS kind, count(*) AS checked,
+  count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(data->'repeats') r
+    WHERE r<>data->>'first')) AS stable,
+  count(*) FILTER (WHERE data ? 'second') AS cross_checked,
+  count(*) FILTER (WHERE data->>'second'=data->>'first') AS agreed
+FROM events WHERE type='judge.check' AND created_at>now()-interval '30 days'
+GROUP BY data->>'kind' ORDER BY data->>'kind';
+
+-- 8. What the owner had to say again, by memory key.
+SELECT 'restated' AS row, r->>'key' AS key, count(*) AS times
+FROM events e CROSS JOIN LATERAL jsonb_array_elements(e.data->'restated') AS r
+WHERE e.type='judge.turn' GROUP BY r->>'key' ORDER BY count(*) DESC, r->>'key';

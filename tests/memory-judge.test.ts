@@ -6,6 +6,8 @@ import type { Database } from "../src/db.js";
 import { Learner } from "../src/learning.js";
 import { MemoryStore } from "../src/memory.js";
 import {
+  DECOYS,
+  factProbes,
   JUDGE_LIMITS,
   JUDGE_PROMPT_VERSION,
   type JudgeBatch,
@@ -13,7 +15,10 @@ import {
   judgeTools,
   newJudgements,
   recordJudgement,
+  shownInTurn,
+  shuffled,
   turnScore,
+  turnSignature,
   unjudged,
 } from "../src/memory-judge.js";
 import type { Generation, ModelAdapter } from "../src/model.js";
@@ -62,7 +67,14 @@ const learner = (db: Database, adapter: ModelAdapter, now = NIGHT) =>
     model: adapter,
     modelName: "test/model",
     clock: () => now,
+    // The judge's checks on itself have their own tests below.
+    judgeChecks: false,
   });
+// What the judge was shown, and the short ID it gave a memory: the order is shuffled per run.
+const shownTo = (input: any) => JSON.parse(input.messages[1].content);
+const idOf = (input: any, key: string) =>
+  shownTo(input).memories.find((m: any) => m.key === key).id as string;
+const decoyKeys = DECOYS.map((d) => d.key as string);
 // The pass itself, without the item and procedure passes a night runs before it.
 const judge = (db: Database, adapter: ModelAdapter, now = NIGHT) =>
   (learner(db, adapter, now) as any).runJudge("owner", now) as Promise<
@@ -136,6 +148,18 @@ async function learned(
   });
 }
 
+/** Every row of the report script but the run list, as text. */
+async function report(db: Database) {
+  const queries = (await readFile("scripts/judge-report.sql", "utf8"))
+    .replace(/^--.*$/gm, "")
+    .split(";")
+    .filter((sql) => sql.trim());
+  const rows = [];
+  for (const sql of queries)
+    rows.push(...(await db.query(sql)).rows.map((r) => Object.values(r)));
+  return rows.filter((r) => r[0] !== "run").map((r) => r.map(String));
+}
+
 const events = async (db: Database, type: string) =>
   (
     await db.query("SELECT data FROM events WHERE type=$1 ORDER BY id", [type])
@@ -175,8 +199,15 @@ const batch: JudgeBatch = {
       runId: "run",
       date: "2026-11-25",
       owner: "Book a flight",
-      reply: "Booked",
-      calls: ["flights_search:success"],
+      reply: "Booked an *aisle* seat on the 9am flight.",
+      calls: [
+        {
+          call: "flights_search",
+          state: "success",
+          input: '{"to":"Tokyo"}',
+          result: '{"seat":"14C","fare":"flex"}',
+        },
+      ],
       memories: ["m1"],
     },
   ],
@@ -197,7 +228,11 @@ test("a judgement must name an item of the batch once, and a turn may cite only 
     recordJudgement("judge_fact", { fact: "f1", ...fact }, batch, done)!,
     /already judged/,
   );
-  const use = { use: "followed", reason: "Aisle seat booked" };
+  const use = {
+    use: "followed",
+    evidence: "aisle seat",
+    reason: "Aisle seat booked",
+  };
   assert.match(
     recordJudgement("judge_turn", { turn: "t2", relevant: [] }, batch, done)!,
     /no turn t2/,
@@ -228,15 +263,45 @@ test("a judgement must name an item of the batch once, and a turn may cite only 
     /twice/,
   );
   assert.deepEqual(unjudged(batch, done), ["t1"]);
+  // A claim that Chief acted on a memory, or against it, has to point at where.
+  const claim = (extra: Record<string, unknown>, restated?: string[]) =>
+    recordJudgement(
+      "judge_turn",
+      {
+        turn: "t1",
+        relevant: [{ memory: "m1", reason: "Because", ...extra }],
+        ...(restated ? { restated } : {}),
+      },
+      batch,
+      newJudgements(),
+    );
+  assert.match(claim({ use: "followed" })!, /followed needs evidence/);
+  assert.match(
+    claim({ use: "contradicted", evidence: "a window seat" })!,
+    /not in the reply or the calls of t1/,
+  );
+  // The reply's words whatever its markup or case, a call's result, or a call's name.
+  for (const evidence of ["AISLE seat", '"seat":"14C"', "flights_search"])
+    assert.equal(claim({ use: "followed", evidence }), undefined, evidence);
+  // Saying a memory was passed over, or that it cannot be told, needs no quote.
+  assert.equal(claim({ use: "ignored" }), undefined);
+  assert.equal(claim({ use: "unclear" }), undefined);
+  assert.match(claim({ use: "ignored" }, ["m2"])!, /restated takes only ids/);
+  assert.equal(shownInTurn(batch.turns[0]!, "9am flight"), true);
+  assert.equal(shownInTurn(batch.turns[0]!, "am"), false);
   assert.equal(
     recordJudgement(
       "judge_turn",
-      { turn: "t1", relevant: [{ memory: "m1", ...use }] },
+      { turn: "t1", relevant: [{ memory: "m1", ...use }], restated: ["m1"] },
       batch,
       done,
     ),
     undefined,
   );
+  assert.deepEqual(done.turns.get("t1"), {
+    relevant: [{ memory: "m1", ...use }],
+    restated: ["m1"],
+  });
   assert.deepEqual(unjudged(batch, done), []);
   // The tools refuse verdicts outside the fixed lists and IDs of another shape.
   assert.equal(
@@ -361,6 +426,7 @@ test("the judge checks a new fact against the message it cites, and a turn again
             {
               memory: seatId,
               use: "contradicted",
+              evidence: "a window seat",
               reason: "Booked a window seat",
             },
           ],
@@ -387,13 +453,23 @@ test("the judge checks a new fact against the message it cites, and a turn again
   // Turns: the reply, the tool names in order without the turn's bookkeeping calls, and the
   // memories that were in context, the owner's own fact included.
   const turns = JSON.parse(inputs[1].messages[1].content);
+  // The owner's fact, the learned one and one planted decoy, in an order that says nothing.
   assert.deepEqual(
-    turns.memories.map((m: any) => [m.id, m.key, m.kind]),
-    [
-      ["m1", "home", "fact"],
-      ["m2", "seat", "fact"],
-    ],
+    turns.memories.map((m: any) => m.id),
+    ["m1", "m2", "m3"],
   );
+  const keys = turns.memories.map((m: any) => m.key as string);
+  assert.deepEqual(keys.filter((k: string) => !decoyKeys.includes(k)).sort(), [
+    "home",
+    "seat",
+  ]);
+  assert.equal(keys.filter((k: string) => decoyKeys.includes(k)).length, 1);
+  assert.deepEqual(Object.keys(turns.memories[0]).sort(), [
+    "id",
+    "key",
+    "kind",
+    "value",
+  ]);
   // The turn the fact came from had no memory in context, so it is not read at all.
   assert.deepEqual(
     turns.turns.map((turn: any) => turn.id),
@@ -404,8 +480,10 @@ test("the judge checks a new fact against the message it cites, and a turn again
     date: "2026-11-25",
     owner: "Book me a flight to Tokyo",
     reply: "Booked a window seat on the 9am flight.",
-    calls: ["flights_search:success"],
-    memories: ["m1", "m2"],
+    calls: [{ call: "flights_search", state: "success" }],
+    // What the owner wrote within six hours of it.
+    ownerNext: "Hello?",
+    memories: ["m1", "m2", "m3"],
   });
   assert.deepEqual(
     inputs[1].tools.map((tool: any) => tool.name),
@@ -444,6 +522,7 @@ test("the judge checks a new fact against the message it cites, and a turn again
       kind: "fact",
       learned: true,
       use: "contradicted",
+      evidence: "a window seat",
       reason: "Booked a window seat",
     },
   ]);
@@ -462,24 +541,16 @@ test("the judge checks a new fact against the message it cites, and a turn again
   }))
     assert.equal(result[key], value, key);
   // The report script reads the same events: verdicts by fact, and use by memory key.
-  const report = (await readFile("scripts/judge-report.sql", "utf8"))
-    .replace(/^--.*$/gm, "")
-    .split(";")
-    .filter((sql) => sql.trim());
-  const rows = [];
-  for (const sql of report)
-    rows.push(...(await db.query(sql)).rows.map((r) => Object.values(r)));
-  assert.deepEqual(
-    rows.filter((r) => r[0] !== "run").map((r) => r.map(String)),
-    [
-      ["facts", "no_source", "1"],
-      ["facts", "overstated", "1"],
-      ["fact", "gym", "no_source", "null"],
-      ["fact", "seat", "overstated", "A one-off request for this trip"],
-      ["use", "seat", "2", "1", "0", "0", "1", "0"],
-      ["use", "home", "2", "0", "0", "0", "0", "0"],
-    ],
-  );
+  assert.deepEqual(await report(db), [
+    ["facts", "no_source", "1"],
+    ["facts", "overstated", "1"],
+    ["fact", "gym", "no_source", "null"],
+    ["fact", "seat", "overstated", "A one-off request for this trip"],
+    ["use", "seat", "2", "1", "0", "0", "1", "0"],
+    ["use", "home", "2", "0", "0", "0", "0", "0"],
+    // Two judged turns carried the planted memory, and it was never called relevant.
+    ["decoy", "2", "0"],
+  ]);
   // It measures only: no revision is written, flagged or retired.
   assert.equal(
     (await db.query("SELECT count(*)::int n FROM memory_revisions")).rows[0].n,
@@ -523,16 +594,20 @@ test("a refused or missing judgement gets one reminder, and what is still missin
     ago: 1.5 * DAY,
     selected: [diet.id],
   });
-  const { adapter, inputs } = model((_input, n) =>
+  const { adapter, inputs } = model((input, n) =>
     n === 1
-      ? // m1 is diet, which was not in the first turn's context; the second turn is left out.
+      ? // Diet was not in the first turn's context; the second turn is left out.
         [
           [
             "judge_turn",
             {
               turn: "t1",
               relevant: [
-                { memory: "m1", use: "followed", reason: "Vegetarian meal" },
+                {
+                  memory: idOf(input, "diet"),
+                  use: "ignored",
+                  reason: "Vegetarian meal",
+                },
               ],
             },
           ],
@@ -544,7 +619,11 @@ test("a refused or missing judgement gets one reminder, and what is still missin
             {
               turn: "t1",
               relevant: [
-                { memory: "m2", use: "unclear", reason: "Seat not shown" },
+                {
+                  memory: idOf(input, "seat"),
+                  use: "unclear",
+                  reason: "Seat not shown",
+                },
               ],
             },
           ],
@@ -557,7 +636,7 @@ test("a refused or missing judgement gets one reminder, and what is still missin
   assert.match(reminder.content, /t1, t2/);
   assert.match(
     inputs[1].messages.find((m: any) => m.role === "tool").content,
-    /m1 was not in the context of t1/,
+    /m\d was not in the context of t1/,
   );
   assert.equal(result.state, "completed");
   assert.deepEqual(
@@ -730,13 +809,18 @@ test("a judged turn is exported as evaluations on the turn's own trace, and the 
   });
   let result: Record<string, any>;
   // The judge's own model answers, not the learner's, and the run is recorded under it.
-  const own = model(() => [
+  const own = model((input) => [
     [
       "judge_turn",
       {
         turn: "t1",
         relevant: [
-          { memory: "m1", use: "followed", reason: "Aisle seat booked" },
+          {
+            memory: idOf(input, "seat"),
+            use: "followed",
+            evidence: "an aisle seat",
+            reason: "Aisle seat booked",
+          },
         ],
       },
     ],
@@ -749,6 +833,7 @@ test("a judged turn is exported as evaluations on the turn's own trace, and the 
         modelName: "writer/model",
         judge: { model: own.adapter, modelName: "judge/model" },
         clock: () => NIGHT,
+        judgeChecks: false,
       }) as any
     ).runJudge("owner", NIGHT);
     assert.equal(writer.inputs.length, 0);
@@ -938,4 +1023,339 @@ test("the judge is told a fact's kind and each message's day, so a note or a rep
     },
   ]);
   assert.match(inputs[0].messages[0].content, /messages from separate days/);
+});
+
+test("a turn shows the judge its calls, the exchange around it and a decoy, and records what the owner restated", async (t) => {
+  const db = await setup(t);
+  const seat = await learned(db, "seat", "Prefers aisle seats", []);
+  await turn(db, {
+    says: "Find me flights to Tokyo",
+    reply: "Three options found.",
+    ago: 2 * DAY + 3600_000,
+    selected: [],
+  });
+  const flight = await turn(db, {
+    says: "Book the first one. Aisle seat, as always",
+    reply: "Booked 14C.",
+    calls: [["flights_book", "success"]],
+    selected: [seat.id],
+  });
+  await db.query(
+    "UPDATE runtime_calls SET arguments=$2::jsonb,result=$3::jsonb WHERE run_id=$1",
+    [
+      flight.run,
+      JSON.stringify({ seat: "aisle", token: "sk-live-1234567890abcdef1234" }),
+      JSON.stringify({ booked: "14C", notes: "x".repeat(600) }),
+    ],
+  );
+  const next = await turn(db, {
+    says: "No, I wanted the later flight",
+    reply: "Rebooked.",
+    ago: 2 * DAY - 3600_000,
+    selected: [seat.id],
+  });
+  await db.query(
+    "INSERT INTO events(run_id,user_id,type,data) VALUES($1,'owner','turn.redirect',$2::jsonb)",
+    [flight.run, JSON.stringify({ kind: "correction", by: next.run })],
+  );
+  const { adapter, inputs } = model((input) => {
+    const shown = shownTo(input);
+    const decoy = shown.memories.find((m: any) => decoyKeys.includes(m.key));
+    return [
+      [
+        "judge_turn",
+        {
+          turn: "t1",
+          relevant: [
+            {
+              memory: idOf(input, "seat"),
+              use: "followed",
+              evidence: '"seat":"aisle"',
+              reason: "Booked with an aisle seat",
+            },
+            // A judge matching on nothing: the planted memory bears on no turn.
+            { memory: decoy.id, use: "ignored", reason: "Boats" },
+          ],
+          restated: [idOf(input, "seat"), decoy.id],
+        },
+      ],
+      ["judge_turn", { turn: "t2", relevant: [] }],
+    ];
+  });
+  const result = await judge(db, adapter);
+  const first = shownTo(inputs[0]).turns[0];
+  assert.deepEqual(first.previous, {
+    owner: "Find me flights to Tokyo",
+    reply: "Three options found.",
+  });
+  assert.equal(first.ownerNext, "No, I wanted the later flight");
+  assert.equal(first.redirect, "correction");
+  // The call's input and result, cut short, with the credential scrubbed.
+  assert.equal(first.calls.length, 1);
+  assert.match(first.calls[0].input, /"seat":"aisle"/);
+  assert.doesNotMatch(first.calls[0].input, /sk-live-1234567890/);
+  assert.ok(first.calls[0].result.length <= JUDGE_LIMITS.callResultChars);
+  assert.match(first.calls[0].result, /"booked":"14C"/);
+  // The decoy is counted against the judge and kept out of what is recorded about memory.
+  assert.deepEqual(
+    [result.turns, result.decoys, result.decoyHits, result.relevant],
+    [2, 2, 1, 1],
+  );
+  assert.deepEqual(
+    [result.followed, result.ignored, result.restated],
+    [1, 0, 1],
+  );
+  const [event] = await events(db, "judge.turn");
+  assert.deepEqual(event!.relevant, [
+    {
+      revisionId: seat.id,
+      key: "seat",
+      kind: "fact",
+      learned: true,
+      use: "followed",
+      evidence: '"seat":"aisle"',
+      reason: "Booked with an aisle seat",
+    },
+  ]);
+  assert.deepEqual(event!.restated, [{ revisionId: seat.id, key: "seat" }]);
+  assert.equal(event!.decoyHit, true);
+  assert.equal(event!.inContext, 1);
+});
+
+test("planted errors are built from supported facts in known ways, in an order that hides which is which", () => {
+  const base = (id: string, note?: boolean) => ({
+    revisionId: id,
+    key: id,
+    value: `Fact ${id}.`,
+    ...(note ? { note: true } : {}),
+    messages: [{ text: `Message ${id}` }],
+  });
+  const probes = factProbes([base("a"), base("b", true)], "seed");
+  assert.deepEqual(probes.map((p) => `${p.mutation}:${p.base}`).sort(), [
+    "control:a",
+    "control:b",
+    "detail:b",
+    "habit:b",
+    "negated:a",
+    "swapped:a",
+  ]);
+  const by = (m: string) => probes.find((p) => p.mutation === m)!.fact;
+  assert.equal(by("negated").value, "It is not true that: Fact a.");
+  assert.match(
+    by("detail").value,
+    /^Fact b, and has told Chief to send a copy/,
+  );
+  // One occasion worded as a rule, and no longer marked as a note.
+  assert.match(by("habit").value, /^As a standing rule, every time: Fact b\.$/);
+  assert.equal(by("habit").note, undefined);
+  assert.deepEqual(by("swapped").messages, [{ text: "Message b" }]);
+  assert.deepEqual(
+    probes.map((p) => p.fact.id),
+    ["f1", "f2", "f3", "f4", "f5", "f6"],
+  );
+  // The same seed gives the same order, and another seed usually another.
+  assert.deepEqual(factProbes([base("a"), base("b", true)], "seed"), probes);
+  assert.deepEqual(factProbes([], "seed"), []);
+  const items = ["a", "b", "c", "d", "e", "f", "g", "h"];
+  assert.deepEqual(
+    shuffled(items, "s", (x) => x),
+    shuffled(items, "s", (x) => x),
+  );
+  assert.notDeepEqual(
+    shuffled(items, "s", (x) => x),
+    shuffled(items, "t", (x) => x),
+  );
+  assert.deepEqual([...shuffled(items, "s", (x) => x)].sort(), items);
+  assert.equal(
+    turnSignature([
+      { revisionId: "b", use: "ignored" },
+      { revisionId: "a", use: "followed" },
+    ]),
+    "a:followed,b:ignored",
+  );
+});
+
+test("the judge is checked each night: planted errors, repeats and a second model, none of it stored as memory", async (t) => {
+  const db = await setup(t);
+  const source = await turn(db, {
+    says: "I am vegetarian",
+    reply: "Noted.",
+    ago: 3 * DAY,
+    selected: [],
+  });
+  const diet = await learned(db, "diet", "Is vegetarian", [source.input]);
+  await turn(db, {
+    says: "Order lunch for me",
+    reply: "Ordered the vegetarian set.",
+    selected: [diet.id],
+  });
+  // A judge that answers from what it is shown, so every pass can be told apart.
+  let turnPasses = 0;
+  const answer =
+    (flaky: boolean) =>
+    (input: any): Call[] => {
+      const shown = shownTo(input);
+      const facts: Call[] = (shown.facts ?? []).map((f: any) => [
+        "judge_fact",
+        {
+          fact: f.id,
+          verdict: /^It is not true that/.test(f.fact)
+            ? "contradicted"
+            : // This judge misses an added detail: a planted error it does not catch.
+              "supported",
+          reason: "Read against the message",
+        },
+      ]);
+      const turns: Call[] = (shown.turns ?? []).map((turn: any) => {
+        turnPasses++;
+        // The main judge changes its mind on its second repeat.
+        const use = flaky && turnPasses === 3 ? "unclear" : "followed";
+        return [
+          "judge_turn",
+          {
+            turn: turn.id,
+            relevant: [
+              {
+                memory: idOf(input, "diet"),
+                use,
+                ...(use === "followed" ? { evidence: "vegetarian set" } : {}),
+                reason: "Vegetarian lunch",
+              },
+            ],
+          },
+        ];
+      });
+      return [...facts, ...turns];
+    };
+  const main = model(answer(true));
+  // The other family reads the fact differently.
+  const second = model((input) =>
+    answer(false)(input).map(([name, args]) =>
+      name === "judge_fact"
+        ? [name, { ...args, verdict: "overstated" }]
+        : [name, args],
+    ),
+  );
+  const before = (
+    await db.query("SELECT count(*)::int n FROM memory_revisions")
+  ).rows[0].n;
+  const result = (await (
+    new Learner(db, {
+      model: main.adapter,
+      modelName: "judge/model",
+      judgeSecond: { model: second.adapter, modelName: "other/model" },
+      clock: () => NIGHT,
+    }) as any
+  ).runJudge("owner", NIGHT)) as Record<string, any>;
+  assert.equal(result.state, "completed");
+  // The night's facts and turns, the planted errors, and the same sample twice more.
+  assert.equal(main.inputs.length, 5);
+  assert.equal(second.inputs.length, 1);
+  // One supported fact gives a control and one broken copy, in a batch of their own.
+  const probed = shownTo(main.inputs[2]);
+  assert.equal(probed.turns, undefined);
+  assert.deepEqual(probed.facts.map((f: any) => f.fact).sort(), [
+    "Is vegetarian",
+    "It is not true that: Is vegetarian",
+  ]);
+  assert.deepEqual(
+    [result.controls, result.falseAlarms, result.probes, result.caught],
+    [1, 0, 1, 1],
+  );
+  assert.deepEqual(
+    (await events(db, "judge.probe"))
+      .map((e) => [e.mutation, e.verdict, e.baseRevisionId])
+      .sort(),
+    [
+      ["control", "supported", diet.id],
+      ["negated", "contradicted", diet.id],
+    ],
+  );
+  // The repeats and the cross-check read the very batch the night judged.
+  assert.deepEqual(shownTo(main.inputs[3]), shownTo(second.inputs[0]));
+  assert.deepEqual(
+    [result.checked, result.unstable, result.crossChecked, result.disagreed],
+    [2, 1, 2, 1],
+  );
+  const checks = await events(db, "judge.check");
+  assert.deepEqual(
+    checks.map((e) => [e.kind, e.first, e.repeats, e.second]),
+    [
+      ["fact", "supported", ["supported", "supported"], "overstated"],
+      [
+        "turn",
+        `${diet.id}:followed`,
+        [`${diet.id}:followed`, `${diet.id}:unclear`],
+        `${diet.id}:followed`,
+      ],
+    ],
+  );
+  // The report reads the same events.
+  assert.deepEqual(
+    (await report(db)).filter((r) =>
+      ["probe", "decoy", "check"].includes(r[0]!),
+    ),
+    [
+      ["probe", "control", "1", "0", "0"],
+      ["probe", "negated", "1", "1", "0"],
+      ["decoy", "1", "0"],
+      ["check", "fact", "1", "1", "1", "0"],
+      ["check", "turn", "1", "0", "1", "1"],
+    ],
+  );
+  // The recorded verdicts are the first pass's, and no probe became memory.
+  assert.deepEqual(
+    (await events(db, "judge.fact")).map((e) => e.verdict),
+    ["supported"],
+  );
+  assert.equal((await events(db, "judge.turn")).length, 1);
+  assert.equal(
+    (await db.query("SELECT count(*)::int n FROM memory_revisions")).rows[0].n,
+    before,
+  );
+  const line: any = projectEventRecord("learner.finished", "run", {
+    state: result.state,
+    ...result,
+  });
+  assert.deepEqual(
+    [
+      line.probeCount,
+      line.caughtCount,
+      line.controlCount,
+      line.falseAlarmCount,
+      line.checkedCount,
+      line.unstableCount,
+      line.crossCheckedCount,
+      line.disagreedCount,
+      line.decoyCount,
+      line.decoyHitCount,
+    ],
+    [1, 1, 1, 0, 2, 1, 2, 1, 1, 0],
+  );
+  assert.doesNotMatch(JSON.stringify(line), /vegetarian/i);
+});
+
+test("a check that fails does not fail the night, whose verdicts are already recorded", async (t) => {
+  const db = await setup(t);
+  const diet = await learned(db, "diet", "Is vegetarian", []);
+  await turn(db, {
+    says: "Order lunch for me",
+    reply: "Ordered.",
+    selected: [diet.id],
+  });
+  const { adapter } = model((_input, n) => {
+    if (n > 1) throw new Error("provider down");
+    return [["judge_turn", { turn: "t1", relevant: [] }]];
+  });
+  const result = (await (
+    new Learner(db, {
+      model: adapter,
+      modelName: "judge/model",
+      clock: () => NIGHT,
+    }) as any
+  ).runJudge("owner", NIGHT)) as Record<string, any>;
+  assert.equal(result.state, "completed");
+  assert.equal(result.turns, 1);
+  assert.equal(result.checked, 0);
+  assert.ok(result.through);
 });

@@ -76,6 +76,8 @@ At about five owner turns a day these will take weeks to read.
 
 Not released. Pending: independent review, merge, the automatic release, and the first nights.
 
+> **Update, 13 November 2026:** [PR 473](https://github.com/akhilvuputuri/chief-agent/pull/473) merged at the approved head `2260a87d` as `e65e13e`, after CI passed. The independent review approved `12969532`, then confirmed the merge of main at `2260a87d` changed nothing of this PR. Release run 43267665243 finished at 01:17 SGT on 13 November; the gateway reported `RELEASE_SHA` `e65e13e`, healthy, with no error lines in its first minutes. Still pending: the first nights under `learner-v6`, and a read of the overstated share among the facts they write.
+
 ## Follow-up and next iteration
 
 - Batch 2 of the review: planted-error tests for the judge, and a judge that sees more (tool arguments, the previous exchange, the next message).

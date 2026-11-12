@@ -1,3 +1,9 @@
+# The memory judge checks itself — not yet released, 13 November 2026
+
+Issue #326, batch 2 of the memory-loop review. The judge now has checks that need no labels: broken copies of supported facts it should not call supported, a planted memory it should never call relevant, a quote the host verifies for every "followed" or "contradicted", and a nightly sample judged again twice and once by a second model (`openai/gpt-6.1-sol`). A turn also shows the judge each call's input and result, the exchange around it, and it lists what the owner had to say again. Nothing changes memory. Nothing is measured yet. See [journal 183](journey/183-can-the-judge-be-trusted.md) and [learning](learning.md#nightly-judge). Next: a week of probe, decoy and repeat counts, then the owner's decision on letting verdicts narrow overstated facts.
+
+> **Update, 13 November 2026:** batch 1 ("One request is not a preference", below) is live in `e65e13e` from 01:17 SGT on 13 November.
+
 # One request is not a preference — not yet released, 13 November 2026
 
 Issue #326. The nightly judge's first run (12 November) found 12 of 26 learned facts overstated, 10 of them a single request or question saved as a standing preference. Prompt `learner-v6` makes each fact say what it is: standing, a note of one occasion, or time-bound. Notes stay out of turns until another day repeats them; a habit on one day's evidence gets a flag; facts keep the days that support them; end dates expire; redirects count as pitfalls. The 12 existing facts are unchanged. Nothing is measured yet. See [journal 181](journey/181-one-request-is-not-a-preference.md) and [learning](learning.md#host-checks). The wider review and its remaining batches are in the owner's `reports/Memory loop improvement plan.md` (not in the repository). Next: read the overstated share among facts written under `learner-v6`.

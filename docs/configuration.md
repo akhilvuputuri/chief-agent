@@ -12,7 +12,7 @@ A secret or identifier reaches the production gateway only if `compose.yaml` pas
 
 Other reviewed policy files already in the repo:
 
-- `config/model-policy.json`: main and agent models, the nightly judge's model (`judge`, [learning](learning.md#nightly-judge)), optional `priceCeilings` and optional `providers.anthropic`, the models that may go directly to Anthropic with their native IDs and list prices ([model providers](model-providers.md)). A pinned main model wins over `AGENT_MODEL`. When `priceCeilings` is set, it wins over `OPENROUTER_MAX_INPUT_PRICE`/`OPENROUTER_MAX_OUTPUT_PRICE` from both the environment and `config/runtime.json`, which keeps mirroring the code defaults.
+- `config/model-policy.json`: main and agent models, the nightly judge's model (`judge`, [learning](learning.md#nightly-judge)) and the model that cross-checks a sample of its verdicts (`judgeSecond`, since 13 November 2026), optional `priceCeilings` and optional `providers.anthropic`, the models that may go directly to Anthropic with their native IDs and list prices ([model providers](model-providers.md)). A pinned main model wins over `AGENT_MODEL`. When `priceCeilings` is set, it wins over `OPENROUTER_MAX_INPUT_PRICE`/`OPENROUTER_MAX_OUTPUT_PRICE` from both the environment and `config/runtime.json`, which keeps mirroring the code defaults.
 - `config/tool-picker.json`: the Jev domain picker.
 - `config/decisions.json`: the shadow decisions.
 - `config/reasoning-effort.json`: Jev's reasoning-effort question, thresholds and escalation schedule ([reasoning effort](reasoning-effort.md)).

@@ -90,6 +90,7 @@ const fields: Record<string, Shape> = {
   standardRoute: "code",
   fastRoute: "code",
   judgeRoute: "code",
+  judgeSecondRoute: "code",
   mediaRoute: "code",
   /** The model the host asked for; `model` on model.completed is the one that served. */
   requestedModel: "model",
@@ -201,6 +202,18 @@ const fields: Record<string, Shape> = {
   ignoredCount: "count",
   contradictedCount: "count",
   missedCount: "count",
+  /** The judge's checks on itself (docs/learning.md#nightly-judge). Counts only. */
+  restatedCount: "count",
+  decoyCount: "count",
+  decoyHitCount: "count",
+  probeCount: "count",
+  caughtCount: "count",
+  controlCount: "count",
+  falseAlarmCount: "count",
+  checkedCount: "count",
+  unstableCount: "count",
+  crossCheckedCount: "count",
+  disagreedCount: "count",
 };
 
 // Written as null rather than omitted: an unknown charge stays visibly unknown.
@@ -532,6 +545,17 @@ const projections: Record<string, Projection> = {
       ignoredCount: d.ignored,
       contradictedCount: d.contradicted,
       missedCount: d.missed,
+      restatedCount: d.restated,
+      decoyCount: d.decoys,
+      decoyHitCount: d.decoyHits,
+      probeCount: d.probes,
+      caughtCount: d.caught,
+      controlCount: d.controls,
+      falseAlarmCount: d.falseAlarms,
+      checkedCount: d.checked,
+      unstableCount: d.unstable,
+      crossCheckedCount: d.crossChecked,
+      disagreedCount: d.disagreed,
     },
   ],
   "recall.searched": (run, d) => [
