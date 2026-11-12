@@ -1,3 +1,9 @@
+## Kite 0.2.0 pinned (12 November 2026)
+
+- **Code.** `tools/kite.json` pins Kite 0.2.0, which adds `kite build`. Nothing calls it yet; installs and script runs are unchanged. No migration.
+- **Why.** First step towards building Chief's TypeScript with Kite instead of `tsc` and esbuild. See [journal 168](journey/168-kite-builds-typescript.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Worker image with re-review on the delta (12 November 2026)
 
 - **Configuration.** New coding jobs pin worker image `sha256:33639fbe…`, built from `f6df014` (PR 453): 32,000-character document pages, and a review round after a repair reads the earlier findings and the diff since the reviewed candidate. The image also carries undici 8.12.4 from PR 444. The previous image `sha256:e67dc9ea…` moves to `previousImages`, so paused jobs on it still resume. See [journal 167](journey/167-review-that-reads-what-changed.md).

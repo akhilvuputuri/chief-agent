@@ -1,3 +1,7 @@
+# Kite builds TypeScript — Kite 0.2.0 pinned, build switch pending, 12 November 2026
+
+Kite 0.2.0 adds `kite build`, which compiles a TypeScript project to the JavaScript `tsc` would write, without type checking. All 250 of Chief's output files have the same syntax tree as `tsc`'s, and both projects build in about 40 ms. This change only pins 0.2.0. The coding worker image is rebuilt next, and then `kite run build` and the image builds switch to it. See [journal 168](journey/168-kite-builds-typescript.md).
+
 # Traces from anywhere, behind a sign-in — prepared, 12 November 2026
 
 Branch `feat/traces-signin`, with agentwatch's sign-in in agentwatch#21 ([journal 166](journey/166-traces-from-anywhere.md), [tracing](tracing.md#viewing-traces-from-anywhere)). The exporter, alert relay and backfill CLIs send `AGENTWATCH_API_KEY` as a Bearer key when it is set; `compose.yaml` passes it to the gateway; `scripts/deploy-agentwatch-key.py` has `BASE` = `7aac85f0d8f0698f24db61277081add46dc9bae5`, the host's `RELEASE` on 12 November. Once merged, no other release can land until the key rollout runs. `scripts/deploy-agentwatch-update.py` now permits signing in as a whole, and `scripts/deploy-traces-site.py` adds the Caddy site only once agentwatch requires signing in.
@@ -154,6 +158,8 @@ Phase 1 of issue #326. Memories become immutable revisions with provenance (run,
 Issue #330. npm is replaced everywhere by [Kite](https://github.com/akhilvuputuri/kite), a Rust package manager. It installs, resolves and runs scripts with npm-identical results: the same `node_modules`, `package-lock.json` and `package.json`, checked against npm 10.9.9 on Linux x64, Linux arm64 and macOS.
 
 `tools/kite.json` pins the release (0.1.3) and its SHA-256, and `tools/install-kite.mjs` installs it with only Node. CI, every Dockerfile and the coding runtimes use it, and npm is removed from runners and images.
+
+> **Update, 12 November 2026 ([journal 168](journey/168-kite-builds-typescript.md)):** the pin is now Kite 0.2.0.
 
 - **Release:** the cut-over (`5dd4639`, #339) merged, but its release failed on the host. The host's Docker uses the containerd image store, where Kite 0.1.2 could not reuse its store across build steps. Kite 0.1.3 fixed this, and `0a78485` (#343) released with host health confirmed. The same release deployed #341 and #342.
 - **This change:** pins worker images rebuilt from `0a78485` with Kite 0.1.3. Until it is released, new coding jobs start on the old npm images. Their checks are expected to fail against main, because main's scripts call `kite` and those images lack it. This follows from the code; no job has been run to confirm it.
