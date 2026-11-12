@@ -1511,7 +1511,10 @@ if (tracesUrl) {
     alertsBase(tracesUrl),
     c.TELEGRAM_ALLOWED_USER_IDS.split(","),
     async (owner, text) => {
-      await bot.api.sendMessage(owner, text);
+      // An alert may hold links to traces; a preview would only show the sign-in page.
+      await bot.api.sendMessage(owner, text, {
+        link_preview_options: { is_disabled: true },
+      });
     },
     fetch,
     Date.now,
