@@ -108,7 +108,6 @@ test("review evidence exposes complete unexpected changes and rejects stale iden
       collected[i] = body.text[i - body.from];
   }
   assert.equal(collected.join(""), actual.patch);
-  assert.deepEqual(paged.unread(), ["candidate_inventory"]);
   assert(
     !tools(
       tree,

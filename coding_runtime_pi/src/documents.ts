@@ -30,10 +30,6 @@ export function documents(
     entries.set(d.id, { ...d });
   }
   const read = new Map<string, Set<number>>();
-  const unread = () =>
-    [...entries.values()]
-      .filter((d) => !d.optional && (read.get(d.id)?.size ?? 0) !== pagesOf(d))
-      .map((d) => d.id);
   const description = [...entries.values()]
     .map(
       (d) =>
@@ -92,7 +88,6 @@ export function documents(
   return {
     tool,
     description,
-    unread,
     pagesRead: () => [...read.values()].reduce((n, pages) => n + pages.size, 0),
   };
 }

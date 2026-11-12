@@ -341,6 +341,15 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
       runtime: "pi",
       squad: false,
       autoMerge: false,
+      // Catalog windows of real models. Without them the fixture models fall back to 32,000
+      // tokens, and Pi's default compaction threshold (journal 182) compacts the review evidence.
+      contextWindows: Object.fromEntries(
+        [
+          settings.leaderModel ?? settings.model,
+          settings.model,
+          settings.reviewerModel,
+        ].map((id) => [id, 128000]),
+      ),
     };
     await f.db.query(
       "UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3 WHERE id=$1",

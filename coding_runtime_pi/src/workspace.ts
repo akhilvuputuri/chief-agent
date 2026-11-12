@@ -17,12 +17,18 @@ export type Execution = {
   exitCode: number;
   output: string;
   truncated?: boolean;
+  timedOut?: boolean;
 };
+/**
+ * Runs one command. Without `timeoutMs` the command runs until it exits or `signal` aborts.
+ * With `onData`, output streams to the caller and is not kept in `output`.
+ */
 export type Executor = (
   command: string,
   signal: AbortSignal,
-  timeoutMs: number,
+  timeoutMs?: number,
   maxOutput?: number,
+  onData?: (chunk: string) => void,
 ) => Promise<Execution>;
 export function artifactHash(patch: string, files: FileChange[]) {
   const ordered = {
@@ -39,7 +45,7 @@ export function localExecutor(
   home: string,
   cleanup: (() => void) | undefined = processCleanup(),
 ): Executor {
-  return async (command, signal, timeoutMs, maxOutput = 32000) => {
+  return async (command, signal, timeoutMs, maxOutput = 32000, onData) => {
     await mkdir(home, { recursive: true, mode: 0o700 });
     if (signal.aborted) throw new Error("Cancelled");
     return new Promise((accept, reject) => {
@@ -71,13 +77,17 @@ export function localExecutor(
           child.kill("SIGKILL");
         }
       };
-      const timer = setTimeout(() => {
-        timedOut = true;
-        kill();
-      }, timeoutMs);
+      const timer =
+        timeoutMs === undefined
+          ? undefined
+          : setTimeout(() => {
+              timedOut = true;
+              kill();
+            }, timeoutMs);
       signal.addEventListener("abort", kill, { once: true });
       if (signal.aborted) kill();
       const append = (data: string) => {
+        if (onData) return onData(data);
         output += data;
         if (output.length > maxOutput) {
           truncated = true;
@@ -112,6 +122,7 @@ export function localExecutor(
             exitCode: signal.aborted || timedOut ? -1 : (code ?? -1),
             output,
             truncated,
+            timedOut,
           });
       };
       child.on("error", (e) => finish(e));
@@ -158,9 +169,9 @@ export class Workspace {
     }
     return full;
   }
-  async files() {
-    const found: string[] = [];
-    const walk = async (dir: string, prefix: string) => {
+  /** Regular files outside protected and dependency directories, walked lazily so a caller can stop early. */
+  async *files(): AsyncGenerator<string> {
+    async function* walk(dir: string, prefix: string): AsyncGenerator<string> {
       for (const entry of await readdir(dir, { withFileTypes: true })) {
         if (
           [".git", "node_modules", ".env"].includes(entry.name) ||
@@ -170,20 +181,14 @@ export class Workspace {
         if (entry.isSymbolicLink()) continue;
         const path = prefix + entry.name;
         if (entry.isDirectory())
-          await walk(resolve(dir, entry.name), path + "/");
-        else if (entry.isFile()) found.push(path);
-        if (found.length > 20_000)
-          throw new Error("Repository file inventory exceeds bound");
+          yield* walk(resolve(dir, entry.name), path + "/");
+        else if (entry.isFile()) yield path;
       }
-    };
-    await walk(await this.path("."), "");
-    return found;
+    }
+    yield* walk(await this.path("."), "");
   }
   async read(path: string) {
-    const full = await this.path(path);
-    if ((await lstat(full)).size > 2_000_000)
-      throw new Error("File too large; use targeted search");
-    return readFile(full);
+    return readFile(await this.path(path));
   }
   async write(path: string, data: string) {
     const full = await this.path(path, true);
