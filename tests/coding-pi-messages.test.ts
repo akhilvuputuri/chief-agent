@@ -425,6 +425,74 @@ test("the host refuses anything Pi does not send, before any call", async (t) =>
           { role: "user", content: "x", container: { id: "container_1" } },
           "messages_field_refused",
         ],
+        // A key Pi never writes on a block of an allowed type.
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "x",
+                citations: [{ type: "web_search_result_location" }],
+              },
+            ],
+          },
+          "content_field_refused",
+        ],
+        [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_1",
+                name: "read",
+                input: {},
+                caller: { type: "code_execution_20260120" },
+              },
+            ],
+          },
+          "content_field_refused",
+        ],
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: "image/png",
+                  data: "AA==",
+                  url: "https://example.invalid/i.png",
+                },
+              },
+            ],
+          },
+          "content_field_refused",
+        ],
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_1",
+                content: [
+                  {
+                    type: "text",
+                    text: "x",
+                    cache_control: { type: "ephemeral" },
+                  },
+                ],
+              },
+            ],
+          },
+          "content_field_refused",
+        ],
+        // An inherited property name is not a role.
+        [{ role: "constructor", content: "x" }, "messages_request_invalid"],
+        [{ role: "__proto__", content: "x" }, "messages_request_invalid"],
       ] as [Record<string, unknown>, string][]
     ).map(
       ([message, reason]) =>
@@ -443,6 +511,10 @@ test("the host refuses anything Pi does not send, before any call", async (t) =>
         ],
       },
       "content_block_refused",
+    ],
+    [
+      { system: [{ type: "text", text: "x", citations: [] }] },
+      "content_field_refused",
     ],
     [
       {
