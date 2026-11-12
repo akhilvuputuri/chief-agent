@@ -179,8 +179,12 @@ export class CodingAutomation {
     await this.phase(j, d, "manual_review", reason, true);
   }
   /**
-   * Main moved before merge: re-implement the approved plan on current main (owner policy,
-   * 17 October 2026: the plan approval carries over; checks, review and the Merge card repeat).
+   * Main moved before merge: the plan approval carries over and checks, review and the Merge
+   * card repeat (owner policy, 17 October 2026). Since 12 November 2026 (owner decision,
+   * journal 174) the reviewed change itself is carried too: the next attempt applies it to
+   * current main with git's three-way merge and implements the plan again only if that is
+   * impossible. The checkpoint still starts empty, so a worker image that predates this
+   * ignores the carried change and implements the plan again, as before.
    */
   private async rebase(j: CodingJob, d: Record, main: string) {
     const prior = Number(
@@ -233,13 +237,26 @@ export class CodingAutomation {
         : {}),
     };
     const scope = requirementScope({ ...j, checkpoint: cp });
-    const message = `Rebase onto current main ${main}: approved plan carried over (owner policy, 17 October 2026)`;
+    const message = `Rebase onto current main ${main}: approved plan and reviewed change carried over (owner decisions, 17 October and 12 November 2026)`;
+    // The reviewed change, for the worker to carry onto the new base (journal 174).
+    const carried = {
+      kind: "rebase_change",
+      from: j.base_sha,
+      hash: artifactHash(j.result.checkpoint),
+      patch: j.result.checkpoint.patch,
+      files: j.result.checkpoint.files,
+      summary: Array.from(String(j.result.summary ?? ""))
+        .slice(0, 4000)
+        .join(""),
+      findings: j.result.review?.findings ?? "",
+    };
     const changed = await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',base_sha=$5,summary='Main moved; re-applying the approved change on current main before checks, review and the Merge card',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision),
+      `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',base_sha=$5,summary='Main moved; carrying the reviewed change onto current main before checks, review and the Merge card',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision),
       budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$6::jsonb,'remainingMs',$7::bigint),'suppressed' FROM changed RETURNING job_id),
       approval AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'rebase-approval:'||revision,jsonb_build_object('decision','approved','approvedScope',$8::text,'carriedFrom',$10::text,'reason','rebase','carriedArtifact',$13::text),'suppressed' FROM changed RETURNING job_id),
-      revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$11,$12,'implement' FROM changed RETURNING job_id)
-      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$11,jsonb_build_object('summary','Main moved since this job started, so Chief is re-applying your approved change on current main, then re-running the checks and review before asking you to merge.') FROM changed ON CONFLICT DO NOTHING RETURNING job_id`,
+      revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$11,$12,'implement' FROM changed RETURNING job_id),
+      carried AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'rebase-change:'||revision,$14::jsonb,'suppressed' FROM changed RETURNING job_id)
+      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$11,jsonb_build_object('summary','Main moved since this job started, so Chief is carrying your approved, reviewed change onto current main, then re-running the checks and review before asking you to merge.') FROM changed ON CONFLICT DO NOTHING RETURNING job_id`,
       [
         j.id,
         j.lease,
@@ -255,6 +272,7 @@ export class CodingAutomation {
         message,
         // The reviewed artifact, so the rebased candidate can be compared with it (journal 115).
         artifactHash(j.result.checkpoint),
+        JSON.stringify(carried),
       ],
     );
     if (!changed.rows.length) throw new StageChanged();

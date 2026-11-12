@@ -1,3 +1,10 @@
+## A rebase carries the reviewed change instead of implementing it again (12 November 2026)
+
+- **Code.** When main moves before the owner merges, the rebase records the reviewed change (`rebase-change:<revision>`) and sends it to the next Pi attempt, which applies it to current main with `git apply --3way` before any model call. Clean: no implementation call; the checks run again (`CodingRuntime.verify`), failures go to the existing check repair, and the first review round reads what changed. Conflicts go to a coder session that resolves them in the existing change. Only a change that cannot be applied is implemented again. The two-rebase cap, allocations, approval carry-over, protected paths, the owner-merge workflow and the same-attempt independent review are unchanged. No migration or Compose change.
+- **Why.** The owner superseded the 17 October redo policy on 12 November 2026 after job `9600af57`, whose redo cost more than $16.50. See [journal 174](journey/174-rebase-instead-of-redo.md).
+- **Worker image.** Needed: the carry runs in the worker, so it takes effect only for jobs on a worker image built from this change and pinned in a following change. The gateway can release first: older workers drop the new assignment field and implement the plan again, as before. A job created before the pin needs `coding_job_update` with `upgradeWorker` while stopped.
+- **Deployment.** Not yet recorded as live; a dated note follows on release.
+
 ## Coding attempts may run three hours (12 November 2026)
 
 - **Configuration.** New Pi coding jobs get 180 minutes per attempt instead of 150, the most one attempt may run. Model and tool-call limits, models and effort are unchanged. No code, migration or Compose change.

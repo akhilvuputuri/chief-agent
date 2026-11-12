@@ -114,6 +114,24 @@ export async function piReviewedTree(
   return tree && /^[a-f0-9]{40,64}$/.test(tree) ? tree : undefined;
 }
 
+/** The diff between two trees: "" when they are identical, nothing when unavailable. */
+async function treeDelta(
+  execute: Executor,
+  from: string,
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  const to = await execute(`${git} write-tree`, signal, 120000);
+  if (to.exitCode !== 0 || to.truncated) return undefined;
+  if (to.output.trim() === from) return "";
+  const delta = await execute(
+    `${git} diff --no-ext-diff --no-textconv --no-renames ${from} ${to.output.trim()}`,
+    signal,
+    120000,
+    500_000,
+  );
+  return delta.exitCode === 0 && !delta.truncated ? delta.output : undefined;
+}
+
 /**
  * The complete diff from an earlier reviewed candidate's tree to the candidate now staged
  * in this checkout. Returns nothing when it is unavailable or too large to help.
@@ -123,16 +141,40 @@ export async function piReviewDelta(
   from: string,
   signal: AbortSignal,
 ): Promise<string | undefined> {
-  const to = await execute(`${git} write-tree`, signal, 120000);
-  if (to.exitCode !== 0 || to.truncated) return undefined;
-  const delta = await execute(
-    `${git} diff --no-ext-diff --no-textconv --no-renames ${from} ${to.output.trim()}`,
+  const delta = await treeDelta(execute, from, signal);
+  return delta?.trim() ? delta : undefined;
+}
+
+/**
+ * For a change carried onto a new base (journal 174): the diff from the reviewed
+ * candidate's files laid on the new base to the candidate staged now. "" means every file
+ * the change touches is byte-identical to the reviewed candidate; nothing means unavailable.
+ */
+export function piCarriedDelta(
+  execute: Executor,
+  from: string,
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  return treeDelta(execute, from, signal);
+}
+
+/** What main changed between two bases, as `git diff --stat`, or nothing when unavailable. */
+export async function piMainChanges(
+  execute: Executor,
+  from: string,
+  to: string,
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  if (!/^[a-f0-9]{40}$/.test(from) || !/^[a-f0-9]{40}$/.test(to))
+    return undefined;
+  const stat = await execute(
+    `${git} diff --no-ext-diff --no-textconv --no-renames --stat=160 ${from} ${to}`,
     signal,
     120000,
-    500_000,
+    100_000,
   );
-  return delta.exitCode === 0 && !delta.truncated && delta.output.trim()
-    ? delta.output
+  return stat.exitCode === 0 && !stat.truncated
+    ? stat.output.trimEnd() || "(no file changes)"
     : undefined;
 }
 

@@ -421,3 +421,17 @@ Evidence boundary:
 - **Measured:** token, cache and cost figures for one job, and 30-day totals.
 - **Tested:** synthetic jobs with larger pages and a second review round on the delta.
 - **Estimated, not measured:** the saving, roughly $10 of $16 on that job.
+
+## A rebase carries the reviewed change — 12 November 2026
+
+**What changed for a coding job** ([journal 174](174-rebase-instead-of-redo.md); tested, not yet released). When main moved before the owner merged, the job re-implemented the approved plan from scratch. On job `9600af57` that redo cost more than $16.50, and the coder spent 44 minutes and 80 calls re-reading the repository before its first edit (reported measurement). The owner superseded the 17 October policy. The next attempt now applies the reviewed change to current main with `git apply --3way`. A clean carry runs only the checks and a review limited to what changed; a conflict goes to a coder session that resolves the markers in the existing change; only a change that cannot be applied is implemented again.
+
+- The expensive behaviour came from the storage format, not the task: whole-file snapshots cannot be restored onto a new base without reverting main, so clearing them was the only safe option. Keep a diff with blob identities beside them, and let git do the merge.
+- Keep the safety rules where they are: the carry changes where the change comes from, not who approves it. Approval still carries over only for the same scope, and a fresh reviewer call in the same attempt still binds the approval.
+- Give a model the smallest job that fits: conflicts and failing checks, with the reviewed change as optional reading, not the plan again.
+- Ship worker changes so older images degrade to the old behaviour: the carried change is a top-level assignment field that older workers drop, and the checkpoint still starts empty.
+
+Evidence boundary:
+
+- **Tested:** synthetic end-to-end jobs with real git and checks: a clean carry with no coder call and a delta review, then the Merge card; a conflict resolved by one coder session; failing checks after a clean carry repaired once; a broken carried change falling back to a fresh implementation.
+- **Not yet measured:** a real carried rebase's box time, calls and cost, and how often a carry is clean.

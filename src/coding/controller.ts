@@ -1321,6 +1321,17 @@ export class CodingController {
       agentGit,
       ...settings
     } = job.settings;
+    // A rebased Pi revision carries its reviewed change (journal 174). Older worker images
+    // drop this unknown field and implement the approved plan again on the new base.
+    const carried =
+      job.settings.runtime === "pi" && job.mode === "implement"
+        ? (
+            await this.db.query(
+              "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
+              [job.id, `rebase-change:${job.revision}`],
+            )
+          ).rows[0]?.payload
+        : undefined;
     return {
       protocolVersion: 1,
       ...(job.settings.squad || job.settings.runtime === "pi"
@@ -1344,6 +1355,18 @@ export class CodingController {
           }
         : {}),
       checkpoint: job.checkpoint,
+      ...(carried
+        ? {
+            rebase: {
+              from: carried.from,
+              hash: carried.hash,
+              patch: carried.patch,
+              files: carried.files,
+              summary: carried.summary,
+              findings: carried.findings,
+            },
+          }
+        : {}),
       deadline: new Date(job.attempt_deadline).toISOString(),
       usedModels: job.used_models,
     };

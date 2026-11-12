@@ -14,6 +14,7 @@ import {
   TaskStore,
   Workspace,
   localExecutor,
+  planHash,
   type ModelFactory,
 } from "../src/index.js";
 
@@ -245,6 +246,69 @@ test("failed real checks do not become completion; revisions invalidate approval
   assert.equal(revised.approved, undefined);
   assert.equal(revised.plan, undefined);
   assert.equal(revised.intent, "plan");
+});
+test("verify runs the configured checks on an approved build with no model call", async () => {
+  const f = await fixture();
+  const noModel: ModelFactory = async () => {
+    throw new Error("verify must not call a model");
+  };
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: noModel,
+    executor: (t) => localExecutor(t.workspace, join(f.root, "home")),
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Fix sum",
+    checks: ["node test.mjs"],
+  });
+  // Without exact approval nothing runs.
+  task.intent = "build";
+  await f.store.save(task);
+  const refused = await runtime.verify(task.id);
+  assert.equal(refused.status, "failed");
+  assert.match(refused.summary, /exact approved requirements/);
+  assert.deepEqual(refused.checks, []);
+  // A change already in the workspace, as a clean rebase leaves it.
+  await writeFile(
+    join(f.workspace, "sum.js"),
+    "export const sum = (a, b) => a + b;\n",
+  );
+  const approve = async (id: string) => {
+    const current = await f.store.get(id);
+    current.status = "ready";
+    current.plan = {
+      revision: current.revision,
+      text: "Change subtraction to addition.",
+      hash: planHash(current, "Change subtraction to addition."),
+    };
+    current.approved = {
+      revision: current.plan.revision,
+      hash: current.plan.hash,
+    };
+    await f.store.save(current);
+  };
+  await approve(task.id);
+  const verified = await runtime.verify(task.id);
+  assert.equal(verified.status, "completed");
+  assert.deepEqual(
+    verified.checks.map((c) => [c.command, c.exitCode]),
+    [["node test.mjs", 0]],
+  );
+  assert.equal(verified.used.models, 0);
+  assert(verified.artifact?.patch.includes("a + b"));
+  assert(verified.events.some((e) => e.text === "Running checks"));
+  assert(verified.events.some((e) => /^node test\.mjs: 0 in /.test(e.text)));
+  // A failing check pauses with the artifact retained.
+  await writeFile(
+    join(f.workspace, "sum.js"),
+    "export const sum = (a, b) => a * b;\n",
+  );
+  await approve(task.id);
+  const failed = await runtime.verify(task.id);
+  assert.equal(failed.status, "paused");
+  assert.notEqual(failed.checks[0]?.exitCode, 0);
+  assert(failed.artifact?.patch.includes("a * b"));
 });
 test("outside, credential and symlink paths are denied", async () => {
   const f = await fixture();

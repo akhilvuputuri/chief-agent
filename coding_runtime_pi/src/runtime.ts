@@ -222,6 +222,131 @@ export class CodingRuntime {
       return current;
     });
   }
+  /**
+   * The configured checks on the workspace, then its artifact. Charged to the run's
+   * allocation; a failure pauses the task with the artifact retained.
+   */
+  private async runChecks(
+    task: Task,
+    workspace: Workspace,
+    execute: Executor,
+    signal: AbortSignal,
+    started: number,
+  ) {
+    // A link would run the checks against, and let kite ci write to, another tree.
+    if (task.checkCommands.length && task.base)
+      await workspace.removeDependencyLinks(execute, signal, task.base);
+    for (const command of task.checkCommands) {
+      if (signal.aborted) throw new Error("Cancelled before checks");
+      // Trusted configured checks can outlast an interactive shell call.
+      // Charge them to the same original run allocation, never a reset.
+      const remainingMs = Math.floor(
+        task.limits.ms - (task.used.ms ?? 0) - (performance.now() - started),
+      );
+      if (remainingMs <= 0)
+        throw new Error("Time allocation exhausted before checks");
+      const checkStarted = performance.now();
+      const check = await execute(command, signal, remainingMs);
+      const checkSeconds = ((performance.now() - checkStarted) / 1000).toFixed(
+        1,
+      );
+      task.checks.push({
+        command,
+        exitCode: check.exitCode,
+        output: checkOutput(check),
+      });
+      await this.event(
+        task,
+        "check",
+        `${command}: ${check.exitCode} in ${checkSeconds}s`,
+      );
+    }
+    task.artifact = await workspace.snapshot(execute, signal, task.base);
+    if (task.artifact.base !== task.base)
+      throw new Error("Repository base changed during implementation");
+    task.status = task.checks.every((c) => c.exitCode === 0)
+      ? "completed"
+      : "paused";
+    if (task.status === "paused")
+      task.summary = "Checks failed; artifact and session retained";
+  }
+  /**
+   * Runs the configured checks on an approved build task's workspace with no model session:
+   * for a change the host already has, such as a reviewed change git carried onto a new
+   * base without conflicts. Same allocation, events and artifact as the checks that follow
+   * a build report.
+   */
+  async verify(id: string): Promise<Task> {
+    if (this.active) throw new Error("Runtime already has active work");
+    const unlock = await this.options.store.lock();
+    const task = await this.inspect(id).catch(async (error) => {
+      await unlock();
+      throw error;
+    });
+    const stop = new AbortController();
+    this.active = { id, stop, cancelled: false };
+    const started = performance.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const execute = this.options.executor?.(task);
+      if (
+        task.status !== "ready" ||
+        task.intent !== "build" ||
+        !task.plan ||
+        task.approved?.hash !== task.plan.hash ||
+        task.approved.revision !== task.plan.revision ||
+        task.plan.hash !== planHash(task, task.plan.text, task.plan.revision) ||
+        !task.checkCommands.length ||
+        !execute
+      )
+        throw new Error(
+          "Verification requires exact approved requirements and configured checks",
+        );
+      task.activeRun = {
+        startedAt: Date.now(),
+        reservedMs: Math.max(0, task.limits.ms - (task.used.ms ?? 0)),
+      };
+      task.status = "running";
+      task.runnerPid = process.pid;
+      task.report = undefined;
+      task.checks = [];
+      await this.event(task, "state", "Running checks");
+      await this.options.store.clearCancel(id);
+      if ((task.used.ms ?? 0) >= task.limits.ms)
+        throw new Error("Time allocation exhausted");
+      timer = setTimeout(
+        () => stop.abort(),
+        task.limits.ms - (task.used.ms ?? 0),
+      );
+      timer.unref();
+      const workspace = await new Workspace(task.workspace).initialize();
+      await this.runChecks(task, workspace, execute, stop.signal, started);
+      await this.event(task, "state", task.status);
+      await this.options.onCheckpoint?.(task);
+      return task;
+    } catch (error) {
+      task.status = stop.signal.aborted
+        ? this.active.cancelled
+          ? "cancelled"
+          : "paused"
+        : "failed";
+      task.summary =
+        error instanceof Error ? error.message.slice(0, 400) : "Run failed";
+      await this.event(task, "state", task.summary);
+      return task;
+    } finally {
+      if (timer) clearTimeout(timer);
+      task.used.ms =
+        (task.used.ms ?? 0) + Math.ceil(performance.now() - started);
+      task.activeRun = undefined;
+      try {
+        await this.options.store.save(task);
+      } finally {
+        this.active = undefined;
+        await unlock();
+      }
+    }
+  }
   async run(id: string): Promise<Task> {
     if (this.active) throw new Error("Runtime already has active work");
     const unlock = await this.options.store.lock();
@@ -779,53 +904,7 @@ export class CodingRuntime {
           task.approved = undefined;
           task.status = "waiting_approval";
         } else if (task.intent === "build") {
-          // A link would run the checks against, and let kite ci write to, another tree.
-          if (task.checkCommands.length && task.base)
-            await workspace.removeDependencyLinks(
-              execute!,
-              stop.signal,
-              task.base,
-            );
-          for (const command of task.checkCommands) {
-            if (stop.signal.aborted) throw new Error("Cancelled before checks");
-            // Trusted configured checks can outlast an interactive shell call.
-            // Charge them to the same original run allocation, never a reset.
-            const remainingMs = Math.floor(
-              task.limits.ms -
-                (task.used.ms ?? 0) -
-                (performance.now() - started),
-            );
-            if (remainingMs <= 0)
-              throw new Error("Time allocation exhausted before checks");
-            const checkStarted = performance.now();
-            const check = await execute!(command, stop.signal, remainingMs);
-            const checkSeconds = (
-              (performance.now() - checkStarted) /
-              1000
-            ).toFixed(1);
-            task.checks.push({
-              command,
-              exitCode: check.exitCode,
-              output: checkOutput(check),
-            });
-            await this.event(
-              task,
-              "check",
-              `${command}: ${check.exitCode} in ${checkSeconds}s`,
-            );
-          }
-          task.artifact = await workspace.snapshot(
-            execute!,
-            stop.signal,
-            task.base,
-          );
-          if (task.artifact.base !== task.base)
-            throw new Error("Repository base changed during implementation");
-          task.status = task.checks.every((c) => c.exitCode === 0)
-            ? "completed"
-            : "paused";
-          if (task.status === "paused")
-            task.summary = "Checks failed; artifact and session retained";
+          await this.runChecks(task, workspace, execute!, stop.signal, started);
         } else task.status = "completed";
       }
       await this.event(task, "state", task.status);

@@ -622,6 +622,52 @@ test("when main moves, an owner-merge job is rebased automatically with its appr
   assert.equal(carried.carriedFrom, requirementScope(before));
   // The reviewed artifact is recorded so the rebased candidate can be compared with it.
   assert.equal(carried.carriedArtifact, artifactHash(before.result.checkpoint));
+  // The reviewed change itself travels to the next attempt, to be carried onto the new base
+  // (journal 174); the checkpoint stays empty, so an older worker implements the plan again.
+  const change = (
+    await f.db.query(
+      "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND event_key='rebase-change:2'",
+      [f.id],
+    )
+  ).rows[0];
+  assert.equal(change.delivery, "suppressed");
+  assert.deepEqual(change.payload, {
+    kind: "rebase_change",
+    from: base,
+    hash: artifactHash(before.result.checkpoint),
+    patch: before.result.checkpoint.patch,
+    files: before.result.checkpoint.files,
+    summary: before.result.summary,
+    findings: "Matches the plan",
+  });
+  const c = new CodingController(
+    f.db,
+    settings,
+    {} as any,
+    {} as any,
+    "c".repeat(64),
+    "https://coding.example.com",
+    () => true,
+    () => ({
+      generate: async () => ({ message: { role: "assistant", content: "" } }),
+    }),
+    () => new Date(),
+  );
+  const assignment: any = await c.assignment(queued);
+  assert.deepEqual(assignment.rebase, {
+    from: base,
+    hash: artifactHash(before.result.checkpoint),
+    patch: before.result.checkpoint.patch,
+    files: before.result.checkpoint.files,
+    summary: before.result.summary,
+    findings: "Matches the plan",
+  });
+  assert.deepEqual(assignment.checkpoint.files, []);
+  // Only the rebased revision carries it.
+  assert.equal(
+    ((await c.assignment({ ...queued, revision: 3 })) as any).rebase,
+    undefined,
+  );
   const budget = (
     await f.db.query(
       "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
@@ -783,6 +829,16 @@ test("automatic rebases stop after two rounds and hand back to the owner", async
   assert.equal(job.state, "pr_ready");
   assert.equal(job.stage, "manual_review");
   assert.match(job.summary, /two automatic rebases/);
+  // Nothing is carried when no rebase happens.
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT 1 FROM coding_events WHERE job_id=$1 AND event_key LIKE 'rebase-change:%'",
+        [f.id],
+      )
+    ).rows.length,
+    0,
+  );
 });
 
 test("a rebase never carries over a scope the owner did not approve, and blocked PRs are not rebased", async (t) => {
@@ -794,6 +850,15 @@ test("a rebase never carries over a scope the owner did not approve, and blocked
   assert.equal(job.state, "pr_ready");
   assert.equal(job.stage, "manual_review");
   assert.match(job.summary, /no recorded owner approval/);
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT 1 FROM coding_events WHERE job_id=$1 AND event_key LIKE 'rebase-change:%'",
+        [f.id],
+      )
+    ).rows.length,
+    0,
+  );
 });
 
 /** The owner's "continue" as Chief's coding_resume call, through the real controller. */
