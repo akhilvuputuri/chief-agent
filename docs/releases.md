@@ -3,6 +3,7 @@
 - **Code.** Learner prompt `learner-v6`: each fact says whether it is standing, a note of one occasion or time-bound. Notes are kept out of every turn's context until a repeat on another day makes them a preference. A standing fact on one day's evidence is flagged when it is worded as a habit or rests on a question. Facts keep the messages and days that support them. Time-bound facts are retired the night after their end date. The owner's redirects (asked again, rephrased, pushed back) are stored and count as pitfalls, and the next message is shown beside each turn. Judge prompt `judge-v2` reads a fact's kind and every supporting message with its day. No database or Compose change.
 - **Why.** The judge's first run found 12 of 26 learned facts overstated, 10 of them one request saved as a standing preference. See [journal 181](journey/181-one-request-is-not-a-preference.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Main moving no longer rebuilds a coding job (13 November 2026)
 
 - **Code.** An owner-merge coding job's PR is no longer re-implemented when main moves. It goes to its Merge card and merges at the reviewed head like any PR. Only a conflict reported by GitHub, with main actually moved, runs the existing re-apply path, which stays as an interim. The two-rebase cap is removed. While GitHub recomputes whether the PR can merge, the Merge card and a recorded tap are kept. Host only; no worker image, migration or Compose change.
