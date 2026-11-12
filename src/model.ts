@@ -83,6 +83,13 @@ export interface ModelAdapter {
     /** Coding-only opt-in. Ordinary assistant requests keep their existing path. */
     stream?: boolean;
     onProgress?: (value: StreamProgress) => Promise<void> | void;
+    /**
+     * Pi coding opt-in (journal 171): the direct Anthropic route asks for summarized thinking,
+     * so each thinking block carries a readable summary instead of empty text. Visibility only:
+     * thinking is billed the same either way. Other adapters ignore it, so an OpenRouter
+     * request (including a fallback) is unchanged.
+     */
+    thinkingDisplay?: "summarized";
   }): Promise<Generation>;
 }
 /** Mark one message for prompt caching; text content becomes a single marked text block. */

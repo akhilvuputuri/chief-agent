@@ -594,3 +594,37 @@ test("the owner is told about a fallback at most once an hour per fault, with wh
   };
   alerts.notice({ ...billing, reason: "auth" });
 });
+
+test("the summarized-thinking opt-in never changes an OpenRouter request, direct or fallback (journal 171)", async () => {
+  const bodies: string[] = [];
+  const openRouter = new OpenRouter("or-test", OPUS, 4, 20, (async (
+    _url: unknown,
+    init?: RequestInit,
+  ) => {
+    bodies.push(String(init?.body));
+    return Response.json({
+      choices: [{ message: { role: "assistant", content: "ok" } }],
+      provider: "test",
+      usage: { cost: 0.01 },
+    });
+  }) as typeof fetch);
+  await openRouter.generate(input());
+  await openRouter.generate({ ...input(), thinkingDisplay: "summarized" });
+  const fallback = new FallbackAdapter(
+    OPUS,
+    fake("direct", [], OPUS, fault("unavailable")),
+    openRouter,
+    new DirectCooldown(),
+  );
+  const ops = captureOps();
+  try {
+    await fallback.generate({ ...input(), thinkingDisplay: "summarized" });
+  } finally {
+    ops.restore();
+  }
+  assert.equal(bodies.length, 3);
+  assert.equal(bodies[1], bodies[0]);
+  assert.equal(bodies[2], bodies[0]);
+  assert.ok(!bodies[0]!.includes("summarized"));
+  assert.ok(!bodies[0]!.includes("display"));
+});

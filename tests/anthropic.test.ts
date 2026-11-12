@@ -442,6 +442,115 @@ test("text, usage, cost and thinking normalize to OpenRouter's shape and replay 
   ]);
 });
 
+test("summarized thinking is asked for only when the call opts in (journal 171)", async () => {
+  const { model, requests } = adapter(() => sse(stream(reply)));
+  await run(model, [{ role: "user", content: "Hi" }], {
+    thinkingDisplay: "summarized",
+  });
+  await run(model, [{ role: "user", content: "Hi" }]);
+  assert.deepEqual(requests[0]!.body.thinking, {
+    type: "adaptive",
+    display: "summarized",
+    block_binding: { prefix_mismatch_behavior: "drop_block" },
+  });
+  // Without the opt-in (every non-coding call) the API default, omitted, stays in force.
+  assert.deepEqual(requests[1]!.body.thinking, {
+    type: "adaptive",
+    block_binding: { prefix_mismatch_behavior: "drop_block" },
+  });
+  assert.ok(!("display" in requests[1]!.body.thinking));
+  // Nothing else in the request changes.
+  const { thinking: _a, ...summarized } = requests[0]!.body;
+  const { thinking: _b, ...plain } = requests[1]!.body;
+  assert.deepEqual(summarized, plain);
+});
+
+test("summarized thinking round-trips verbatim; empty-text legacy blocks still replay", async () => {
+  const summary =
+    "**Checking the schema**\n\nThe migration adds a column; I should confirm été 🚀 and a trailing space ";
+  const summarized = {
+    type: "thinking",
+    thinking: summary,
+    signature: "sig-new",
+  };
+  const legacy = { type: "thinking", thinking: "", signature: "sig-old" };
+  const { model, requests } = adapter((call) =>
+    sse(
+      call === 1
+        ? stream(
+            [
+              summarized,
+              { type: "text", text: "Reading it." },
+              {
+                type: "tool_use",
+                id: "toolu_2",
+                name: "read",
+                input: { path: "db/1.sql" },
+              },
+            ],
+            { stop: "tool_use" },
+          )
+        : stream(reply),
+    ),
+  );
+  const first = await run(model, [{ role: "user", content: "Go" }], {
+    thinkingDisplay: "summarized",
+  });
+  // The stored entry keeps the summary exactly as streamed (the coding call record's field).
+  assert.deepEqual(first.message.reasoning_details, [
+    {
+      type: "anthropic.thinking",
+      format: "anthropic-direct-v1",
+      block: summarized,
+      position: 0,
+    },
+  ]);
+  // An older turn from before the opt-in: empty text, stored without a position.
+  const earlier: ModelMessage = {
+    role: "assistant",
+    content: null,
+    tool_calls: [
+      {
+        id: "toolu_1",
+        type: "function",
+        function: { name: "read", arguments: '{"path":"a"}' },
+      },
+    ],
+    reasoning_details: [
+      {
+        type: "anthropic.thinking",
+        format: "anthropic-direct-v1",
+        block: legacy,
+      },
+    ],
+  };
+  const history: ModelMessage[] = [
+    { role: "user", content: "Go" },
+    earlier,
+    { role: "tool", tool_call_id: "toolu_1", content: "one" },
+    first.message,
+    { role: "tool", tool_call_id: "toolu_2", content: "two" },
+  ];
+  const before = JSON.stringify(history);
+  await run(model, history, { thinkingDisplay: "summarized" });
+  const sent = requests[1]!.body.messages;
+  // Byte for byte: no truncation, trimming, normalization or cache mark on either block.
+  assert.equal(JSON.stringify(sent[1].content[0]), JSON.stringify(legacy));
+  assert.equal(JSON.stringify(sent[3].content[0]), JSON.stringify(summarized));
+  assert.equal(sent[3].content[0].thinking, summary);
+  assert.deepEqual(sent[3].content.slice(1), [
+    { type: "text", text: "Reading it." },
+    {
+      type: "tool_use",
+      id: "toolu_2",
+      name: "read",
+      input: { path: "db/1.sql" },
+    },
+  ]);
+  // The caller's stored history is not modified by translation.
+  assert.equal(JSON.stringify(history), before);
+});
+
 test("finish reasons map to OpenRouter values and requireComplete rejects truncated output", async () => {
   for (const [stop, finish] of [
     ["end_turn", "stop"],

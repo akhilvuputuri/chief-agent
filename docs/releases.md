@@ -1,3 +1,9 @@
+## Coding thinking summaries (12 November 2026)
+
+- **Code.** Pi coding calls on the direct Anthropic route ask for summarized thinking (`thinking.display: "summarized"`), so each `coding_model_calls.result` keeps the call's thinking summary in `message.reasoning_details[].block.thinking`. Every other call keeps the API default, and OpenRouter requests are unchanged. Host only: no worker image, migration or Compose change.
+- **Why.** Job `9600af57` thought for minutes on single calls, and the records could not say about what. See [journal 171](journey/171-coding-thinking-summaries.md).
+- **Deployment.** Not yet recorded as live; a dated note follows on release.
+
 ## Coding attempts may run three hours (12 November 2026)
 
 - **Configuration.** New Pi coding jobs get 180 minutes per attempt instead of 150, the most one attempt may run. Model and tool-call limits, models and effort are unchanged. No code, migration or Compose change.

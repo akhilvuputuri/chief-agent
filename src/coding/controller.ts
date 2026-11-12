@@ -1853,6 +1853,10 @@ export class CodingController {
                 input.maxOutputTokens ?? allowance,
                 allowance,
               ),
+              // Keeps each call's thinking summary in its record (journal 171). Pi's client
+              // drops the direct route's reasoning entries, so requests do not grow; the
+              // Python squad replays them inside an 80 KB history and is left out.
+              thinkingDisplay: "summarized" as const,
             }
           : {}),
         signal: AbortSignal.any([cancellation.signal, total, idle.signal]),

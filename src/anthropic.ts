@@ -587,8 +587,15 @@ export class AnthropicDirect implements ModelAdapter {
             }
           : {}),
         // Chief rebuilds history each call, so mismatched thinking is dropped, not a 400.
+        // Summarized display is a Pi coding opt-in (journal 171); the API default, "omitted",
+        // returns thinking blocks with empty text. Display is outside system, tools and
+        // messages, so it never invalidates a replayed block, and stored blocks replay
+        // verbatim whatever display produced them.
         thinking: {
           type: "adaptive",
+          ...(input.thinkingDisplay === "summarized"
+            ? { display: "summarized" }
+            : {}),
           block_binding: { prefix_mismatch_behavior: "drop_block" },
         },
         output_config: { effort: input.reasoning },

@@ -421,3 +421,15 @@ Evidence boundary:
 - **Measured:** token, cache and cost figures for one job, and 30-day totals.
 - **Tested:** synthetic jobs with larger pages and a second review round on the delta.
 - **Estimated, not measured:** the saving, roughly $10 of $16 on that job.
+
+## A call record that says what the model thought about — 12 November 2026
+
+**What changed for a coding job** ([journal 171](171-coding-thinking-summaries.md), not yet released). Pi calls on the direct Anthropic route ask for summarized thinking, so each call record keeps a readable summary of its thinking instead of an empty block. Job `9600af57` spent most of its time thinking (journal 169), and until now the records showed only how long.
+
+- Display changes visibility, not billing or behaviour; the summaries are for diagnosis.
+- Pi drops these entries between its own tool turns, so the summaries reach the record but never the next request. The Python squad would replay them inside its 80 KB history, so it keeps the default.
+
+Evidence boundary:
+
+- **Tested:** mocked requests: the opt-in reaches only Pi calls, summarized and empty-text blocks replay byte for byte, OpenRouter requests are unchanged.
+- **Not yet measured:** summary length and content on a real job, and whether they explain the long thinking phases.

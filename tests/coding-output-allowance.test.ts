@@ -96,3 +96,80 @@ test("each role's model call is sent its own allowance", async (t) => {
     });
   assert.deepEqual(sent, [128000, 128000, 6553, 16000]);
 });
+
+// Journal 171: Pi calls ask for summarized thinking, and the summary lands in the call record.
+test("Pi coding calls ask for summarized thinking and keep the summary in the call record", async (t) => {
+  const f = await fixture(t);
+  const started: any = await f.start("thinking-summaries", "plan");
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    started.id,
+    JSON.stringify({ ...pi, planCheck: true }),
+  ]);
+  await f.c.tick();
+  const job = await f.row(started.id);
+  const sent: unknown[] = [];
+  const summary = "**Planning**\n\nRead the schema before editing.";
+  f.setGeneration((_model, input) => {
+    sent.push(input.thinkingDisplay);
+    return {
+      message: {
+        role: "assistant",
+        content: "Complete",
+        reasoning_details: [
+          {
+            type: "anthropic.thinking",
+            format: "anthropic-direct-v1",
+            block: { type: "thinking", thinking: summary, signature: "sig" },
+            position: 0,
+          },
+        ],
+      },
+    };
+  });
+  const ids: string[] = [];
+  for (const role of ["leader", "reviewer"] as const) {
+    const callId = randomUUID();
+    ids.push(callId);
+    await f.c.generate(job, {
+      callId,
+      role,
+      messages: [{ role: "user", content: "Synthetic" }],
+      tools: [],
+    });
+  }
+  assert.deepEqual(sent, ["summarized", "summarized"]);
+  // The field path a profiling script reads from the readable call record.
+  const rows = (
+    await f.db.query(
+      `SELECT d->'block'->>'thinking' AS summary FROM coding_model_calls c,
+         jsonb_array_elements(c.result->'message'->'reasoning_details') d
+       WHERE c.id = ANY($1::uuid[]) AND d->>'type'='anthropic.thinking'
+         AND d->'block'->>'type'='thinking'`,
+      [ids],
+    )
+  ).rows;
+  assert.deepEqual(
+    rows.map((r: any) => r.summary),
+    [summary, summary],
+  );
+});
+
+test("non-Pi coding calls keep the default thinking display", async (t) => {
+  const f = await fixture(t);
+  const started: any = await f.start("thinking-default");
+  await f.c.tick();
+  const job = await f.row(started.id);
+  assert.notEqual(job.settings.runtime, "pi");
+  const sent: unknown[] = [];
+  f.setGeneration((_model, input) => {
+    sent.push("thinkingDisplay" in input ? input.thinkingDisplay : "absent");
+    return { message: { role: "assistant", content: "Complete" } };
+  });
+  await f.c.generate(job, {
+    callId: randomUUID(),
+    role: "coder",
+    messages: [{ role: "user", content: "Synthetic" }],
+    tools: [],
+  });
+  assert.deepEqual(sent, ["absent"]);
+});
