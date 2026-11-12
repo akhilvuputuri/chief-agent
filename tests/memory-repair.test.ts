@@ -449,7 +449,7 @@ test("a rewrite must stay inside the owner's words; a refused one gets one corre
   assert.equal((await events(db, "repair.proposal")).length, 11);
 });
 
-test("an unsupported fact may be retired, a fact the repair keeps is not sent again, and the owner's key is left alone", async (t) => {
+test("a contradicted fact may be retired, a fact the repair keeps is not sent again, and the owner's key is left alone", async (t) => {
   const db = await setup(t);
   const store = new MemoryStore(db);
   const gym = await learned(

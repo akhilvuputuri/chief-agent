@@ -186,7 +186,7 @@ Reading one item at a time produced narrow rules overgeneralised from one exampl
 
 ### Nightly judge
 
-> **Update, 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)):** the judge no longer only measures: its verdicts on facts feed the [nightly repair](#nightly-repair), and a fact an earlier judge prompt faulted is judged again under the current one. Evidence for `followed` and `contradicted` must match whole words of the turn, so a fragment such as "nt the wee" no longer counts. The report's use query has a `claimed_contradicted` column for claims the host found no proof of.
+> **Update, 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)):** the judge no longer only measures: its verdicts on facts feed the [nightly repair](#nightly-repair), and a fact an earlier judge prompt faulted is judged again under the current one. Evidence for `followed` and `contradicted` must match whole words of the turn, so a fragment such as "nt the wee" no longer counts. Text written without spaces between words, such as Chinese or Japanese, is one "word" to this check, so a partial quote of it is not found and the claim is recorded as unclear. The report's use query has a `claimed_contradicted` column for claims the host found no proof of.
 
 > **Update, 13 November 2026 ([journal 183](journey/183-can-the-judge-be-trusted.md)):** prompt `judge-v3`, and the judge is now checked against itself. Nothing here changes memory or a recorded verdict.
 >
@@ -255,6 +255,8 @@ Added 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)). T
 - **Forget:** `memory_forget(key, reason?)`, new. It is also what Chief is told to use when something held only once. It retires any active key as the owner: a revision in the history, and a key the learner may not propose again. A bulk rollback does not bring it back, since rollback undoes only the learner's revisions: a forgotten fact returns only when the owner has it saved again, and a forgotten procedure only through a coding session, and until then that kind of work gets no procedure. It is a coordinator tool; no agent can be granted it.
 
 `memory_list` shows keys that are not in a turn's context, such as notes. Offering to save something new still asks first, as before.
+
+The new tool and the sentence add about 740 characters to the fixed part of every turn's prompt (54,227 to 54,964 with the context fixture's capabilities), which is cached.
 
 ### The ledger
 
