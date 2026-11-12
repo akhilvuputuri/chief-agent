@@ -7,13 +7,12 @@ WORKDIR /app
 COPY package*.json ./
 COPY coding_runtime_pi ./coding_runtime_pi
 RUN kite ci
-COPY scripts/build-image.mjs ./scripts/
 COPY tsconfig.json ./
 COPY src ./src
-# Transpile only: CI's typecheck gates every release (journal 132). /out holds what the
+# `kite run build` transpiles only: CI's typecheck gates every release (journals 132, 168). /out holds what the
 # final stage needs besides node_modules, so it is one COPY: dist, package.json, and the
 # file: dependency's package.json and dist (links must resolve after pruning).
-RUN kite run build:image && kite install --omit=dev \
+RUN kite run build && kite install --omit=dev \
  && mkdir -p /out/coding_runtime_pi && cp -r dist package.json /out/ \
  && cp -r coding_runtime_pi/package.json coding_runtime_pi/dist /out/coding_runtime_pi/
 FROM node:22.23.4-bookworm-slim

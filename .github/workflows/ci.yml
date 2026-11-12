@@ -65,8 +65,8 @@ jobs:
       - uses: ./.github/actions/setup-ripgrep
       - run: python -m pip install --require-hashes -r coding_runtime/requirements-dev.txt
       - run: kite ci
-      # Transpile only: `format and types` checks types, and this job only runs the tests.
-      - run: kite run build:image
+      # `kite run build` transpiles only: `format and types` checks types.
+      - run: kite run build
       - run: kite run test:ts
         env:
           TEST_SHARD: ${{ matrix.shard }}/4

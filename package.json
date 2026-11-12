@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
-    "build": "kite run build:pi && tsc",
+    "build": "kite build --project coding_runtime_pi --skip-declarations && kite build",
     "typecheck": "kite run build:pi && tsc --noEmit && tsc -p tsconfig.evals.json",
     "test": "kite run build && kite run test:ts && kite run test:other",
     "test:ts": "node scripts/test-shard.mjs",
@@ -38,7 +38,6 @@
     "check:coding": "python3 -m ruff check coding_runtime && python3 -m ruff format --check coding_runtime && python3 -m mypy coding_runtime/src --strict && PYTHONPATH=coding_runtime/src python3 -m unittest discover -s coding_runtime/tests -v",
     "eval:coding": "python3 evals/coding/run.py",
     "build:pi": "kite --prefix coding_runtime_pi run build",
-    "build:image": "node scripts/build-image.mjs",
     "check:pi": "kite --prefix coding_runtime_pi run check"
   },
   "dependencies": {
@@ -67,7 +66,6 @@
     "@electric-sql/pglite": "^0.3.0",
     "@types/node": "^22.13.10",
     "@types/pg": "^8.11.11",
-    "esbuild": "0.28.2",
     "prettier": "^3.9.6",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
