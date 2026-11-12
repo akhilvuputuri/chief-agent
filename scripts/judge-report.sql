@@ -68,11 +68,14 @@ FROM events WHERE type='judge.turn' AND data->>'state'='judged'
   AND created_at>now()-interval '30 days';
 
 -- 7. Verdicts judged again, last 30 days: how often the same model repeated its first
--- verdict, and how often the second model agreed with it.
+-- verdict (a repeat that gave no verdict is "missed" and is not stable), and how often the
+-- second model, which reads facts only, agreed with it.
 SELECT 'check' AS row, data->>'kind' AS kind, count(*) AS checked,
   count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(data->'repeats') r
     WHERE r<>data->>'first')) AS stable,
-  count(*) FILTER (WHERE data ? 'second') AS cross_checked,
+  count(*) FILTER (WHERE EXISTS (SELECT 1 FROM jsonb_array_elements_text(data->'repeats') r
+    WHERE r='missed')) AS repeat_missed,
+  count(*) FILTER (WHERE data ? 'second' AND data->>'second'<>'missed') AS cross_checked,
   count(*) FILTER (WHERE data->>'second'=data->>'first') AS agreed
 FROM events WHERE type='judge.check' AND created_at>now()-interval '30 days'
 GROUP BY data->>'kind' ORDER BY data->>'kind';

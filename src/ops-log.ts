@@ -213,6 +213,10 @@ const fields: Record<string, Shape> = {
   checkedCount: "count",
   unstableCount: "count",
   crossCheckedCount: "count",
+  checkMissedCount: "count",
+  checkModelCalls: "count",
+  checkRefusedCount: "count",
+  unprovenCount: "count",
   disagreedCount: "count",
 };
 
@@ -555,6 +559,10 @@ const projections: Record<string, Projection> = {
       checkedCount: d.checked,
       unstableCount: d.unstable,
       crossCheckedCount: d.crossChecked,
+      checkMissedCount: d.checkMissed,
+      checkModelCalls: d.checkModelCalls,
+      checkRefusedCount: d.checkRefused,
+      unprovenCount: d.unproven,
       disagreedCount: d.disagreed,
     },
   ],

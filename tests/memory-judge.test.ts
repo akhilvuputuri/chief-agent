@@ -263,9 +263,12 @@ test("a judgement must name an item of the batch once, and a turn may cite only 
     /twice/,
   );
   assert.deepEqual(unjudged(batch, done), ["t1"]);
-  // A claim that Chief acted on a memory, or against it, has to point at where.
-  const claim = (extra: Record<string, unknown>, restated?: string[]) =>
-    recordJudgement(
+  // A claim that Chief acted on a memory, or against it, has to point at where. One the
+  // host cannot find is recorded as unclear with what was claimed, never refused: a refusal
+  // could leave a batch with no verdict, which fails the night.
+  const claim = (extra: Record<string, unknown>, restated?: string[]) => {
+    const fresh = newJudgements();
+    const problem = recordJudgement(
       "judge_turn",
       {
         turn: "t1",
@@ -273,22 +276,68 @@ test("a judgement must name an item of the batch once, and a turn may cite only 
         ...(restated ? { restated } : {}),
       },
       batch,
-      newJudgements(),
+      fresh,
     );
-  assert.match(claim({ use: "followed" })!, /followed needs evidence/);
-  assert.match(
-    claim({ use: "contradicted", evidence: "a window seat" })!,
-    /not in the reply or the calls of t1/,
-  );
-  // The reply's words whatever its markup or case, a call's result, or a call's name.
-  for (const evidence of ["AISLE seat", '"seat":"14C"', "flights_search"])
-    assert.equal(claim({ use: "followed", evidence }), undefined, evidence);
+    return problem ?? fresh.turns.get("t1")!.relevant[0]!;
+  };
+  assert.deepEqual(claim({ use: "followed" }), {
+    memory: "m1",
+    reason: "Because",
+    use: "unclear",
+    claimed: "followed",
+  });
+  for (const evidence of ["a window seat", "the", "one", "14C"])
+    assert.deepEqual(
+      [
+        (claim({ use: "contradicted", evidence }) as any).use,
+        (claim({ use: "contradicted", evidence }) as any).claimed,
+      ],
+      ["unclear", "contradicted"],
+      evidence,
+    );
+  // The reply's words whatever its markup or case; a call's result as shown, as the judge
+  // sees it escaped inside the prompt, or in plain words; or a call's exact name.
+  for (const evidence of [
+    "AISLE seat",
+    '"seat":"14C"',
+    '\\"seat\\":\\"14C\\"',
+    "seat: 14C, fare: flex",
+    "flights_search",
+  ])
+    assert.deepEqual(
+      [
+        (claim({ use: "followed", evidence }) as any).use,
+        (claim({ use: "followed", evidence }) as any).claimed,
+      ],
+      ["followed", undefined],
+      evidence,
+    );
   // Saying a memory was passed over, or that it cannot be told, needs no quote.
-  assert.equal(claim({ use: "ignored" }), undefined);
-  assert.equal(claim({ use: "unclear" }), undefined);
-  assert.match(claim({ use: "ignored" }, ["m2"])!, /restated takes only ids/);
+  assert.equal((claim({ use: "ignored" }) as any).use, "ignored");
+  assert.equal((claim({ use: "unclear" }) as any).claimed, undefined);
+  assert.match(
+    claim({ use: "ignored" }, ["m2"]) as string,
+    /restated takes only ids/,
+  );
   assert.equal(shownInTurn(batch.turns[0]!, "9am flight"), true);
   assert.equal(shownInTurn(batch.turns[0]!, "am"), false);
+  // Line breaks escaped inside a call's result do not stop a quote across them.
+  assert.equal(
+    shownInTurn(
+      {
+        ...batch.turns[0]!,
+        calls: [
+          {
+            call: "gmail_read",
+            state: "success",
+            result: '{"body":"Line one\\nLine two"}',
+          },
+        ],
+      },
+      "Line one Line two",
+    ),
+    true,
+  );
   assert.equal(
     recordJudgement(
       "judge_turn",
@@ -1131,31 +1180,54 @@ test("planted errors are built from supported facts in known ways, in an order t
     messages: [{ text: `Message ${id}` }],
   });
   const probes = factProbes([base("a"), base("b", true)], "seed");
-  assert.deepEqual(probes.map((p) => `${p.mutation}:${p.base}`).sort(), [
+  // One unchanged control and one broken copy for each base, and no IDs yet: the caller
+  // judges controls and broken copies in separate batches.
+  assert.deepEqual(
+    probes.map((p) => [p.base, p.mutation === "control"]),
+    [
+      ["a", true],
+      ["a", false],
+      ["b", true],
+      ["b", false],
+    ],
+  );
+  assert.deepEqual(probes[0]!.fact, base("a"));
+  // Every kind of broken copy, over enough seeds, each built the same way every time.
+  const seen = new Map<string, any>();
+  for (let seed = 0; seed < 60; seed++)
+    for (const p of factProbes([base("a"), base("b", true)], String(seed)))
+      seen.set(`${p.mutation}:${p.base}`, p.fact);
+  assert.deepEqual([...seen.keys()].sort(), [
     "control:a",
     "control:b",
+    "detail:a",
     "detail:b",
     "habit:b",
     "negated:a",
+    "negated:b",
     "swapped:a",
+    "swapped:b",
   ]);
-  const by = (m: string) => probes.find((p) => p.mutation === m)!.fact;
-  assert.equal(by("negated").value, "It is not true that: Fact a.");
+  assert.equal(seen.get("negated:a").value, "It is not true that: Fact a.");
   assert.match(
-    by("detail").value,
+    seen.get("detail:b").value,
     /^Fact b, and has told Chief to send a copy/,
   );
   // One occasion worded as a rule, and no longer marked as a note.
-  assert.match(by("habit").value, /^As a standing rule, every time: Fact b\.$/);
-  assert.equal(by("habit").note, undefined);
-  assert.deepEqual(by("swapped").messages, [{ text: "Message b" }]);
-  assert.deepEqual(
-    probes.map((p) => p.fact.id),
-    ["f1", "f2", "f3", "f4", "f5", "f6"],
+  assert.match(
+    seen.get("habit:b").value,
+    /^As a standing rule, every time: Fact b\.$/,
   );
-  // The same seed gives the same order, and another seed usually another.
+  assert.equal(seen.get("habit:b").note, undefined);
+  assert.deepEqual(seen.get("swapped:a").messages, [{ text: "Message b" }]);
+  // The same seed gives the same copies; a single base has nothing to swap with.
   assert.deepEqual(factProbes([base("a"), base("b", true)], "seed"), probes);
   assert.deepEqual(factProbes([], "seed"), []);
+  for (let seed = 0; seed < 20; seed++)
+    assert.notEqual(
+      factProbes([base("a")], String(seed))[1]!.mutation,
+      "swapped",
+    );
   const items = ["a", "b", "c", "d", "e", "f", "g", "h"];
   assert.deepEqual(
     shuffled(items, "s", (x) => x),
@@ -1199,10 +1271,7 @@ test("the judge is checked each night: planted errors, repeats and a second mode
         "judge_fact",
         {
           fact: f.id,
-          verdict: /^It is not true that/.test(f.fact)
-            ? "contradicted"
-            : // This judge misses an added detail: a planted error it does not catch.
-              "supported",
+          verdict: f.fact === "Is vegetarian" ? "supported" : "contradicted",
           reason: "Read against the message",
         },
       ]);
@@ -1248,35 +1317,52 @@ test("the judge is checked each night: planted errors, repeats and a second mode
     }) as any
   ).runJudge("owner", NIGHT)) as Record<string, any>;
   assert.equal(result.state, "completed");
-  // The night's facts and turns, the planted errors, and the same sample twice more.
-  assert.equal(main.inputs.length, 5);
+  // The night's facts and turns, the control, the broken copy, and the sample twice more.
+  assert.equal(main.inputs.length, 6);
   assert.equal(second.inputs.length, 1);
-  // One supported fact gives a control and one broken copy, in a batch of their own.
-  const probed = shownTo(main.inputs[2]);
-  assert.equal(probed.turns, undefined);
-  assert.deepEqual(probed.facts.map((f: any) => f.fact).sort(), [
-    "Is vegetarian",
-    "It is not true that: Is vegetarian",
-  ]);
+  // The control and its broken copy are never in front of the judge together.
+  assert.deepEqual(
+    shownTo(main.inputs[2]).facts.map((f: any) => f.fact),
+    ["Is vegetarian"],
+  );
+  const broken = shownTo(main.inputs[3]).facts;
+  assert.equal(broken.length, 1);
+  assert.match(
+    broken[0].fact,
+    /^It is not true that: Is vegetarian$|^Is vegetarian, and has told Chief/,
+  );
+  assert.equal(shownTo(main.inputs[3]).turns, undefined);
   assert.deepEqual(
     [result.controls, result.falseAlarms, result.probes, result.caught],
     [1, 0, 1, 1],
   );
+  const planted = await events(db, "judge.probe");
   assert.deepEqual(
-    (await events(db, "judge.probe"))
-      .map((e) => [e.mutation, e.verdict, e.baseRevisionId])
-      .sort(),
+    planted.map((e) => [e.mutation === "control", e.verdict, e.baseRevisionId]),
     [
-      ["control", "supported", diet.id],
-      ["negated", "contradicted", diet.id],
+      [true, "supported", diet.id],
+      [false, "contradicted", diet.id],
     ],
   );
-  // The repeats and the cross-check read the very batch the night judged.
-  assert.deepEqual(shownTo(main.inputs[3]), shownTo(second.inputs[0]));
+  assert.ok(["negated", "detail"].includes(planted[1]!.mutation));
+  // The repeats read the night's facts and turns. The other family is shown the facts and
+  // the owner's messages only: a turn's tool calls stay with the judge's own provider.
+  assert.equal(shownTo(main.inputs[4]).turns.length, 1);
+  assert.deepEqual(shownTo(second.inputs[0]), {
+    facts: shownTo(main.inputs[4]).facts,
+  });
   assert.deepEqual(
-    [result.checked, result.unstable, result.crossChecked, result.disagreed],
-    [2, 1, 2, 1],
+    [
+      result.checked,
+      result.unstable,
+      result.checkMissed,
+      result.crossChecked,
+      result.disagreed,
+    ],
+    [2, 1, 0, 1, 1],
   );
+  // The checks' calls are counted apart from the night's own two.
+  assert.deepEqual([result.modelCalls, result.checkModelCalls], [2, 5]);
   const checks = await events(db, "judge.check");
   assert.deepEqual(
     checks.map((e) => [e.kind, e.first, e.repeats, e.second]),
@@ -1286,7 +1372,7 @@ test("the judge is checked each night: planted errors, repeats and a second mode
         "turn",
         `${diet.id}:followed`,
         [`${diet.id}:followed`, `${diet.id}:unclear`],
-        `${diet.id}:followed`,
+        undefined,
       ],
     ],
   );
@@ -1297,10 +1383,10 @@ test("the judge is checked each night: planted errors, repeats and a second mode
     ),
     [
       ["probe", "control", "1", "0", "0"],
-      ["probe", "negated", "1", "1", "0"],
+      ["probe", planted[1]!.mutation, "1", "1", "0"],
       ["decoy", "1", "0"],
-      ["check", "fact", "1", "1", "1", "0"],
-      ["check", "turn", "1", "0", "1", "1"],
+      ["check", "fact", "1", "1", "0", "1", "0"],
+      ["check", "turn", "1", "0", "0", "0", "0"],
     ],
   );
   // The recorded verdicts are the first pass's, and no probe became memory.
@@ -1330,7 +1416,7 @@ test("the judge is checked each night: planted errors, repeats and a second mode
       line.decoyCount,
       line.decoyHitCount,
     ],
-    [1, 1, 1, 0, 2, 1, 2, 1, 1, 0],
+    [1, 1, 1, 0, 2, 1, 1, 1, 1, 0],
   );
   assert.doesNotMatch(JSON.stringify(line), /vegetarian/i);
 });
@@ -1358,4 +1444,96 @@ test("a check that fails does not fail the night, whose verdicts are already rec
   assert.equal(result.turns, 1);
   assert.equal(result.checked, 0);
   assert.ok(result.through);
+});
+
+test("a repeat that gives no verdict is recorded as missed, and a failing second model keeps the repeats", async (t) => {
+  const db = await setup(t);
+  const source = await turn(db, {
+    says: "I am vegetarian",
+    reply: "Noted.",
+    ago: 3 * DAY,
+    selected: [],
+  });
+  await learned(db, "diet", "Is vegetarian", [source.input]);
+  let passes = 0;
+  const main = model((input) => {
+    passes++;
+    // The night, the control and the broken copy answer; the first repeat says nothing,
+    // on its call and on the reminder after it.
+    return passes === 4 || passes === 5
+      ? []
+      : shownTo(input).facts.map((f: any) => [
+          "judge_fact",
+          { fact: f.id, verdict: "supported", reason: "Says so" },
+        ]);
+  });
+  const second: ModelAdapter = {
+    generate: async () => {
+      throw new Error("provider down");
+    },
+  };
+  const result = (await (
+    new Learner(db, {
+      model: main.adapter,
+      modelName: "judge/model",
+      judgeSecond: { model: second, modelName: "other/model" },
+      clock: () => NIGHT,
+    }) as any
+  ).runJudge("owner", NIGHT)) as Record<string, any>;
+  assert.equal(result.state, "completed");
+  assert.deepEqual(
+    (await events(db, "judge.check")).map((e) => [
+      e.first,
+      e.repeats,
+      e.second,
+    ]),
+    [["supported", ["missed", "supported"], undefined]],
+  );
+  assert.deepEqual(
+    [result.checked, result.unstable, result.checkMissed, result.crossChecked],
+    [1, 0, 1, 0],
+  );
+  // A missed repeat is not agreement.
+  assert.deepEqual(
+    (await report(db)).filter((r) => r[0] === "check"),
+    [["check", "fact", "1", "0", "1", "0", "0"]],
+  );
+});
+
+test("a claim of use the host cannot find in the turn is recorded as unclear, with what was claimed", async (t) => {
+  const db = await setup(t);
+  const seat = await learned(db, "seat", "Prefers aisle seats", []);
+  await turn(db, {
+    says: "Book a flight",
+    reply: "Booked 14C.",
+    selected: [seat.id],
+  });
+  const { adapter, inputs } = model((input) => [
+    [
+      "judge_turn",
+      {
+        turn: "t1",
+        relevant: [
+          {
+            memory: idOf(input, "seat"),
+            use: "followed",
+            evidence: "an aisle seat as you prefer",
+            reason: "Chose the aisle",
+          },
+        ],
+      },
+    ],
+  ]);
+  const result = await judge(db, adapter);
+  // One call: nothing was refused, so no retry was spent and the night completes.
+  assert.equal(inputs.length, 1);
+  assert.deepEqual(
+    [result.state, result.followed, result.unclear, result.unproven],
+    ["completed", 0, 1, 1],
+  );
+  const [event] = await events(db, "judge.turn");
+  assert.deepEqual(
+    [event!.relevant[0].use, event!.relevant[0].claimed],
+    ["unclear", "followed"],
+  );
 });

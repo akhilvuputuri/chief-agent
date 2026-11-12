@@ -32,7 +32,8 @@ const schema = z
     // chose Opus 5.5 for it, the same model (journal 164). Unset, it uses the standard tier.
     judge: modelId.optional(),
     // A model of another family that re-judges a small nightly sample of the judge's verdicts,
-    // so agreement can be read (13 November 2026, journal 182). It replaces nothing: the judge
+    // so agreement can be read (13 November 2026, journal 183). It is shown facts and the
+    // owner messages they cite only, never a turn's tool calls. It replaces nothing: the judge
     // above still gives every recorded verdict. Unset, there is no cross-check.
     judgeSecond: modelId.optional(),
     // Provider price ceilings ($ per million tokens) for every OpenRouter caller. When set, this
