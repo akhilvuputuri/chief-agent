@@ -1735,6 +1735,11 @@ export class CodingController {
     // One call at a time per job: a request that arrives while the previous call is still
     // finishing waits for its slot instead of being refused.
     await this.piSlots.get(job.id);
+    // A worker that hung up while waiting gets nothing, and costs no allowance or call record.
+    if (request.signal.aborted)
+      return refuse(
+        new Error("Coding request cancelled before model dispatch"),
+      );
     const callId = randomUUID();
     const claimed = await this.db.query(
       `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+1,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4 RETURNING id)

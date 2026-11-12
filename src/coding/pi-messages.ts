@@ -128,12 +128,100 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
 
 /** A tool Pi defines and runs itself; server tools (web, code execution, MCP, computer) are refused. */
+/**
+ * The fields of a tool Pi defines (`convertTools`, and its deferred placeholder
+ * `DEFERRED_TOOL_PLACEHOLDER`, which carries `defer_loading`). Pi sends no `type`, so a typed
+ * tool is a server tool (web search or fetch, code execution, MCP, computer use) and is refused.
+ */
+const TOOL_FIELDS = new Set([
+  "name",
+  "description",
+  "input_schema",
+  "eager_input_streaming",
+  "strict",
+  "cache_control",
+  "defer_loading",
+]);
 function assertClientTool(tool: unknown) {
-  if (!isObject(tool) || (tool.type !== undefined && tool.type !== "custom"))
+  if (!isObject(tool) || tool.type !== undefined)
     throw new MessagesRefusal(
       `Messages request includes a server tool${isObject(tool) && typeof tool.type === "string" ? ` (${tool.type.slice(0, 60)})` : ""}; only Pi's own tools are allowed`,
       "server_tool_refused",
     );
+  for (const key of Object.keys(tool))
+    if (!TOOL_FIELDS.has(key))
+      throw new MessagesRefusal(
+        `Messages request tool field not allowed: ${key.slice(0, 60)}`,
+        "tool_field_refused",
+      );
+}
+
+/**
+ * The content blocks Pi's client builds (`convertMessages` and `convertContentBlocks` in
+ * pi-ai 1.1.0 `dist/api/anthropic-messages.js`): user turns hold text, base64 images and
+ * tool results (whose content is a string or text and base64 image blocks); assistant turns
+ * hold text, thinking, redacted thinking and tool calls; mid-conversation system messages hold
+ * text and native tool changes. The box is untrusted, and a block with a URL or file source,
+ * a server-tool block or a container upload would let it make Anthropic fetch or run something,
+ * so any other block or source is refused.
+ */
+const BLOCKS: Record<string, Set<string>> = {
+  user: new Set(["text", "image", "tool_result"]),
+  assistant: new Set(["text", "thinking", "redacted_thinking", "tool_use"]),
+  system: new Set(["text", "tool_addition", "tool_removal"]),
+};
+const MESSAGE_FIELDS: Record<string, Set<string>> = {
+  user: new Set(["role", "content"]),
+  assistant: new Set(["role", "content"]),
+  // Pi's per-turn effort markers carry output_config.
+  system: new Set(["role", "content", "output_config"]),
+};
+
+function refuseBlock(type: unknown, where: string): never {
+  throw new MessagesRefusal(
+    `Messages request content not allowed: ${typeof type === "string" ? type.slice(0, 60) : "unknown"} block in ${where}`,
+    "content_block_refused",
+  );
+}
+
+/** A Pi image: inline base64 only, never a URL or file the API would fetch. */
+function assertImage(block: Record<string, unknown>, where: string) {
+  if (!isObject(block.source) || block.source.type !== "base64")
+    throw new MessagesRefusal(
+      `Messages request content not allowed: image source ${isObject(block.source) && typeof block.source.type === "string" ? block.source.type.slice(0, 40) : "unknown"} in ${where}`,
+      "content_source_refused",
+    );
+}
+
+function assertBlock(block: unknown, role: string, where: string) {
+  if (!isObject(block) || !BLOCKS[role]!.has(String(block.type)))
+    refuseBlock(isObject(block) ? block.type : undefined, where);
+  if (block.type === "image") assertImage(block, where);
+  else if (block.type === "tool_result") {
+    // Pi's tool results hold a string or text and base64 image blocks.
+    if (Array.isArray(block.content))
+      for (const inner of block.content) {
+        if (
+          !isObject(inner) ||
+          (inner.type !== "text" && inner.type !== "image")
+        )
+          refuseBlock(
+            isObject(inner) ? inner.type : undefined,
+            `${where} tool_result`,
+          );
+        if (inner.type === "image") assertImage(inner, `${where} tool_result`);
+      }
+    else if (block.content !== undefined && typeof block.content !== "string")
+      refuseBlock("tool_result content", where);
+  } else if (block.type === "tool_addition") {
+    if (!isObject(block.tool) || block.tool.type !== "tool_definition")
+      refuseBlock("tool_addition", where);
+    // Tools added mid-conversation are definitions too, so they get the same check.
+    assertClientTool(block.tool.definition);
+  } else if (block.type === "tool_removal") {
+    if (!isObject(block.tool) || block.tool.type !== "tool_reference")
+      refuseBlock("tool_removal", where);
+  }
 }
 
 function assertOutputConfig(config: unknown, effort: string, where: string) {
@@ -215,8 +303,29 @@ export function messagesRequest(
     );
   if (body.output_config !== undefined)
     assertOutputConfig(body.output_config, pinned.effort, "output_config");
+  if (body.system !== undefined && typeof body.system !== "string") {
+    if (!Array.isArray(body.system))
+      throw new MessagesRefusal(
+        "Invalid Messages request",
+        "messages_request_invalid",
+      );
+    for (const block of body.system)
+      if (!isObject(block) || block.type !== "text")
+        refuseBlock(isObject(block) ? block.type : undefined, "system");
+  }
   for (const message of body.messages) {
-    if (!isObject(message)) continue;
+    if (!isObject(message) || !MESSAGE_FIELDS[String(message.role)])
+      throw new MessagesRefusal(
+        "Invalid Messages request",
+        "messages_request_invalid",
+      );
+    const role = String(message.role);
+    for (const key of Object.keys(message))
+      if (!MESSAGE_FIELDS[role]!.has(key))
+        throw new MessagesRefusal(
+          `Messages request field not allowed: messages[].${key.slice(0, 60)}`,
+          "messages_field_refused",
+        );
     // Pi's per-turn effort markers are system messages carrying output_config.
     if (message.output_config !== undefined)
       assertOutputConfig(
@@ -224,13 +333,14 @@ export function messagesRequest(
         pinned.effort,
         "messages[].output_config",
       );
-    // Tools added mid-conversation are definitions too, so they get the same check.
     if (Array.isArray(message.content))
       for (const block of message.content)
-        if (isObject(block) && block.type === "tool_addition")
-          assertClientTool(
-            isObject(block.tool) ? block.tool.definition : undefined,
-          );
+        assertBlock(block, role, `${role} message`);
+    else if (typeof message.content !== "string")
+      throw new MessagesRefusal(
+        "Invalid Messages request",
+        "messages_request_invalid",
+      );
   }
   const requested = body.max_tokens;
   if (

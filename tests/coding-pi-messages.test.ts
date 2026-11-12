@@ -12,6 +12,7 @@ import {
   CodingRuntime,
   TaskStore,
   anthropicModel,
+  localExecutor,
 } from "@chief-agent/pi-runtime";
 import { AnthropicMessagesGateway, anthropicUsage } from "../src/anthropic.js";
 import { GATEWAY_RETRY } from "../src/coding/pi-worker.js";
@@ -323,6 +324,146 @@ test("the host refuses anything Pi does not send, before any call", async (t) =>
       { tool_choice: { type: "auto", disable_parallel_tool_use: true } },
       "tool_choice_refused",
     ],
+    // Content the API would fetch or run on the box's behalf.
+    ...(
+      [
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "document",
+                source: { type: "url", url: "https://example.invalid/x.pdf" },
+              },
+            ],
+          },
+          "content_block_refused",
+        ],
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_1",
+                content: [
+                  {
+                    type: "image",
+                    source: {
+                      type: "url",
+                      url: "https://example.invalid/i.png",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          "content_source_refused",
+        ],
+        [
+          {
+            role: "user",
+            content: [
+              { type: "image", source: { type: "file", file_id: "file_1" } },
+            ],
+          },
+          "content_source_refused",
+        ],
+        [
+          {
+            role: "user",
+            content: [{ type: "container_upload", file_id: "file_1" }],
+          },
+          "content_block_refused",
+        ],
+        [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "server_tool_use",
+                id: "srvtoolu_1",
+                name: "web_fetch",
+                input: { url: "https://example.invalid" },
+              },
+            ],
+          },
+          "content_block_refused",
+        ],
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "web_fetch_tool_result",
+                tool_use_id: "srvtoolu_1",
+                content: {},
+              },
+            ],
+          },
+          "content_block_refused",
+        ],
+        [
+          {
+            role: "user",
+            content: [{ type: "compaction", content: "summary" }],
+          },
+          "content_block_refused",
+        ],
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_1",
+                content: [
+                  { type: "document", source: { type: "text", data: "x" } },
+                ],
+              },
+            ],
+          },
+          "content_block_refused",
+        ],
+        [
+          { role: "user", content: "x", container: { id: "container_1" } },
+          "messages_field_refused",
+        ],
+      ] as [Record<string, unknown>, string][]
+    ).map(
+      ([message, reason]) =>
+        [
+          { messages: [{ role: "user", content: "Plan" }, message] },
+          reason,
+        ] as [Record<string, unknown>, string],
+    ),
+    [
+      {
+        system: [
+          {
+            type: "document",
+            source: { type: "url", url: "https://example.invalid" },
+          },
+        ],
+      },
+      "content_block_refused",
+    ],
+    [
+      {
+        tools: [
+          {
+            name: "x",
+            input_schema: {},
+            allowed_callers: ["code_execution_20260120"],
+          },
+        ],
+      },
+      "tool_field_refused",
+    ],
+    [
+      { tools: [{ name: "x", type: "custom", input_schema: {} }] },
+      "server_tool_refused",
+    ],
     [{ max_tokens: "lots" }, "messages_request_invalid"],
     [{ messages: "none" }, "messages_request_invalid"],
   ];
@@ -532,6 +673,10 @@ async function throughHost(
     /** The host refuses connections for this long before it starts listening. */
     outageMs?: number;
     workspaceId?: string;
+    /** A small window makes Pi compact. */
+    contextWindow?: number;
+    /** After the plan, approve it and run the build phase too. */
+    build?: boolean;
   } = {},
 ) {
   const upstream: { headers: Record<string, unknown>; body: any }[] = [];
@@ -573,6 +718,7 @@ async function throughHost(
       autoMerge: false,
       effort: "medium",
       maxOutputTokens: 32000,
+      limits: { ...settings.limits, models: 400 },
     }),
   ]);
   job = await f.row(job.id);
@@ -626,17 +772,31 @@ async function throughHost(
       apiKey: token,
       maxTokens: 32000,
       reasoning: options.workerEffort ?? "medium",
+      ...(options.contextWindow
+        ? { contextWindow: options.contextWindow, maxTokens: 16000 }
+        : {}),
       // Short delays keep the test quick; the worker's own settings are checked separately.
       ...(options.outageMs
         ? { retry: { maxRetries: 8, baseDelayMs: 200 } }
         : {}),
     }),
+    ...(options.build
+      ? {
+          executor: (task: { workspace: string }) =>
+            localExecutor(task.workspace, join(root, "home")),
+        }
+      : {}),
   });
   const task = await runtime.start({
     workspace,
     objective: "Plan the synthetic fix",
+    ...(options.build ? { checks: ["node --check sum.js"] } : {}),
   });
-  const result = await runtime.run(task.id);
+  let result = await runtime.run(task.id);
+  if (options.build && result.status === "waiting_approval") {
+    await runtime.approve(task.id, result.plan!.revision, result.plan!.hash);
+    result = await runtime.run(task.id);
+  }
   for (let i = 0; i < 200; i++) {
     if (!(await f.row(job.id)).model_busy) break;
     await delay(10);
@@ -1026,4 +1186,109 @@ test("1-hour cache writes are priced at twice the input price", () => {
     ).cost,
     (1000 * 5) / 1e6,
   );
+});
+
+test("a real Pi session's final-report phase and compaction call pass the host's allowlists", async (t) => {
+  const rejections = async (f: {
+    db: { query: (sql: string) => Promise<any> };
+  }) =>
+    (
+      await f.db.query(
+        "SELECT payload FROM coding_events WHERE payload->>'kind'='worker_request_rejected'",
+      )
+    ).rows;
+  // (a) 32 investigation turns: the host ends planning with the final-report phase, which Pi
+  // sends as a mid-conversation system message.
+  let finalPhase = false;
+  const planned = await throughHost(t, (n, body, res) => {
+    finalPhase ||= JSON.stringify(body.messages).includes(
+      "Host workflow phase: final report",
+    );
+    sse(res, {
+      content: [
+        finalPhase
+          ? planReport
+          : toolUse(`toolu_read_${n}`, "read", { path: "sum.js" }),
+      ],
+    });
+  });
+  assert(finalPhase, "Pi sent the final-report phase");
+  assert.equal(
+    planned.result.status,
+    "waiting_approval",
+    planned.result.summary,
+  );
+  assert.deepEqual(await rejections(planned.f), []);
+  // (b) A build whose reported context fills a small window: Pi makes a summary call.
+  let compactions = 0;
+  let building = false;
+  let turns = 0;
+  const built = await throughHost(
+    t,
+    (_n, body, res) => {
+      if (!body.tools?.length) {
+        compactions++;
+        sse(res, {
+          content: [
+            {
+              type: "text",
+              text: "Working state: sum.js inspected; use addition, then report done.",
+            },
+          ],
+          usage: { input_tokens: 2000, output_tokens: 100 },
+        });
+        return;
+      }
+      turns++;
+      building ||= turns > 1;
+      sse(res, {
+        content: [
+          !building
+            ? planReport
+            : compactions > 0
+              ? toolUse("toolu_done", "report", {
+                  kind: "done",
+                  summary: "Done",
+                  detail: "Synthetic build finished after compaction.",
+                })
+              : toolUse(`toolu_b${turns}`, "read", { path: "sum.js" }),
+        ],
+        usage: { input_tokens: building ? 35000 : 100, output_tokens: 100 },
+      });
+    },
+    // A large file, so each read fills the small window.
+    {
+      "sum.js":
+        Array.from(
+          { length: 200 },
+          (_, i) =>
+            `export const rule_${i} = ${JSON.stringify({ id: i, text: "Retain the documented validation behavior and source evidence across context maintenance." })};`,
+        ).join("\n") + "\n",
+    },
+    { contextWindow: 40000, build: true },
+  );
+  assert(compactions > 0, "Pi made a compaction call");
+  assert.deepEqual(await rejections(built.f), []);
+  assert.equal(built.result.status, "completed", built.result.summary);
+});
+
+test("a request whose worker hung up while waiting for the slot costs nothing", async (t) => {
+  const { f, job, settled, calls } = await piJob(t);
+  let open!: () => void;
+  (f.c as any).piSlots.set(
+    job.id,
+    new Promise<void>((resolve) => (open = resolve)),
+  );
+  const gone = new AbortController();
+  const reply = f.c.piMessages(job, "coder", request(), {
+    signal: gone.signal,
+  });
+  gone.abort();
+  open();
+  const response = await reply;
+  assert.equal(response.status, 400);
+  await settled();
+  assert.equal((await calls()).length, 0);
+  assert.equal((await f.row(job.id)).used_models, job.used_models);
+  assert.equal(f.messagesRequests().length, 0);
 });
