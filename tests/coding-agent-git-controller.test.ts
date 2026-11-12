@@ -148,19 +148,14 @@ test("agent tokens are issued only to a running, approved implementation attempt
     patch: "fixture",
     summary: "Done",
     files,
-    piState: { version: 1, toolsUsed: 2 },
+    piState: { version: 1, delivered: [] },
   };
   const candidate = {
     kind: "candidate",
     summary: "Done",
     question: "",
     checkpoint,
-    checks: [
-      "kite ci",
-      "kite run check",
-      "kite run build",
-      "kite run format:check",
-    ].map((command) => ({ command, exitCode: 0, output: "ok" })),
+    // A Pi coder runs the tests itself; the host needs no check receipts (journal 192).
     review: {
       verdict: "APPROVE",
       findings: "Approved",
@@ -169,7 +164,10 @@ test("agent tokens are issued only to a running, approved implementation attempt
     },
   };
   // An agent-git job must report the PR it published.
-  await assert.rejects(c.finish(job, candidate), /passing checks and review/);
+  await assert.rejects(
+    c.finish(job, candidate),
+    /independent review of the exact artifact/,
+  );
   const accepted = await c.finish(
     job,
     outcome.parse({

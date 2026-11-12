@@ -3,7 +3,6 @@ import { execFileSync } from "node:child_process";
 import {
   runPiWorker,
   NativePiWorkerClient,
-  piReviewInstructions,
 } from "../../src/coding/pi-worker.js";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";

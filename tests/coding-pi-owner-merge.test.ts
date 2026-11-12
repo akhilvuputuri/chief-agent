@@ -35,6 +35,23 @@ const settings = codingSettings.parse({
   limits: { ms: 900000, models: 40, tools: 100 },
 });
 
+/** The job's inbox items, oldest first (journal 192). */
+async function inbox(f: { db: Database; id: string }) {
+  return (
+    await f.db.query(
+      "SELECT event_key,payload FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' ORDER BY created_at,id",
+      [f.id],
+    )
+  ).rows.map((r: any) => ({ key: r.event_key, ...r.payload }));
+}
+/** Earlier owner-merge feedback rounds, as their requeues recorded them. */
+async function priorRounds(f: { db: Database; id: string }, n: number) {
+  for (let i = 1; i <= n; i++)
+    await f.db.query(
+      "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,$2,$3,'Earlier feedback','implement')",
+      [f.id, 100 + i, `mr-feedback:earlier-${i}`],
+    );
+}
 async function fixture(
   t: TestContext,
   piState: any = undefined,
@@ -53,7 +70,7 @@ async function fixture(
     summary: "Added the fixture entry",
     patch: "fixture",
     files,
-    piState: piState ?? { version: 1, toolsUsed: 20 },
+    piState: piState ?? { version: 1, delivered: [] },
   };
   const hash = artifactHash(cp);
   const result = outcome.parse({
@@ -237,10 +254,7 @@ test("a PR that needs operator work still gets its review feedback fixed first",
   await f.auto.tick();
   const queued = await f.job();
   assert.equal(queued.state, "queued");
-  assert.match(
-    queued.checkpoint.piState!.mrFeedback!.text,
-    /the index is missing/,
-  );
+  assert.match((await inbox(f))[0].text, /the index is missing/);
 });
 
 test("a tool-picker change tells the owner to run the picker eval before merging", async (t) => {
@@ -365,7 +379,7 @@ test("declining keeps the PR open and a changed head invalidates an unanswered c
   assert.equal(g.counts().merges, 0);
 });
 
-test("MR feedback starts a bounded fresh Pi repair round on the published candidate", async (t) => {
+test("MR feedback becomes labelled inbox items for the same coder session, with the work kept", async (t) => {
   const f = await fixture(t);
   f.setInspection({
     draft: false,
@@ -375,16 +389,18 @@ test("MR feedback starts a bounded fresh Pi repair round on the published candid
   const queued = await f.job();
   assert.equal(queued.state, "queued");
   assert.equal(queued.revision, 2);
-  assert.deepEqual(Object.keys(queued.checkpoint.piState!).sort(), [
-    "mrFeedback",
-    "toolsUsed",
-    "version",
-  ]);
-  assert.equal(queued.checkpoint.piState!.toolsUsed, 20);
-  assert.equal(queued.checkpoint.piState!.mrFeedback!.round, 1);
-  assert.match(
-    queued.checkpoint.piState!.mrFeedback!.text,
-    /untrusted evidence[\s\S]*heading level is wrong/,
+  // The checkpoint, and with it the job's sessions, is kept as it was.
+  assert.deepEqual(queued.checkpoint, (await f.job()).checkpoint);
+  assert.deepEqual(queued.checkpoint.piState, { version: 1, delivered: [] });
+  assert.deepEqual(
+    (await inbox(f)).map(({ key, source, text }) => ({ key, source, text })),
+    [
+      {
+        key: "inbox:gh:devin-1",
+        source: "review",
+        text: "Devin: the heading level is wrong",
+      },
+    ],
   );
   assert.deepEqual(queued.checkpoint.files, [
     { path: "docs/fixture.md", content: "Fixture\n" },
@@ -397,11 +413,8 @@ test("MR feedback starts a bounded fresh Pi repair round on the published candid
   ).rows[0].payload;
   assert.deepEqual(budget.handled, ["devin-1"]);
 
-  const limit = await fixture(t, {
-    version: 1,
-    toolsUsed: 20,
-    mrFeedback: { round: 3, text: "Earlier feedback" },
-  });
+  const limit = await fixture(t);
+  await priorRounds(limit, 3);
   limit.setInspection({
     draft: false,
     feedback: [{ id: "devin-9", text: "Devin: still wrong" }],
@@ -492,18 +505,21 @@ test("an approval lost to a check flap, or a lapsed card, is re-offered rather t
   assert.equal(f.counts().merges, 1);
 });
 
-test("feedback rounds continue review numbering so session scopes never collide", async (t) => {
-  const f = await fixture(t, { version: 1, toolsUsed: 20, reviewRound: 2 });
+test("a CI failure becomes an untrusted CI inbox item", async (t) => {
+  const f = await fixture(t);
   f.setInspection({
     draft: false,
-    feedback: [{ id: "devin-2", text: "Devin: typo" }],
+    checks: "failed",
+    feedback: [
+      { id: "ci:1:1:9", text: '{"job":"test","conclusion":"failure"}' },
+    ],
   });
   await f.auto.tick();
-  const queued = await f.job();
-  assert.equal(queued.checkpoint.piState!.reviewRound, 2);
-  assert.equal(queued.checkpoint.piState!.mrFeedback!.round, 1);
+  assert.equal((await f.job()).state, "queued");
+  const [item] = await inbox(f);
+  assert.equal(item.key, "inbox:gh:ci:1:1:9");
+  assert.equal(item.source, "ci");
 });
-
 test("an owner decision recorded mid-tick stands: Keep open is never undone by a check flap or new feedback", async (t) => {
   for (const change of [
     { checks: "pending" as const },
@@ -582,7 +598,7 @@ test("each Pi owner-merge feedback round gets a fresh active window even after t
 });
 
 test("a PR that conflicts with main is re-applied on current main with its approval carried over (interim, journal 180)", async (t) => {
-  const f = await fixture(t, { version: 1, toolsUsed: 20, reviewRound: 2 });
+  const f = await fixture(t, { version: 1, delivered: [] });
   const before = await f.job();
   await f.db.query(
     "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'owner-approved',$2::jsonb,'suppressed')",
@@ -608,11 +624,7 @@ test("a PR that conflicts with main is re-applied on current main with its appro
   assert.equal(queued.base_sha, moved);
   assert.deepEqual(queued.checkpoint.files, []);
   assert.equal(queued.checkpoint.plan, before.checkpoint.plan);
-  assert.deepEqual(queued.checkpoint.piState, {
-    version: 1,
-    toolsUsed: 20,
-    reviewRound: 2,
-  });
+  assert.deepEqual(queued.checkpoint.piState, { version: 1, delivered: [] });
   assert.equal(f.counts().merges, 0);
   const requirements = new CodingRequirements(
     f.db,
@@ -697,35 +709,7 @@ async function rebasedAttempt(f: Awaited<ReturnType<typeof fixture>>) {
       patch,
       piState: { ...job.checkpoint.piState },
     };
-    const hash = artifactHash(cp);
-    const identity = (intent: string, value: string) =>
-      createHash("sha256")
-        .update(
-          canonicalJson({
-            objective: job.objective,
-            context: job.context,
-            plan: cp.plan,
-            base: job.base_sha,
-            intent,
-            hash: value,
-          }),
-        )
-        .digest("hex");
-    cp.piState = {
-      ...cp.piState,
-      phase: "review",
-      reviewRound: 3,
-      reviewCandidate: {
-        hash,
-        checks: ["check", "build", "format:check"].map((s) => ({
-          command: `kite run ${s}`,
-          exitCode: 0,
-          output: "passed",
-        })),
-      },
-      scopeIdentity: identity("review", hash),
-      sessionScope: identity("review-session", `${hash}:3`),
-    };
+    cp.piState = { ...cp.piState, phase: "review" };
     return c.save(job, cp);
   };
   const recorded = async () =>
@@ -1175,10 +1159,10 @@ test("the owner's fix request on a stopped PR goes to the coder on the same PR",
   await f.auto.tick();
   const queued = await f.job();
   assert.equal(queued.state, "queued");
-  assert.match(
-    queued.checkpoint.piState!.mrFeedback!.text,
-    /Owner request: Keep the buttons when a tap fails\./,
-  );
+  // The owner's own words, labelled as the owner's (journal 192).
+  const [request] = await inbox(f);
+  assert.equal(request.source, "owner");
+  assert.equal(request.text, "Keep the buttons when a tap fails.");
   const handled = (
     await f.db.query(
       "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
@@ -1246,11 +1230,8 @@ test("a hard-stop PR never merges, even with an owner approval already recorded"
 });
 
 test("a fix request that a feedback round could not deliver is refused up front", async (t) => {
-  const f = await fixture(t, {
-    version: 1,
-    toolsUsed: 20,
-    mrFeedback: { round: 3, text: "Earlier feedback" },
-  });
+  const f = await fixture(t);
+  await priorRounds(f, 3);
   await f.db.query("UPDATE coding_jobs SET stage='manual_review' WHERE id=$1", [
     f.id,
   ]);

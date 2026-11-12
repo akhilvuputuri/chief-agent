@@ -514,7 +514,7 @@ export class GitHubPublisher implements RepositoryPublisher {
         head: branch,
         base: "main",
         draft: true,
-        body: `Prepared by Chief's isolated coding runtime.\n\nBase: \`${j.base_sha}\`\nArtifact: \`${artifactHash(j.result.checkpoint)}\`\n\nSandbox checks: ${j.result.checks.map((c) => `${c.command}: exit ${c.exitCode}`).join(", ")}.\n\nSandbox review: ${j.result.review?.verdict ?? "unavailable"} (${j.result.review?.model ?? "unknown"}). ${j.settings.autoMerge ? "Chief binds this independent squad review to the verified published Git tree and exact head; CI and MR feedback remain merge gates. There is no additional final review when the candidate is unchanged." : "This is a worker report; independent review of the published head and CI are still required."}\n\nPrivate request, traces and command output are retained outside this public PR.`,
+        body: `Prepared by Chief's isolated coding runtime.\n\nBase: \`${j.base_sha}\`\nArtifact: \`${artifactHash(j.result.checkpoint)}\`${j.result.checks.length ? `\n\nSandbox checks: ${j.result.checks.map((c) => `${c.command}: exit ${c.exitCode}`).join(", ")}.` : ""}\n\nSandbox review: ${j.result.review?.verdict ?? "unavailable"} (${j.result.review?.model ?? "unknown"}). ${j.settings.autoMerge ? "Chief binds this independent squad review to the verified published Git tree and exact head; CI and MR feedback remain merge gates. There is no additional final review when the candidate is unchanged." : "This is a worker report; independent review of the published head and CI are still required."}\n\nPrivate request, traces and command output are retained outside this public PR.`,
       },
       signal,
     );

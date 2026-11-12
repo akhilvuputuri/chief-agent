@@ -95,59 +95,35 @@ export const checkpoint = z
     summary: z.string().max(4000).default(""),
     squadState: squadState.optional(),
     runtimeMemory: runtimeMemory.optional(),
+    /** A Pi job's state between attempts (journal 192); the sessions themselves are stored apart. */
     piState: z
       .object({
         version: z.literal(1),
-        toolsUsed: z.number().int().min(0).max(5000),
         phase: z.enum(["build", "review"]).optional(),
-        reviewRound: z.number().int().min(1).max(1000).optional(),
-        rejectedCandidate: z
-          .string()
-          .regex(/^[a-f0-9]{64}$/)
-          .optional(),
-        reviewCandidate: z
+        /** Inbox events already in the coder's session. */
+        delivered: z.array(z.string().uuid()).default([]),
+        /** The candidate the reviewer last judged, so the next round reads what changed since. */
+        reviewed: z
           .object({
             hash: z.string().regex(/^[a-f0-9]{64}$/),
-            checks: z
-              .array(
-                z
-                  .object({
-                    command: z.string().max(100),
-                    exitCode: z.literal(0),
-                    output: z.string().max(8000),
-                  })
-                  .strict(),
-              )
-              .max(4),
+            base: z.string().regex(/^[a-f0-9]{40}$/),
+            patch: z.string().max(10_000_000),
           })
           .strict()
           .optional(),
-        sessionScope: z
-          .string()
-          .regex(/^[a-f0-9]{64}$/)
-          .optional(),
-        scopeIdentity: z
-          .string()
-          .regex(/^[a-f0-9]{64}$/)
-          .optional(),
-        findings: z.string().max(reportLimits.document).optional(),
-        /** Untrusted merge-request feedback for one owner-merge repair round. */
-        mrFeedback: z
-          .object({
-            round: z.number().int().min(1).max(3),
-            text: z.string().min(1).max(reportLimits.document),
-          })
-          .strict()
-          .optional(),
-        reportFailure: z.string().max(500).optional(),
         reportDocument: z
           .object({
             version: z.literal(1),
             hash: z.string().regex(/^[a-f0-9]{64}$/),
-            kind: z.enum(["learned", "plan", "question", "done", "review"]),
+            kind: z.enum(["done", "review", "ask"]),
             summary: z.string().max(reportLimits.summary),
             detail: z.string().max(reportLimits.document),
             verdict: z.enum(["APPROVE", "REQUEST_CHANGES"]).optional(),
+            ask: z.string().max(reportLimits.ask).optional(),
+            options: z
+              .array(z.string().min(1))
+              .max(reportLimits.options)
+              .optional(),
           })
           .strict()
           .refine((d) => {
@@ -180,7 +156,10 @@ export const outcome = z
     kind: z.enum(["awaiting_input", "candidate", "paused", "failed"]),
     summary: z.string().min(1).max(4000),
     question: z.string().max(2000).default(""),
+    /** Answers the owner can tap for a Pi ask (journal 192). */
+    options: z.array(z.string().min(1)).max(reportLimits.options).optional(),
     checkpoint,
+    /** Receipts from the legacy runtimes; a Pi coder runs the tests itself (journal 192). */
     checks: z
       .array(
         z

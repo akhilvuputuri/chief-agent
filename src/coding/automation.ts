@@ -29,6 +29,17 @@ const record = z
   })
   .strict();
 type Record = z.infer<typeof record>;
+/** Owner-merge feedback rounds so far: each is one requeue keyed `mr-feedback:` (journal 192). */
+export async function feedbackRounds(db: Database, jobId: string) {
+  return Number(
+    (
+      await db.query(
+        "SELECT count(*)::int AS n FROM coding_revisions WHERE job_id=$1 AND request_key LIKE 'mr-feedback:%'",
+        [jobId],
+      )
+    ).rows[0].n,
+  );
+}
 /** An owner decision or other writer changed the job after this tick read it; stop without writing. */
 class StageChanged extends Error {}
 const key = (revision: number) => `automation:${revision}`;
@@ -196,8 +207,7 @@ export class CodingAutomation {
   private async rebase(j: CodingJob, d: Record, main: string) {
     if (
       !/^[a-f0-9]{40}$/.test(main) ||
-      j.used_models >= j.settings.limits.models ||
-      (j.checkpoint.piState?.toolsUsed ?? 0) >= j.settings.limits.tools
+      j.used_models >= j.settings.limits.models
     ) {
       await this.manual(
         j,
@@ -225,13 +235,8 @@ export class CodingAutomation {
     // A fresh implementation on current main; whole-file contents from the old base are not reused.
     cp.files = [];
     cp.patch = "";
-    cp.piState = {
-      version: 1,
-      toolsUsed: cp.piState?.toolsUsed ?? 0,
-      ...(cp.piState?.reviewRound
-        ? { reviewRound: cp.piState.reviewRound }
-        : {}),
-    };
+    // Interim until stage D3's in-box rebase: the job's sessions continue on the new base.
+    cp.piState = { version: 1, delivered: cp.piState?.delivered ?? [] };
     const scope = requirementScope({ ...j, checkpoint: cp });
     const message = `The PR conflicts with main; re-applying on current main ${main}: approved plan carried over (owner policy, 17 October 2026)`;
     const changed = await this.db.query(
@@ -269,6 +274,7 @@ export class CodingAutomation {
     ).rows.map((r: { id: string; text: string }) => ({
       id: `owner:${r.id}`,
       text: `Owner request: ${r.text}`,
+      owner: r.text,
     }));
   }
   /** Keeps one answerable card for the current revision/head; lost or expired answers are re-offered. */
@@ -476,7 +482,7 @@ export class CodingAutomation {
         return;
       }
       if (
-        !approvedArtifact(j.result, j.settings.reviewerModel) ||
+        !approvedArtifact(j.result, j.settings) ||
         !(await this.reviewProof(j))
       ) {
         await this.manual(
@@ -521,9 +527,8 @@ export class CodingAutomation {
         if (
           (!freshRound && d.remainingMs <= 0) ||
           j.used_models >= j.settings.limits.models ||
-          (j.checkpoint.squadState?.toolsUsed ??
-            j.checkpoint.piState?.toolsUsed ??
-            0) >= j.settings.limits.tools ||
+          (j.checkpoint.squadState?.toolsUsed ?? 0) >=
+            j.settings.limits.tools ||
           d.handled.length + feedback.length > 200
         ) {
           await this.manual(
@@ -535,7 +540,7 @@ export class CodingAutomation {
         }
         const cp = structuredClone(j.checkpoint);
         const pi = j.settings.prWorkflow === "owner_merge" && cp.piState;
-        const round = (cp.piState?.mrFeedback?.round ?? 0) + 1;
+        const round = (await feedbackRounds(this.db, j.id)) + 1;
         if (!cp.squadState && !pi) {
           await this.manual(
             j,
@@ -569,17 +574,23 @@ export class CodingAutomation {
           return;
         }
         if (cp.squadState) cp.squadState.findings = text;
-        else
-          // A fresh coder round on the published candidate; reviewer state is not carried over.
-          cp.piState = {
-            version: 1,
-            toolsUsed: cp.piState!.toolsUsed,
-            // Continue review numbering so repair/review session scopes never collide.
-            ...(cp.piState!.reviewRound
-              ? { reviewRound: cp.piState!.reviewRound }
-              : {}),
-            mrFeedback: { round, text },
-          };
+        // A Pi job keeps its checkpoint and sessions: each item goes into the job's inbox,
+        // labelled by source, and reaches the same coder session (journal 192).
+        const inbox = pi
+          ? batch.map((item) => ({
+              key: `inbox:gh:${item.id}`,
+              payload: {
+                kind: "inbox",
+                source:
+                  "owner" in item
+                    ? "owner"
+                    : item.id.startsWith("ci:")
+                      ? "ci"
+                      : "review",
+                text: "owner" in item ? item.owner : item.text,
+              },
+            }))
+          : [];
         const handled = [...d.handled, ...batch.map((f) => f.id)];
         // An owner request is sent once: a retried or resumed round starts with no handled
         // list, and the request must not be fixed (and charged) again. It is marked in the
@@ -591,7 +602,7 @@ export class CodingAutomation {
           .update(JSON.stringify(handled))
           .digest("hex");
         await this.db.query(
-          `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='MR feedback returned to leader/coder; fresh independent review is required',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision), budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$5::jsonb,'remainingMs',$6::bigint),'suppressed' FROM changed RETURNING job_id), revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$7,$8,'implement' FROM changed RETURNING job_id), delivered AS (UPDATE coding_events SET payload=payload || jsonb_build_object('deliveredRound',$10::int) WHERE job_id IN (SELECT id FROM changed) AND id=ANY($11::uuid[]) RETURNING job_id) INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$7,jsonb_build_object('summary','MR feedback returned to coder; candidate approval is invalidated until fresh checks and review.') FROM changed ON CONFLICT DO NOTHING`,
+          `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='MR feedback returned to leader/coder; fresh independent review is required',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision), budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$5::jsonb,'remainingMs',$6::bigint),'suppressed' FROM changed RETURNING job_id), revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$7,$8,'implement' FROM changed RETURNING job_id), delivered AS (UPDATE coding_events SET payload=payload || jsonb_build_object('deliveredRound',$10::int) WHERE job_id IN (SELECT id FROM changed) AND id=ANY($11::uuid[]) RETURNING job_id), inboxed AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT changed.id,x.key,x.payload,'suppressed' FROM changed, jsonb_to_recordset($12::jsonb) AS x(key text, payload jsonb) ON CONFLICT DO NOTHING RETURNING job_id) INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$7,jsonb_build_object('summary','MR feedback returned to coder; candidate approval is invalidated until fresh checks and review.') FROM changed ON CONFLICT DO NOTHING`,
           [
             j.id,
             j.lease,
@@ -604,6 +615,7 @@ export class CodingAutomation {
             j.stage,
             round,
             sent,
+            JSON.stringify(inbox),
           ],
         );
         return;

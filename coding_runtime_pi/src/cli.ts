@@ -3,8 +3,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { resolve, join } from "node:path";
-import { tmpdir } from "node:os";
-import { serveRpc } from "./rpc.js";
 import {
   CodingRuntime,
   TaskStore,
@@ -27,6 +25,15 @@ if (!stateKey || stateKey.length < 32)
   );
 delete process.env.PI_RUNTIME_STATE_KEY;
 delete process.env.PI_RUNTIME_API_KEY;
+const git = (...gitArgs: string[]) =>
+  promisify(execFile)("git", gitArgs, {
+    env: {
+      PATH: process.env.PATH,
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+    },
+  });
 const runtime = new CodingRuntime({
   store: new TaskStore(join(state, "tasks"), stateKey),
   model: anthropicModel({
@@ -35,66 +42,50 @@ const runtime = new CodingRuntime({
     baseUrl: value("--base-url"),
     reasoning: "high",
   }),
-  executor: args.includes("--local-execution")
-    ? (task) =>
-        localExecutor(task.workspace, join(state, "tool-homes", task.id))
-    : undefined,
+  executor: (task) => {
+    // Generated commands run with this user's permissions; the flag makes that explicit.
+    if (!args.includes("--local-execution"))
+      throw new Error(
+        "Generated commands need --local-execution; use an isolated container for untrusted source",
+      );
+    return localExecutor(task.workspace, join(state, "tool-homes", task.id));
+  },
   onEvent: async (_task, event) => {
     process.stderr.write(JSON.stringify(event) + "\n");
   },
 });
 try {
   let result: unknown;
-  if (command === "rpc") {
-    await serveRpc(runtime, process.stdin, process.stdout);
-    process.exitCode = 0;
-  } else if (command === "start") {
-    if (!args[0] || !args[1])
+  if (command === "start") {
+    if (!args[0])
       throw new Error(
-        "Usage: pi-runtime start REPOSITORY OBJECTIVE [--mode learn|plan] [--check COMMAND] [--state DIRECTORY]",
+        "Usage: pi-runtime start REPOSITORY [--role coder|reviewer] [--state DIRECTORY]",
       );
     await mkdir(join(state, "workspaces"), { recursive: true, mode: 0o700 });
     const workspace = await mkdtemp(join(state, "workspaces", "task-"));
-    await promisify(execFile)(
-      "git",
-      ["clone", "--no-hardlinks", "--", args[0], workspace],
-      {
-        env: {
-          PATH: process.env.PATH,
-          GIT_TERMINAL_PROMPT: "0",
-          GIT_CONFIG_NOSYSTEM: "1",
-          GIT_CONFIG_GLOBAL: "/dev/null",
-        },
-      },
-    );
-    const mode = value("--mode", "plan");
-    if (mode !== "plan" && mode !== "learn")
-      throw new Error("Initial mode must be learn or plan");
-    const checks = args.flatMap((v, i) =>
-      v === "--check" && args[i + 1] ? [args[i + 1]!] : [],
-    );
-    result = await runtime.start({
-      workspace,
-      objective: args[1],
-      intent: mode,
-      checks,
-    });
-  } else if (command === "run") result = await runtime.run(args[0]!);
-  else if (command === "status") result = await runtime.inspect(args[0]!);
-  else if (command === "approve")
-    result = await runtime.approve(args[0]!, Number(args[1]), args[2]!);
-  else if (command === "reply")
-    result = await runtime.reply(args[0]!, Number(args[1]), args[2]!);
-  else if (command === "resume") result = await runtime.resume(args[0]!);
+    await git("clone", "--no-hardlinks", "--", args[0], workspace);
+    const base = (
+      await git("-C", workspace, "rev-parse", "HEAD")
+    ).stdout.trim();
+    const role = value("--role", "coder");
+    if (role !== "coder" && role !== "reviewer")
+      throw new Error("Role must be coder or reviewer");
+    result = await runtime.start({ workspace, role, base });
+  } else if (command === "run") {
+    if (!args[0] || !args[1])
+      throw new Error(
+        "Usage: pi-runtime run TASK_ID MESSAGE [--state DIRECTORY]",
+      );
+    result = await runtime.run(args[0], args[1]);
+  } else if (command === "status") result = await runtime.inspect(args[0]!);
   else if (command === "cancel") {
     await runtime.cancel(args[0]!);
     result = { cancelled: true };
   } else
     throw new Error(
-      "Commands: start, run, status, approve, reply, resume, cancel. Model credentials use PI_RUNTIME_API_KEY. Local generated commands require --local-execution; use an isolated container for untrusted source.",
+      "Commands: start, run, status, cancel. Model credentials use PI_RUNTIME_API_KEY. Local generated commands require --local-execution; use an isolated container for untrusted source.",
     );
-  if (command !== "rpc")
-    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+  process.stdout.write(JSON.stringify(result, null, 2) + "\n");
 } catch (error) {
   process.stderr.write(
     (error instanceof Error ? error.message : "Runtime operation failed") +

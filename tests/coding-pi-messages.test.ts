@@ -13,6 +13,7 @@ import {
   TaskStore,
   anthropicModel,
   localExecutor,
+  reportReminder,
 } from "@chief-agent/pi-runtime";
 import { AnthropicMessagesGateway, anthropicUsage } from "../src/anthropic.js";
 import { GATEWAY_RETRY } from "../src/coding/pi-worker.js";
@@ -742,8 +743,6 @@ async function throughHost(
     workspaceId?: string;
     /** A small window makes Pi compact. */
     contextWindow?: number;
-    /** After the plan, approve it and run the build phase too. */
-    build?: boolean;
   } = {},
 ) {
   const upstream: { headers: Record<string, unknown>; body: any }[] = [];
@@ -847,23 +846,17 @@ async function throughHost(
         ? { retry: { maxRetries: 8, baseDelayMs: 200 } }
         : {}),
     }),
-    ...(options.build
-      ? {
-          executor: (task: { workspace: string }) =>
-            localExecutor(task.workspace, join(root, "home")),
-        }
-      : {}),
+    executor: (task: { workspace: string }) =>
+      localExecutor(task.workspace, join(root, "home")),
   });
   const task = await runtime.start({
     workspace,
-    objective: "Plan the synthetic fix",
-    ...(options.build ? { checks: ["node --check sum.js"] } : {}),
+    role: "coder",
+    base: execFileSync("git", ["-C", workspace, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim(),
   });
-  let result = await runtime.run(task.id);
-  if (options.build && result.status === "waiting_approval") {
-    await runtime.approve(task.id, result.plan!.revision, result.plan!.hash);
-    result = await runtime.run(task.id);
-  }
+  const result = await runtime.run(task.id, "Fix the synthetic sum");
   for (let i = 0; i < 200; i++) {
     if (!(await f.row(job.id)).model_busy) break;
     await delay(10);
@@ -881,8 +874,8 @@ const sse = (res: ServerResponse, turn: FakeTurn) => {
   res.writeHead(200, { "content-type": "text/event-stream" });
   res.end(messagesStream(turn));
 };
-const planReport = toolUse("toolu_report", "report", {
-  kind: "plan",
+const doneReport = toolUse("toolu_report", "report", {
+  kind: "done",
   summary: "Fix café sum",
   detail: "Use addition in sum.js and check sum(2,3)=5.",
 });
@@ -901,7 +894,7 @@ test("through the host, Pi resends the first response's content blocks byte for 
       id: "msg_second",
       content: [
         { type: "thinking", thinking: "Summary", signature: "c2Vjb25k" },
-        planReport,
+        doneReport,
       ],
     },
   ];
@@ -909,7 +902,7 @@ test("through the host, Pi resends the first response's content blocks byte for 
     t,
     (n, _body, res) => sse(res, turns[n - 1]!),
   );
-  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(result.status, "completed", result.summary);
   assert.equal(upstream.length, 2);
   // The second request carries the first response's blocks exactly as Anthropic sent them.
   const replayed = upstream[1]!.body.messages.filter(
@@ -964,12 +957,12 @@ test("a 429 mid-session is retried by Pi's stock retry and the session carries o
         content: [
           n === 1
             ? toolUse("toolu_read", "read", { path: "sum.js" })
-            : planReport,
+            : doneReport,
         ],
       });
     },
   );
-  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(result.status, "completed", result.summary);
   assert.equal(upstream.length, 3);
   // The retry is the same request: the failed call never entered the session.
   assert.deepEqual(upstream[2]!.body.messages, upstream[1]!.body.messages);
@@ -1001,12 +994,12 @@ test("an image the model reads reaches Anthropic as an image block", async (t) =
         content: [
           n === 1
             ? toolUse("toolu_img", "read", { path: "pixel.png" })
-            : planReport,
+            : doneReport,
         ],
       }),
     { "pixel.png": png },
   );
-  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(result.status, "completed", result.summary);
   const results = upstream[1]!.body.messages.flatMap((m: any) =>
     Array.isArray(m.content)
       ? m.content.filter((b: any) => b.type === "tool_result")
@@ -1078,13 +1071,13 @@ test("a body field the SDK would turn into a header never reaches Anthropic, and
         content: [
           n === 1
             ? toolUse("toolu_read", "read", { path: "sum.js" })
-            : planReport,
+            : doneReport,
         ],
       }),
     {},
     { workspaceId: "wrkspc_host" },
   );
-  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(result.status, "completed", result.summary);
   for (const { headers } of upstream)
     assert.equal(headers["anthropic-workspace-id"], "wrkspc_host");
   // A forged request with workspace_id in the body is refused before any call.
@@ -1197,13 +1190,13 @@ test("a host that refuses connections for a while (a gateway restart) does not e
         content: [
           n === 1
             ? toolUse("toolu_read", "read", { path: "sum.js" })
-            : planReport,
+            : doneReport,
         ],
       }),
     {},
     { outageMs: 1500 },
   );
-  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(result.status, "completed", result.summary);
   assert.equal(upstream.length, 2);
 });
 
@@ -1255,7 +1248,7 @@ test("1-hour cache writes are priced at twice the input price", () => {
   );
 });
 
-test("a real Pi session's final-report phase and compaction call pass the host's allowlists", async (t) => {
+test("a real Pi session's report reminder and Pi's own compaction call pass the host's allowlists", async (t) => {
   const rejections = async (f: {
     db: { query: (sql: string) => Promise<any> };
   }) =>
@@ -1264,31 +1257,24 @@ test("a real Pi session's final-report phase and compaction call pass the host's
         "SELECT payload FROM coding_events WHERE payload->>'kind'='worker_request_rejected'",
       )
     ).rows;
-  // (a) A turn that ends in prose without a report: the runtime asks for the report with the
-  // final-report phase, which Pi sends as a mid-conversation system message.
-  let finalPhase = false;
-  const planned = await throughHost(t, (_n, body, res) => {
-    finalPhase ||= JSON.stringify(body.messages).includes(
-      "Host workflow phase: final report",
-    );
+  // (a) A turn that ends in prose without a report: the runtime sends one reminder in the
+  // same session, as an ordinary user message (journal 192).
+  let reminded = false;
+  const prose = await throughHost(t, (_n, body, res) => {
+    reminded ||= JSON.stringify(body.messages).includes(reportReminder);
     sse(res, {
       content: [
-        finalPhase
-          ? planReport
+        reminded
+          ? doneReport
           : { type: "text", text: "sum.js subtracts; it should add." },
       ],
     });
   });
-  assert(finalPhase, "Pi sent the final-report phase");
-  assert.equal(
-    planned.result.status,
-    "waiting_approval",
-    planned.result.summary,
-  );
-  assert.deepEqual(await rejections(planned.f), []);
+  assert(reminded, "Pi sent the reminder");
+  assert.equal(prose.result.status, "completed", prose.result.summary);
+  assert.deepEqual(await rejections(prose.f), []);
   // (b) A build whose reported context fills a small window: Pi makes a summary call.
   let compactions = 0;
-  let building = false;
   let turns = 0;
   const built = await throughHost(
     t,
@@ -1307,20 +1293,17 @@ test("a real Pi session's final-report phase and compaction call pass the host's
         return;
       }
       turns++;
-      building ||= turns > 1;
       sse(res, {
         content: [
-          !building
-            ? planReport
-            : compactions > 0
-              ? toolUse("toolu_done", "report", {
-                  kind: "done",
-                  summary: "Done",
-                  detail: "Synthetic build finished after compaction.",
-                })
-              : toolUse(`toolu_b${turns}`, "read", { path: "sum.js" }),
+          compactions > 0
+            ? toolUse("toolu_done", "report", {
+                kind: "done",
+                summary: "Done",
+                detail: "Synthetic build finished after compaction.",
+              })
+            : toolUse(`toolu_b${turns}`, "read", { path: "sum.js" }),
         ],
-        usage: { input_tokens: building ? 35000 : 100, output_tokens: 100 },
+        usage: { input_tokens: 35000, output_tokens: 100 },
       });
     },
     // A large file, so each read fills the small window.
@@ -1332,7 +1315,7 @@ test("a real Pi session's final-report phase and compaction call pass the host's
             `export const rule_${i} = ${JSON.stringify({ id: i, text: "Retain the documented validation behavior and source evidence across context maintenance." })};`,
         ).join("\n") + "\n",
     },
-    { contextWindow: 40000, build: true },
+    { contextWindow: 40000 },
   );
   assert(compactions > 0, "Pi made a compaction call");
   assert.deepEqual(await rejections(built.f), []);

@@ -25,19 +25,19 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Workspace, type Executor } from "./workspace.js";
-import { reportLimits, reportDocument } from "./report.js";
-import type { Report, Intent } from "./types.js";
+import { reportLimits, reportDocument, type ReportDocument } from "./report.js";
+import type { Report, Role } from "./types.js";
 
 /**
  * Pi's own tools, confined to the workspace through Pi's tool `operations` options. Execution
- * mode, output truncation and bash timeouts are Pi's defaults (journal 182).
+ * mode, output truncation and bash timeouts are Pi's defaults (journal 182). The reviewer has
+ * no edit or write; its shell runs in its own copy (journal 192).
  */
 export function tools(
   workspace: Workspace,
-  intent: Intent,
+  role: Role,
   execute: Executor | undefined,
-  report: (r: Report) => void,
-  admit: (name: string) => Promise<void>,
+  report: (r: ReportDocument) => void,
   /** Where Pi writes full output it truncated; `read` alone may open files directly in it. */
   outputs?: string,
 ): ToolDefinition<any, any>[] {
@@ -109,14 +109,11 @@ export function tools(
       },
     }),
   ];
-  // A candidate reviewer works in a disposable copy, so it may run commands to test the
-  // candidate. Its edits never reach the artifact, which comes from the coder's workspace.
-  if (intent === "review" && execute) list.push(bash(cwd, execute));
-  if (intent === "build") {
-    if (!execute)
-      throw new Error(
-        "Build requires an explicitly supplied isolated command executor",
-      );
+  if (!execute)
+    throw new Error("A coding session needs an isolated command executor");
+  // The reviewer works in a disposable copy, so it may run commands to test the candidate.
+  // Its edits never reach the artifact, which comes from the coder's workspace.
+  if (role === "coder") {
     list.push(
       createEditToolDefinition(cwd, {
         operations: {
@@ -136,57 +133,44 @@ export function tools(
         },
       }),
     );
-    list.push(bash(cwd, execute));
   }
-  const reportKinds =
-    intent === "learn"
-      ? ["learned", "question"]
-      : intent === "plan"
-        ? ["plan", "question"]
-        : intent === "review"
-          ? ["review", "question"]
-          : ["done", "question"];
+  list.push(bash(cwd, execute));
+  const result = role === "coder" ? "done" : "review";
   list.push({
     name: "report",
     label: "Report",
-    description: `Required final result for ${intent}: use kind ${reportKinds[0]}, or question if blocked. Review reports require verdict APPROVE or REQUEST_CHANGES. Full plan/review documents fit within ${reportLimits.document} characters; summary is a separate status field of at most ${reportLimits.summary} characters. Questions fit within ${reportLimits.question} characters. Reporting does not approve work or mark checks passed.`,
+    description: `Hands your result to Chief and ends your turn. Use kind ${result}${role === "reviewer" ? " with verdict APPROVE or REQUEST_CHANGES" : ""} when finished: summary (at most ${reportLimits.summary} characters) and detail (the full ${role === "coder" ? "account of what you changed and how you tested it" : "findings"}, at most ${reportLimits.document} characters). Use kind ask only when you need the owner: ask is one short question of at most ${reportLimits.ask} characters, with up to ${reportLimits.options} options the owner can tap; put any background in detail.`,
     parameters: Type.Object({
-      kind: Type.Union(reportKinds.map((v) => Type.Literal(v))),
-      summary: Type.String({
-        minLength: 1,
-        maxLength: reportLimits.summary,
-      }),
-      detail: Type.String({ minLength: 1, maxLength: reportLimits.document }),
-      verdict: Type.Optional(
-        Type.Union([Type.Literal("APPROVE"), Type.Literal("REQUEST_CHANGES")]),
-      ),
+      kind: Type.Union([Type.Literal(result), Type.Literal("ask")]),
+      summary: Type.String({ minLength: 1 }),
+      detail: Type.Optional(Type.String()),
+      ...(role === "reviewer"
+        ? {
+            verdict: Type.Optional(
+              Type.Union([
+                Type.Literal("APPROVE"),
+                Type.Literal("REQUEST_CHANGES"),
+              ]),
+            ),
+          }
+        : {}),
+      ask: Type.Optional(Type.String()),
+      options: Type.Optional(Type.Array(Type.String())),
     }),
     execute: async (_id, input) => {
       const r = input as Report;
-      if (!reportKinds.includes(r.kind) || (r.kind === "review" && !r.verdict))
-        throw new Error("Report does not match this task intent");
-      const document = reportDocument(r);
-      report(document);
+      if (r.kind !== result && r.kind !== "ask")
+        throw new Error(`Use kind ${result} or ask`);
+      report(reportDocument(r));
       return {
-        content: [
-          {
-            type: "text",
-            text: "Report recorded; the host validates state, checks and authority.",
-          },
-        ],
+        content: [{ type: "text", text: "Report recorded." }],
         details: {},
+        // Pi's own early termination: the run ends after this tool batch.
+        terminate: true,
       };
     },
   });
-  return list.map((tool) => ({
-    ...tool,
-    execute: async (
-      ...args: Parameters<ToolDefinition<any, any>["execute"]>
-    ) => {
-      await admit(tool.name);
-      return tool.execute(...args);
-    },
-  }));
+  return list;
 }
 
 /**

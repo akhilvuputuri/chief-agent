@@ -212,59 +212,41 @@ export class Workspace {
       }
     }
   }
-  /** Removes dependency links the base does not track, so checks install and use their own. */
-  async removeDependencyLinks(
-    execute: Executor,
-    signal: AbortSignal,
-    base: string,
-  ) {
-    const found = await execute(
-      "find . -name node_modules -type l -not -path './.git/*' -print0",
-      signal,
-      30000,
-      2_000_000,
-    );
-    if (found.exitCode !== 0 || found.truncated)
-      throw new Error("Dependency links could not be listed");
-    const quote = (value: string) =>
-      "'" + value.replaceAll("'", "'\"'\"'") + "'";
-    for (const link of found.output.split("\0").filter(Boolean)) {
-      const path = link.replace(/^\.\//, "");
-      const tracked = await execute(
-        `git --literal-pathspecs ls-tree --name-only ${quote(base)} -- ${quote(path)}`,
-        signal,
-        30000,
-      );
-      if (tracked.exitCode !== 0)
-        throw new Error("Dependency links could not be checked");
-      if (tracked.output.trim()) continue;
-      const removed = await execute(`rm -f -- ${quote(path)}`, signal, 30000);
-      if (removed.exitCode !== 0)
-        throw new Error("A dependency link could not be removed");
-    }
-  }
-  /** Diffs the staged tree against the pinned base, so agent commits never hide changes. */
+  /**
+   * Diffs the staged tree against the job's base commit, never against HEAD, so commits the
+   * model makes never hide or change the candidate.
+   */
   async snapshot(
     execute: Executor,
     signal: AbortSignal,
-    pinned?: string,
+    base: string,
   ): Promise<Artifact> {
-    if (pinned !== undefined && !/^[a-f0-9]{40}$/.test(pinned))
+    if (!/^[a-f0-9]{40}$/.test(base))
       throw new Error("Artifact base must be a full commit SHA");
     const quote = (value: string) =>
       "'" + value.replaceAll("'", "'\"'\"'") + "'";
     const run = async (args: string[], max = 20_000_000) => {
+      // No time limit: a large repository is slow, not stuck; cancellation still stops it.
+      // The output bound guards memory.
       const result = await execute(
-        ["git", "-c", "core.hooksPath=/dev/null", ...args].map(quote).join(" "),
+        [
+          "git",
+          "-c",
+          "core.hooksPath=/dev/null",
+          "-c",
+          "core.fsmonitor=false",
+          ...args,
+        ]
+          .map(quote)
+          .join(" "),
         signal,
-        120000,
+        undefined,
         max,
       );
       if (result.exitCode !== 0 || result.truncated)
         throw new Error("Git artifact operation failed or exceeded its bound");
       return result.output;
     };
-    const base = pinned ?? (await run(["rev-parse", "HEAD"])).trim();
     await run(["add", "-A"]);
     // `.gitignore`'s `node_modules/` does not match a link, and a dependency link is never
     // an artifact. Matching the base drops an added one and keeps one the repository tracks.

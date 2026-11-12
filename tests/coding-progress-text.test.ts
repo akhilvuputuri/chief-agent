@@ -5,29 +5,18 @@ import { fixture } from "./helpers/coding-fixture.js";
 
 test("the worker's internal progress labels are shown to the owner in plain words", () => {
   for (const [from, to] of [
-    ["Pi plan: Running plan", "Planning started"],
-    ["Pi plan: waiting_approval", "Plan ready for your approval"],
-    ["Pi plan: paused", "Planning paused"],
-    ["Pi build: Running build", "Implementation started"],
-    ["Pi build: completed", "Implementation completed"],
-    ["Pi review: Running review", "Review started"],
-    ["Pi review: failed", "Review failed"],
-    ["Pi plan: waiting_input", "Planning needs your answer"],
-    ["Pi build: cancelled", "Implementation cancelled"],
-    ["Pi build: ready", "Implementation ready"],
-    ["Pi learn: Running learn", "Learning started"],
-    ["Pi check: kite ci: 0", "Check passed: kite ci"],
-    ["Pi check: kite run check: 1", "Check failed: kite run check (exit 1)"],
-    ["Pi check: kite run build", "Check: kite run build"],
-    ["Pi check: kite ci: 0 in 1.4s", "Check passed: kite ci in 1.4 s"],
+    ["Pi coder: Running", "Coding started"],
+    ["Pi coder: completed", "Coding completed"],
+    ["Pi coder: waiting_input", "Coding needs your answer"],
+    ["Pi coder: cancelled", "Coding cancelled"],
+    ["Pi reviewer: Running", "Review started"],
+    ["Pi reviewer: failed", "Review failed"],
     [
-      "Pi check: kite run check: 1 in 62.0s",
-      "Check failed: kite run check (exit 1) in 62.0 s",
+      "Pi coder: The model call failed after Pi's retries; the session is kept",
+      "Coding: The model call failed after Pi's retries; the session is kept",
     ],
-    [
-      "Pi plan: Requesting one structured final report",
-      "Planning: Requesting one structured final report",
-    ],
+    // Labels from workers before journal 192 are shown as they are.
+    ["Pi build: Running build", "Pi build: Running build"],
     ["Owner asked to continue", "Owner asked to continue"],
   ])
     assert.equal(ownerProgress(from), to);
@@ -41,10 +30,10 @@ test("progress is stored in owner wording, and a retried report still matches", 
   const report = {
     key: "pi:task:1",
     stage: "implementing",
-    summary: "Pi check: kite run check: 0",
+    summary: "Pi coder: Running",
   };
   assert.deepEqual(await f.c.progress(j, report), { accepted: true });
-  assert.equal((await f.row(job.id)).summary, "Check passed: kite run check");
+  assert.equal((await f.row(job.id)).summary, "Coding started");
   // The same report again is an idempotent retry, not a key conflict.
   assert.deepEqual(await f.c.progress(j, report), { accepted: true });
   const event = (
@@ -53,7 +42,7 @@ test("progress is stored in owner wording, and a retried report still matches", 
       [job.id, `${j.attempt_id}:pi:task:1`],
     )
   ).rows[0].payload;
-  assert.equal(event.summary, "Check passed: kite run check");
+  assert.equal(event.summary, "Coding started");
 });
 
 test("a retry of a progress report stored before the owner wording still matches", async (t) => {
@@ -64,7 +53,7 @@ test("a retry of a progress report stored before the owner wording still matches
   const report = {
     key: "pi:task:7",
     stage: "implementing",
-    summary: "Pi build: Running build",
+    summary: "Pi coder: Running",
   };
   // Stored by the previous host version, in the worker's own words.
   await f.db.query(

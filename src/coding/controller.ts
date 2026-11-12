@@ -2,7 +2,7 @@ import { ToolValidationError } from "../tool-errors.js";
 import { PiSessions } from "./pi-sessions.js";
 import { z } from "zod";
 import { reviewMetadata, completePlanDelivered } from "./review-proof.js";
-import { CodingAutomation } from "./automation.js";
+import { CodingAutomation, feedbackRounds } from "./automation.js";
 import { codingDiagnostics } from "./diagnostics.js";
 import {
   modelPreferences,
@@ -99,7 +99,7 @@ function storableCheckpoint<T extends Checkpoint>(c: T, findings?: string): T {
     findings: findings ?? null,
     // Text the host compares with the document must not lose characters either.
     ...(document
-      ? { document, plan: c.plan, reviewFindings: c.piState?.findings ?? null }
+      ? { document, plan: c.plan, reviewed: c.piState?.reviewed?.patch ?? null }
       : {}),
   };
   if (canonicalJson(storable(exact)) !== canonicalJson(exact))
@@ -114,21 +114,6 @@ const hash = (v: unknown) =>
   createHash("sha256").update(canonicalJson(v)).digest("hex");
 /** The longest one Pi attempt runs, inside the box task's four-hour deadline. */
 const PI_ATTEMPT_MS = 10_800_000;
-/** The identity a Pi worker derives for a phase or session of this job's approved work. */
-const piIdentity = (
-  job: CodingJob,
-  plan: string,
-  intent: string,
-  value: string,
-) =>
-  hash({
-    objective: job.objective,
-    context: job.context,
-    plan,
-    base: job.base_sha,
-    intent,
-    hash: value,
-  });
 /**
  * Progress-only coding notices (`e` a coding_events row, `j` its job), folded into the
  * status message: worker progress, automatic retry/rebase/feedback re-queues, the approved
@@ -470,9 +455,6 @@ export class CodingController {
             },
           }
         : {}),
-      ...(stored.checkpoint.piState?.reportFailure
-        ? { reportFailure: stored.checkpoint.piState.reportFailure }
-        : {}),
       ...(modelProgress
         ? {
             modelProgress: {
@@ -774,6 +756,15 @@ export class CodingController {
       job.settings.prWorkflow === "owner_merge"
     )
       return this.requestPrChanges(user, job, a);
+    // After Start a Pi job's messages go into its inbox (journal 192); the request and its
+    // approval stay as they are.
+    if (
+      a.operation === "coding_reply" &&
+      job.mode === "implement" &&
+      job.settings.runtime === "pi" &&
+      job.state !== "pr_ready"
+    )
+      return this.followUp(user, job, a);
     if (
       a.operation === "coding_resume" &&
       job.state === "plan_ready" &&
@@ -855,33 +846,22 @@ export class CodingController {
     await this.assertFreshOrConfirmed(job, a, RESTARTABLE);
     // A message from the owner is appended to the request, and the job waits for a new Start
     // card: the old card's scope no longer matches, so it cannot start the changed request.
-    // After Start this is interim (journal 191): a stopped job returns to a Start card.
-    // The worker's session and review identities hash the request, so a changed request starts
-    // its build phase afresh: the files, patch and tool count are kept, the review and session
-    // state is not (otherwise review recovery would refuse the changed identity).
-    const pi = job.checkpoint.piState;
+    // Before Start for a Pi job (after Start it goes to the inbox above, journal 192); the
+    // legacy runtimes still return a stopped job to a Start card (journal 191).
+    // A started Pi job never comes back here, so no session or review state needs dropping:
+    // the job has no piState before Start, and after Start the request never changes.
     const followUp =
       a.operation === "coding_reply"
         ? ({
             ...job,
             revision: job.revision + 1,
             context: `${job.context}\nOwner follow-up: ${message}`,
-            checkpoint: pi
-              ? {
-                  ...job.checkpoint,
-                  piState: {
-                    version: 1,
-                    toolsUsed: pi.toolsUsed,
-                    ...(pi.mrFeedback ? { mrFeedback: pi.mrFeedback } : {}),
-                  },
-                }
-              : job.checkpoint,
           } as CodingJob)
         : undefined;
     const changed = followUp
       ? await this.db.query(
           `WITH changed AS (
-      UPDATE coding_jobs SET revision=revision+1,mode='plan',context=$5,checkpoint=$10::jsonb,state='plan_ready',stage='awaiting_start',summary='Waiting for the owner to tap Start',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
+      UPDATE coding_jobs SET revision=revision+1,mode='plan',context=$5,state='plan_ready',stage='awaiting_start',summary='Waiting for the owner to tap Start',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
       WHERE id=$1 AND user_id=$2 AND revision=$3 AND context=$8 AND checkpoint=$9::jsonb AND ${RESTARTABLE} RETURNING id,revision,mode
     ), revised AS (
       INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$6,$4,mode FROM changed RETURNING job_id
@@ -896,7 +876,6 @@ export class CodingController {
             JSON.stringify(startCard(followUp)),
             job.context,
             JSON.stringify(job.checkpoint),
-            JSON.stringify(followUp.checkpoint),
           ],
         )
       : await this.db.query(
@@ -927,53 +906,10 @@ export class CodingController {
       );
     return this.status(user, a.id);
   }
-  /** The checkpoint state that restarts the current step, when that step's model changed. */
-  private freshSession(
-    job: CodingJob,
-    next: CodingSettings,
-    requestKey: string,
-  ) {
-    const pi = job.checkpoint.piState;
-    if (!pi?.sessionScope) return undefined;
-    // An earlier report failure would hold the new model to finishing a session it never saw.
-    const { reportFailure: _earlier, ...kept } = pi;
-    if (pi.phase === "review") {
-      const candidate = pi.reviewCandidate;
-      const round = pi.reviewRound;
-      if (
-        job.settings.reviewerModel === next.reviewerModel ||
-        // A rejected candidate goes to the coder's repair session next, not to a review.
-        (pi.reportDocument?.kind === "review" &&
-          pi.reportDocument.verdict === "REQUEST_CHANGES") ||
-        !candidate ||
-        !round ||
-        round >= 1000
-      )
-        return undefined;
-      // The host binds a review session to its candidate and round, so a fresh one is a new round.
-      return {
-        ...kept,
-        reviewRound: round + 1,
-        sessionScope: piIdentity(
-          job,
-          job.checkpoint.plan,
-          "review-session",
-          `${candidate.hash}:${round + 1}`,
-        ),
-      };
-    }
-    const changed =
-      pi.phase === "build" &&
-      job.mode === "implement" &&
-      job.settings.model !== next.model;
-    return changed
-      ? { ...kept, sessionScope: hash([pi.sessionScope, requestKey]) }
-      : undefined;
-  }
   /**
    * The owner changes who carries out a stopped job, or how long it may run. The requirements
-   * are untouched, so their approval stands. A session under a changed model starts fresh on
-   * the same files, because continuing another model's session is untested.
+   * are untouched, so their approval stands. A Pi session continues under the new model: Pi
+   * switches models inside a session as shipped (journal 192).
    */
   private async updateJob(
     user: string,
@@ -1044,12 +980,7 @@ export class CodingController {
     ].filter(([, from, to]) => from !== to);
     if (!changes.length)
       throw new ToolValidationError("The job already has these settings");
-    if (
-      Math.max(
-        job.checkpoint.piState?.toolsUsed ?? 0,
-        job.checkpoint.squadState?.toolsUsed ?? 0,
-      ) > next.limits.tools
-    )
+    if ((job.checkpoint.squadState?.toolsUsed ?? 0) > next.limits.tools)
       throw new ToolValidationError(
         "The tool-call limit is below what this job has already used",
       );
@@ -1066,11 +997,7 @@ export class CodingController {
     this.assertDirectPiModels(next, "The job was not changed.");
     // Pi's own catalogue gives each Claude model's window (journal 190); none is snapshotted.
     delete (next as { contextWindows?: unknown }).contextWindows;
-    const piState = this.freshSession(job, next, a.requestKey);
-    const restarted = !!piState;
-    const checkpoint = piState
-      ? { ...job.checkpoint, piState }
-      : job.checkpoint;
+    const checkpoint = job.checkpoint;
     const approved =
       job.mode === "implement" && (await this.requirements.approved(job));
     // A job waiting for Start shows its models on the Start card, so a model change replaces
@@ -1105,12 +1032,11 @@ export class CodingController {
           kind: "settings_change",
           request,
           changes: changes.map(([field, from, to]) => ({ field, from, to })),
-          sessionRestarted: restarted,
           summary: `Job settings changed at your request. ${changes
             .map(([field, from, to]) => `${field}: ${from} → ${to}`)
             .join(
               "; ",
-            )}.${restarted ? " That step restarts in a fresh session; finished work is kept." : ""}${approved ? " Your Start of the request still stands." : ""}${
+            )}.${approved ? " Your Start of the request still stands." : ""}${
             waiting
               ? recard
                 ? " A new Start card follows; tap Start on it to begin."
@@ -1130,6 +1056,68 @@ export class CodingController {
       );
     opsLog("coding.settings_changed", "info", { ref: job.id });
     return this.status(user, a.id);
+  }
+  /**
+   * An owner message after Start (journal 192) becomes one inbox item for the coder. It never
+   * changes the approved request, so the Start stands and no new card is needed. A running
+   * job gets it at the coder's next turn boundary; a stopped one (a question, a pause, a
+   * failure) is queued again with its work and sessions, and the message is the first thing
+   * its coder reads. An answer to the job's question is labelled as that answer.
+   */
+  private async followUp(
+    user: string,
+    job: CodingJob & { question?: string },
+    a: Extract<CodingAction, { operation: "coding_reply" }>,
+  ) {
+    const key = `inbox:reply:${a.requestKey}`;
+    const prior = (
+      await this.db.query(
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
+        [job.id, key],
+      )
+    ).rows[0];
+    if (prior) {
+      if (prior.payload.text !== a.message)
+        throw new ToolValidationError("Coding revision request key conflict");
+      return this.status(user, job.id);
+    }
+    if (job.revision !== a.baseRevision)
+      throw new ToolValidationError(
+        "Coding revision changed; read coding_status and retry with the current revision",
+      );
+    const asked = job.state === "awaiting_input" && !!job.question;
+    const payload = JSON.stringify({
+      kind: "inbox",
+      source: asked ? "ask" : "owner",
+      text: a.message,
+      ...(asked ? { question: job.question } : {}),
+    });
+    if (["queued", "provisioning", "running"].includes(job.state)) {
+      const added = await this.db.query(
+        "INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,$3,$4::jsonb,'suppressed' FROM coding_jobs WHERE id=$1 AND user_id=$2 AND revision=$5 AND mode='implement' AND state IN ('queued','provisioning','running') ON CONFLICT DO NOTHING RETURNING id",
+        [job.id, user, key, payload, job.revision],
+      );
+      if (added.rows.length) return this.status(user, job.id);
+    } else if (["awaiting_input", "paused", "failed"].includes(job.state)) {
+      await this.assertFreshOrConfirmed(job, a, RESTARTABLE);
+      const continued = await this.db.query(
+        `WITH changed AS (
+        UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='The owner replied; the job continues',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
+        WHERE id=$1 AND user_id=$2 AND revision=$3 AND mode='implement' AND state IN ('awaiting_input','paused','failed') AND ${RESTARTABLE} RETURNING id,revision,mode
+      ), revised AS (
+        INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$4,$5,mode FROM changed RETURNING job_id
+      ) INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT job_id,$6,$7::jsonb,'suppressed' FROM revised RETURNING job_id`,
+        [job.id, user, job.revision, a.requestKey, a.message, key, payload],
+      );
+      if (continued.rows.length) return this.status(user, job.id);
+    }
+    throw new ToolValidationError(
+      job.state === "publishing"
+        ? "The job's change is being published right now; send the message again once its PR is open, and it reaches the coder on that PR."
+        : job.state === "cancelled"
+          ? "This job was cancelled; start a new coding job."
+          : "The job changed or is being processed right now, or its sandbox cleanup is pending; read coding_status and retry.",
+    );
   }
   /**
    * The owner asks for changes to an open owner-merge PR. The request joins the PR's next
@@ -1190,12 +1178,10 @@ export class CodingController {
         ? "The request is too long for one feedback round; shorten it to under 7,000 characters"
         : queuedLength + a.message.length > 7000
           ? "Earlier requests already fill the next round of fixes; send this after that round, or shorten it"
-          : (job.checkpoint.piState?.mrFeedback?.round ?? 0) >= 3
+          : (await feedbackRounds(this.db, job.id)) >= 3
             ? "This PR has already had three rounds of fixes, so it cannot take another; start a new coding job for further changes"
-            : job.used_models >= job.settings.limits.models ||
-                (job.checkpoint.piState?.toolsUsed ?? 0) >=
-                  job.settings.limits.tools
-              ? "This job has used its model or tool allowance, so it cannot take another round of fixes; start a new coding job"
+            : job.used_models >= job.settings.limits.models
+              ? "This job has used its model allowance, so it cannot take another round of fixes; start a new coding job"
               : handled + waiting.length >= 200
                 ? "This PR has handled too much feedback to take more; start a new coding job"
                 : undefined;
@@ -1389,7 +1375,32 @@ export class CodingController {
       checkpoint: job.checkpoint,
       deadline: new Date(job.attempt_deadline).toISOString(),
       usedModels: job.used_models,
+      ...(job.settings.runtime === "pi"
+        ? { inbox: await this.inbox(job) }
+        : {}),
     };
+  }
+  /**
+   * The job's inbox (journal 192): every message for the coder after Start, oldest first, or
+   * only those the checkpoint does not list as delivered.
+   */
+  async inbox(job: CodingJob, undeliveredIn?: Checkpoint) {
+    const delivered = new Set(undeliveredIn?.piState?.delivered ?? []);
+    return (
+      await this.db.query(
+        "SELECT id,payload FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' ORDER BY created_at,id",
+        [job.id],
+      )
+    ).rows
+      .filter((r: { id: string }) => !undeliveredIn || !delivered.has(r.id))
+      .map((r: { id: string; payload: any }) => ({
+        id: r.id,
+        source: r.payload.source,
+        text: r.payload.text,
+        ...(typeof r.payload.question === "string"
+          ? { question: r.payload.question }
+          : {}),
+      }));
   }
   piSessionAppend(job: CodingJob, raw: unknown) {
     return new PiSessions(this.db, this.resultKey()).append(job, raw);
@@ -1413,7 +1424,10 @@ export class CodingController {
       [job.id, job.attempt_id, this.clock(), activeMs],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");
-    return { accepted: true };
+    // New messages for the coder ride on the heartbeat (journal 192).
+    return job.settings.runtime === "pi"
+      ? { accepted: true, inbox: await this.inbox(job, job.checkpoint) }
+      : { accepted: true };
   }
   async progress(job: CodingJob, raw: unknown) {
     const reported = storable(workerEvent.parse(raw));
@@ -1449,53 +1463,13 @@ export class CodingController {
     return { accepted: !!update.rows.length };
   }
   private validateReportCheckpoint(job: CodingJob, c: Checkpoint) {
-    const document = c.piState?.reportDocument;
-    if (
-      job.settings.runtime !== "pi" &&
-      (document ||
-        c.piState?.reportFailure ||
-        (c.piState?.findings?.length ?? 0) > 6000)
-    )
+    if (job.settings.runtime !== "pi" && c.piState)
       throw new Error("Pi report state requires the Pi runtime");
-    if (c.piState?.phase === "review") {
-      const candidate = c.piState.reviewCandidate;
-      if (
-        job.settings.runtime !== "pi" ||
-        job.mode !== "implement" ||
-        !c.files.length ||
-        !c.piState.reviewRound ||
-        !candidate ||
-        candidate.hash !== artifactHash(c) ||
-        ["kite run check", "kite run build", "kite run format:check"].some(
-          (command) =>
-            !candidate.checks.some(
-              (check) => check.command === command && check.exitCode === 0,
-            ),
-        )
-      )
-        throw new Error(
-          "Review recovery requires the exact checked Pi candidate",
-        );
-      const identity = (intent: string, value: string) =>
-        piIdentity(job, c.plan, intent, value);
-      if (
-        c.piState.scopeIdentity !== identity("review", candidate.hash) ||
-        c.piState.sessionScope !==
-          identity(
-            "review-session",
-            `${candidate.hash}:${c.piState.reviewRound}`,
-          )
-      )
-        throw new Error(
-          "Review session must match the candidate, scope and round",
-        );
-    }
     if (
-      document?.kind === "review" &&
-      document.verdict === "REQUEST_CHANGES" &&
-      document.detail !== c.piState?.findings
+      c.piState?.phase === "review" &&
+      (job.mode !== "implement" || !c.files.length)
     )
-      throw new Error("Review document must match the saved findings");
+      throw new Error("A review needs the started Pi candidate");
   }
   async save(job: CodingJob, raw: unknown) {
     const c = storableCheckpoint(checkpoint.parse(raw));
@@ -1511,13 +1485,19 @@ export class CodingController {
     validateFiles(c.files);
     if (
       job.settings.runtime === "pi" &&
-      (!c.piState ||
-        c.piState.toolsUsed < (job.checkpoint.piState?.toolsUsed ?? 0) ||
-        c.piState.toolsUsed > job.settings.limits.tools ||
-        c.squadState ||
-        c.runtimeMemory)
+      (!c.piState || c.squadState || c.runtimeMemory)
     )
-      throw new Error("Pi checkpoint allocation/state is invalid");
+      throw new Error("Pi checkpoint state is invalid");
+    // Delivery only grows, and names this job's own inbox (journal 192).
+    if (job.settings.runtime === "pi") {
+      const before = job.checkpoint.piState?.delivered ?? [];
+      const inbox = new Set((await this.inbox(job)).map((i) => i.id));
+      if (
+        before.some((id) => !c.piState!.delivered.includes(id)) ||
+        c.piState!.delivered.some((id) => !inbox.has(id))
+      )
+        throw new Error("Inbox delivery must name this job's own messages");
+    }
     assertSquadCheckpoint(job, c);
     if (canonicalJson(c) === canonicalJson(job.checkpoint))
       return { saved: true };
@@ -1540,13 +1520,10 @@ export class CodingController {
       ],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");
-    // The checked candidate is about to be reviewed: measure whether a rebase reproduced the
+    // The candidate is about to be reviewed: measure whether a rebase reproduced the
     // reviewed artifact. Measurement only; it never changes the save.
-    if (c.piState?.phase === "review" && c.piState.reviewCandidate)
-      await this.noteRebasedCandidate(
-        job,
-        c.piState.reviewCandidate.hash,
-      ).catch(() => {});
+    if (c.piState?.phase === "review")
+      await this.noteRebasedCandidate(job, artifactHash(c)).catch(() => {});
     return { saved: true };
   }
   /**
@@ -1639,6 +1616,8 @@ export class CodingController {
     }
     if (new Date(job.attempt_deadline).getTime() <= this.clock().getTime())
       throw new Error("Worker allocation expired");
+    // A Pi coder runs the tests itself and GitHub CI checks the PR (journal 192); the legacy
+    // runtimes still hand over the sandbox's check receipts.
     if (
       r.kind === "candidate" &&
       (r.review?.verdict !== "APPROVE" ||
@@ -1646,13 +1625,22 @@ export class CodingController {
         r.review.patchHash !== artifactHash(r.checkpoint) ||
         !r.checkpoint.files.length ||
         !!r.published !== !!(job.settings.agentGit && this.agentGit) ||
-        ["kite run check", "kite run build", "kite run format:check"].some(
-          (cmd) => !r.checks.some((c) => c.command === cmd && c.exitCode === 0),
-        ))
+        (job.settings.runtime !== "pi" &&
+          ["kite run check", "kite run build", "kite run format:check"].some(
+            (cmd) =>
+              !r.checks.some((c) => c.command === cmd && c.exitCode === 0),
+          )))
     )
       throw new Error(
-        "Candidate needs passing checks and review of the exact artifact",
+        job.settings.runtime === "pi"
+          ? "Candidate needs an independent review of the exact artifact"
+          : "Candidate needs passing checks and review of the exact artifact",
       );
+    // Every message after Start reaches the coder, and its change a review, before publication.
+    if (r.kind === "candidate" && job.settings.runtime === "pi") {
+      const waiting = await this.inbox(job, r.checkpoint);
+      if (waiting.length) return { accepted: false, inbox: waiting };
+    }
     const state = r.kind === "candidate" ? "publishing" : r.kind;
     const update = await this.db.query(
       `WITH changed AS (UPDATE coding_jobs SET state=$3,stage=$3,summary=$4,question=$5,checkpoint=$6::jsonb,result=$7::jsonb,cleanup='pending',model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND checkpoint=$10::jsonb RETURNING id)
@@ -1666,7 +1654,7 @@ export class CodingController {
         JSON.stringify(r.checkpoint),
         JSON.stringify(r),
         `${job.attempt_id}:finished`,
-        "{}",
+        JSON.stringify(r.options?.length ? { options: r.options } : {}),
         JSON.stringify(job.checkpoint),
       ],
     );
@@ -2785,6 +2773,90 @@ export class CodingController {
       }
     }
   }
+  /**
+   * The owner tapped an answer on a job's question (journal 192). The tap counts only on the
+   * delivered message, while the job still waits at the attempt that asked; it becomes one
+   * inbox item and queues the job again with its work and sessions. A second tap on the same
+   * answer is answered from the record; any other later tap is refused.
+   */
+  async answerAsk(
+    user: string,
+    eventId: string,
+    index: number,
+    chat: string,
+    messageId: number,
+  ) {
+    if (
+      !this.allowed(user) ||
+      chat !== user ||
+      !Number.isSafeInteger(messageId) ||
+      messageId <= 0 ||
+      !Number.isSafeInteger(index)
+    )
+      throw new Error("Answer unavailable");
+    const event = (
+      await this.db.query(
+        "SELECT e.event_key,e.delivery,e.payload,j.id AS job_id,j.attempt_id,j.revision,j.question AS asked FROM coding_events e JOIN coding_jobs j ON j.id=e.job_id WHERE e.id=$1 AND j.user_id=$2",
+        [eventId, user],
+      )
+    ).rows[0];
+    const option = event?.payload?.options?.[index];
+    if (
+      !event ||
+      event.delivery !== "sent" ||
+      Number(event.payload.telegramMessageId) !== messageId ||
+      typeof option !== "string"
+    )
+      throw new Error("Answer unavailable");
+    if (event.payload.answer !== undefined) {
+      if (event.payload.answer !== index)
+        throw new Error("This question was already answered");
+      return { status: "answered", duplicate: true, jobId: event.job_id };
+    }
+    const key = `inbox:ask:${eventId}`;
+    const answered = await this.db.query(
+      `WITH changed AS (
+        UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='The owner answered; the job continues',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
+        WHERE id=$1 AND user_id=$2 AND revision=$3 AND state='awaiting_input' AND mode='implement' AND attempt_id::text||':finished'=$4 AND ${RESTARTABLE}
+          AND EXISTS(SELECT 1 FROM coding_events WHERE id=$5 AND job_id=$1 AND delivery='sent' AND NOT payload ? 'answer')
+        RETURNING id,revision,mode
+      ), marked AS (
+        UPDATE coding_events SET payload=payload || jsonb_build_object('answer',$6::int) WHERE id=$5 AND job_id IN (SELECT id FROM changed) RETURNING job_id
+      ), revised AS (
+        INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$7,$8,mode FROM changed RETURNING job_id
+      ) INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT job_id,$7,$9::jsonb,'suppressed' FROM revised RETURNING job_id`,
+      [
+        event.job_id,
+        user,
+        event.revision,
+        event.event_key,
+        eventId,
+        index,
+        key,
+        option,
+        JSON.stringify({
+          kind: "inbox",
+          source: "ask",
+          text: option,
+          question: event.payload.question,
+        }),
+      ],
+    );
+    if (!answered.rows.length) {
+      const closing = (
+        await this.db.query(
+          "SELECT 1 FROM coding_jobs WHERE id=$1 AND state='awaiting_input' AND attempt_id::text||':finished'=$2 AND cleanup NOT IN ('none','complete')",
+          [event.job_id, event.event_key],
+        )
+      ).rows.length;
+      throw new Error(
+        closing
+          ? "The job is still closing its last box; tap again in a moment"
+          : "This question is no longer open",
+      );
+    }
+    return { status: "answered", duplicate: false, jobId: event.job_id };
+  }
   async recoverDelivery() {
     await this.db.query(
       "UPDATE coding_events SET delivery='uncertain' WHERE delivery='sending'",
@@ -2864,6 +2936,12 @@ export class CodingController {
         ).rows[0];
         const req = e.payload.requirements;
         const merge = e.payload.merge;
+        // A job's question with answers the owner can tap (journal 192).
+        const ask =
+          typeof e.payload.question === "string" &&
+          e.payload.question &&
+          Array.isArray(e.payload.options) &&
+          e.payload.options.length > 0;
         const status =
           (
             await this.db.query(
@@ -2963,10 +3041,12 @@ export class CodingController {
             ? { kind: "requirements", id: e.id }
             : merge
               ? { kind: "merge", id: e.id }
-              : undefined,
+              : ask
+                ? { kind: "ask", id: e.id, options: e.payload.options }
+                : undefined,
           plain,
         );
-        if (req || merge) {
+        if (req || merge || ask) {
           const receipt = sent as { message_id?: number } | undefined;
           if (
             !Number.isSafeInteger(receipt?.message_id) ||

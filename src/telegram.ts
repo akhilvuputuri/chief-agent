@@ -175,6 +175,36 @@ export function telegram(
   }
   if (assistant.tools?.coding) {
     const coding = assistant.tools.coding;
+    // An answer to a coding job's question goes to its coder (journal 192).
+    bot.callbackQuery(/^cdq:([0-2]):([0-9a-f-]{36})$/, async (ctx) => {
+      if (
+        !allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids) ||
+        !ctx.callbackQuery.message
+      )
+        return;
+      await ctx.answerCallbackQuery();
+      let reply: string;
+      try {
+        await coding.answerAsk(
+          String(ctx.from.id),
+          ctx.match[2]!,
+          Number(ctx.match[1]),
+          String(ctx.callbackQuery.message.chat.id),
+          ctx.callbackQuery.message.message_id,
+        );
+        reply = "Sent to the coder.";
+      } catch (error) {
+        reply = /closing its last box/.test(String((error as Error)?.message))
+          ? "The job is still closing its last box; tap again in a moment."
+          : "That question is no longer open. Ask Chief for the job's status.";
+      }
+      await ctx
+        .reply(reply, inThread(threadOf(ctx.callbackQuery.message)))
+        .catch(() => undefined);
+    });
+  }
+  if (assistant.tools?.coding) {
+    const coding = assistant.tools.coding;
     // Merge cards answer one exact PR head; the host re-verifies everything before merging.
     bot.callbackQuery(/^cdm:(yes|no):([0-9a-f-]{36})$/, async (ctx) => {
       if (

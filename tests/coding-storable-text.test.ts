@@ -157,11 +157,11 @@ test("worker progress with such text is stored", async (t) => {
 
 test("a report document is bound to its hash, so one with a NUL is refused, not changed", () => {
   assert.throws(
-    () => reportDocument({ kind: "plan", summary: "Plan", detail: nul }),
+    () => reportDocument({ kind: "done", summary: "Done", detail: nul }),
     /no NUL characters/,
   );
   // As an older worker would send it: a correct hash over the text with the NUL.
-  const body = { kind: "plan" as const, summary: "Plan", detail: nul };
+  const body = { kind: "done" as const, summary: "Done", detail: nul };
   const document = {
     ...body,
     version: 1 as const,
@@ -175,7 +175,6 @@ test("a report document is bound to its hash, so one with a NUL is refused, not 
       files: [],
       piState: {
         version: 1,
-        toolsUsed: 0,
         reportDocument: document,
       },
     }).success,

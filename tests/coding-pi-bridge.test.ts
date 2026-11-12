@@ -1,10 +1,6 @@
 import { reportDocument } from "@chief-agent/pi-runtime/report";
 import { execFileSync } from "node:child_process";
-import {
-  runPiWorker,
-  NativePiWorkerClient,
-  piReviewInstructions,
-} from "../src/coding/pi-worker.js";
+import { runPiWorker, NativePiWorkerClient } from "../src/coding/pi-worker.js";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, generateKeyPairSync } from "node:crypto";
