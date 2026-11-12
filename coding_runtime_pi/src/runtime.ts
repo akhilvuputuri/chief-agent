@@ -249,12 +249,9 @@ export class CodingRuntime {
         model,
         thinkingLevel: reasoning ?? "high",
         sessionManager: manager,
-        // Pi's defaults, including compaction. Cache warming stays off: see the specification's
-        // table of differences from stock Pi.
-        settingsManager: SettingsManager.inMemory({
-          cacheWarming: "off",
-          ...(retry ? { retry } : {}),
-        }),
+        // Pi's defaults, including compaction and cache warming (journal 192); only the retry
+        // count for the host route differs (journal 190).
+        settingsManager: SettingsManager.inMemory(retry ? { retry } : {}),
         // Pi awaits this at each turn end, after the whole tool batch and before the next call.
         // Pi reports an extension's error instead of throwing it, so a failed save (the host
         // refused it, or could not be reached) is kept here and stops the run.

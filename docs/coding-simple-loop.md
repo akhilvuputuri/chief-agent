@@ -68,12 +68,11 @@ Each remaining difference needs a reason Chief cannot work without. A test fails
 | The worker owns git for the candidate and a rebase               | The candidate is the reviewed working tree on a known base                                                                              |
 | Work is saved at each turn end (one extension handler)           | A box can end at any moment; Pi awaits the handler, so a save never races a tool, and nothing else in Pi is replaced                    |
 | One report reminder in the same session, then a fixed owner ask  | A session that ends in prose would otherwise leave the job with no result and nobody told                                               |
-| Cache warming is off                                             | Warming sends extra paid requests on its own timer, which the host records as model calls; to be measured before it is turned on        |
 | Pi's retry raised to eight attempts for the host route           | A gateway release takes longer than Pi's default 14 seconds of retries (journal 190)                                                    |
 
 Builders add rows here only with a reason of this kind.
 
-> **Update, 13 November 2026 ([journal 192](journey/192-one-session-per-job.md)):** the last four rows were added by stage D2. The rows for the inbox labels, the review copy and seal, the fixed path and sessions saved to the host are built.
+> **Update, 13 November 2026 ([journal 192](journey/192-one-session-per-job.md)):** the last three rows were added by stage D2. The rows for the inbox labels, the review copy and seal, the fixed path and sessions saved to the host are built.
 
 ## What is deleted
 
