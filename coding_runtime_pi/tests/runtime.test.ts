@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, readFile, symlink, mkdir } from "node:fs/promises";
+import {
+  mkdtemp,
+  writeFile,
+  readFile,
+  symlink,
+  mkdir,
+  realpath,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -1251,6 +1258,7 @@ test("configured checks use decreasing remaining task time beyond the interactiv
 async function approvedBuild(
   f: Awaited<ReturnType<typeof fixture>>,
   ms?: number,
+  referenceDocuments?: Array<{ id: string; title: string; text: string }>,
 ) {
   const planner = new CodingRuntime({
     store: f.store,
@@ -1261,6 +1269,7 @@ async function approvedBuild(
     objective: "Fix sum",
     checks: ["node test.mjs"],
     ...(ms ? { limits: { ms } } : {}),
+    ...(referenceDocuments ? { referenceDocuments } : {}),
   });
   const plan = await planner.run(task.id);
   await planner.approve(task.id, 1, plan.plan!.hash);
@@ -1310,7 +1319,11 @@ test("a build session runs Pi's own prompt, execution mode and bash as shipped",
 });
 test("parallel tool calls overlap and checkpoints wait for the whole batch", async () => {
   const f = await fixture();
-  const id = await approvedBuild(f);
+  // A task document registers the runtime's read_document wrapper; one sequential tool in the
+  // batch would make Pi run every call of the message one at a time.
+  const id = await approvedBuild(f, undefined, [
+    { id: "notes", title: "Notes", text: "Synthetic evidence" },
+  ]);
   let running = 0;
   let most = 0;
   const atCheckpoint: number[] = [];
@@ -1319,6 +1332,7 @@ test("parallel tool calls overlap and checkpoints wait for the whole batch", asy
     model: scripted([
       [
         { name: "bash", arguments: { command: "sleep 0.4" } },
+        { name: "read_document", arguments: { id: "notes", page: 0 } },
         { name: "bash", arguments: { command: "sleep 0.4" } },
       ],
       [report("done", "Ran two commands.")],
@@ -1395,4 +1409,175 @@ test("grep is confined to the workspace and truncates like stock grep", async ()
   assert.match(await run({ limit: 1000 }), /50\.0KB limit reached/);
   await assert.rejects(run({ path: ".env" }));
   await assert.rejects(run({ path: "../" }));
+});
+test("the final-report phase adds a section to Pi's own prompt instead of replacing it", async () => {
+  const f = await fixture();
+  const prompts: string[] = [];
+  const runtime = new CodingRuntime({
+    store: f.store,
+    // Prose instead of a report moves the run into the final-report phase.
+    model: scripted(
+      [[], [report("plan", "Fix sum and test it.")]],
+      undefined,
+      (prompt) => prompts.push(prompt),
+    ),
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Fix sum",
+  });
+  const planned = await runtime.run(task.id);
+  assert.equal(planned.status, "waiting_approval");
+  const final = prompts.at(-1)!;
+  // A forced replacement prompt is sent as one opaque text, without Pi's sections.
+  assert.match(
+    final,
+    /"host_phase":"<host_phase>\\nHost workflow phase: final report/,
+  );
+  assert.match(final, /Use read to examine files instead of cat or sed/);
+});
+test("the command executor arms no timer when no timeout is given", async () => {
+  const f = await fixture();
+  const execute = localExecutor(f.workspace, join(f.root, "home"));
+  const delays: Array<number | undefined> = [];
+  const original = globalThis.setTimeout;
+  globalThis.setTimeout = ((handler: any, delay?: number, ...rest: any[]) => {
+    delays.push(delay);
+    return original(handler, delay, ...rest);
+  }) as typeof setTimeout;
+  try {
+    const done = await execute("true", new AbortController().signal);
+    assert.equal(done.exitCode, 0);
+    assert.equal(done.timedOut, false);
+  } finally {
+    globalThis.setTimeout = original;
+  }
+  assert.deepEqual(
+    delays.filter((d) => (d ?? 0) >= 1000),
+    [],
+  );
+  const timed = await execute("sleep 5", new AbortController().signal, 50);
+  assert.equal(timed.timedOut, true);
+});
+test("read returns an image as an image, not its bytes as text", async () => {
+  const f = await fixture();
+  // A valid 1x1 PNG.
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  await writeFile(join(f.workspace, "pixel.png"), png);
+  const read = tools(
+    await new Workspace(await realpath(f.workspace)).initialize(),
+    "plan",
+    undefined,
+    () => {},
+    async () => {},
+  ).find((t) => t.name === "read")!;
+  const result = await read.execute(
+    "r",
+    { path: "pixel.png" },
+    undefined,
+    undefined,
+    undefined as any,
+  );
+  const text = result.content
+    .filter((c: any) => c.type === "text")
+    .map((c: any) => c.text)
+    .join("");
+  assert.match(text, /Read image file \[image\/png\]/);
+  assert(!text.includes("PNG\r\n"));
+  assert(!text.includes("IHDR"));
+});
+test("truncated bash output is readable from the run's output directory and removed after the run", async () => {
+  const f = await fixture();
+  const outputs = join(f.root, "outputs");
+  await mkdir(outputs);
+  await writeFile(join(f.root, "outside"), "not readable");
+  const previous = process.env.TMPDIR;
+  process.env.TMPDIR = outputs;
+  try {
+    const list = tools(
+      await new Workspace(await realpath(f.workspace)).initialize(),
+      "build",
+      localExecutor(f.workspace, join(f.root, "home")),
+      () => {},
+      async () => {},
+      outputs,
+    );
+    const bash = list.find((t) => t.name === "bash")!;
+    const read = list.find((t) => t.name === "read")!;
+    const ran = await bash.execute(
+      "b",
+      { command: "seq 1 30000" },
+      undefined,
+      undefined,
+      undefined as any,
+    );
+    const path = /Full output: ([^\]]+)\]/.exec(ran.content[0].text)![1]!;
+    assert(path.startsWith(outputs + "/"));
+    const full = await read.execute(
+      "r",
+      { path, offset: 29999 },
+      undefined,
+      undefined,
+      undefined as any,
+    );
+    assert.match(full.content[0].text, /^29999\n30000/);
+    for (const denied of [
+      join(f.root, "outside"),
+      join(outputs, "..", "outside"),
+    ])
+      await assert.rejects(
+        read.execute(
+          "r",
+          { path: denied },
+          undefined,
+          undefined,
+          undefined as any,
+        ),
+      );
+    // Only read reaches the directory.
+    const grep = list.find((t) => t.name === "grep")!;
+    await assert.rejects(
+      grep.execute(
+        "g",
+        { pattern: "1", path },
+        undefined,
+        undefined,
+        undefined as any,
+      ),
+    );
+  } finally {
+    if (previous === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previous;
+  }
+  const id = await approvedBuild(f);
+  const before = process.env.TMPDIR;
+  const built = await new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      [{ name: "bash", arguments: { command: "seq 1 30000" } }],
+      [report("done", "Printed a long sequence.")],
+    ]),
+    executor: (t) => localExecutor(t.workspace, join(f.root, "home")),
+  }).run(id);
+  assert.equal(built.report?.kind, "done");
+  assert.equal(process.env.TMPDIR, before);
+  await assert.rejects(readFile(join(f.store.path(id), "outputs", ".")));
+  assert(!built.artifact?.files.some((file) => file.path.includes("pi-bash")));
+});
+test("concurrent saves of one task land in call order", async () => {
+  const f = await fixture();
+  const runtime = new CodingRuntime({ store: f.store, model: scripted([]) });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Fix sum",
+  });
+  await Promise.all(
+    Array.from({ length: 40 }, (_, i) =>
+      f.store.save({ ...task, summary: `save ${i}` }),
+    ),
+  );
+  assert.equal((await f.store.get(task.id)).summary, "save 39");
 });

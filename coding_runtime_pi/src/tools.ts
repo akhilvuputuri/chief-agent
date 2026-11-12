@@ -1,7 +1,13 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { readdir, stat } from "node:fs/promises";
-import { basename, matchesGlob, relative } from "node:path";
+import { lstat, readdir, readFile, stat } from "node:fs/promises";
+import {
+  basename,
+  isAbsolute,
+  matchesGlob,
+  relative,
+  resolve,
+} from "node:path";
 import { Type } from "typebox";
 import {
   createReadToolDefinition,
@@ -11,6 +17,7 @@ import {
   createFindToolDefinition,
   createLsToolDefinition,
   createBashToolDefinition,
+  detectSupportedImageMimeTypeFromFile,
   DEFAULT_MAX_BYTES,
   formatSize,
   truncateHead,
@@ -31,17 +38,38 @@ export function tools(
   execute: Executor | undefined,
   report: (r: Report) => void,
   admit: (name: string) => Promise<void>,
+  /** Where Pi writes full output it truncated; `read` alone may open files directly in it. */
+  outputs?: string,
 ): ToolDefinition<any, any>[] {
   const cwd = workspace.requestedRoot;
   const read = (path: string) => workspace.read(path);
+  const readable = async (path: string) => {
+    const full = resolve(cwd, path);
+    const inOutputs = outputs ? relative(outputs, full) : "";
+    if (
+      outputs &&
+      inOutputs &&
+      !inOutputs.startsWith("..") &&
+      !isAbsolute(inOutputs) &&
+      basename(inOutputs) === inOutputs
+    ) {
+      if ((await lstat(full)).isSymbolicLink())
+        throw new Error("Symlink paths are unsupported");
+      return full;
+    }
+    return workspace.path(path);
+  };
   const list: ToolDefinition<any, any>[] = [
+    // Images are not sent while the model proxy is OpenAI-shaped (journal 182).
     createReadToolDefinition(cwd, {
       autoResizeImages: false,
       operations: {
-        readFile: read,
+        readFile: async (p) => readFile(await readable(p)),
         access: async (p) => {
-          await workspace.path(p);
+          await readable(p);
         },
+        detectImageMimeType: async (p) =>
+          detectSupportedImageMimeTypeFromFile(await readable(p)),
       },
     }),
     grep(workspace),

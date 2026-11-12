@@ -29,7 +29,23 @@ export class TaskStore {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error("Invalid task identity");
     return join(this.root, id);
   }
+  private saving = new Map<string, Promise<void>>();
+  /**
+   * Saves run one at a time per task, each writing the task as it is when its turn comes, so
+   * concurrent saves from tools admitted together cannot land an older state last.
+   */
   async save(task: Task) {
+    const next = (this.saving.get(task.id) ?? Promise.resolve())
+      .catch(() => {})
+      .then(() => this.write(task));
+    this.saving.set(task.id, next);
+    try {
+      await next;
+    } finally {
+      if (this.saving.get(task.id) === next) this.saving.delete(task.id);
+    }
+  }
+  private async write(task: Task) {
     const dir = this.path(task.id);
     await mkdir(dir, { recursive: true, mode: 0o700 });
     const temporary = join(dir, `${randomUUID()}.tmp`);

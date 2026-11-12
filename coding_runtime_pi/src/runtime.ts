@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID, createHash } from "node:crypto";
-import { mkdir, realpath, readdir } from "node:fs/promises";
+import { mkdir, realpath, readdir, rm } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import {
   createAgentSession,
@@ -239,6 +239,12 @@ export class CodingRuntime {
     const stop = new AbortController();
     this.active = { id, stop, cancelled: false };
     const started = performance.now();
+    // Pi writes the full text of output it truncated to os.tmpdir() and names the file to the
+    // model. During a run that is a private directory outside the workspace, so snapshots never
+    // include it; `read` may open it, and it is emptied when the run ends (journal 182).
+    const outputs = join(this.options.store.path(id), "outputs");
+    const previousTmpdir = process.env.TMPDIR;
+    let outputsActive = false;
     const poll = setInterval(() => {
       void this.options.store
         .cancellation(id)
@@ -312,6 +318,10 @@ export class CodingRuntime {
         setRequestPurpose,
       } = await this.options.model(admitModel);
       const workspace = await new Workspace(task.workspace).initialize();
+      await rm(outputs, { recursive: true, force: true });
+      await mkdir(outputs, { recursive: true, mode: 0o700 });
+      process.env.TMPDIR = outputs;
+      outputsActive = true;
       const agentsFiles: Array<{ path: string; content: string }> = [];
       try {
         const data = await workspace.read("AGENTS.md");
@@ -365,6 +375,7 @@ export class CodingRuntime {
           task.used.tools++;
           await this.options.store.save(task);
         },
+        outputs,
       );
       if (references.description)
         custom.push({
@@ -859,11 +870,16 @@ export class CodingRuntime {
       clearInterval(poll);
       if (timer) clearTimeout(timer);
       session?.dispose();
+      if (outputsActive) {
+        if (previousTmpdir === undefined) delete process.env.TMPDIR;
+        else process.env.TMPDIR = previousTmpdir;
+      }
       task.used.ms =
         (task.used.ms ?? 0) + Math.ceil(performance.now() - started);
       task.activeRun = undefined;
       try {
         await this.options.store.save(task);
+        if (outputsActive) await rm(outputs, { recursive: true, force: true });
       } finally {
         this.active = undefined;
         await unlock();
