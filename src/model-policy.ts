@@ -31,6 +31,11 @@ const schema = z
     // the main and learner models so it would not grade their work; on 11 November 2026 the owner
     // chose Opus 5.5 for it, the same model (journal 164). Unset, it uses the standard tier.
     judge: modelId.optional(),
+    // A model of another family that re-judges a small nightly sample of the judge's verdicts,
+    // so agreement can be read (13 November 2026, journal 183). It is shown facts and the
+    // owner messages they cite only, never a turn's tool calls. It replaces nothing: the judge
+    // above still gives every recorded verdict. Unset, there is no cross-check.
+    judgeSecond: modelId.optional(),
     // Provider price ceilings ($ per million tokens) for every OpenRouter caller. When set, this
     // reviewed value replaces OPENROUTER_MAX_INPUT_PRICE/OPENROUTER_MAX_OUTPUT_PRICE; raising it
     // needs an explicit owner request (owner-approved $4/$20 on 19 October 2026 for Opus 5.5).
@@ -116,6 +121,13 @@ export function resolveJudgeModel(
   policy: ModelPolicy = readModelPolicy(),
 ): string {
   return policy.judge ?? resolveAgentModel("standard", mainModel, policy).model;
+}
+
+/** The model that cross-checks a sample of the judge's verdicts, when the policy names one. */
+export function resolveJudgeSecondModel(
+  policy: ModelPolicy = readModelPolicy(),
+): string | undefined {
+  return policy.judgeSecond;
 }
 
 /** The effective provider price ceilings: the reviewed policy value, else the environment's. */

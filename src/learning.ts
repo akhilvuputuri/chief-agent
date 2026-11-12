@@ -15,10 +15,15 @@ import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { isLearned, isNote, MemoryStore } from "./memory.js";
 import {
+  DECOYS,
+  factProbes,
   JUDGE_INSTRUCTIONS,
   JUDGE_LIMITS,
   JUDGE_PROMPT_VERSION,
+  type FactVerdict,
+  type Judgements,
   type JudgeBatch,
+  type JudgeCall,
   type JudgeFact,
   type JudgeMemory,
   type JudgeToolName,
@@ -28,7 +33,9 @@ import {
   judgeTools,
   newJudgements,
   recordJudgement,
+  shuffled,
   turnScore,
+  turnSignature,
   unjudged,
 } from "./memory-judge.js";
 import * as otel from "./otel.js";
@@ -137,6 +144,16 @@ export const LEARNING_LIMITS = {
   /** Characters of the owner's next message shown with a turn, for context. */
   nextChars: 1000,
 } as const;
+
+/** Tonight's judged facts and turns, kept so a few can be judged again (Learner.calibrate). */
+interface JudgedFact {
+  fact: JudgeFact;
+  verdict: FactVerdict;
+}
+interface JudgedTurns {
+  memories: JudgeMemory[];
+  turns: Array<{ turn: JudgeTurn; signature: string }>;
+}
 
 /** Where the judge has read to: the last item's time and ID, or nothing yet. */
 type Mark = { at: string; id: string } | null;
@@ -708,6 +725,10 @@ export interface LearnerOptions {
   modelName: string;
   /** The judge pass's own model, so it does not grade its own writing; else the learner's. */
   judge?: { model: ModelAdapter; modelName: string };
+  /** A model of another family that re-judges a small sample each night, as a cross-check. */
+  judgeSecond?: { model: ModelAdapter; modelName: string };
+  /** Planted-error probes and repeat judging after the night's judging; on unless false. */
+  judgeChecks?: boolean;
   clock?: () => Date;
   enabled?: boolean;
 }
@@ -1388,13 +1409,98 @@ export class Learner {
         [user, row.run_id],
       )
     ).rows[0]?.content as string | undefined;
-    const calls = (
+    // Names, states and a short cut of each call's input and result, credentials scrubbed:
+    // without them a procedure about how to call a tool could only be judged "unclear".
+    const calls: JudgeCall[] = [];
+    let shownChars = 0;
+    // Each field is cut on its own first, so one long value does not crowd out the rest.
+    const brief = (value: unknown) =>
+      typeof value === "string"
+        ? clip(value, JUDGE_LIMITS.callFieldChars)
+        : value !== null && typeof value === "object"
+          ? clip(JSON.stringify(value), JUDGE_LIMITS.callFieldChars)
+          : value;
+    const cut = (value: unknown, max: number) => {
+      const scrubbed = scrubTrace(value) ?? null;
+      const text = JSON.stringify(
+        scrubbed !== null &&
+          typeof scrubbed === "object" &&
+          !Array.isArray(scrubbed)
+          ? Object.fromEntries(
+              Object.entries(scrubbed).map(([k, v]) => [k, brief(v)]),
+            )
+          : scrubbed,
+      );
+      return text === "null" || text === "{}" ? undefined : clip(text, max);
+    };
+    for (const c of (
       await this.db.query(
-        `SELECT operation,state FROM runtime_calls WHERE run_id=$1
+        `SELECT operation,state,arguments,result FROM runtime_calls WHERE run_id=$1
          AND operation NOT IN ('finish_turn','tools_load') ORDER BY started_at,call_id LIMIT $2`,
         [row.run_id, JUDGE_LIMITS.calls],
       )
-    ).rows.map((c) => `${c.operation}:${c.state}`);
+    ).rows) {
+      const input = cut(c.arguments, JUDGE_LIMITS.callInputChars);
+      const result = cut(c.result, JUDGE_LIMITS.callResultChars);
+      const size = (input?.length ?? 0) + (result?.length ?? 0);
+      // Past the turn's allowance a call keeps its name and state only.
+      const detailed = shownChars + size <= JUDGE_LIMITS.turnCallChars;
+      if (detailed) shownChars += size;
+      calls.push({
+        call: c.operation,
+        state: c.state,
+        ...(detailed && input ? { input } : {}),
+        ...(detailed && result ? { result } : {}),
+      });
+    }
+    const first = (
+      await this.db.query(
+        "SELECT min(received_at) AS at,max(received_at) AS last FROM conversation_inputs WHERE user_id=$1 AND run_id=$2",
+        [user, row.run_id],
+      )
+    ).rows[0] as { at: Date | string | null; last: Date | string | null };
+    const around = async (after: boolean) => {
+      if (!first.at || !first.last) return undefined;
+      const from = new Date(after ? first.last : first.at).getTime();
+      return (
+        await this.db.query(
+          `SELECT i.message,i.run_id FROM conversation_inputs i WHERE i.user_id=$1
+           AND i.run_id IS DISTINCT FROM $2 AND i.run_id IS NOT NULL
+           AND i.received_at ${after ? ">" : "<"} $3 AND i.received_at ${after ? "<=" : ">="} $4
+           ORDER BY i.received_at ${after ? "ASC" : "DESC"},i.ordinal ${after ? "ASC" : "DESC"} LIMIT 1`,
+          [
+            user,
+            row.run_id,
+            new Date(from),
+            new Date(from + (after ? 1 : -1) * LEARNING_LIMITS.followUpMs),
+          ],
+        )
+      ).rows[0] as { message: string; run_id: string } | undefined;
+    };
+    const replyOf = async (runId: string) =>
+      (
+        await this.db.query(
+          `SELECT mc.payload->>'content' AS content FROM conversation_messages cm
+           JOIN message_contents mc ON mc.user_id=cm.user_id AND mc.hash=cm.hash
+           WHERE cm.user_id=$1 AND cm.run_id=$2 AND mc.payload->>'role'='assistant'
+           ORDER BY cm.ordinal DESC LIMIT 1`,
+          [user, runId],
+        )
+      ).rows[0]?.content as string | undefined;
+    const before = await around(false);
+    const beforeReply = before ? await replyOf(before.run_id) : undefined;
+    const after = await around(true);
+    const ownerNext = after ? ownerWords(after.message).text.trim() : "";
+    // Only when the redirect was the message shown as ownerNext: a reply to an older message
+    // can redirect this turn from further away.
+    const redirect = after
+      ? ((
+          await this.db.query(
+            "SELECT data->>'kind' AS kind FROM events WHERE user_id=$1 AND run_id=$2 AND type='turn.redirect' AND data->>'by'=$3 ORDER BY id LIMIT 1",
+            [user, row.run_id, after.run_id],
+          )
+        ).rows[0]?.kind as string | undefined)
+      : undefined;
     return {
       id: "",
       runId: row.run_id,
@@ -1410,6 +1516,22 @@ export class Learner {
       ),
       reply: clip(reply ?? "", JUDGE_LIMITS.replyChars),
       calls,
+      ...(before && beforeReply
+        ? {
+            previous: {
+              owner: clip(
+                ownerWords(before.message).text ||
+                  "(an attachment without text)",
+                JUDGE_LIMITS.aroundChars,
+              ),
+              reply: clip(beforeReply, JUDGE_LIMITS.aroundChars),
+            },
+          }
+        : {}),
+      ...(ownerNext
+        ? { ownerNext: clip(ownerNext, JUDGE_LIMITS.aroundChars) }
+        : {}),
+      ...(redirect && /^[a-z]{1,20}$/.test(redirect) ? { redirect } : {}),
       memories: [] as string[],
     };
   }
@@ -1424,6 +1546,8 @@ export class Learner {
     run: string,
     batch: JudgeBatch,
     progress: { modelCalls: number; refused: number },
+    /** The night's cross-check runs the same pass on another model. */
+    adapter = this.options.judge?.model ?? this.options.model,
   ) {
     const tools: ToolDefinition[] = Object.entries(judgeTools).map(
       ([name, schema]) => ({
@@ -1437,7 +1561,6 @@ export class Learner {
       { role: "user", content: judgePrompt(batch) },
     ];
     const done = newJudgements();
-    const adapter = this.options.judge?.model ?? this.options.model;
     for (let i = 0; i < JUDGE_LIMITS.modelCalls; i++) {
       if (await this.ownerActive(user)) return { deferred: true as const };
       const generation = await this.traced(
@@ -1489,6 +1612,214 @@ export class Learner {
   }
 
   /**
+   * The judge checked against itself, with no labels from anyone (docs/learning.md#nightly-judge).
+   * Planted errors: copies of facts it has called supported, broken by the host in known ways,
+   * which it should not call supported, and unchanged copies, which it should. Then a few of
+   * tonight's facts and turns judged again by the same model, to see whether a verdict
+   * repeats, and the facts once more by a model of another family when one is configured.
+   * That model is shown facts and the owner messages they cite only: a turn's tool calls stay
+   * with the judge's own provider. Results are events and counts; nothing here is stored as
+   * memory or changes a recorded verdict, and its model calls are counted apart.
+   */
+  private async calibrate(
+    user: string,
+    run: string,
+    learnerRun: string,
+    spend: Spending,
+    progress: Record<
+      | "checkModelCalls"
+      | "checkRefused"
+      | "probes"
+      | "caught"
+      | "controls"
+      | "falseAlarms"
+      | "checked"
+      | "unstable"
+      | "checkMissed"
+      | "crossChecked"
+      | "disagreed",
+      number
+    >,
+    now: Date,
+    judged: { facts: JudgedFact[]; turns?: JudgedTurns },
+  ) {
+    const calls = { modelCalls: 0, refused: 0 };
+    // One pass of a batch; undefined when the owner started a turn, which ends the checks.
+    const pass = async (batch: JudgeBatch, adapter?: ModelAdapter) => {
+      try {
+        const outcome = await spending.run(spend, () =>
+          this.judge(user, run, batch, calls, adapter),
+        );
+        return outcome.deferred ? undefined : outcome.done;
+      } finally {
+        progress.checkModelCalls += calls.modelCalls;
+        progress.checkRefused += calls.refused;
+        calls.modelCalls = calls.refused = 0;
+      }
+    };
+    const bases: Array<Omit<JudgeFact, "id">> = [];
+    for (const r of (
+      await this.db.query(
+        // A different few each night, from the facts whose latest verdict is supported.
+        `SELECT r.id,r.key,r.value,r.source FROM memory_heads h
+         JOIN memory_revisions r ON r.user_id=h.user_id AND r.id=h.revision_id
+         WHERE h.user_id=$1 AND r.status='active' AND r.kind='fact' AND r.origin='learned'
+         AND (SELECT e.data->>'verdict' FROM events e WHERE e.user_id=$1 AND e.type='judge.fact'
+           AND e.data->>'revisionId'=r.id::text AND e.run_id IN
+             (SELECT run_id FROM learner_runs WHERE user_id=$1 AND prompt_version LIKE 'judge-%')
+           ORDER BY e.id DESC LIMIT 1)='supported'
+         ORDER BY md5(r.id::text||$2) LIMIT $3`,
+        [user, singaporeDay(now), JUDGE_LIMITS.probeBases],
+      )
+    ).rows as Array<{
+      id: string;
+      key: string;
+      value: string;
+      source: Record<string, unknown>;
+    }>) {
+      const messages = await this.judgeMessages(user, r.source);
+      if (messages.length)
+        bases.push({
+          revisionId: r.id,
+          key: r.key,
+          value: r.value,
+          ...(r.source.durability === "one_off" ? { note: true } : {}),
+          ...(typeof r.source.until === "string"
+            ? { until: r.source.until }
+            : {}),
+          messages,
+        });
+    }
+    // Controls and broken copies go in separate batches: side by side with the same
+    // messages, the broken one would be found by comparison, not by reading.
+    const probes = factProbes(bases, run);
+    for (const control of [true, false]) {
+      const group = probes
+        .filter((p) => (p.mutation === "control") === control)
+        .map((p, i) => ({ ...p, fact: { ...p.fact, id: `f${i + 1}` } }));
+      if (!group.length) continue;
+      const done = await pass({
+        facts: group.map((p) => p.fact),
+        turns: [],
+        memories: [],
+      });
+      if (!done) return;
+      for (const p of group) {
+        const verdict = done.facts.get(p.fact.id)?.verdict;
+        if (verdict && control) {
+          progress.controls++;
+          if (verdict !== "supported") progress.falseAlarms++;
+        } else if (verdict) {
+          progress.probes++;
+          if (verdict !== "supported") progress.caught++;
+        }
+        await this.trace(user, run, "judge.probe", {
+          learnerRun,
+          mutation: p.mutation,
+          baseRevisionId: p.base,
+          verdict: verdict ?? "missed",
+        });
+      }
+    }
+    // Facts the judge faulted first: those are the verdicts a later step would act on.
+    const facts = [...judged.facts]
+      .sort(
+        (a, b) =>
+          Number(a.verdict === "supported") - Number(b.verdict === "supported"),
+      )
+      .slice(0, JUDGE_LIMITS.checkFacts)
+      .map((f, i) => ({ ...f, fact: { ...f.fact, id: `f${i + 1}` } }));
+    const turns = judged.turns?.turns ?? [];
+    if (!facts.length && !turns.length) return;
+    const memories = judged.turns?.memories ?? [];
+    const factBatch: JudgeBatch = {
+      facts: facts.map((f) => f.fact),
+      turns: [],
+      memories: [],
+    };
+    const repeats: Judgements[] = [];
+    for (let i = 0; i < JUDGE_LIMITS.repeats; i++) {
+      // A repeat that throws ends the repeats; the ones before it are still compared.
+      const done = await pass({
+        ...factBatch,
+        turns: turns.map((t) => t.turn),
+        memories,
+      }).catch((error) => {
+        opsLog("judge.checks_failed", "warn", {
+          runId: run,
+          ...errorFields(error),
+        });
+        return undefined;
+      });
+      if (!done) break;
+      repeats.push(done);
+    }
+    // The other family's pass is optional, and its failure must not cost the repeats.
+    let second: Judgements | undefined;
+    if (this.options.judgeSecond && facts.length && repeats.length)
+      second = await pass(factBatch, this.options.judgeSecond.model).catch(
+        (error) => {
+          opsLog("judge.second_failed", "warn", {
+            runId: run,
+            ...errorFields(error),
+          });
+          return undefined;
+        },
+      );
+    if (!repeats.length) return;
+    const memoryOf = new Map(memories.map((m) => [m.id, m]));
+    const compared = async (
+      first: string,
+      of: (done: Judgements) => string | undefined,
+      about: Record<string, unknown>,
+      crossChecked: boolean,
+    ) => {
+      // A pass that gave no verdict for the item is recorded as missed, not left out.
+      const again = repeats.map((done) => of(done) ?? "missed");
+      const other =
+        crossChecked && second ? (of(second) ?? "missed") : undefined;
+      progress.checked++;
+      if (again.some((v) => v !== first && v !== "missed")) progress.unstable++;
+      if ([...again, other].includes("missed")) progress.checkMissed++;
+      if (other !== undefined && other !== "missed") {
+        progress.crossChecked++;
+        if (other !== first) progress.disagreed++;
+      }
+      await this.trace(user, run, "judge.check", {
+        learnerRun,
+        ...about,
+        first,
+        repeats: again,
+        ...(other !== undefined ? { second: other } : {}),
+      });
+    };
+    for (const f of facts)
+      await compared(
+        f.verdict,
+        (done) => done.facts.get(f.fact.id)?.verdict,
+        { kind: "fact", revisionId: f.fact.revisionId },
+        true,
+      );
+    for (const t of turns)
+      await compared(
+        t.signature,
+        (done) => {
+          const again = done.turns.get(t.turn.id);
+          return again
+            ? turnSignature(
+                again.relevant
+                  .map((r) => ({ item: memoryOf.get(r.memory)!, use: r.use }))
+                  .filter((r) => !r.item.decoy)
+                  .map((r) => ({ revisionId: r.item.revisionId, use: r.use })),
+              )
+            : undefined;
+        },
+        { kind: "turn", turnRunId: t.turn.runId },
+        false,
+      );
+  }
+
+  /**
    * The night's judge pass: new learned facts against the messages they cite, then the turns
    * past the success window against the memory that was in their context. Verdicts go to the
    * events table and, for turns, to trace export as evaluations. No memory is changed. Progress
@@ -1517,7 +1848,28 @@ export class Learner {
       contradicted: 0,
       unclear: 0,
       missed: 0,
+      // What the owner had to say again, and the judge's own checks (memory-judge.ts).
+      restated: 0,
+      decoys: 0,
+      decoyHits: 0,
+      probes: 0,
+      caught: 0,
+      controls: 0,
+      falseAlarms: 0,
+      checked: 0,
+      unstable: 0,
+      checkMissed: 0,
+      crossChecked: 0,
+      disagreed: 0,
+      // The checks' own model calls and refusals, apart from the night's.
+      checkModelCalls: 0,
+      checkRefused: 0,
+      // "Followed" or "contradicted" the host found no proof of, recorded as unclear.
+      unproven: 0,
     };
+    // Tonight's verdicts, from which a few are judged again.
+    const judgedFacts: JudgedFact[] = [];
+    let judgedTurns: JudgedTurns | undefined;
     let turnsMark: Mark = null;
     let factsMark: Mark = null;
     const summary = () => ({
@@ -1592,6 +1944,7 @@ export class Learner {
             progress[
               verdict === "contradicted" ? "contradictedFacts" : verdict
             ]++;
+            judgedFacts.push({ fact: f, verdict });
           }
           await this.trace(user, run, "judge.fact", {
             learnerRun: id,
@@ -1612,6 +1965,7 @@ export class Learner {
         JUDGE_LIMITS.turns,
       ))
         turns.push(await this.judgeTurn(user, row));
+      let chunkIndex = 0;
       for (const chunk of chunks(turns)) {
         const revisions = (
           await this.db.query(
@@ -1620,24 +1974,44 @@ export class Learner {
             [user, [...new Set(chunk.flatMap((t) => t.selected))]],
           )
         ).rows;
-        const memories: JudgeMemory[] = revisions.map((r, i) => ({
-          id: `m${i + 1}`,
-          revisionId: r.id,
-          key: r.key,
-          kind: r.kind,
-          learned: isLearned(r),
-          value: clip(r.value, JUDGE_LIMITS.memoryChars),
-        }));
+        // Shuffled for each batch, so a memory's place says nothing, with one planted item that
+        // was in no turn's context: a judge that calls it relevant is matching on nothing.
+        const decoy = DECOYS[chunkIndex % DECOYS.length]!;
+        const memories: JudgeMemory[] = shuffled(
+          [
+            ...revisions.map((r) => ({
+              revisionId: r.id as string,
+              key: r.key as string,
+              kind: r.kind as string,
+              learned: isLearned(r),
+              value: clip(r.value, JUDGE_LIMITS.memoryChars),
+            })),
+            {
+              revisionId: "decoy",
+              key: decoy.key,
+              kind: "fact",
+              learned: true,
+              value: decoy.value,
+              decoy: true,
+            },
+          ],
+          `${run}:${chunkIndex++}`,
+          (m) => m.revisionId,
+        ).map((m, i) => ({ ...m, id: `m${i + 1}` }));
         const memoryOf = new Map(memories.map((m) => [m.id, m]));
+        const real = (ids: string[]) =>
+          ids.filter((m) => !memoryOf.get(m)!.decoy);
         chunk.forEach((t, i) => {
           t.id = `t${i + 1}`;
           // In the list's order, whatever order the context was recorded in.
           t.memories = memories
-            .filter((m) => t.selected.includes(m.revisionId))
+            .filter((m) => m.decoy || t.selected.includes(m.revisionId))
             .map((m) => m.id);
         });
         // A turn with no reply, or whose memories are gone, has nothing to judge.
-        const judgeable = chunk.filter((t) => t.reply && t.memories.length);
+        const judgeable = chunk.filter(
+          (t) => t.reply && real(t.memories).length,
+        );
         const outcome = judgeable.length
           ? await spending.run(spend, () =>
               this.judge(
@@ -1651,43 +2025,99 @@ export class Learner {
         if (outcome.deferred) return await deferred();
         if (judgeable.length && !outcome.done.turns.size)
           throw new Error("The judge returned no verdict for a batch of turns");
+        const sample: JudgedTurns["turns"] = [];
         for (const t of chunk) {
-          const relevant = outcome.done.turns.get(t.id);
+          const judged = outcome.done.turns.get(t.id);
           const state = !judgeable.includes(t)
             ? "skipped"
-            : relevant
+            : judged
               ? "judged"
               : "missed";
+          const named = (judged?.relevant ?? []).map((r) => ({
+            ...r,
+            item: memoryOf.get(r.memory)!,
+          }));
+          const relevant = named.filter((r) => !r.item.decoy);
+          const decoyHit =
+            named.some((r) => r.item.decoy) ||
+            (judged?.restated ?? []).some((m) => memoryOf.get(m)?.decoy);
+          const restated = real(judged?.restated ?? []).map((m) =>
+            memoryOf.get(m)!,
+          );
           if (state === "skipped") progress.skippedTurns++;
           else if (state === "missed") progress.missed++;
           else {
             progress.turns++;
-            progress.relevant += relevant!.length;
-            for (const r of relevant!) progress[r.use]++;
-            otel.memoryUse(t.runId, turnScore(relevant!));
+            progress.decoys++;
+            if (decoyHit) progress.decoyHits++;
+            progress.relevant += relevant.length;
+            for (const r of relevant) {
+              progress[r.use]++;
+              if (r.claimed) progress.unproven++;
+            }
+            progress.restated += restated.length;
+            otel.memoryUse(t.runId, turnScore(relevant));
+            sample.push({
+              turn: t,
+              signature: turnSignature(
+                relevant.map((r) => ({
+                  revisionId: r.item.revisionId,
+                  use: r.use,
+                })),
+              ),
+            });
           }
           await this.trace(user, run, "judge.turn", {
             learnerRun: id,
             turnRunId: t.runId,
             state,
             ...(t.label ? { label: t.label } : {}),
-            inContext: t.memories.length,
-            relevant: (relevant ?? []).map((r) => {
-              const m = memoryOf.get(r.memory)!;
-              return {
-                revisionId: m.revisionId,
-                key: m.key,
-                kind: m.kind,
-                learned: m.learned,
-                use: r.use,
-                reason: r.reason,
-              };
-            }),
+            inContext: real(t.memories).length,
+            relevant: relevant.map((r) => ({
+              revisionId: r.item.revisionId,
+              key: r.item.key,
+              kind: r.item.kind,
+              learned: r.item.learned,
+              use: r.use,
+              ...(r.claimed ? { claimed: r.claimed } : {}),
+              ...(r.evidence ? { evidence: r.evidence } : {}),
+              reason: r.reason,
+            })),
+            ...(restated.length
+              ? {
+                  restated: restated.map((m) => ({
+                    revisionId: m.revisionId,
+                    key: m.key,
+                  })),
+                }
+              : {}),
+            ...(decoyHit ? { decoyHit: true } : {}),
           });
         }
+        // The first batch with judged turns supplies the ones judged again: those where a
+        // memory was relevant first, since most turns have none.
+        if (!judgedTurns && sample.length)
+          judgedTurns = {
+            memories,
+            turns: [...sample]
+              .sort((a, b) => Number(!!b.signature) - Number(!!a.signature))
+              .slice(0, JUDGE_LIMITS.checkTurns),
+          };
         turnsMark = { at: chunk.at(-1)!.at, id: chunk.at(-1)!.runId };
         await save();
       }
+      // The judge's checks on itself come last and never fail the night: the verdicts above
+      // are already recorded.
+      if (this.options.judgeChecks !== false)
+        await this.calibrate(user, run, id, spend, progress, now, {
+          facts: judgedFacts,
+          turns: judgedTurns,
+        }).catch((error) =>
+          opsLog("judge.checks_failed", "warn", {
+            runId: run,
+            ...errorFields(error),
+          }),
+        );
       return await finish("completed", summary());
     } catch (error) {
       opsLog("learner.failed", "warn", { runId: run, ...errorFields(error) });

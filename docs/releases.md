@@ -1,3 +1,10 @@
+## The memory judge checks itself (13 November 2026)
+
+- **Code.** Judge prompt `judge-v3`. A judged turn shows each call's input and result cut short, the exchange before it and the owner's next message. `followed` and `contradicted` need a quote the host can find in the turn. Memories are shuffled, with one planted decoy per batch. A turn lists what the owner had to tell Chief again. After the night's verdicts, the host plants broken copies of supported facts to see whether the judge catches them, and judges a few items again twice with the same model; the facts among them go once to a second model. None of it changes memory or a recorded verdict. No database or Compose change.
+- **Configuration.** `config/model-policy.json` gains `judgeSecond`: `openai/gpt-6.1-sol`, through OpenRouter, inside the price ceilings. It is sent learned facts and the owner messages they cite, never a turn's tool calls. The judge itself stays on Claude Opus 5.5.
+- **Why.** The judge is the only quality signal on memory, shares a model with what it judges, and had never been checked; the owner labels nothing. See [journal 183](journey/183-can-the-judge-be-trusted.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Coding worker runs Pi's tools and prompt as shipped (13 November 2026)
 
 - **Code.** In the coding worker, Pi builds its own system prompt (tool list and tool rules) and our role text is appended; the owner's request is sent once. Tools run in parallel as in stock Pi, with the workspace checkpoint taken only when no tool is running. `bash` has no time limit unless the model passes one; the run deadline and cancellation still stop a command. `grep` truncates like stock Pi, `read` detects images, and large command output goes to a per-run directory that `read` can open. The gate that blocked tools until every document page was read, the 2 MB read refusal and the 20,000-file limit are removed. Workspace confinement is unchanged. No host, migration or Compose change.
@@ -9,6 +16,8 @@
 - **Code.** Learner prompt `learner-v6`: each fact says whether it is standing, a note of one occasion or time-bound. Notes are kept out of every turn's context until a repeat on another day makes them a preference. A standing fact on one day's evidence is flagged when it is worded as a habit or rests on a question. Facts keep the messages and days that support them. Time-bound facts are retired the night after their end date. The owner's redirects (asked again, rephrased, pushed back) are stored and count as pitfalls, and the next message is shown beside each turn. Judge prompt `judge-v2` reads a fact's kind and every supporting message with its day. No database or Compose change.
 - **Why.** The judge's first run found 12 of 26 learned facts overstated, 10 of them one request saved as a standing preference. See [journal 181](journey/181-one-request-is-not-a-preference.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
+
+> **Update, 13 November 2026:** merged as `e65e13e` (PR 473) at the head the independent review approved (`2260a87d`, after two rounds of requested changes recorded in journal 181). Live from 01:17 SGT on 13 November by release run 43267665243; the gateway reported `e65e13e`, healthy, with no error lines in its first minutes. The first night under `learner-v6` and `judge-v2` is 13 November.
 
 ## Main moving no longer rebuilds a coding job (13 November 2026)
 

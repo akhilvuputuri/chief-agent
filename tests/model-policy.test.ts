@@ -8,6 +8,7 @@ import {
   readModelPolicy,
   resolveAgentModel,
   resolveJudgeModel,
+  resolveJudgeSecondModel,
   resolveMainModel,
   resolveAnthropicModel,
   resolvePriceCeilings,
@@ -75,6 +76,17 @@ test("reviewed policy price ceilings replace the environment's, and stay bounded
   // owner chose Opus 5.5, the main and learner model, for its judgement (journal 164). Without
   // one in the policy it uses the standard tier.
   assert.equal(resolveJudgeModel("main/model"), "anthropic/claude-opus-5.5");
+  // The cross-check of a nightly sample is another family than the judge, or it checks
+  // nothing the judge's own repeats do not; without one in the policy there is none.
+  assert.equal(resolveJudgeSecondModel(), "openai/gpt-6.1-sol");
+  assert.notEqual(
+    resolveJudgeSecondModel()!.split("/")[0],
+    resolveJudgeModel("main/model").split("/")[0],
+  );
+  assert.equal(
+    resolveJudgeSecondModel({ ...bundled, judgeSecond: undefined }),
+    undefined,
+  );
   assert.equal(
     resolveJudgeModel("main/model", { ...bundled, judge: undefined }),
     resolveAgentModel("standard", "main/model").model,

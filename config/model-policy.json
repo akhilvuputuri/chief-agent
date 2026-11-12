@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "main": "anthropic/claude-opus-5.5",
   "judge": "anthropic/claude-opus-5.5",
+  "judgeSecond": "openai/gpt-6.1-sol",
   "priceCeilings": { "input": 4, "output": 20 },
   "agents": {
     "default": "fast",

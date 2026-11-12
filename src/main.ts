@@ -54,6 +54,7 @@ import { FallbackAlerts, ModelRouter } from "./model-router.js";
 import {
   resolveAgentModel,
   resolveJudgeModel,
+  resolveJudgeSecondModel,
   resolveMainModel,
   resolvePriceCeilings,
   readModelPolicy,
@@ -1434,6 +1435,7 @@ workTimer.unref();
 // Singapore, deferred while the owner is active. LEARNING in config/runtime.json turns it off.
 const learnerModel = resolveAgentModel("standard", mainModel).model;
 const judgeModel = resolveJudgeModel(mainModel);
+const judgeSecondModel = resolveJudgeSecondModel();
 const learner = new Learner(db, {
   model: models.modelFor(learnerModel),
   modelName: learnerModel,
@@ -1441,6 +1443,14 @@ const learner = new Learner(db, {
     model: models.modelFor(judgeModel),
     modelName: judgeModel,
   },
+  ...(judgeSecondModel
+    ? {
+        judgeSecond: {
+          model: models.modelFor(judgeSecondModel),
+          modelName: judgeSecondModel,
+        },
+      }
+    : {}),
   enabled: c.LEARNING === "on",
 });
 await learner.recover();
@@ -1600,6 +1610,7 @@ opsLog("model.routes", "info", {
   standardRoute: routeOf(tierModel("standard")),
   fastRoute: routeOf(tierModel("fast")),
   judgeRoute: routeOf(judgeModel),
+  judgeSecondRoute: routeOf(judgeSecondModel),
   mediaRoute: routeOf(c.MEDIA_MODEL || mainModel),
 });
 // The direct route meant to be on but off for the main model is a silent switch to OpenRouter
