@@ -1,3 +1,7 @@
+# One request is not a preference — not yet released, 13 November 2026
+
+Issue #326. The nightly judge's first run (12 November) found 12 of 26 learned facts overstated, 10 of them a single request or question saved as a standing preference. Prompt `learner-v6` makes each fact say what it is: standing, a note of one occasion, or time-bound. Notes stay out of turns until another day repeats them; a habit on one day's evidence gets a warning flag; facts keep the days that support them; end dates expire; redirects count as pitfalls. The 12 existing facts are unchanged. Nothing is measured yet. See [journal 181](journey/181-one-request-is-not-a-preference.md) and [learning](learning.md#host-checks). The wider review and its remaining batches are in the owner's `reports/Memory loop improvement plan.md` (not in the repository). Next: read the overstated share among facts written under `learner-v6`.
+
 # Kite builds TypeScript — Kite 0.2.0 pinned, build switch pending, 12 November 2026
 
 Kite 0.2.0 adds `kite build`, which compiles a TypeScript project to the JavaScript `tsc` would write, without type checking. All 250 of Chief's output files have the same syntax tree as `tsc`'s, and both projects build in about 40 ms. This change only pins 0.2.0. The coding worker image is rebuilt next, and then `kite run build` and the image builds switch to it. See [journal 168](journey/168-kite-builds-typescript.md).
