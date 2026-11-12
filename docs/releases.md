@@ -5,6 +5,8 @@
 - **Why.** Two CI jobs and every coding job spent about 20 s on a `tsc` emit beside a separate type check. See [journal 168](journey/168-kite-builds-typescript.md#build-switch-12-november-2026).
 - **Deployment.** Not yet recorded as live; a dated note follows on release.
 
+> **Update, 12 November 2026:** merged as `aac9036` (PR 458); release run 43150674748 succeeded and the gateway was healthy at `aac9036`. The `kite run build` step in the two CI jobs fell from a median of 17 s over seven runs to under 1 s. "Every coding job spent about 20 s" above is an estimate from those CI jobs; a coding job's build was not measured.
+
 ## Kite 0.2.0 pinned (12 November 2026)
 
 - **Code.** `tools/kite.json` pins Kite 0.2.0, which adds `kite build`. Nothing calls it yet; installs and script runs are unchanged. No migration.

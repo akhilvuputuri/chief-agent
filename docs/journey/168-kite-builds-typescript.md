@@ -5,6 +5,8 @@ Status: Kite 0.2.0 is released and pinned by this change. Chief's build still ru
 
 > **Update, 12 November 2026:** the pin is live, the coding worker image is rebuilt with Kite 0.2.0 and pinned, and `kite run build` and the image builds now use `kite build`. See [Build switch](#build-switch-12-november-2026) below, which also corrects three statements in this entry.
 
+> **Update, 12 November 2026:** the build switch is live in `aac9036` (PR 458). See [Release closure](#release-closure-12-november-2026) below.
+
 ## User-visible problem and preceding iteration
 
 The owner asked for Kite to take over more of the toolchain where that buys speed. [Journal 159](159-shared-process-test-runs.md) showed that a transpiler would not speed up tests. Builds are different: `kite run build` runs `tsc`, which type-checks and emits, in two CI jobs and in every coding job's checks, although the type check already runs on its own.
@@ -101,3 +103,29 @@ The pin and the switch are one change, so a new coding job never meets `kite bui
 - **Older Kite:** a machine with Kite 0.1.3 fails `kite run build` with an unknown-command error; `node tools/install-kite.mjs` installs the pinned one. A coding job paused on an earlier worker image keeps its own branch and its old scripts, so it is affected only if it takes this change from main.
 
 **Next:** record the build steps of the two CI jobs after release.
+
+## Release closure (12 November 2026)
+
+**Release.** The switch merged as `aac9036` (PR 458) after an independent reviewer (Claude Opus 5.5) approved `d8857fb4`. Checks run 43150369755 passed, release run 43150674748 succeeded, and the host ran the gateway at `aac9036`, healthy. A coding job that was running on the previous worker image kept running across this release and the pin's.
+
+**Measured, CI, the `kite run build` step in the Pi worker and scripts jobs:**
+
+| Runs                                        | Pi worker job        | Scripts job          |
+| ------------------------------------------- | -------------------- | -------------------- |
+| Seven runs on main before the switch        | 13–22 s, median 17 s | 13–21 s, median 17 s |
+| Main run 43150369755 and PR run 43149849897 | under 1 s            | under 1 s            |
+
+GitHub reports step times to the second; after the switch each step started and finished in the same second, in the four test jobs as well. The seven earlier runs are from 11–12 November, so their medians differ from the 21 s and 19 s measured on 10 November.
+
+**Tested in CI on the pull request:** the gateway, browser and coding worker images all built with `kite run build`, and the worker boundary test passed on the worker image built that way.
+
+**Reviewer's check.** The reviewer built both projects with `tsc` and with `kite run build` and found the same 250 files with no syntax-tree difference. It confirmed from Kite's v0.1.3 source that `kite build` there is an unknown command.
+
+**Corrections to the Build switch section and its release record,** from the same review:
+
+- esbuild 0.28.2 stays in the image's production `node_modules`, as a dependency of `@earendil-works/chord`; it is not only tsx that brings it. Only Chief's own use of it is gone.
+- The release record said "every coding job spent about 20 s". That is an estimate from the CI jobs; a coding job's own build time was not measured.
+
+**Still not tested:** a coding job on the new worker image.
+
+**Kite follow-up.** A peer session once saw `kite ci` fail with "Directory not empty" when Finder wrote `.DS_Store` into `node_modules` during removal. Kite now tries such a removal up to five times ([PR 14](https://github.com/akhilvuputuri/kite/pull/14), merged as `9cdba4d`, not yet released). Its reviewer, in a local session whose figures are not on the pull request, reported reproducing the race on macOS with a test program: 47 of 50 plain removals failed and 50 of 50 succeeded with the retry.

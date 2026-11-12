@@ -5,6 +5,8 @@ Kite 0.2.0 adds `kite build`, which compiles a TypeScript project to the JavaScr
 > **Update, 12 November 2026 ([journal 168](journey/168-kite-builds-typescript.md#build-switch-12-november-2026)):** the pin is live in `d2d7d3b`. `kite run build` and both gateway image builds now use `kite build`; `build:image`, its esbuild script and the direct `esbuild` dependency are removed. Worker image `sha256:8da97981…` carries Kite 0.2.0 and is pinned in the same change. `typecheck` and `build:pi` still run `tsc`. Not yet released.
 >
 > Two conditions on the paragraph above: "the same syntax tree" is by Kite's `harness/ast-diff.mjs`, which ignores layout, comments, parentheses and three equivalent spellings; "about 40 ms" is one run on an Apple M4 laptop.
+>
+> **Update, 12 November 2026 ([journal 168](journey/168-kite-builds-typescript.md#release-closure-12-november-2026)):** live in `aac9036` (PR 458). The build step in the two CI jobs fell from a median of 17 s to under 1 s. Not yet tested: a coding job on the new worker image.
 
 # Traces from anywhere, behind a sign-in — prepared, 12 November 2026
 
