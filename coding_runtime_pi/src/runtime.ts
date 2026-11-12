@@ -309,14 +309,8 @@ export class CodingRuntime {
         task.used.models++;
         await this.options.store.save(task);
       };
-      const {
-        runtime,
-        model,
-        reasoning,
-        didRejectContextLocally,
-        requestByteLimit,
-        setRequestPurpose,
-      } = await this.options.model(admitModel);
+      const { runtime, model, reasoning, setRequestPurpose } =
+        await this.options.model(admitModel);
       const workspace = await new Workspace(task.workspace).initialize();
       await rm(outputs, { recursive: true, force: true });
       await mkdir(outputs, { recursive: true, mode: 0o700 });
@@ -467,7 +461,6 @@ export class CodingRuntime {
       task.sessionFile = manager.getSessionFile();
       await this.options.store.save(task);
       const settings = SettingsManager.inMemory({
-        retry: { enabled: false, provider: { maxRetries: 0 } },
         cacheWarming: "off",
         compaction: { enabled: true },
         images: { blockImages: true },
@@ -517,7 +510,6 @@ export class CodingRuntime {
                     { version: 1 },
                   );
                 },
-                requestByteLimit,
               );
               return { compaction: result };
             } catch (error) {
@@ -579,24 +571,13 @@ export class CodingRuntime {
                 : `${reason} Submitted report and validation feedback retained in the session.`;
           }
         }
-        const localContextOnly =
-          !finalizing &&
-          !stop.signal.aborted &&
-          turn.message.stopReason === "error" &&
-          didRejectContextLocally?.();
         // Pi's outer session can recover a length/error response through
         // compaction even when its ordinary retry setting is disabled.
-        if (
-          !localContextOnly &&
-          ["error", "aborted", "length"].includes(turn.message.stopReason)
-        )
+        if (["error", "aborted", "length"].includes(turn.message.stopReason))
           settings.setCompactionEnabled(false);
         const decision = await finishTurn?.(turn, signal);
         await pending;
-        if (
-          !localContextOnly &&
-          ["error", "aborted", "length"].includes(turn.message.stopReason)
-        )
+        if (["error", "aborted", "length"].includes(turn.message.stopReason))
           return { action: "end" };
         if (
           !finalizing &&

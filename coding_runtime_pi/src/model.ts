@@ -1,42 +1,30 @@
-import { randomUUID } from "node:crypto";
-import { openAICompletionsApi } from "@earendil-works/pi-ai/compat";
+import { anthropicMessagesApi } from "@earendil-works/pi-ai/compat";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { InMemoryCredentialStore, type Model } from "@earendil-works/pi-ai";
-import type { ModelConfig } from "./types.js";
 import {
-  gatewayOutageFetch,
-  terminalHttpRecoveryFetch,
-} from "./terminal-http-recovery.js";
-import { patientFetch } from "./patient-fetch.js";
+  InMemoryCredentialStore,
+  createAssistantMessageEventStream,
+  type AssistantMessageEventStream,
+  type Model,
+} from "@earendil-works/pi-ai";
+import type { ModelConfig } from "./types.js";
+
+/** Names the request's purpose (agent turn or compaction summary) for the host's call record. */
+export const purposeHeader = "x-runtime-purpose";
 
 export type ModelFactory = (admit: () => Promise<void>) => Promise<{
   runtime: ModelRuntime;
   model: Model<any>;
   reasoning?: ModelConfig["reasoning"];
-  /** Trusted provenance: envelope rejection before any provider transport. */
-  didRejectContextLocally?: () => boolean;
-  requestByteLimit?: number;
   setRequestPurpose?: (purpose: "agent" | "compaction") => void;
 }>;
+
 /**
- * Pi's bundled metadata (reasoning flag, compatibility rules) for a model. A dated snapshot
- * such as `deepseek/deepseek-v4.1-flash-1017` is often newer than the bundled list; it then
- * shares its base model's protocol rules, which must not silently fall back to defaults.
+ * Pi's own Anthropic Messages client, pointed at a gateway. Pi builds, streams and replays
+ * every request exactly as it would against api.anthropic.com; only the address, the key
+ * (a gateway capability, never an Anthropic key inside the box) and the purpose header differ.
  */
-export function knownModel(
-  runtime: Pick<ModelRuntime, "getModel">,
-  provider: string,
-  model: string,
-) {
-  const exact = runtime.getModel(provider, model);
-  if (exact) return exact;
-  const base = /^(.+)-\d{4}$/.exec(model)?.[1];
-  return base ? runtime.getModel(provider, base) : undefined;
-}
-/** Native Pi OpenAI-compatible implementation; no custom transcript conversion. */
-export function compatibleModel(config: ModelConfig): ModelFactory {
+export function anthropicModel(config: ModelConfig): ModelFactory {
   return async (admit) => {
-    let localContextRejected = false;
     let requestPurpose: "agent" | "compaction" = "agent";
     const runtime = await ModelRuntime.create({
       credentials: new InMemoryCredentialStore(),
@@ -44,125 +32,59 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
       refreshOnCreate: false,
       allowModelNetwork: false,
     });
-    const known = knownModel(runtime, config.provider, config.model);
-    const baseFetch = config.responseTimeoutMs
-      ? patientFetch(config.responseTimeoutMs)
-      : globalThis.fetch;
+    const known = runtime.getModel("anthropic", config.model);
+    if (!known || known.api !== "anthropic-messages")
+      throw new Error(`Pi's catalogue has no Anthropic model ${config.model}`);
     const provider = "runtime";
     runtime.registerProvider(provider, {
-      api: "openai-completions",
-      baseUrl: config.baseUrl ?? known?.baseUrl,
+      api: "anthropic-messages",
+      baseUrl: config.baseUrl ?? known.baseUrl,
       models: [
         {
-          id: config.model,
-          name: config.model,
-          input: ["text"],
-          reasoning: known?.reasoning ?? true,
-          cost: known?.cost ?? {
-            input: 0,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-          },
-          contextWindow:
-            config.contextWindow ??
-            known?.contextWindow ??
-            config.fallbackContextWindow ??
-            32000,
-          maxTokens: config.maxTokens ?? known?.maxTokens ?? 4096,
-          compat: {
-            ...known?.compat,
-            supportsStore: false,
-            supportsDeveloperRole: false,
-          },
+          id: known.id,
+          name: known.name,
+          input: known.input,
+          reasoning: known.reasoning,
+          thinkingLevelMap: known.thinkingLevelMap,
+          promptCache: known.promptCache,
+          inputLimits: known.inputLimits,
+          cost: known.cost,
+          contextWindow: config.contextWindow ?? known.contextWindow,
+          maxTokens: config.maxTokens ?? known.maxTokens,
+          compat: known.compat,
         },
       ],
       streamSimple: (model, context, options) => {
         const purpose = requestPurpose;
-        localContextRejected = false;
-        const stream = openAICompletionsApi().streamSimple;
+        const stream = anthropicMessagesApi().streamSimple;
         // Admission is awaited before provider I/O, including compaction calls.
-        const resultStream = new DeferredAdmissionStream(async () => {
+        return new DeferredAdmissionStream(model, async () => {
           await admit();
           return stream(model, context, {
             ...options,
-            ...(config.responseTimeoutMs
-              ? { timeoutMs: config.responseTimeoutMs }
-              : {}),
-            maxRetries: 0,
-            ...(config.terminalHttpRecovery &&
-            config.baseUrl &&
-            config.requestIdField
-              ? {
-                  fetch: terminalHttpRecoveryFetch({
-                    ...config.terminalHttpRecovery,
-                    baseUrl: config.baseUrl,
-                    requestIdField: config.requestIdField,
-                    admit,
-                    fetch: gatewayOutageFetch({
-                      baseUrl: config.baseUrl,
-                      requestIdField: config.requestIdField,
-                      admit,
-                      fetch: options?.fetch ?? baseFetch,
-                    }),
-                  }),
-                }
-              : config.responseTimeoutMs
-                ? { fetch: options?.fetch ?? baseFetch }
-                : {}),
-            onPayload: async (payload, selected) => {
-              const original = await options?.onPayload?.(payload, selected);
-              const request = original ?? payload;
-              if (
-                config.maxRequestBytes &&
-                Buffer.byteLength(JSON.stringify(request)) >
-                  config.maxRequestBytes
-              ) {
-                localContextRejected = true;
-                throw new Error("context_length_exceeded");
-              }
-              return config.requestIdField || config.requestPurposeField
-                ? {
-                    ...(request as Record<string, unknown>),
-                    ...(config.requestIdField
-                      ? { [config.requestIdField]: randomUUID() }
-                      : {}),
-                    ...(config.requestPurposeField
-                      ? { [config.requestPurposeField]: purpose }
-                      : {}),
-                  }
-                : request;
-            },
+            headers: { ...options?.headers, [purposeHeader]: purpose },
           });
-        });
-        return resultStream.stream;
+        }).stream;
       },
     });
     if (config.apiKey) await runtime.setRuntimeApiKey(provider, config.apiKey);
     return {
       runtime,
-      model: runtime.getModel(provider, config.model)!,
+      model: runtime.getModel(provider, known.id)!,
       reasoning: config.reasoning ?? "high",
-      requestByteLimit: config.maxRequestBytes,
       setRequestPurpose: (purpose) => {
         requestPurpose = purpose;
-      },
-      didRejectContextLocally: () => {
-        const rejected = localContextRejected;
-        const purpose = requestPurpose;
-        localContextRejected = false;
-        return rejected;
       },
     };
   };
 }
-import {
-  createAssistantMessageEventStream,
-  type AssistantMessageEventStream,
-} from "@earendil-works/pi-ai";
+
 class DeferredAdmissionStream {
   readonly stream = createAssistantMessageEventStream();
-  constructor(start: () => Promise<AssistantMessageEventStream>) {
+  constructor(
+    model: Model<any>,
+    start: () => Promise<AssistantMessageEventStream>,
+  ) {
     void (async () => {
       try {
         for await (const event of await start()) this.stream.push(event);
@@ -173,9 +95,9 @@ class DeferredAdmissionStream {
           error: {
             role: "assistant",
             content: [],
-            api: "openai-completions",
-            provider: "runtime",
-            model: "unavailable",
+            api: model.api,
+            provider: model.provider,
+            model: model.id,
             usage: {
               input: 0,
               output: 0,

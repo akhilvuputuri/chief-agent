@@ -20,7 +20,6 @@ export async function compactContext(
   stream: Stream,
   tools: unknown,
   commitEmptyTail: () => string,
-  requestByteLimit?: number,
 ) {
   const model = context.model;
   if (!model)
@@ -77,9 +76,7 @@ export async function compactContext(
   };
   const hasHeadroom = (value: ReturnType<typeof project>) =>
     value.projectedTokens <=
-      model.contextWindow - event.preparation.settings.reserveTokens &&
-    (requestByteLimit === undefined ||
-      value.projectedBytes <= requestByteLimit * 0.75);
+    model.contextWindow - event.preparation.settings.reserveTokens;
   const summaryTokenLimit = Math.floor(
     event.preparation.settings.reserveTokens / 2,
   );

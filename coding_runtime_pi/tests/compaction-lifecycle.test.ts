@@ -1,32 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import {
   CodingRuntime,
   TaskStore,
-  compatibleModel,
+  anthropicModel,
   localExecutor,
 } from "../src/index.js";
+import { messagesStream, toolUse } from "./anthropic-sse.js";
 
 // Actual Pi session/automatic compaction, with a deterministic HTTP provider.
 // This is a lifecycle regression, not a model-quality acceptance workload.
-for (const failure of [
-  "truncated",
-  "oversized",
-  "disconnect",
-  "cancel",
-  "terminal-recovered",
-  "terminal-second-failure",
-  "terminal-cancel",
-] as const) {
+for (const failure of ["truncated", "disconnect", "cancel"] as const) {
   test(`automatic ${failure} compaction preserves recovery boundaries`, async (t) => {
-    const terminal = failure.startsWith("terminal-"),
-      attemptId = randomUUID();
     let cancelRun: (() => Promise<unknown>) | undefined;
     let phase: "plan" | "build" = "plan",
       ordinary = 0,
@@ -40,29 +30,6 @@ for (const failure of [
       if (compact) {
         summaries++;
         if (summaries === 1) ordinaryAtFirstCompaction = ordinary;
-        if (
-          terminal &&
-          (summaries === 1 || failure === "terminal-second-failure")
-        ) {
-          res.writeHead(409, { "content-type": "application/json" });
-          res.end(
-            JSON.stringify({
-              code: "model_transient_failure",
-              recovery: {
-                version: 1,
-                kind: "terminal-provider-http",
-                callId: request.runtime_call_id,
-                attemptId,
-                providerStatus: 504,
-              },
-            }),
-          );
-          if (failure === "terminal-cancel")
-            setTimeout(() => {
-              void cancelRun!();
-            }, 10);
-          return;
-        }
         if (failure === "disconnect") {
           req.socket.destroy();
           return;
@@ -70,19 +37,6 @@ for (const failure of [
         if (failure === "cancel") {
           await cancelRun!();
           res.destroy();
-          return;
-        }
-        if (failure === "truncated") {
-          res.writeHead(409, { "content-type": "application/json" });
-          res.end(
-            JSON.stringify({
-              error: {
-                message: "model_incomplete",
-                type: "invalid_request_error",
-                code: "model_incomplete",
-              },
-            }),
-          );
           return;
         }
       } else if (phase === "build") ordinary++;
@@ -97,8 +51,7 @@ for (const failure of [
                   "Inspect source evidence and preserve the public API; report whether work can be completed. Only actual checks may establish completion.",
               },
             }
-          : ordinary <= 20 &&
-              !(failure === "terminal-recovered" && summaries >= 2)
+          : ordinary <= 20
             ? { name: "read", arguments: { path: "source.js" } }
             : {
                 name: "report",
@@ -109,36 +62,27 @@ for (const failure of [
                     "Synthetic provider terminal fallback after repeated investigation.",
                 },
               };
-      const delta = compact
-        ? {
-            role: "assistant",
-            content: "Retained requirement and investigation state. ".repeat(
-              terminal ? 12 : 5000,
-            ),
-          }
-        : {
-            role: "assistant",
-            content: null,
-            tool_calls: [
-              {
-                index: 0,
-                id: `tool-${phase}-${ordinary}`,
-                type: "function",
-                function: {
-                  name: tool.name,
-                  arguments: JSON.stringify(tool.arguments),
-                },
-              },
-            ],
-          };
-      const header = {
-        id: `fixture-${ordinary}-${summaries}`,
-        model: "fixture/compaction",
-        choices: [{ index: 0, delta, finish_reason: null }],
-      };
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(
-        `data: ${JSON.stringify(header)}\n\ndata: ${JSON.stringify({ ...header, choices: [{ index: 0, delta: {}, finish_reason: compact ? "stop" : "tool_calls" }], usage: { prompt_tokens: phase === "build" && !compact ? 35000 : 100, completion_tokens: 100, total_tokens: phase === "build" && !compact ? 35100 : 200 } })}\n\ndata: [DONE]\n\n`,
+        messagesStream({
+          id: `fixture-${ordinary}-${summaries}`,
+          content: compact
+            ? [
+                {
+                  type: "text",
+                  text: "Retained requirement and investigation state. ".repeat(
+                    5000,
+                  ),
+                },
+              ]
+            : [toolUse(`tool-${phase}-${ordinary}`, tool.name, tool.arguments)],
+          // The truncated case ends its summary at the output limit.
+          stopReason: compact ? "max_tokens" : "tool_use",
+          usage: {
+            input_tokens: phase === "build" && !compact ? 35000 : 100,
+            output_tokens: 100,
+          },
+        }),
       );
     });
     await new Promise<void>((resolve) =>
@@ -176,21 +120,12 @@ for (const failure of [
         join(root, "state"),
         "synthetic-compaction-state-key-at-least32",
       ),
-      model: compatibleModel({
-        provider: "synthetic",
-        model: "fixture/compaction",
+      model: anthropicModel({
+        model: "claude-opus-5-5",
         apiKey: "synthetic",
-        baseUrl: `http://127.0.0.1:${(server.address() as any).port}/v1`,
+        baseUrl: `http://127.0.0.1:${(server.address() as any).port}`,
         contextWindow: 40000,
         maxTokens: 16000,
-        maxRequestBytes: 179000,
-        ...(terminal
-          ? {
-              requestIdField: "runtime_call_id",
-              requestPurposeField: "runtime_purpose",
-              terminalHttpRecovery: { attemptId },
-            }
-          : {}),
       }),
       executor: (task) => localExecutor(task.workspace, join(root, "home")),
     });
@@ -218,11 +153,7 @@ for (const failure of [
     assert(summaries > 0, "Fixture must reach native automatic compaction");
     assert.equal(
       result.status,
-      failure === "terminal-recovered"
-        ? "completed"
-        : failure === "cancel" || failure === "terminal-cancel"
-          ? "cancelled"
-          : "paused",
+      failure === "cancel" ? "cancelled" : "paused",
       JSON.stringify({
         status: result.status,
         summary: result.summary,
@@ -230,14 +161,11 @@ for (const failure of [
         summaries,
       }),
     );
-    if (failure !== "terminal-recovered")
-      assert.match(
-        result.summary,
-        failure === "cancel" || failure === "terminal-cancel"
-          ? /stopped/i
-          : /compaction|summari[sz]/i,
-        "Compaction failure must retain its actual cause",
-      );
+    assert.match(
+      result.summary,
+      failure === "cancel" ? /stopped/i : /compaction|summari[sz]/i,
+      "Compaction failure must retain its actual cause",
+    );
     const retainedStore = new TaskStore(
       join(root, "state"),
       "synthetic-compaction-state-key-at-least32",
@@ -250,31 +178,13 @@ for (const failure of [
     assert.equal(restored.sessionFile, result.sessionFile);
     assert.equal(
       summaries,
-      failure === "terminal-recovered" || failure === "terminal-second-failure"
-        ? 2
-        : 1,
+      1,
       "A failed compaction must not be retried implicitly after each subsequent tool turn",
     );
-    if (terminal) {
-      const entries = (await readFile(result.sessionFile!, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-      assert.equal(
-        entries.filter((entry) => entry.type === "compaction").length,
-        failure === "terminal-recovered" ? 1 : 0,
-      );
-      assert.equal(
-        result.used.models,
-        1 + ordinary + summaries,
-        "Every inference, including failed summary, is admitted",
-      );
-    }
-    if (failure !== "terminal-recovered")
-      assert.equal(
-        ordinary,
-        ordinaryAtFirstCompaction,
-        "No new investigation should run after unrecovered compaction failure",
-      );
+    assert.equal(
+      ordinary,
+      ordinaryAtFirstCompaction,
+      "No new investigation should run after unrecovered compaction failure",
+    );
   });
 }

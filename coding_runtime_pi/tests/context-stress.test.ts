@@ -11,9 +11,10 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   CodingRuntime,
   TaskStore,
-  compatibleModel,
+  anthropicModel,
   localExecutor,
 } from "../src/index.js";
+import { messagesStream, toolUse } from "./anthropic-sse.js";
 
 for (const scenario of [
   "progress",
@@ -21,7 +22,6 @@ for (const scenario of [
   "stagnant",
   "small-progress",
   "small-stagnant",
-  "large-provider-window",
   "atomic-read-group",
   "atomic-truncated",
   "atomic-oversized",
@@ -72,15 +72,18 @@ for (const scenario of [
       } else if (phase === "build") {
         if (documentReads < pages) page = documentReads++;
         else ordinary++;
-        const prompt = JSON.stringify(body.messages);
+        const prompt = JSON.stringify([body.system, body.messages]);
         if (atomic) {
           missingScope ||= !prompt.includes("R279:");
           const calls = new Set<string>();
-          for (const message of body.messages) {
-            for (const call of message.tool_calls ?? []) calls.add(call.id);
-            if (message.role === "tool" && !calls.has(message.tool_call_id))
-              orphanToolResult = true;
-          }
+          for (const message of body.messages)
+            for (const block of Array.isArray(message.content)
+              ? message.content
+              : []) {
+              if (block.type === "tool_use") calls.add(block.id);
+              if (block.type === "tool_result" && !calls.has(block.tool_use_id))
+                orphanToolResult = true;
+            }
         }
         missingScope ||=
           !prompt.includes("REQUIREMENT_A") ||
@@ -130,43 +133,31 @@ for (const scenario of [
                 : { name: "read", arguments: { path: "source.js" } };
       if (!compact && phase === "build" && tool.name === "report")
         submitted = true;
-      const delta = compact
-        ? {
-            role: "assistant",
-            content:
-              (scenario === "atomic-oversized"
-                ? "Oversized summary evidence. ".repeat(5000)
-                : "") +
-              `Working state: preserve REQUIREMENT_A and REQUIREMENT_B. Source evidence inspected. Latest controlled work step ${ordinary}. Continue the remaining scoped edits, then submit the candidate for checks. Never claim checks passed without a receipt.` +
-              (atomic
-                ? "\n" +
-                  Array.from(
-                    { length: 30 },
-                    (_, i) =>
-                      `Observation ${i}: source evidence_${i} retains its identifier and validation rule. No implementation has been saved; update progress.json next.`,
-                  ).join("\n")
-                : ""),
-          }
-        : {
-            role: "assistant",
-            content: null,
-            tool_calls: (atomic && phase === "build" && ordinary === 1
-              ? [tool, { name: "read", arguments: { path: "source-copy.js" } }]
-              : [tool]
-            ).map((selected, index) => ({
-              index,
-              id: `step-${phase}-${ordinary}-${index}`,
-              type: "function",
-              function: {
-                name: selected.name,
-                arguments: JSON.stringify(selected.arguments),
-              },
-            })),
-          };
-      const header = {
-        id: `stress-${ordinary}-${summaries}`,
-        model: "fixture/context-stress",
-      };
+      const summary =
+        (scenario === "atomic-oversized"
+          ? "Oversized summary evidence. ".repeat(5000)
+          : "") +
+        `Working state: preserve REQUIREMENT_A and REQUIREMENT_B. Source evidence inspected. Latest controlled work step ${ordinary}. Continue the remaining scoped edits, then submit the candidate for checks. Never claim checks passed without a receipt.` +
+        (atomic
+          ? "\n" +
+            Array.from(
+              { length: 30 },
+              (_, i) =>
+                `Observation ${i}: source evidence_${i} retains its identifier and validation rule. No implementation has been saved; update progress.json next.`,
+            ).join("\n")
+          : "");
+      const content = compact
+        ? [{ type: "text" as const, text: summary }]
+        : (atomic && phase === "build" && ordinary === 1
+            ? [tool, { name: "read", arguments: { path: "source-copy.js" } }]
+            : [tool]
+          ).map((selected, index) =>
+            toolUse(
+              `step-${phase}-${ordinary}-${index}`,
+              selected.name,
+              selected.arguments,
+            ),
+          );
       // Provider accounting can exceed the locally modeled window (e.g. tokenization
       // differs); a successfully accepted terminal report must still terminate.
       const promptTokens =
@@ -175,7 +166,21 @@ for (const scenario of [
           : Math.ceil(Buffer.byteLength(raw) / 4);
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(
-        `data: ${JSON.stringify({ ...header, choices: [{ index: 0, delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ ...header, choices: [{ index: 0, delta: {}, finish_reason: compact ? (scenario === "atomic-truncated" ? "length" : "stop") : "tool_calls" }], usage: { prompt_tokens: promptTokens, completion_tokens: Math.ceil(Buffer.byteLength(JSON.stringify(delta)) / 4), total_tokens: promptTokens + Math.ceil(Buffer.byteLength(JSON.stringify(delta)) / 4) } })}\n\ndata: [DONE]\n\n`,
+        messagesStream({
+          id: `stress-${ordinary}-${summaries}`,
+          content,
+          stopReason: compact
+            ? scenario === "atomic-truncated"
+              ? "max_tokens"
+              : "end_turn"
+            : "tool_use",
+          usage: {
+            input_tokens: promptTokens,
+            output_tokens: Math.ceil(
+              Buffer.byteLength(JSON.stringify(content)) / 4,
+            ),
+          },
+        }),
       );
     });
     await new Promise<void>((resolve) =>
@@ -218,14 +223,12 @@ for (const scenario of [
         join(root, "state"),
         "synthetic-long-context-key-at-least32",
       ),
-      model: compatibleModel({
-        provider: "synthetic",
-        model: "fixture/context-stress",
+      model: anthropicModel({
+        model: "claude-opus-5-5",
         apiKey: "synthetic",
-        baseUrl: `http://127.0.0.1:${(server.address() as any).port}/v1`,
-        contextWindow: scenario === "large-provider-window" ? 1000000 : 40000,
+        baseUrl: `http://127.0.0.1:${(server.address() as any).port}`,
+        contextWindow: 40000,
         maxTokens: 16000,
-        maxRequestBytes: 179000,
       }),
       executor: (task) => localExecutor(task.workspace, join(root, "home")),
     });
@@ -255,7 +258,6 @@ for (const scenario of [
       }),
     );
     assert.equal(missingScope, false);
-    assert(wireSizes.every((n) => n <= 179000));
     if (atomicFailure) {
       assert.equal(result.status, "paused");
       assert.match(result.summary, /compaction|summari[sz]/i);
@@ -281,11 +283,6 @@ for (const scenario of [
     } else {
       assert.equal(result.status, "completed", result.summary);
       assert.equal(ordinary, atomic ? 3 : 101);
-      if (scenario === "large-provider-window")
-        assert(
-          result.used.models > ordinary + summaries + 1,
-          "Exercise repeated local byte-envelope recovery, not model-window compaction",
-        );
       assert.equal(documentReads, pages);
       assert.equal(result.plan!.text, planText);
       assert.equal(
