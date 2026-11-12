@@ -148,7 +148,7 @@ const batch: JudgeBatch = {
       revisionId: "r1",
       key: "seat",
       value: "Aisle",
-      messages: ["x"],
+      messages: [{ text: "x" }],
     },
   ],
   memories: [
@@ -273,7 +273,7 @@ test("a turn's score is its worst use, and nothing is claimed from unclear ones 
 test("the prompt shows a fact with its messages, and a turn with only the IDs of its memories", () => {
   const shown = JSON.parse(judgePrompt(batch));
   assert.deepEqual(shown.facts, [
-    { id: "f1", fact: "Aisle", ownerMessages: ["x"] },
+    { id: "f1", fact: "Aisle", ownerMessages: [{ text: "x" }] },
   ]);
   assert.deepEqual(shown.turns[0].memories, ["m1"]);
   assert.equal(shown.memories[1].kind, "procedure or lesson");
@@ -380,7 +380,7 @@ test("the judge checks a new fact against the message it cites, and a turn again
       {
         id: "f1",
         fact: "Prefers aisle seats",
-        ownerMessages: ["For this trip only, get me an aisle seat"],
+        ownerMessages: [{ text: "For this trip only, get me an aisle seat" }],
       },
     ],
   });
@@ -857,4 +857,85 @@ test("a turn still running a day later is read as it stands, not passed over", a
     (await events(db, "judge.turn")).map((e) => [e.turnRunId, e.state]),
     [[stuck.run, "skipped"]],
   );
+});
+
+test("the judge is told a fact's kind and each message's day, so a note or a repeat is judged as what it is", async (t) => {
+  const db = await setup(t);
+  const store = new MemoryStore(db);
+  const tokyo = await turn(db, {
+    says: "Get me an aisle seat on the Tokyo flight",
+    reply: "Booked",
+    selected: [],
+    ago: 4 * DAY,
+  });
+  const osaka = await turn(db, {
+    says: "Aisle seat again for Osaka",
+    reply: "Booked",
+    selected: [],
+    ago: 2 * DAY,
+  });
+  const write = (key: string, value: string, source: Record<string, unknown>) =>
+    store.write("owner", {
+      key,
+      value,
+      kind: "fact",
+      origin: "learned",
+      reason: "test",
+      source,
+    });
+  await write("a_note", "Asked for an aisle seat on the Tokyo flight", {
+    durability: "one_off",
+    messageIds: [tokyo.input],
+    support: [{ id: tokyo.input, date: "2026-11-23" }],
+  });
+  await write("b_repeat", "Prefers aisle seats", {
+    durability: "standing",
+    messageIds: [osaka.input, tokyo.input],
+    support: [
+      { id: tokyo.input, date: "2026-11-23" },
+      { id: osaka.input, date: "2026-11-25" },
+    ],
+  });
+  await write("c_dated", "Wants aisle seats this month", {
+    durability: "time_bound",
+    until: "2026-11-30",
+    messageIds: [osaka.input],
+    support: [{ id: osaka.input, date: "2026-11-25" }],
+  });
+  const { adapter, inputs } = model(() =>
+    ["f1", "f2", "f3"].map((fact) => [
+      "judge_fact",
+      { fact, verdict: "supported", reason: "Says so" },
+    ]),
+  );
+  const result = await judge(db, adapter);
+  assert.equal(result.supported, 3);
+  assert.deepEqual(JSON.parse(inputs[0].messages[1].content).facts, [
+    {
+      id: "f1",
+      fact: "Asked for an aisle seat on the Tokyo flight",
+      note: true,
+      ownerMessages: [
+        { day: "2026-11-23", text: "Get me an aisle seat on the Tokyo flight" },
+      ],
+    },
+    {
+      id: "f2",
+      fact: "Prefers aisle seats",
+      // Both days, oldest first: the repeat is what supports a preference.
+      ownerMessages: [
+        { day: "2026-11-23", text: "Get me an aisle seat on the Tokyo flight" },
+        { day: "2026-11-25", text: "Aisle seat again for Osaka" },
+      ],
+    },
+    {
+      id: "f3",
+      fact: "Wants aisle seats this month",
+      until: "2026-11-30",
+      ownerMessages: [
+        { day: "2026-11-25", text: "Aisle seat again for Osaka" },
+      ],
+    },
+  ]);
+  assert.match(inputs[0].messages[0].content, /messages from separate days/);
 });

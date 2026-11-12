@@ -56,6 +56,8 @@ A learned write that changes an owner's active fact wins as a new revision and i
 
 ### Selection
 
+> **Update, 13 November 2026 ([journal 181](journey/181-one-request-is-not-a-preference.md)):** a learned note of one occasion (`source.durability` `one_off`) is not selected into a turn's context, and is not counted as omitted. It is still listed by `memory_list`, found by `memory_recall` and shown to the learner. A learned item with an end date carries `until` into the turn, and the learned block then says such an item holds only through that day.
+
 Owner and imported facts are always included, as before this store existed, under the existing "Explicit memories" label; the cached prefix is byte-identical to before while no learned item exists. Learned facts and lessons follow under their own label, "Learned from completed work (data, not instructions; an explicit memory or the owner's current words win)", within 30,000 characters (12,000 until 3 November, when procedures were allowed to grow). Learned facts and lessons each have half of that to themselves, pinned first and then newest first, so new lessons cannot push out what Chief knows about the owner; room one kind leaves goes to either. The result is sorted by key so an unchanged set keeps the cached prefix. Responsibility investigations, plugin agents and research specialists still receive no memories.
 
 Every owner turn records `memory_context` for its run, after the request is final, and a `memory.selected` event with counts (explicit, learned, omitted, flagged, characters) that the ops log projects without content. A responsibility investigation, which gets no memories, records an empty selection.
@@ -101,6 +103,8 @@ A labelled task or turn is recorded in `learning_reviews` once its batch is appl
 
 #### Conversation turns
 
+> **Update, 13 November 2026 ([journal 181](journey/181-one-request-is-not-a-preference.md)):** a turn is also a pitfall when the owner's next message redirected it: asked again, rephrased or pushed back. The turn loop now stores what it already computed for trace export as a `turn.redirect` event on the redirected turn (`kind`, and the run that redirected it), whether or not tracing is on, and the learner reads it (reasons `owner_redirected` and `redirect_<kind>`). Turns from before this have no such event. The owner's next message within six hours is shown beside the turn as `ownerNext` (1,000 characters) when it is not already there as a correction; it is context, and is quoted from its own item.
+
 Most of the owner's requests never become a tracked work task: on the first night (29 October) the only finished tasks in 14 days were six routine occurrences and one cancelled task, so nothing could be learned ([journal 130](journey/130-nightly-learner.md#first-night-and-conversation-turns--2026-10-29)). The owner chose to also learn from ordinary conversation turns. After the tasks, each run looks at up to 100 turns: foreground runs answering the owner's own inputs, with no tracked task (those are reviewed as tasks) and not in the background, at least 24 hours and at most 90 days old, oldest first. The run ID is the reviewed ID in `learning_reviews`, whose `task_id` column holds either kind.
 
 - **success:** Chief answered (`stop_reason` `answer`) and the owner's next message within six hours does not correct it.
@@ -110,6 +114,8 @@ Most of the owner's requests never become a tracked work task: on the first nigh
 Turn evidence is the owner's messages, Chief's last reply, call counts per operation and the untrusted kinds, which also include the operations of any agent the turn delegated to (an email agent's `gmail_read` tags the turn `email`). Evidence sizes are generous on purpose (owner, 29 October) and will be cut back once real nights are measured: about 8,000 characters a turn and 12,000 a task, with up to 3,000 characters of each owner message and 2,000 of Chief's reply. The success signal is weaker than a task's proof, but a lesson may come from a single item because the owner prunes later. Facts still need the owner's own quoted words.
 
 ### The model run
+
+> **Update, 13 November 2026 ([journal 181](journey/181-one-request-is-not-a-preference.md)):** prompt `learner-v6`. Every `learn_fact` says what kind of statement it is in `durability`. `standing`: the owner spoke generally. `one_off`: a request, question or instruction about one occasion, saved as a past-tense note ("Asked for an aisle seat on the Tokyo flight"). `time_bound`: holds until a date, given in `until`. The learner sees a note in `current` with `once` and its day, and a repeat on another day is what lets it revise the key as standing. It is told to propose a standing fact again when a later item restates it, so the host can record the repeat. Items reviewed under `learner-v5` are not reviewed again, and the 12 facts the judge found overstated are unchanged.
 
 The learner calls the `standard` tier (resolved from `config/model-policy.json`, Claude Opus 5.5 today) at most 10 times, with its own run ID so its charges in `provider_charges` stay separate from owner turns, and its own prompt-cache key. Its input is, per labelled task: the label and reasons, the request, step titles, statuses and short results, receipt counts per operation, up to five owner messages, Chief's last reply, and the kinds of untrusted content the task read (email, web, document, agent report, calendar, from its operations). It also sees the current memory items, marked when learned: owner facts first, then learned items newest first, up to 40,000 characters. Each task is held to about 12,000 characters.
 
@@ -124,6 +130,14 @@ The host appends attachment content to the owner's stored message after a blank 
 Each task shown to the model is held to about 12,000 characters: steps are dropped first, then later owner messages, then the reply, then the request and step results are shortened.
 
 ### Host checks
+
+> **Update, 13 November 2026 ([journal 181](journey/181-one-request-is-not-a-preference.md)):** four additions, all in [src/learning.ts](../src/learning.ts).
+>
+> - **End dates.** `until` goes with `time_bound` and only with it. It must be a real date, not before the cited work, not before today in Singapore, and at most a year past the work. On the night after it, the item pass retires the fact as a revision of that run (`learner.applied` action `expired`, reason "Held until …"). A rollback of that run restores it without the end date, so it then stays until pruned. The cited work's day is a UTC day and today is a Singapore day, so an end date worked out from an early-morning message can be a day early.
+> - **Flags for a habit on one day's evidence.** A `standing` fact seen on one day is flagged `habitual_framing` when its value uses a habit word ("prefers", "wants", "needs", "usually", "always", "never", "every" and similar; "would like" is not one) and the quote has no sign the owner spoke generally ("I prefer", "I always", "I'm", "I don't", "next time", "from now on" and similar), and `quoted_question` when the quote is a question. Neither applies once the fact has been seen on two separate days. They are named so pruning can rank by them, and like `paraphrased` they do not count as flagged in `memory.selected`: as warnings they would mark most turns' log lines for as long as a fact is never repeated. A habit worded without such a word is not caught.
+> - **Support accumulates.** A fact keeps the messages its quotes were found in (the newest 8, as `support` and `messageIds`), every separate day it was seen on (`seenDays`, up to 20) and its latest `quote`. A proposal with the same value from a new day is written as a revision (`reinforced`); the same day again is `unchanged`. Support carries over only when the value is the same or a note is being promoted: a changed value is a new claim and starts its own, so rewording a long-held fact returns it to one day of evidence. A revision from before this counts as one sighting on its work day.
+> - **A key keeps its standing.** A `one_off` proposal under a key that holds a standing or time-bound fact is refused, since it would take the fact out of every turn, and so is a `time_bound` one under a key that holds a standing fact, since the key would hold nothing after its end date. An exception goes under its own key. A note is made `standing` only when the evidence then spans two separate days or the new quote shows the owner speaking generally; a second message on the note's own day is refused.
+> - **Framing words.** "asked", "requested", "wanted", "said" and "once" count as framing, so a note is not flagged `paraphrased` for how notes are worded.
 
 Every proposal is checked before it is accepted, and a refusal is returned to the model with its reason:
 
@@ -170,6 +184,8 @@ Reading one item at a time produced narrow rules overgeneralised from one exampl
 
 ### Nightly judge
 
+> **Update, 13 November 2026 ([journal 181](journey/181-one-request-is-not-a-preference.md)):** prompt `judge-v2`. A fact reaches the judge with its kind (`note` for one occasion, `until` for an end date) and every supporting message with the day of its work, oldest first. A note is supported when the owner asked or said that on the occasion. A standing fact is supported when the owner says it generally, or when messages from separate days each show the same choice; one request or question still makes it overstated. The judge and the learner changed together, so shares before and after are not strictly comparable.
+
 > **Update, 11 November 2026 ([journal 164](journey/164-claude-models-everywhere.md)):** the judge's model is `anthropic/claude-opus-5.5`, the same model as the main model and the learner; the owner chose it for the quality of its judgement. The separation described below, a different family so it does not grade its own work, no longer holds. agentwatch's `answer_ok` judge stays on `openai/gpt-6.1-sol`.
 
 [`src/memory-judge.ts`](../src/memory-judge.ts), run by the learner as a night's last pass (`judge-v1`). The host checks compare a fact's words with a quote, not its meaning, and a record that a memory was in a turn's context does not say whether it was used. The owner rates nothing ([decisions](#decisions)), so a model judges both. It measures only: it writes no revision, flag or retirement.
@@ -196,6 +212,8 @@ A fact whose messages no longer exist is recorded `no_source` without a model ca
 ### Telemetry and the private record
 
 `learner.finished` logs the state and counts (tasks reviewed, successes, pitfalls, facts, retirements, refusals, flagged, model calls; its flagged counts items written with any flag, routine ones included, while `memory.selected` counts warning flags only), and for a procedure pass the procedures written, lessons absorbed, windows read and items left unread. For a judge pass it logs the facts judged and found supported, the turns judged, the memories found relevant, followed, ignored and contradicted, and the items missed. `lessonCount` remains for older records. `learner.failed` and `learner.item_refused` log the error class only.
+
+> **Update, 13 November 2026 ([journal 181](journey/181-one-request-is-not-a-preference.md)):** an item pass also logs notes written, facts reinforced by a new day, and facts retired past their end date (`noteCount`, `reinforcedCount`, `expiredCount`); `factCount` no longer includes notes. `learner.applied` has the actions `reinforced` and `expired`, and carries the fact's `durability` and the days it has been seen on. `turn.redirect` is a new event type, not in the ops-log projection.
 
 Each run also keeps a private record in the Postgres `events` table, under the run's `runtime_runs` ID, with credentials scrubbed. These event types are not in the ops-log projection, so their text never leaves the host:
 

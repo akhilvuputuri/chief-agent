@@ -63,6 +63,8 @@ export interface LearnedItem {
   value: string;
   outcome?: "success" | "pitfall";
   domain?: string;
+  /** The last day a time-bound fact holds. */
+  until?: string;
 }
 
 export interface MemorySelection {
@@ -83,13 +85,17 @@ export type DescribedItem = Omit<MemoryItemInput, "itemId">;
 
 /** A learned item as the prompt shows it. */
 const learnedEntry = (
-  r: Pick<MemoryRevision, "key" | "kind" | "value" | "outcome" | "domain">,
+  r: Pick<
+    MemoryRevision,
+    "key" | "kind" | "value" | "outcome" | "domain" | "source"
+  >,
 ): LearnedItem => ({
   key: r.key,
   kind: r.kind,
   value: r.value!,
   ...(r.outcome ? { outcome: r.outcome } : {}),
   ...(r.domain ? { domain: r.domain } : {}),
+  ...(typeof r.source?.until === "string" ? { until: r.source.until } : {}),
 });
 
 /**
@@ -146,6 +152,11 @@ export const ROUTINE_FLAGS = new Set([
   "paraphrased",
   "loosely_quoted",
   "shrunk",
+  // A habit resting on one day's evidence (learning.ts): a doubt about scope, not a risk.
+  // Named so pruning can rank by them; as warnings they would mark most turns' log lines
+  // for as long as the fact is never repeated.
+  "habitual_framing",
+  "quoted_question",
 ]);
 
 // Flag, never block: a flagged item is applied and listed first in the digest.
@@ -185,6 +196,26 @@ const COLUMNS = `r.id,r.key,r.revision,r.kind,r.status,r.value,r.outcome,r.domai
 export const isLearned = (r: Pick<MemoryRevision, "origin" | "source">) =>
   r.origin === "learned" ||
   (r.origin === "rollback" && r.source.restoredOrigin === "learned");
+
+/**
+ * A learned note of one occasion ("Asked for an aisle seat on the Tokyo flight"), which the
+ * learner keeps so that a repeat can make it a preference (learning.ts). It is memory like
+ * any other (listed, recalled, rolled back) but is not put in every turn's context: a single
+ * request read as a rule is the failure it exists to prevent.
+ */
+export const isNote = (r: Pick<MemoryRevision, "origin" | "source">) =>
+  isLearned(r) && r.source.durability === "one_off";
+
+// What a restored copy keeps of the original's provenance, so it stays the kind of item it
+// was. When the revision being undone is an expiry, the end date is left behind: undoing an
+// expiry means the fact is wanted back, and with the date it would expire again the next night.
+const lifecycle = (source: Record<string, unknown>, undoneExpiry: boolean) =>
+  Object.fromEntries(
+    ["durability", "until", "support", "seenDays", "workDate"]
+      .filter((k) => source[k] !== undefined)
+      .filter((k) => k !== "until" || !undoneExpiry)
+      .map((k) => [k, source[k]]),
+  );
 
 const trustOf = (origin: "owner" | "learned", untrusted: string[]) =>
   origin === "learned" && untrusted.length ? "untrusted" : "owner";
@@ -354,7 +385,11 @@ export class MemoryStore {
         const source = {
           rollback: { of: head.id, ...this.describe(filter) },
           ...(keep
-            ? { restoredFrom: keep.id, restoredOrigin: keep.origin }
+            ? {
+                restoredFrom: keep.id,
+                restoredOrigin: keep.origin,
+                ...lifecycle(keep.source, head.source.expired !== undefined),
+              }
             : {}),
         };
         if (keep?.status === "active") {
@@ -470,6 +505,7 @@ export class MemoryStore {
       value: r.value,
     });
     for (const r of items) {
+      if (isNote(r)) continue;
       if (isLearned(r)) candidates.push(r);
       else if (r.kind === "fact") {
         explicit.push({ key: r.key, value: r.value! });

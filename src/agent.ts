@@ -745,27 +745,41 @@ export class Assistant {
           previousTurns.at(-1),
         );
         const apply = this.effort?.config.redirect?.apply;
-        if (previous && previous !== run && otel.tracingEnabled())
+        if (previous && previous !== run)
           void Promise.resolve(latest ? effortDecided : undefined)
             .catch(() => undefined)
-            .then((decision) =>
-              otel.turnFeedback(
-                previous,
-                () =>
-                  withJev(
-                    target
-                      ? redirectOf(
-                          message,
-                          target.runId === last?.runId ? last?.request : null,
-                          target.text,
-                        )
-                      : redirectOf(message, last?.request, answer),
-                    decision?.redirect,
-                    apply,
-                  ),
-                last?.runId,
+            .then(async (decision) => {
+              const redirect = withJev(
+                target
+                  ? redirectOf(
+                      message,
+                      target.runId === last?.runId ? last?.request : null,
+                      target.text,
+                    )
+                  : redirectOf(message, last?.request, answer),
                 decision?.redirect,
-              ),
+                apply,
+              );
+              if (otel.tracingEnabled())
+                otel.turnFeedback(
+                  previous,
+                  () => redirect,
+                  last?.runId,
+                  decision?.redirect,
+                );
+              // Kept on the turn it redirects, so the nightly learner counts that answer as
+              // a pitfall (docs/learning.md); until now the signal lived only in trace export.
+              if (redirect)
+                await event(this.db, user, previous, "turn.redirect", {
+                  kind: redirect,
+                  by: run,
+                });
+            })
+            .catch((error) =>
+              opsLog("turn.redirect_failed", "warn", {
+                runId: run,
+                ...errorFields(error),
+              }),
             );
       }
       // Foreground messages ask the picker; background job steps, a missing
