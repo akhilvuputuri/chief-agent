@@ -1,3 +1,8 @@
+## Worker image for the go gate (13 November 2026)
+
+- **Configuration.** New coding jobs pin worker image `sha256:dfbc5b19…`, built from `9e4f36f` (run 43306397865). It carries the worker side of [journal 191](journey/191-go-gate-no-planner.md): no planner, plan check or plan repair, and a plan-mode assignment is refused. `previousImages` stays empty: the previous image expects the planning flow this gateway no longer starts, and no coding job is open on it. No code, migration or Compose change.
+- **Deployment.** Not yet recorded as live; a dated note follows on release.
+
 ## Coding jobs start at a Start card, with no planner (13 November 2026)
 
 - **Code.** `coding_start` creates the job waiting for Start and sends the goal in one or two lines, the coder and reviewer models and one Start button. No model runs and no box starts before Start. A message before Start is appended to the request and replaces the card; a tap on the earlier card is refused. The planner, the plan check and plan repair are deleted from the host and the worker, with the plan attachment, the Change button, `leaderModel` and `planCheck`, and the length caps on the request. The host still refuses a build without the owner's approval of the exact request. No migration or Compose change.
@@ -5,6 +10,8 @@
 - **Interim.** Until the next stage, a reply after Start on a stopped job is appended to the request and returns the job to a new Start card.
 - **Why.** The owner does not read plans and wants a go gate, then one session. See [journal 191](journey/191-go-gate-no-planner.md) and [the design](coding-simple-loop.md).
 - **Deployment.** Host and worker change together; a worker image built from this merge is pinned right after. Not yet released.
+
+> **Update, 13 November 2026:** merged as `9e4f36f` (PR 483) at the head both independent reviewers approved, with the review fixes (a clean rebuild after a reply to a job stopped in review, a fresh Start card when a model changes before Start, the goal shown as plain text, the typed decline path deleted). Release run 43306834191 succeeded and the gateway was healthy at `9e4f36f`. The worker image built from it is pinned by the entry above.
 
 ## Worker image for the native protocol and Pi's own tools (13 November 2026)
 
