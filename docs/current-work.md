@@ -2,6 +2,8 @@
 
 Issue #326, batch 3 of the memory-loop review. A fourth nightly pass rewrites the learned facts the judge faulted so that they say only what the owner said, once the judge's record against planted errors passes a gate; five a night, undone by one rollback. The owner can now tell Chief to forget or narrow a memory and it happens in that turn (`memory_forget`, and `memory_set` on the same key). `scripts/memory-ledger.sql` ranks learned memory for pruning. Nothing is measured: the gate cannot open before the judge has two nights of planted-error results. See [journal 185](journey/185-verdicts-repair-memory.md) and [learning](learning.md#nightly-repair). Next: watch the gate open, then read what the repair made of the 12 overstated facts.
 
+> **Update, 13 November 2026:** live in `a869463` (PR 478) from 02:32 SGT on 13 November.
+
 # An alert leads to the trace — not yet released, 13 November 2026
 
 Issue #323. A review of agentwatch on 13 November found it had not been used to answer one production question: 82 of 367 stored traces held a failed span and no real alert had fired. Step 1 of the plan that followed is the path from an alert to the answer. agentwatch's trace page now opens on what was asked, what was replied and the first error, a wrong password keeps the linked trace, and a firing alert records the worst tool or model and up to three traces behind its figure. Chief's relay passes those on: the Telegram message names the worst contributor and links to the traces. Pending: agentwatch's alert change in review, then its image pinned and rolled out with its public address, then acceptance from a phone. See [journal 184](journey/184-alert-to-answer.md); the full plan is the owner's `reports/agentwatch improvement review.md`.
