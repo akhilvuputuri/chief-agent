@@ -1,3 +1,9 @@
+## Main moving no longer rebuilds a coding job (13 November 2026)
+
+- **Code.** An owner-merge coding job's PR is no longer re-implemented when main moves. It goes to its Merge card and merges at the reviewed head like any PR. Only a conflict reported by GitHub, with main actually moved, runs the existing re-apply path, which stays as an interim. The two-rebase cap is removed. While GitHub recomputes whether the PR can merge, the Merge card and a recorded tap are kept. Host only; no worker image, migration or Compose change.
+- **Why.** Job `9600af57` was rebuilt twice because main moved, once for a docs-only commit: $68 of its $104. See [journal 180](journey/180-main-moving-is-not-an-event.md) and [journal 179](journey/179-first-full-coding-job-review.md).
+- **Deployment.** Not yet recorded as live; a dated note follows on release.
+
 ## Shared links: study list or Reader (12 November 2026)
 
 - **Code.** Chief classifies a shared link as study material or offline reading and saves it to a new study list, to Reader, or both, with a choice card when unsure. Written by coding job `9600af57` (PR 463).
