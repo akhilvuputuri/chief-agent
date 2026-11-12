@@ -1,11 +1,11 @@
 # 179 — After-action review: why did the first full coding job take a day and $104?
 
-Work date(s): 2026-11-12. Written/revised: 2026-11-12.
-Status: investigation complete; no code changed here. The fixes are in open PRs 462, 464–469 (not released) and in the follow-ups listed under "Plan".
+Work date(s): 2026-11-12. Written/revised: 2026-11-12, 2026-11-13.
+Status: investigation complete; no code changed here. PRs 462 and 467 remain open; 464–466 and 469 were closed on 13 November in favour of the loop design (PR 468); see "Plan".
 
 ## User-visible problem and preceding iteration
 
-Coding job `9600af57` (the study list, [journal 178](178-study-list-link-classification.md)) was the first Pi job to run from request to a merged PR on Opus 5.5. It produced a correct change (33 files, about 4,000 lines, merged as `2910171b`), but it took 19 hours 14 minutes from request to merge-ready and $103.82 in model calls, and the owner had to restart it three times. The owner asked for a thorough review: such a job should need neither that time nor those tokens, and Pi is used by many people without this cost.
+Coding job `9600af57` (the study list, [journal 178](178-study-list-link-classification.md)) was the first Pi job to run from request to a merged PR on Opus 5.5. It produced a correct change (33 files, about 4,000 lines, merged as `2910171b`), but it took 19 hours 14 minutes from the request (11 November, 19:10 UTC) to merge-ready (14:24) and $103.82 in model calls, and the owner had to restart it three times. The owner asked for a thorough review: such a job should need neither that time nor those tokens, and Pi is used by many people without this cost.
 
 Earlier partial findings are in [journal 169](169-three-hour-coding-attempts.md) (time limit, effort, tool use on the first attempt).
 
@@ -30,7 +30,7 @@ Sources: `coding_model_calls` and `coding_events` for the job on the production 
 
 By role: coder 779 calls, $71.22; reviewer 310 calls, $31.49; planner 15 calls, $1.12.
 
-By token type (list prices: $4 input, $20 output, $0.20 cache read, $5 cache write per million):
+By token type (list prices: $4 input, $20 output, $0.20 cache read, $5 cache write per million; figures are rounded to the cent, and "All" includes the planner's $1.12):
 
 | Component       | Coder  | Reviewer | All    |
 | --------------- | ------ | -------- | ------ |
