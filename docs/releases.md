@@ -1,3 +1,9 @@
+## Coding tool guidance for the Pi worker (12 November 2026)
+
+- **Code.** Worker only. The Pi worker's system prompt tells each role which of its own tools to use: `read` and `edit`/`write` for files instead of `cat`, `sed` or `python3` scripts through `bash`, `bash` for commands, tests and git, and independent reads and searches requested together in one turn (up to eight). The planner and reviewer are only told about tools they have. No host, database or Compose change.
+- **Why.** On job `9600af57` the Opus coder asked for one tool in 168 of 173 responses, nearly all `bash`, and never used `read` or `edit`. See [journal 170](journey/170-coding-tool-guidance.md).
+- **Deployment.** Takes effect only when a worker image built from this change is pinned in `config/coding-pi.json` (a later PR); existing jobs keep their image. Not yet recorded as live.
+
 ## Coding attempts may run three hours (12 November 2026)
 
 - **Configuration.** New Pi coding jobs get 180 minutes per attempt instead of 150, the most one attempt may run. Model and tool-call limits, models and effort are unchanged. No code, migration or Compose change.

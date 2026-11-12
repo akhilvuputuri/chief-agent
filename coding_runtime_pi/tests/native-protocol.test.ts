@@ -190,3 +190,130 @@ for (const choice of [
     );
     assert.equal(result.used.models, investigationTurns + 1);
   });
+
+test("native Pi runs every tool call of one host-framed message and replays them together", async (t) => {
+  // Chief's facade frames a completed generation as one SSE chunk whose tool_calls carry
+  // ids but no stream index (src/coding/pi-proxy.ts).
+  const bodies: any[] = [];
+  const server = createServer(async (req, res) => {
+    let text = "";
+    for await (const chunk of req) text += chunk;
+    const body = JSON.parse(text);
+    bodies.push(body);
+    const tool_calls =
+      bodies.length === 1
+        ? [
+            {
+              id: "toolu_read",
+              type: "function",
+              function: {
+                name: "read",
+                arguments: JSON.stringify({ path: "sum.js" }),
+              },
+            },
+            {
+              id: "toolu_grep",
+              type: "function",
+              function: {
+                name: "grep",
+                arguments: JSON.stringify({ pattern: "synthetic" }),
+              },
+            },
+          ]
+        : [
+            {
+              id: "toolu_report",
+              type: "function",
+              function: {
+                name: "report",
+                arguments: JSON.stringify({
+                  kind: "plan",
+                  summary: "Fix sum",
+                  detail: "Use addition in sum.js.",
+                }),
+              },
+            },
+          ];
+    const message = { role: "assistant", content: null, tool_calls };
+    const chunk = {
+      id: body.runtime_call_id,
+      object: "chat.completion.chunk",
+      created: 1,
+      model: body.model,
+      choices: [{ index: 0, delta: message, finish_reason: null }],
+    };
+    const end = {
+      ...chunk,
+      choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+      usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 },
+    };
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(
+      `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(end)}\n\ndata: [DONE]\n\n`,
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const port = (server.address() as { port: number }).port;
+  const root = await mkdtemp(join(tmpdir(), "pi-native-parallel-"));
+  const workspace = join(root, "work");
+  await mkdir(workspace);
+  execFileSync("git", ["init", "-q", workspace]);
+  execFileSync("git", ["-C", workspace, "config", "user.name", "Synthetic"]);
+  execFileSync("git", [
+    "-C",
+    workspace,
+    "config",
+    "user.email",
+    "synthetic@example.invalid",
+  ]);
+  await writeFile(join(workspace, "sum.js"), "// synthetic\n");
+  execFileSync("git", ["-C", workspace, "add", "."]);
+  execFileSync("git", ["-C", workspace, "commit", "-qm", "Fixture"]);
+  const runtime = new CodingRuntime({
+    store: new TaskStore(
+      join(root, "state"),
+      "synthetic-state-key-32-characters",
+    ),
+    model: compatibleModel({
+      provider: "synthetic",
+      model: "synthetic/model",
+      baseUrl: `http://127.0.0.1:${port}/v1`,
+      apiKey: "synthetic-capability",
+      requestIdField: "runtime_call_id",
+      contextWindow: 32000,
+      maxTokens: 8000,
+    }),
+  });
+  const task = await runtime.start({
+    workspace,
+    objective: "Plan the synthetic fix",
+  });
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(bodies.length, 2);
+  assert.equal(result.used.tools, 3);
+  const replay = bodies[1].messages;
+  const assistant = replay.findIndex((m: any) => m.role === "assistant");
+  assert.deepEqual(
+    replay[assistant].tool_calls.map((c: any) => [c.id, c.function.name]),
+    [
+      ["toolu_read", "read"],
+      ["toolu_grep", "grep"],
+    ],
+  );
+  const results = replay.slice(assistant + 1, assistant + 3);
+  assert.deepEqual(
+    results.map((m: any) => [m.role, m.tool_call_id]),
+    [
+      ["tool", "toolu_read"],
+      ["tool", "toolu_grep"],
+    ],
+  );
+  const content = (m: any) =>
+    typeof m.content === "string"
+      ? m.content
+      : m.content.map((p: any) => p.text).join("");
+  assert.match(content(results[0]), /synthetic/);
+  assert.match(content(results[1]), /sum\.js/);
+});

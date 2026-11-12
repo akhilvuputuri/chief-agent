@@ -211,6 +211,40 @@ export function tools(
   }));
 }
 
+/**
+ * System-prompt guidance on choosing and batching tools, naming only the tools this
+ * session was actually given (journal 170). Pi runs every call of one assistant message
+ * in order before the next model turn; the host facade accepts up to 20 calls per replayed
+ * message, so the requested batch stays well below that.
+ */
+export function toolGuidance(names: readonly string[]): string {
+  const has = (name: string) => names.includes(name);
+  const list = (items: string[]) =>
+    items.length > 1
+      ? `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`
+      : (items[0] ?? "");
+  const parts: string[] = [];
+  if (has("read")) {
+    const viaShell = has("edit")
+      ? "cat, sed -n, head or python3 and heredoc scripts"
+      : "cat, sed -n or head";
+    parts.push(
+      `View files with read (offset and limit for part of a long file)${has("edit") ? `, change them with edit${has("write") ? " and create new files with write" : ""}` : ""}${has("bash") ? `, rather than ${viaShell} through bash` : ""}.`,
+    );
+  }
+  const search = ["grep", "find", "ls"].filter(has);
+  if (search.length) parts.push(`Search with ${list(search)}.`);
+  if (has("bash"))
+    parts.push(
+      "Keep bash for running commands, tests and git, and for searches the other tools cannot do.",
+    );
+  if (has("read") || search.length)
+    parts.push(
+      `When several reads or searches are independent, request them in the same turn as parallel tool calls (up to eight) instead of one per turn${has("report") ? "; call report on its own, after the other results are back" : ""}.`,
+    );
+  return parts.length ? `Tool use: ${parts.join(" ")}` : "";
+}
+
 function bash(cwd: string, execute: Executor) {
   return createBashToolDefinition(cwd, {
     exposeSessionEnvironment: false,

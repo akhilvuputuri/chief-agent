@@ -13,6 +13,8 @@ import {
 import { z } from "zod";
 import { ModelError, type ModelMessage } from "../src/model.js";
 import { spending, type Spending } from "../src/spending.js";
+import { piCompletion, piCompletionRequest } from "../src/coding/pi-proxy.js";
+import { randomUUID } from "node:crypto";
 
 const prices = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 };
 const encoder = new TextEncoder();
@@ -1702,4 +1704,118 @@ test("failures after a complete, billed response carry its normalized usage", as
       },
     );
   }
+});
+
+test("parallel tool calls survive the Pi facade and the direct route in both directions", async () => {
+  const { model, requests } = adapter(() =>
+    sse(
+      stream(
+        [
+          {
+            type: "tool_use",
+            id: "toolu_read",
+            name: "read",
+            input: { path: "a.ts" },
+          },
+          {
+            type: "tool_use",
+            id: "toolu_grep",
+            name: "grep",
+            input: { pattern: "x" },
+          },
+        ],
+        { stop: "tool_use" },
+      ),
+    ),
+  );
+  const controller = {
+    generate: (_job: unknown, input: any) =>
+      run(model, input.messages, {
+        tools: input.tools,
+        requireComplete: true,
+      }),
+  };
+  const history = [
+    { role: "system", content: "Coding prompt" },
+    { role: "user", content: "Plan" },
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: "toolu_ls",
+          type: "function",
+          function: { name: "ls", arguments: "{}" },
+        },
+        {
+          id: "toolu_find",
+          type: "function",
+          function: { name: "find", arguments: '{"pattern":"*.ts"}' },
+        },
+      ],
+    },
+    { role: "tool", tool_call_id: "toolu_ls", content: "src" },
+    { role: "tool", tool_call_id: "toolu_find", content: "src/a.ts" },
+  ];
+  const result = await piCompletion(
+    controller as any,
+    {
+      mode: "plan",
+      settings: { runtime: "pi", model: "anthropic/claude-opus-5.5" },
+    } as any,
+    "coder",
+    {
+      runtime_call_id: randomUUID(),
+      model: "anthropic/claude-opus-5.5",
+      messages: history,
+      tools: ["ls", "find", "read", "grep"].map((name) => ({
+        type: "function",
+        function: { name, parameters: { type: "object" } },
+      })),
+      stream: true,
+    },
+  );
+  // Request: both calls as tool_use blocks, both results in one user message, in order.
+  const sent = requests[0]!.body.messages;
+  assert.deepEqual(
+    sent[1].content.map((b: Block) => [b.type, b.id]),
+    [
+      ["tool_use", "toolu_ls"],
+      ["tool_use", "toolu_find"],
+    ],
+  );
+  assert.deepEqual(
+    sent[2].content.map((b: Block) => [b.type, b.tool_use_id]),
+    [
+      ["tool_result", "toolu_ls"],
+      ["tool_result", "toolu_find"],
+    ],
+  );
+  // Response: both tool_use blocks reach Pi as tool_calls in one framed message.
+  assert.equal(result.stream, true);
+  const frames = String(result.body)
+    .split("\n\n")
+    .filter((f) => f.startsWith("data: {"))
+    .map((f) => JSON.parse(f.slice(6)));
+  const reply = frames[0].choices[0].delta;
+  assert.deepEqual(
+    reply.tool_calls.map((c: any) => [c.id, c.function.name]),
+    [
+      ["toolu_read", "read"],
+      ["toolu_grep", "grep"],
+    ],
+  );
+  assert.equal(frames[1].choices[0].finish_reason, "tool_calls");
+  // Pi replays that message with both results on the next turn; the facade accepts it.
+  const next = piCompletionRequest.parse({
+    runtime_call_id: randomUUID(),
+    model: "anthropic/claude-opus-5.5",
+    messages: [
+      ...history,
+      { role: "assistant", content: null, tool_calls: reply.tool_calls },
+      { role: "tool", tool_call_id: "toolu_read", content: "a" },
+      { role: "tool", tool_call_id: "toolu_grep", content: "b" },
+    ],
+  });
+  assert.equal(next.messages.at(-3)!.tool_calls!.length, 2);
 });

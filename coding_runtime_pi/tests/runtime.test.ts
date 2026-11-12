@@ -1246,3 +1246,84 @@ test("configured checks use decreasing remaining task time beyond the interactiv
   assert(timeouts[1]! < timeouts[0]!);
   assert(result.used.ms >= 60000);
 });
+test("each intent's system prompt carries tool guidance for exactly its tools", async () => {
+  const f = await fixture();
+  const prompts: Record<string, string> = {};
+  const capture = (intent: string) => (prompt: string) => {
+    prompts[intent] ??= prompt;
+  };
+  const executor = (t: { workspace: string }) =>
+    localExecutor(t.workspace, join(f.root, "home"));
+  const planner = new CodingRuntime({
+    store: f.store,
+    model: scripted(
+      [[report("plan", "Change subtraction to addition.")]],
+      undefined,
+      capture("plan"),
+    ),
+  });
+  const task = await planner.start({
+    workspace: f.workspace,
+    objective: "Fix sum",
+    checks: ["node test.mjs"],
+  });
+  const plan = await planner.run(task.id);
+  await planner.approve(task.id, plan.plan!.revision, plan.plan!.hash);
+  await new CodingRuntime({
+    store: f.store,
+    model: scripted(
+      [
+        [
+          { name: "read", arguments: { path: "sum.js" } },
+          { name: "grep", arguments: { pattern: "sum" } },
+        ],
+        [report("done", "Inspected.")],
+      ],
+      undefined,
+      capture("build"),
+    ),
+    executor,
+  }).run(task.id);
+  const reviewTask = await planner.start({
+    workspace: f.workspace,
+    objective: "Review the candidate",
+  });
+  reviewTask.intent = "review";
+  await f.store.save(reviewTask);
+  await new CodingRuntime({
+    store: f.store,
+    model: scripted(
+      [
+        [
+          {
+            name: "report",
+            arguments: {
+              kind: "review",
+              summary: "Reviewed",
+              detail: "No findings.",
+              verdict: "APPROVE",
+            },
+          },
+        ],
+      ],
+      undefined,
+      capture("review"),
+    ),
+    executor,
+  }).run(reviewTask.id);
+
+  const guidance = (prompt: string) =>
+    /Tool use: [^\n]*?after the other results are back\./.exec(prompt)?.[0];
+  const plan_ = guidance(prompts.plan!);
+  const build = guidance(prompts.build!);
+  const review = guidance(prompts.review!);
+  assert(plan_ && build && review, JSON.stringify(prompts));
+  assert.match(build, /\bedit\b/);
+  assert.match(build, /\bwrite\b/);
+  assert.match(build, /\bbash\b/);
+  assert.match(review, /\bbash\b/);
+  assert.doesNotMatch(review, /\b(edit|write)\b/);
+  assert.doesNotMatch(plan_, /\b(edit|write|bash)\b/);
+  for (const text of [plan_, build, review])
+    assert.match(text, /parallel tool calls/);
+});

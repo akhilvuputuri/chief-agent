@@ -421,3 +421,17 @@ Evidence boundary:
 - **Measured:** token, cache and cost figures for one job, and 30-day totals.
 - **Tested:** synthetic jobs with larger pages and a second review round on the delta.
 - **Estimated, not measured:** the saving, roughly $10 of $16 on that job.
+
+## Tool guidance for the Pi coder and reviewer — 12 November 2026
+
+**What changed** ([journal 170](170-coding-tool-guidance.md), not yet released). The worker's system prompt replaces Pi's default prompt, so the model had no advice on its tools. On job `9600af57` the Opus coder made one tool call in 168 of 173 responses and did almost everything through `bash` (`sed`, `cat`, `python3` edit scripts); the reviewer was similar; the shell-less planner already batched. The prompt now names the right tool for each kind of step and asks for independent reads and searches together, built from the session's own tool list so no role is told about a tool it lacks.
+
+- A replaced system prompt also replaces the framework's tool advice; say what the tools are for.
+- Each model turn re-reads the context and, at `high` effort, thinks at length; one call per turn multiplies both.
+- Check the whole path before asking for parallel calls: Pi runs them in order, the facade frames them without a stream index (Pi matches by id), and the facade caps a replayed message at 20 calls.
+
+Evidence boundary:
+
+- **Measured (one production job):** the tool-call counts above.
+- **Tested:** guidance per intent, and two calls in one message through the native protocol and through the facade and direct adapter.
+- **Not measured:** whether real jobs follow the guidance, and the effect on turns, time or cost.
