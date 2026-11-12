@@ -1,0 +1,61 @@
+# 184 — Can an alert take the owner straight to what went wrong?
+
+Work date: 2026-11-13. Written: 2026-11-13.
+Status: in progress. agentwatch's trace page, sign-in and address changes are merged ([agentwatch#22](https://github.com/akhilvuputuri/agentwatch/pull/22), [#23](https://github.com/akhilvuputuri/agentwatch/pull/23)); alerts that point at traces are in review ([agentwatch#24](https://github.com/akhilvuputuri/agentwatch/pull/24)); Chief's relay passes the pointers on (this change). Nothing of it is on the host yet: the agentwatch image has to be pinned and rolled out with its public address.
+
+## User-visible problem and preceding iteration
+
+agentwatch has been on the host since 29 October ([journal 134](134-agentwatch-on-the-host.md)) and reachable from a phone behind a sign-in since 12 November ([journal 166](166-traces-from-anywhere.md)). On 13 November the owner asked for a review of the whole tool: what to improve, what other tools do better, what would make it more helpful.
+
+The review's main finding was that the tool had not yet answered one production question. Every incident in this journal since 29 October was investigated from Postgres, server logs or scripts. The first step of the plan that followed is the path from an alert to the answer, because an alert is the one moment the tool asks for the owner's attention.
+
+## Evidence
+
+**Measured on the host, 12 November (UTC), through agentwatch's API with its key; counts only, no content.** 367 traces and 3,708 spans over about 67 days; 82 traces (22%) hold at least one failed span; 4 alerts ever raised, 2 of them tests and 2 from muted drift monitors, so no real alert has reached the owner; 4 sessions; no datasets, experiment runs or prices; a 29 MB database; API calls answered in 5 to 100 ms.
+
+**Read in the record (reviewer, 13 November).** [Journal 136](136-monitors-and-alerts.md) found one tool failing 48 of 50 calls while the global tool-error rate, 12.8%, stayed under its 30% limit. `alertText` in [src/trace-alerts.ts](../../src/trace-alerts.ts) ended every alert with "Details in agentwatch." and no link; an alert held no reference to any trace.
+
+**Seen in screenshots (reviewer, 13 November; emulated Chromium at 390×844, synthetic data).** From a trace link to "what went wrong in this turn" took one tap and four long scrolls. What the user asked appeared only as escaped JSON in an attribute table; a failing tool's name was cut to "u…"; tapping a span showed its detail below the fold; one wrong password at sign-in lost the linked trace.
+
+**Read on the host, 12 November (structure only).** Chief's turns end with a `finish_turn` tool call whose `reply` argument is the reply, and a failed tool span has no status message: the reason is in its result. Both shaped the trace page's summary.
+
+Not measured: how the owner reads a real trace on a real phone. The acceptance check below is that.
+
+## Diagnosis and alternatives
+
+Three separate causes sat between an alert and its answer:
+
+1. **The alert named nothing.** A global rate crossing a line does not say which tool, and the message gave no way in. Fixed where the knowledge is: agentwatch records, when a monitor fires, the worst tool or model and up to three traces behind the figure, and gives each a link when it is told its public address.
+2. **The trace page opened on the wrong thing.** It showed a span tree and raw attributes. It now opens on what was asked, what was replied and the first error, with the failed span selected.
+3. **Small losses on the way.** A wrong password dropped the link; filters did not survive a reload.
+
+Alternatives considered:
+
+- **Chief builds the links itself** from a new `AGENTWATCH_PUBLIC_URL` variable. That needs a second Compose line and its own rollout, and Chief would have to learn agentwatch's routes. agentwatch already has to be told its address to be reachable, so it builds the links and Chief only checks their shape.
+- **A monitor per tool.** It would have caught the 48-of-50 case, and remains worth doing (step 3 of the plan, as issue grouping), but every alert needs to point at its evidence whatever the monitor.
+- **A model-written explanation in the alert.** Not while the plain facts are missing from it.
+
+## Implementation and review
+
+agentwatch:
+
+- [#22](https://github.com/akhilvuputuri/agentwatch/pull/22), merged as `090cca1`: the trace page. Review (Opus 5.5) of `e8d0767`: **request changes**. Reproduced by the reviewer: a turn that failed after asking for a tool showed that tool's argument as "Replied"; the first-error choice missed a failure below a span that succeeded; on a narrow screen a tap could do nothing after a resize, and close then needed two taps. Fixed in `41d735e` (a tool call is a reply only with a `reply`, `answer`, `response` or `message` argument; failed ancestors are explained through any depth; the panel follows the address through the History API). Re-review: **approve with nits**, all four addressed in `0c06c36`.
+- [#23](https://github.com/akhilvuputuri/agentwatch/pull/23), merged as `5acc163`: a refused sign-in keeps the route and the user name; the trace list's and dashboard's filters live in the address. Review (Opus 5.5): **approve with nits**; it confirmed cross-site posts to the sign-in are refused, the escaping, and the page's content policy hash, and found an unknown service filter showing as "All", fixed.
+- [#24](https://github.com/akhilvuputuri/agentwatch/pull/24), in review: `detail` and `examples` on a firing alert, and `serve --public-url`.
+
+Chief (this change):
+
+- [src/trace-alerts.ts](../../src/trace-alerts.ts): a firing alert's text is followed by its detail and up to three examples, each a label and, on its own line, its link. Labels are reduced to one plain line and 120 characters, as a monitor's name is. A link is passed on only when it is an `https` link to a trace page (`TRACE_URL`), so nothing else a response holds can put another address in the chat. Without any link the text still ends "Details in agentwatch.". A resolved alert shows none of it. An alert without the new fields reads exactly as before, so this can release ahead of agentwatch.
+- [src/main.ts](../../src/main.ts): alerts are sent with link previews off; a preview could only show the sign-in page.
+
+## Verification and outcome
+
+Tested: 15 tests in [tests/trace-alerts.test.ts](../../tests/trace-alerts.test.ts), 3 new (the text with pointers, the text without links, and hostile labels and links). agentwatch's own tests and browser tests are in its pull requests.
+
+Not yet verified: anything on the host. What the rollout has to show: a firing alert arrives in Telegram with a link; the link opens the trace on a phone at its summary, with the failed span one tap away.
+
+Limits: examples are read when an alert fires and not updated; a trace named in an old alert may since have been removed by retention, and its page then says so. Labels carry tool, model and error-type names, which reach the owner's chat; they never carry message content.
+
+### Release closure
+
+Pending: review and merge agentwatch#24; pin its image and add `--public-url` to the agentwatch command through the reviewed update procedure; owner acceptance from a phone.

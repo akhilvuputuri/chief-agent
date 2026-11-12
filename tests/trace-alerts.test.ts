@@ -80,6 +80,117 @@ test("alert text shows the numbers in the metric's own units", () => {
   );
 });
 
+const TRACE = "a".repeat(32);
+const SPAN = "b".repeat(16);
+const BASE = "https://traces.example.com/#/trace";
+
+test("a firing alert names the worst contributor and links to the traces behind it", () => {
+  const pointed = alert({
+    detail: "parcel_list failed 4 of 5 calls",
+    examples: [
+      {
+        trace_id: TRACE,
+        span_id: SPAN,
+        label: "parcel_list: TOOL_FAILED",
+        url: `${BASE}/${TRACE}/${SPAN}`,
+      },
+      {
+        trace_id: TRACE,
+        span_id: null,
+        label: "$1.50 in this trace",
+        url: `${BASE}/${TRACE}`,
+      },
+    ],
+  });
+  assert.equal(
+    alertText(pointed),
+    [
+      "Alert: Tool errors is 42% over the last 24 hours, above the limit of 30% (50 samples).",
+      "parcel_list failed 4 of 5 calls.",
+      `parcel_list: TOOL_FAILED\n${BASE}/${TRACE}/${SPAN}`,
+      `$1.50 in this trace\n${BASE}/${TRACE}`,
+    ].join("\n\n"),
+  );
+  // A drift alert points the same way.
+  assert.match(
+    alertText({ ...pointed, mode: "drift", baseline_value: 0.1 }),
+    /previous 24 hours\.\n\nparcel_list failed 4 of 5 calls\.\n\nparcel_list: TOOL_FAILED\nhttps:/,
+  );
+  // A resolved alert points at nothing, whatever it carries.
+  assert.equal(
+    alertText({ ...pointed, kind: "resolved", value: 0.1 }),
+    "Resolved: Tool errors is back to 10% over the last 24 hours (limit 30%).",
+  );
+});
+
+test("without a link the owner is still sent to agentwatch", () => {
+  assert.equal(
+    alertText(
+      alert({
+        detail: "parcel_list failed 4 of 5 calls",
+        examples: [
+          { label: "parcel_list: TOOL_FAILED", url: null },
+          { label: "parcel_list: timeout" },
+        ],
+      }),
+    ),
+    [
+      "Alert: Tool errors is 42% over the last 24 hours, above the limit of 30% (50 samples). Details in agentwatch.",
+      "parcel_list failed 4 of 5 calls.",
+      "parcel_list: TOOL_FAILED",
+      "parcel_list: timeout",
+    ].join("\n\n"),
+  );
+  // Nothing to point at: as before.
+  for (const empty of [{}, { detail: null, examples: [] }, { detail: "  " }])
+    assert.match(
+      alertText(alert(empty)),
+      /\(50 samples\)\. Details in agentwatch\.$/,
+    );
+});
+
+test("only a plain line and an https trace link are passed on", () => {
+  const good = `${BASE}/${TRACE}/${SPAN}`;
+  const text = alertText(
+    alert({
+      detail: "bad\ntool\u202e failed 1 of 1 call" + "x".repeat(300),
+      examples: [
+        { label: "ok\n*URGENT*\u200b visit", url: good },
+        { label: "http", url: `http://traces.example.com/#/trace/${TRACE}` },
+        { label: "elsewhere", url: "https://traces.example.com/login" },
+        { label: "fourth", url: good },
+      ],
+    }),
+  );
+  const [sentence, detail, ...examples] = text.split("\n\n");
+  assert.match(sentence!, /\(50 samples\)\.$/);
+  assert.match(detail!, /^bad tool failed 1 of 1 callx+\.$/);
+  assert.equal(detail!.length, 121);
+  // One line a label, the link on its own line; a link of another kind is dropped, not its label.
+  assert.deepEqual(examples, [
+    `ok *URGENT* visit\n${good}`,
+    "http",
+    "elsewhere",
+  ]);
+  for (const url of [
+    "javascript:alert(1)",
+    `https://traces.example.com/#/trace/${TRACE}\nhttps://evil.example`,
+    `https://traces.example.com/#/trace/${TRACE}?next=https://evil.example`,
+    `https://user:pass@traces.example.com/#/trace/${TRACE}`,
+    `https://traces.example.com/x/#/trace/${TRACE}`,
+    `https://traces.example.com/#/trace/${TRACE}/short`,
+    `HTTPS://TRACES.EXAMPLE.COM/#/trace/${TRACE}`,
+  ])
+    assert.equal(
+      alertText(alert({ examples: [{ label: "x", url }] })),
+      "Alert: Tool errors is 42% over the last 24 hours, above the limit of 30% (50 samples). Details in agentwatch.\n\nx",
+      url,
+    );
+  // Shapes that are not examples at all are ignored.
+  for (const examples of ["text", { label: "x" }, [null, 3, {}, { label: 7 }]])
+    assert.match(alertText(alert({ examples })), /\. Details in agentwatch\.$/);
+});
+
 test("a monitor's name is one plain line, and changes are said plainly", () => {
   assert.match(
     alertText(alert({ monitor_name: "x\n*URGENT* run\u202e it" })),

@@ -1,8 +1,10 @@
 // Alerts from agentwatch (issue #323), delivered to the owner on Telegram. agentwatch decides
 // when a monitor fires and keeps the alert until it is told it was delivered; this polls for
 // undelivered alerts over the same private network as trace export. So no inbound route, no
-// shared secret, and agentwatch never holds the Telegram token. Alerts carry only monitor
-// names and numbers. Delivery is at least once: an alert is marked only after it was sent.
+// shared secret, and agentwatch never holds the Telegram token. Alerts carry monitor names,
+// numbers and, when firing, what they point at: names from spans (a tool, a model, an error
+// type) and links to traces, never message content. Delivery is at least once: an alert is
+// marked only after it was sent.
 
 import { opsLog } from "./ops-log.js";
 
@@ -35,6 +37,55 @@ export interface MonitorAlert {
   mode?: string;
   baseline_value?: number | null;
   baseline_minutes?: number | null;
+  /** Firing only: the worst contributor in words, such as "search failed 4 of 5 calls". */
+  detail?: string | null;
+  /** Firing only: traces behind the figure. `url` is set when agentwatch knows its public address. */
+  examples?: unknown;
+}
+
+/** Examples shown in one message. */
+const MAX_EXAMPLES = 3;
+const MAX_LABEL = 120;
+/**
+ * A link is passed on only when it is an https link to a trace page, so whatever else a
+ * response holds cannot put another address in the owner's chat.
+ */
+const TRACE_URL =
+  /^https:\/\/[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?(:\d{1,5})?\/#\/trace\/[0-9a-f]{32}(\/[0-9a-f]{16})?$/;
+
+/** One plain line: the names in it come from spans, which the agent's own inputs can shape. */
+function line(text: string, limit: number) {
+  return text
+    .replace(/[\p{Cc}\p{Cf}\s]+/gu, " ")
+    .trim()
+    .slice(0, limit);
+}
+
+/**
+ * What a firing alert points at, as the lines after its sentence: the worst contributor, then
+ * each example with its link. Without any link it ends as before, since the owner then has to
+ * open agentwatch to see more.
+ */
+function pointers(alert: MonitorAlert) {
+  const lines: string[] = [];
+  const detail =
+    typeof alert.detail === "string" ? line(alert.detail, MAX_LABEL) : "";
+  if (detail) lines.push(`${detail}.`);
+  let linked = false;
+  const examples = Array.isArray(alert.examples) ? alert.examples : [];
+  for (const example of examples.slice(0, MAX_EXAMPLES)) {
+    const label =
+      typeof example?.label === "string" ? line(example.label, MAX_LABEL) : "";
+    const url =
+      typeof example?.url === "string" && TRACE_URL.test(example.url)
+        ? example.url
+        : "";
+    if (!label && !url) continue;
+    if (url) linked = true;
+    lines.push([label, url].filter(Boolean).join("\n"));
+  }
+  const tail = linked ? "" : " Details in agentwatch.";
+  return lines.length ? `${tail}\n\n${lines.join("\n\n")}` : tail;
 }
 
 const RATES = new Set(["model_error_rate", "tool_error_rate"]);
@@ -113,7 +164,7 @@ function driftText(alert: MonitorAlert, name: string, now: number) {
     alert.value < alert.baseline_value
       ? "fell"
       : "rose";
-  return `Drift: ${name} ${moved} from ${baseline} to ${current} over the last ${span(alert.window_minutes)}, compared with the previous ${earlier}${late(alert, now)}. Details in agentwatch.`;
+  return `Drift: ${name} ${moved} from ${baseline} to ${current} over the last ${span(alert.window_minutes)}, compared with the previous ${earlier}${late(alert, now)}.${pointers(alert)}`;
 }
 
 /** The Telegram text of one alert. Plain text: it is sent without a parse mode. */
@@ -136,7 +187,7 @@ export function alertText(alert: MonitorAlert, now = Date.now()) {
     return `Resolved: ${name} no longer applies; the monitor was changed or switched off.`;
   if (alert.kind === "resolved")
     return `Resolved: ${name} is back to ${value} over the last ${span(alert.window_minutes)} (limit ${threshold}).`;
-  return `Alert: ${name} is ${value} over the last ${span(alert.window_minutes)}, ${alert.comparison} the limit of ${threshold} (${alert.samples} ${alert.samples === 1 ? "sample" : "samples"})${late(alert, now)}. Details in agentwatch.`;
+  return `Alert: ${name} is ${value} over the last ${span(alert.window_minutes)}, ${alert.comparison} the limit of ${threshold} (${alert.samples} ${alert.samples === 1 ? "sample" : "samples"})${late(alert, now)}.${pointers(alert)}`;
 }
 
 const ID = /^[A-Za-z0-9_.:-]{1,200}$/;

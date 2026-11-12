@@ -269,4 +269,5 @@ MCP integrations: [67 — Remote MCP connectors](67-mcp-connectors.md), [15 — 
 
 Article targets: [67 — Reader MCP](67-mcp-connectors.md) → [69 — Shared link resolution](69-link-resolution.md) → [178 — Study list or Reader](178-study-list-link-classification.md).
 
+- 13 November 2026: [184 — Can an alert take the owner straight to what went wrong?](184-alert-to-answer.md) — agentwatch review: no incident had used it; the trace page now opens on asked, replied and first error; alerts point at traces; rollout pending.
 - 13 October 2026: [83 — Sustained Pi context verification](83-pi-context-verification.md) — failing native budget/compaction reproductions and representative acceptance gates; Gemini coder convergence diagnosed; owner-selected lean release in progress.
