@@ -15,6 +15,8 @@ import { ModelError, type ModelMessage } from "../src/model.js";
 import { spending, type Spending } from "../src/spending.js";
 import { piCompletion, piCompletionRequest } from "../src/coding/pi-proxy.js";
 import { randomUUID } from "node:crypto";
+import { DirectCooldown, FallbackAdapter } from "../src/model-router.js";
+import { MAX_TOOL_CALLS } from "../src/tool-call-limit.js";
 
 const prices = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 };
 const encoder = new TextEncoder();
@@ -1818,4 +1820,58 @@ test("parallel tool calls survive the Pi facade and the direct route in both dir
     ],
   });
   assert.equal(next.messages.at(-3)!.tool_calls!.length, 2);
+});
+
+test("a direct response with more tool calls than the limit is rejected like OpenRouter's, without fallback", async () => {
+  const calls = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      type: "tool_use",
+      id: `toolu_${i}`,
+      name: "read",
+      input: { path: `f${i}.ts` },
+    }));
+  const { model: atLimit } = adapter(() =>
+    sse(stream(calls(MAX_TOOL_CALLS), { stop: "tool_use" })),
+  );
+  const accepted = await run(atLimit, [{ role: "user", content: "x" }], {
+    requireComplete: true,
+  });
+  assert.equal(accepted.message.tool_calls!.length, MAX_TOOL_CALLS);
+
+  const { model } = adapter(() =>
+    sse(stream(calls(MAX_TOOL_CALLS + 1), { stop: "tool_use" })),
+  );
+  let openRouterCalls = 0;
+  const routed = new FallbackAdapter(
+    "anthropic/claude-opus-5.5",
+    model,
+    {
+      model: "anthropic/claude-opus-5.5",
+      generate: async () => {
+        openRouterCalls++;
+        throw new Error("must not fall back");
+      },
+    },
+    new DirectCooldown(),
+  );
+  await assert.rejects(
+    routed.generate({
+      messages: [{ role: "user", content: "x" }],
+      tools: [],
+      reasoning: "medium",
+      signal: new AbortController().signal,
+      requireComplete: true,
+    }),
+    (error: ModelError) => {
+      assert.ok(error instanceof ModelError);
+      // OpenRouter's stream reports the same case as failureCode "malformed", not transient.
+      assert.equal(error.transient, false);
+      assert.equal(error.diagnostics.failureCode, "malformed");
+      assert.equal(error.diagnostics.providerFault, undefined);
+      // The response was complete and billed; its usage stays with the failure.
+      assert.equal((error.diagnostics.usage as any).route, "anthropic-direct");
+      return true;
+    },
+  );
+  assert.equal(openRouterCalls, 0);
 });

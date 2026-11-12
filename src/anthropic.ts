@@ -15,6 +15,7 @@ import {
   type ToolCall,
 } from "./model.js";
 import { spending } from "./spending.js";
+import { MAX_TOOL_CALLS } from "./tool-call-limit.js";
 
 /** USD per million tokens. */
 export type AnthropicPrices = {
@@ -748,6 +749,14 @@ export class AnthropicDirect implements ModelAdapter {
         ...ROUTE,
         usage,
       });
+    // As the OpenRouter stream does: a response the Pi facade could not accept back as
+    // history would fail every later request of the job (journal 170).
+    if (toolCalls.length > MAX_TOOL_CALLS)
+      throw new ModelError(
+        `The model requested more than ${MAX_TOOL_CALLS} tool calls in one response; no output was accepted.`,
+        false,
+        { ...diagnostics, failureCode: "malformed" },
+      );
     // Remember the state each new thinking block followed (see ThinkingStates), for this
     // call's scope only.
     if (trailing && scope)

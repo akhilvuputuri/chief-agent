@@ -877,3 +877,36 @@ test("a complete stream reports its finish reason on the generation", async () =
     assert.equal(generation.finishReason, finish);
   }
 });
+
+test("the OpenRouter stream accepts tool call indexes below the shared limit and rejects the limit", async () => {
+  const { MAX_TOOL_CALLS } = await import("../src/tool-call-limit.js");
+  const call = (index: number) => ({
+    index,
+    id: `call_${index}`,
+    type: "function",
+    function: { name: "read", arguments: "{}" },
+  });
+  const ok = await readGenerationStream(
+    response([
+      frame(
+        chunk({ role: "assistant", tool_calls: [call(MAX_TOOL_CALLS - 1)] }),
+      ),
+      frame(chunk({}, "tool_calls")),
+      frame("[DONE]"),
+    ]),
+    new AbortController().signal,
+  );
+  assert.equal(ok.choices[0].message.tool_calls.length, 1);
+  await assert.rejects(
+    readGenerationStream(
+      response([
+        frame(chunk({ role: "assistant", tool_calls: [call(MAX_TOOL_CALLS)] })),
+        frame(chunk({}, "tool_calls")),
+        frame("[DONE]"),
+      ]),
+      new AbortController().signal,
+    ),
+    (error: any) =>
+      error instanceof StreamFailure && error.code === "malformed",
+  );
+});

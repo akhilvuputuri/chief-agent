@@ -1,3 +1,5 @@
+import { MAX_TOOL_CALLS } from "./tool-call-limit.js";
+
 /** Assemble an entire generation before exposing any tool action to the worker. */
 export class StreamFailure extends Error {
   constructor(
@@ -153,7 +155,11 @@ export async function readGenerationStream(
         if (!call || typeof call !== "object" || Array.isArray(call))
           throw new StreamFailure("malformed");
         const index = call.index;
-        if (!Number.isSafeInteger(index) || index < 0 || index >= 20)
+        if (
+          !Number.isSafeInteger(index) ||
+          index < 0 ||
+          index >= MAX_TOOL_CALLS
+        )
           throw new StreamFailure("malformed");
         const current = calls.get(index) ?? {
           index,

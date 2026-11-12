@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { CodingController, CodingJob } from "./controller.js";
 import { ModelError } from "../model.js";
+import { MAX_TOOL_CALLS } from "../tool-call-limit.js";
 
 const text = z.union([
   z.string().max(1_000_000),
@@ -31,7 +32,7 @@ const nativeMessage = z
           })
           .strict(),
       )
-      .max(20)
+      .max(MAX_TOOL_CALLS)
       .optional(),
     reasoning_details: z.array(z.record(z.unknown())).optional(),
     // Pi replays this DeepSeek compatibility field even when structured reasoning is present.
