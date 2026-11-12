@@ -278,14 +278,22 @@ export async function fixture(
         signal,
       });
     } catch (error) {
-      // A scripted provider failure reaches Pi as Anthropic's own error reply.
+      // A scripted provider failure reaches Pi as Anthropic's own error reply: with its HTTP
+      // status when the script names one, otherwise as a request the provider refused, which
+      // Pi does not retry.
+      if (signal.aborted) throw error;
       const status = (error as ModelError)?.diagnostics?.httpStatus;
-      if (typeof status !== "number") throw error;
       throw Anthropic.APIError.generate(
-        status,
+        typeof status === "number" ? status : 400,
         {
           type: "error",
-          error: { type: "api_error", message: "Synthetic provider failure" },
+          error: {
+            type:
+              typeof status === "number"
+                ? "api_error"
+                : "invalid_request_error",
+            message: "Synthetic provider failure",
+          },
         },
         undefined,
         new Headers(),
