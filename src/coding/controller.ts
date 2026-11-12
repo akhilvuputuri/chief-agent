@@ -71,6 +71,7 @@ import { ModelError } from "../model.js";
 import { CodingModelFailure, type CodingFailureCode } from "./model-failure.js";
 import { boxView } from "./box-sandbox.js";
 import { runtimeMemory } from "./memory-schema.js";
+import { currentWorker } from "./worker-image.js";
 
 /**
  * Worker text (plans, findings, check output, summaries) is made storable: Postgres
@@ -241,6 +242,8 @@ export class CodingController {
         allowed,
         (job) => this.hasReviewerProof(job),
         clock,
+        // A rebase also moves a Pi job to the worker image new jobs use (journal 174).
+        () => this.settings,
       );
     if (!/^[a-f0-9]{64}$/i.test(authKey))
       throw new Error(
@@ -954,20 +957,16 @@ export class CodingController {
       );
     if (a.leaderModel && !job.settings.squad && job.settings.runtime !== "pi")
       throw new ToolValidationError("This job has no leader model to change");
-    if (
-      a.upgradeWorker &&
-      (job.settings.runtime !== "pi" ||
-        this.settings.runtime !== "pi" ||
-        !this.settings.image)
-    )
+    const upgraded = a.upgradeWorker
+      ? currentWorker(job.settings, this.settings)
+      : undefined;
+    if (a.upgradeWorker && !upgraded)
       throw new ToolValidationError("Only a Pi coding job can change worker");
     const next = {
-      ...job.settings,
+      ...(upgraded ?? job.settings),
       ...(a.leaderModel ? { leaderModel: a.leaderModel } : {}),
       ...(a.coderModel ? { model: a.coderModel } : {}),
       ...(a.reviewerModel ? { reviewerModel: a.reviewerModel } : {}),
-      // Only to the image new jobs use: the boxes accept it, and it is the reviewed one.
-      ...(a.upgradeWorker ? { image: this.settings.image } : {}),
       limits: { ...job.settings.limits, ...a.limits },
     };
     if (job.settings.runtime === "pi" && (a.limits?.ms ?? 0) > PI_ATTEMPT_MS)

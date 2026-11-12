@@ -51,6 +51,8 @@ type Scenario = {
   coder?: (input: any, call: number) => any;
   /** Breaks the carried change's identity, so it cannot be carried. */
   tamper?: boolean;
+  /** The job was created on an earlier worker image that the boxes still accept. */
+  olderImage?: string;
 };
 
 const reply = (id: string, name: string, args: unknown) => ({
@@ -179,6 +181,7 @@ async function rebased(t: TestContext, scenario: Scenario) {
         squad: false,
         autoMerge: false,
         prWorkflow: "owner_merge",
+        ...(scenario.olderImage ? { image: scenario.olderImage } : {}),
       }),
       oldBase,
       JSON.stringify(cp),
@@ -229,6 +232,8 @@ async function rebased(t: TestContext, scenario: Scenario) {
     () => true,
     async () => true,
     () => new Date(),
+    // New jobs use the fixture's image.
+    () => ({ runtime: "pi", image: settings.image }),
   );
   await auto.start(await f.row(started.id), tree);
   inspection = { ...inspection, main: newBase, base: newBase };
@@ -327,6 +332,7 @@ async function rebased(t: TestContext, scenario: Scenario) {
   ).rows.map((r: any) => r.summary);
   return {
     f,
+    queued,
     id: started.id,
     oldBase,
     newBase,
@@ -561,4 +567,68 @@ test("a carried change that cannot be applied falls back to implementing the app
   const system = review.messages.find((m: any) => m.role === "system").content;
   assert(!system.includes("after a rebase"));
   assert(delivered(review, "candidate_diff").includes("sum.js"));
+});
+
+test("a rebase moves a job on an older worker image to the image new jobs use, and the carried change still applies", async (t) => {
+  // Found on production job 9600af57: main had moved to Kite 0.2.0 while the job's image had 0.1.3.
+  const older = `ghcr.io/example/worker@sha256:${"e".repeat(64)}`;
+  const r = await rebased(t, {
+    moveMain: (write) => write("sum.js", sumFile(subtract, "sum-module")),
+    olderImage: older,
+  });
+  assert.equal(r.queued.settings.image, settings.image);
+  // Only the image changed: models, limits and the owner-merge workflow are kept.
+  assert.deepEqual(
+    { ...r.queued.settings, image: older },
+    {
+      ...settings,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+      prWorkflow: "owner_merge",
+      image: older,
+    },
+  );
+  const change = (
+    await r.f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='rebase-change:2'",
+      [r.id],
+    )
+  ).rows[0].payload;
+  assert.deepEqual(change.image, { from: older, to: settings.image });
+  const revision = (
+    await r.f.db.query(
+      "SELECT message FROM coding_revisions WHERE job_id=$1 AND revision=2",
+      [r.id],
+    )
+  ).rows[0].message;
+  assert.match(revision, /; worker image e{12} → a{12}$/);
+  const notice = (
+    await r.f.db.query(
+      "SELECT payload->>'summary' AS summary FROM coding_events WHERE job_id=$1 AND event_key LIKE 'rebase:%'",
+      [r.id],
+    )
+  ).rows[0].summary;
+  assert.match(notice, /also moves to the worker image new jobs use/);
+  // The assignment the worker received carried the change, which still applied cleanly.
+  assert.equal(r.assignment.settings.image, settings.image);
+  assert.equal(r.assignment.rebase.hash, r.approvedHash);
+  assert.equal(r.calls.coder, 0);
+  assert.equal(r.finished.state, "publishing");
+  assert.equal(r.finished.result.review.verdict, "APPROVE");
+  assert.equal((await r.toMergeCard()).length, 1);
+});
+
+test("a rebase on the current image records no image change", async (t) => {
+  const r = await rebased(t, {
+    moveMain: (write) => write("sum.js", sumFile(subtract, "sum-module")),
+  });
+  assert.equal(r.queued.settings.image, settings.image);
+  const change = (
+    await r.f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='rebase-change:2'",
+      [r.id],
+    )
+  ).rows[0].payload;
+  assert.equal("image" in change, false);
 });

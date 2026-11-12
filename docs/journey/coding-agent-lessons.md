@@ -430,6 +430,7 @@ Evidence boundary:
 - Keep the safety rules where they are: the carry changes where the change comes from, not who approves it. Approval still carries over only for the same scope, and a fresh reviewer call in the same attempt still binds the approval.
 - Give a model the smallest job that fits: conflicts and failing checks, with the reviewed change as optional reading, not the plan again.
 - Ship worker changes so older images degrade to the old behaviour: the carried change is a top-level assignment field that older workers drop, and the checkpoint still starts empty.
+- A new base can need a new toolchain. Production job `9600af57` was rebased onto a main built with Kite 0.2.0 while its snapshot image had Kite 0.1.3, and its build check failed. The rebase now moves a Pi job to the worker image new jobs use, through the same helper as the owner's `upgradeWorker`.
 
 Evidence boundary:
 
