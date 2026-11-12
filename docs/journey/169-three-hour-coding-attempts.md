@@ -3,6 +3,8 @@
 Work dates: 12 November 2026. Written: 12 November 2026.
 Status: new Pi jobs get 180 minutes instead of 150. Effort is unchanged; lowering it is an open owner decision. Not yet released.
 
+> **Update, 12 November 2026:** live in `92999f8` (PR 460, release run 43159458020).
+
 ## User-visible problem and preceding iteration
 
 Coding job `9600af57` (the study-links feature, rerun after [journal 164](164-claude-models-everywhere.md) moved the planner, coder and reviewer to Opus 5.5) paused with "Coding time ran out while the coding box was still working; saved work is retained". It was on worker image `sha256:33639fbe…` from [journal 167](167-review-that-reads-what-changed.md). The owner asked why it took so long, since the same kind of task is faster in an interactive Claude Code session.
