@@ -152,6 +152,11 @@ export const ROUTINE_FLAGS = new Set([
   "paraphrased",
   "loosely_quoted",
   "shrunk",
+  // A habit resting on one day's evidence (learning.ts): a doubt about scope, not a risk.
+  // Named so pruning can rank by them; as warnings they would mark most turns' log lines
+  // for as long as the fact is never repeated.
+  "habitual_framing",
+  "quoted_question",
 ]);
 
 // Flag, never block: a flagged item is applied and listed first in the digest.
@@ -201,11 +206,14 @@ export const isLearned = (r: Pick<MemoryRevision, "origin" | "source">) =>
 export const isNote = (r: Pick<MemoryRevision, "origin" | "source">) =>
   isLearned(r) && r.source.durability === "one_off";
 
-// What a restored copy keeps of the original's provenance, so it stays the kind of item it was.
-const lifecycle = (source: Record<string, unknown>) =>
+// What a restored copy keeps of the original's provenance, so it stays the kind of item it
+// was. When the revision being undone is an expiry, the end date is left behind: undoing an
+// expiry means the fact is wanted back, and with the date it would expire again the next night.
+const lifecycle = (source: Record<string, unknown>, undoneExpiry: boolean) =>
   Object.fromEntries(
     ["durability", "until", "support", "seenDays", "workDate"]
       .filter((k) => source[k] !== undefined)
+      .filter((k) => k !== "until" || !undoneExpiry)
       .map((k) => [k, source[k]]),
   );
 
@@ -380,7 +388,7 @@ export class MemoryStore {
             ? {
                 restoredFrom: keep.id,
                 restoredOrigin: keep.origin,
-                ...lifecycle(keep.source),
+                ...lifecycle(keep.source, head.source.expired !== undefined),
               }
             : {}),
         };

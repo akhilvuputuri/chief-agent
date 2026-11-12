@@ -35,9 +35,9 @@ From the review's research pass (sources in the notes; not independently verifie
 - **Label, do not drop.** Each fact now says what kind of statement it is: `standing`, `one_off` or `time_bound`. A request is saved as a past-tense note of the occasion. Saving less would lose the first sighting that a later repeat needs.
 - **Notes stay out of every turn.** A note is memory (listed, recalled, rolled back, shown to the learner), but `MemoryStore.select` does not put it in a turn's context. A single request read as a rule is the failure being fixed, and the judge found memory relevant to few turns as it is. Alternative considered: a separate "single occasions" group in every turn. Rejected for now because the list would grow with every request; relevance selection is a later batch.
 - **A repeat on another day is the promotion.** The learner sees the note with its day and, when another day shows the same choice, revises the key as standing. Support is carried across revisions, so the host can tell one day from two.
-- **Flag what the label does not catch.** A standing fact on one day's evidence is flagged `habitual_framing` when its wording adds a habit word the quote gives no general basis for, and `quoted_question` when the quote is a question. Both are warnings. Refusing was rejected: the owner's rule is flag, never block.
+- **Flag what the label does not catch.** A standing fact on one day's evidence is flagged `habitual_framing` when its wording adds a habit word the quote gives no general basis for, and `quoted_question` when the quote is a question. Refusing was rejected: the owner's rule is flag, never block. They do not make a turn's log line a warning (see the review below).
 - **End dates.** "This week" was saved like any preference. A `time_bound` fact carries its last day and is retired, as a revision, on the night after.
-- **Use the signals already collected.** The redirect is now stored on the turn it redirects, and the learner labels that turn a pitfall. The owner's next message is always shown beside a turn.
+- **Use the signals already collected.** The redirect is now stored on the turn it redirects, and the learner labels that turn a pitfall. The owner's next message is shown beside a turn, unless it is already there as a correction or the item is over its size limit.
 - **The judge has to know.** A note judged as a preference would be "overstated" by definition, and a promoted preference judged on one message likewise. `judge-v2` is told a fact's kind, sees every supporting message with its day, and counts a preference as supported when separate days show it. This changes the judge at the same time as the learner, so the before and after shares are not strictly comparable; the definition of overstated for a single request is unchanged.
 
 Not done here, on purpose: nothing rewrites the 12 existing overstated facts (that is the batch that lets verdicts repair memory, and needs the owner's decision), and the judge still does not read Chief's reply or the next message beside a fact.
@@ -50,7 +50,14 @@ Not done here, on purpose: nothing rewrites the 12 existing overstated facts (th
 - [src/memory-judge.ts](../../src/memory-judge.ts): `judge-v2`.
 - Tests: [tests/learning-durability.test.ts](../../tests/learning-durability.test.ts) (flags, support, note then promotion then rollback, reinforcement, end dates and expiry, redirect labels), one judge test, one agent-level test of the stored redirect. A scripted model shows the plumbing and the host checks, not what a real model does with the new prompt.
 - Design: [learning](../learning.md), dated notes of 13 November.
-- Independent review: pending.
+- Independent review (Claude Opus 5.5) requested changes on `dcfd0f59`, reproducing each in a throwaway test.
+  - Blocking: a `one_off` proposal under a key holding a standing preference was written, turning the preference into a note and dropping it from every turn; the prompt's own wording made that likely. The host now refuses it, and the prompt says so.
+  - A note could be made standing by a second message on the same day, which only the prompt forbade. The host now requires a second day or a quote in which the owner speaks generally.
+  - `habitual_framing` missed "Wants aisle seats", the motivating case, and flagged "Would like a refund". "wants", "needs" and "would rather" are habit words now, and "would like" is not.
+  - Support was carried over when a value changed, so "Prefers window seats" replaced by "Prefers aisle seats" counted two days and showed the judge the window message. Support now carries only for the same value or a promotion.
+  - Undoing an expiry lasted one night, because the restored copy kept its end date. It is now restored without it.
+  - The two new flags were warnings, which would have marked most turns' `memory.selected` lines for as long as a fact was never repeated. They are routine flags now, still named for pruning.
+  - Smaller: the prompt said "nearly half" of facts turned a request into a habit (it was 10 of 26; nearly half were overstated in all); a failed run could lose its expiry count; the unchanged check compared day counts, which stop at the limit.
 
 ## Verification and outcome
 
@@ -73,4 +80,6 @@ Not released. Pending: independent review, merge, the automatic release, and the
 - Batch 2 of the review: planted-error tests for the judge, and a judge that sees more (tool arguments, the previous exchange, the next message).
 - Batch 3: let verdicts narrow overstated facts (owner decision), a usefulness tally per item, and correcting memory in conversation.
 - A habit worded without a habit word ("Checks NLB for ebooks") passes the host; only the label and the judge catch it.
+- Work is dated by UTC day and end dates by Singapore day, so an end date worked out from an early-morning message can be a day early, and a fact can stay in turns for up to a day after its last day.
+- Untested: a run that fails after it has already retired expired facts.
 - Notes accumulate without limit. They cost nothing in turns, but the learner's view of current memory is bounded at 40,000 characters, so old notes will eventually fall out of its sight, newest kept.

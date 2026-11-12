@@ -145,6 +145,25 @@ test("a habit resting on one request is flagged, and a general statement or a re
       [],
       quote,
     );
+  // "Wants" and "needs" claim a habit too; "would like" is a request, not a liking.
+  assert.deepEqual(
+    durabilityFlags(
+      "Book me an aisle seat",
+      "Wants aisle seats",
+      "standing",
+      1,
+    ),
+    ["habitual_framing"],
+  );
+  assert.deepEqual(
+    durabilityFlags(
+      "I would like a refund for this order",
+      "Would like a refund for the order",
+      "standing",
+      1,
+    ),
+    [],
+  );
   // No habit wording, nothing to flag: a plain fact.
   assert.deepEqual(
     durabilityFlags(
@@ -289,7 +308,7 @@ test("one request is saved as a note outside every turn, and a repeat on another
   assert.deepEqual((await store.select("owner")).learned, []);
 });
 
-test("a preference claimed from one request or a question is saved with a warning flag", async (t) => {
+test("a preference claimed from one request or a question is saved with a flag that pruning can rank by", async (t) => {
   const db = await setup(t);
   const at = (hours: number) => new Date(NIGHT.getTime() - hours * HOUR);
   const seat = await turn(db, {
@@ -335,8 +354,8 @@ test("a preference claimed from one request or a question is saved with a warnin
   assert.deepEqual((await head(db, "seat"))!.flags, ["habitual_framing"]);
   assert.deepEqual((await head(db, "meetings"))!.flags, []);
   assert.ok((await head(db, "rain"))!.flags.includes("quoted_question"));
-  // Both are warnings, so a turn that carries them says so.
-  assert.equal((await new MemoryStore(db).select("owner")).flagged, 2);
+  // A doubt about scope, not a risk: a turn that carries them does not log a warning.
+  assert.equal((await new MemoryStore(db).select("owner")).flagged, 0);
 });
 
 test("a fact seen again on another day gains support as a revision, and the same day adds nothing", async (t) => {
@@ -448,8 +467,20 @@ test("a time-bound fact needs a sound end date, shows it to turns, and is retire
     [last.status, last.reason, last.learner_run],
     ["retired", "Held until 2026-11-28", sunday.learnerRun],
   );
-  // The learner's own retirement leaves the key open, and a rollback restores it.
+  // The learner's own retirement leaves the key open. Undoing that night brings the fact
+  // back without its end date, so it is not retired again the night after.
   assert.deepEqual(await store.removed("owner"), []);
+  await store.rollback("owner", { learnerRun: sunday.learnerRun }, "test");
+  const back = (await head(db, "briefing_time"))!;
+  assert.equal(back.value, "Wants briefings at 7am until Saturday");
+  assert.equal(back.source.until, undefined);
+  const monday = await run(
+    db,
+    model(() => [["learn_finish", {}]]).adapter,
+    new Date(NIGHT.getTime() + 2 * DAY),
+  );
+  assert.equal(monday.expired, undefined);
+  assert.ok(await head(db, "briefing_time"));
   const line: any = projectEventRecord("learner.finished", "run", {
     state: "completed",
     notes: 2,
@@ -521,4 +552,158 @@ test("a redirected answer is a pitfall, and the owner's next message is shown be
       reasons: ["turn", "owner_redirected", "redirect_pushback"],
     },
   );
+});
+
+test("a standing fact is never demoted to a note, and a note is not promoted on the day it was written", async (t) => {
+  const db = await setup(t);
+  const store = new MemoryStore(db);
+  const at = (hours: number) => new Date(NIGHT.getTime() - hours * HOUR);
+  const general = await turn(db, {
+    says: "I always want an aisle seat",
+    at: at(50),
+  });
+  const tokyo = await turn(db, {
+    says: "Get me an early flight to Tokyo",
+    at: at(49),
+  });
+  await run(
+    db,
+    model(() => [
+      fact(
+        "seat",
+        "Prefers aisle seats",
+        "I always want an aisle seat",
+        "standing",
+        general,
+      ),
+      fact(
+        "early",
+        "Asked for an early flight to Tokyo",
+        "Get me an early flight to Tokyo",
+        "one_off",
+        tokyo,
+      ),
+      ["learn_finish", {}],
+    ]).adapter,
+  );
+  // The same night's second batch: later messages of the same two days.
+  const night2 = new Date(NIGHT.getTime() + 2 * DAY);
+  const osaka = await turn(db, {
+    says: "Aisle seat for the Osaka trip",
+    at: new Date(night2.getTime() - 30 * HOUR),
+  });
+  const sameDay = await turn(db, {
+    says: "Early flight please, as before",
+    at: at(48),
+  });
+  const generalLater = await turn(db, {
+    says: "I prefer early flights in general",
+    at: at(47),
+  });
+  const { adapter, inputs } = model((_input, n) =>
+    n === 1
+      ? [
+          // One more occasion of a standing fact, wrongly sent as a note under its key.
+          fact(
+            "seat",
+            "Asked for an aisle seat for Osaka",
+            "Aisle seat for the Osaka trip",
+            "one_off",
+            osaka,
+          ),
+          fact(
+            "seat",
+            "Prefers aisle seats",
+            "Aisle seat for the Osaka trip",
+            "one_off",
+            osaka,
+          ),
+          // A second message on the note's own day is still one occasion.
+          fact(
+            "early",
+            "Prefers early flights",
+            "Early flight please",
+            "standing",
+            sameDay,
+          ),
+          ["learn_finish", {}],
+        ]
+      : [
+          // Said generally, even on the same day, it is a preference.
+          fact(
+            "early",
+            "Prefers early flights",
+            "I prefer early flights in general",
+            "standing",
+            generalLater,
+          ),
+          ["learn_finish", {}],
+        ],
+  );
+  const result = await run(db, adapter, night2);
+  const refusals = results(inputs[1]).map((r: any) => r.refused ?? "accepted");
+  assert.match(refusals[0], /holds a standing fact/);
+  assert.match(refusals[1], /holds a standing fact/);
+  assert.match(
+    refusals[2],
+    /only when another day repeats it or the owner says it generally/,
+  );
+  assert.equal(result.facts, 1);
+  // The preference is still a preference, in context, and the note became one properly.
+  assert.deepEqual(
+    (await store.select("owner")).learned.map((l) => [l.key, l.value]),
+    [
+      ["early", "Prefers early flights"],
+      ["seat", "Prefers aisle seats"],
+    ],
+  );
+  assert.equal(isNote((await head(db, "seat"))!), false);
+  assert.deepEqual((await head(db, "early"))!.flags, []);
+});
+
+test("a changed value starts its own evidence, so the old claim's days do not vouch for the new one", async (t) => {
+  const db = await setup(t);
+  const window = await turn(db, {
+    says: "Book me a window seat",
+    at: new Date(NIGHT.getTime() - 50 * HOUR),
+  });
+  await run(
+    db,
+    model(() => [
+      fact(
+        "seat",
+        "Prefers window seats",
+        "Book me a window seat",
+        "standing",
+        window,
+      ),
+      ["learn_finish", {}],
+    ]).adapter,
+  );
+  const night2 = new Date(NIGHT.getTime() + 2 * DAY);
+  const aisle = await turn(db, {
+    says: "Book me an aisle seat",
+    at: new Date(night2.getTime() - 30 * HOUR),
+  });
+  await run(
+    db,
+    model(() => [
+      fact(
+        "seat",
+        "Prefers aisle seats",
+        "Book me an aisle seat",
+        "standing",
+        aisle,
+      ),
+      ["learn_finish", {}],
+    ]).adapter,
+    night2,
+  );
+  const changed = (await head(db, "seat"))!;
+  assert.equal(changed.value, "Prefers aisle seats");
+  // One day behind the new claim, so it is still a habit on one day's evidence, and the
+  // judge is shown only the message that says it.
+  assert.deepEqual(changed.source.seenDays, ["2026-11-28"]);
+  assert.equal((changed.source.messageIds as string[]).length, 1);
+  assert.deepEqual(changed.flags, ["habitual_framing"]);
 });
