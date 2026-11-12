@@ -1,8 +1,17 @@
+## Chief builds with `kite build`; worker image with Kite 0.2.0 (12 November 2026)
+
+- **Code.** `kite run build` compiles both projects with `kite build` instead of `tsc`, and the gateway image builds use it instead of the esbuild script, which is removed with the direct `esbuild` dependency. Type checking is unchanged. No migration.
+- **Configuration.** New coding jobs pin worker image `sha256:8da97981…`, built from `d2d7d3b` (run 43148537031), which carries Kite 0.2.0. The previous image `sha256:33639fbe…` moves to `previousImages`, so paused jobs on it still resume. The list holds at most ten, so the oldest, `sha256:ba99d955…` from 20 October, is dropped; both jobs recorded on it are finished.
+- **Why.** Two CI jobs and every coding job spent about 20 s on a `tsc` emit beside a separate type check. See [journal 168](journey/168-kite-builds-typescript.md#build-switch-12-november-2026).
+- **Deployment.** Not yet recorded as live; a dated note follows on release.
+
 ## Kite 0.2.0 pinned (12 November 2026)
 
 - **Code.** `tools/kite.json` pins Kite 0.2.0, which adds `kite build`. Nothing calls it yet; installs and script runs are unchanged. No migration.
 - **Why.** First step towards building Chief's TypeScript with Kite instead of `tsc` and esbuild. See [journal 168](journey/168-kite-builds-typescript.md).
 - **Deployment.** Not yet recorded as live; update this entry on release.
+
+> **Update, 12 November 2026:** merged as `d2d7d3b` (PR 457); release run 43148594589 succeeded and the gateway was healthy at `d2d7d3b`.
 
 ## Worker image with re-review on the delta (12 November 2026)
 

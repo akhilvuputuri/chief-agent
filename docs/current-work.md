@@ -2,6 +2,10 @@
 
 Kite 0.2.0 adds `kite build`, which compiles a TypeScript project to the JavaScript `tsc` would write, without type checking. All 250 of Chief's output files have the same syntax tree as `tsc`'s, and both projects build in about 40 ms. This change only pins 0.2.0. The coding worker image is rebuilt next, and then `kite run build` and the image builds switch to it. See [journal 168](journey/168-kite-builds-typescript.md).
 
+> **Update, 12 November 2026 ([journal 168](journey/168-kite-builds-typescript.md#build-switch-12-november-2026)):** the pin is live in `d2d7d3b`. `kite run build` and both gateway image builds now use `kite build`; `build:image`, its esbuild script and the direct `esbuild` dependency are removed. Worker image `sha256:8da97981…` carries Kite 0.2.0 and is pinned in the same change. `typecheck` and `build:pi` still run `tsc`. Not yet released.
+>
+> Two conditions on the paragraph above: "the same syntax tree" is by Kite's `harness/ast-diff.mjs`, which ignores layout, comments, parentheses and three equivalent spellings; "about 40 ms" is one run on an Apple M4 laptop.
+
 # Traces from anywhere, behind a sign-in — prepared, 12 November 2026
 
 Branch `feat/traces-signin`, with agentwatch's sign-in in agentwatch#21 ([journal 166](journey/166-traces-from-anywhere.md), [tracing](tracing.md#viewing-traces-from-anywhere)). The exporter, alert relay and backfill CLIs send `AGENTWATCH_API_KEY` as a Bearer key when it is set; `compose.yaml` passes it to the gateway; `scripts/deploy-agentwatch-key.py` has `BASE` = `7aac85f0d8f0698f24db61277081add46dc9bae5`, the host's `RELEASE` on 12 November. Once merged, no other release can land until the key rollout runs. `scripts/deploy-agentwatch-update.py` now permits signing in as a whole, and `scripts/deploy-traces-site.py` adds the Caddy site only once agentwatch requires signing in.
@@ -128,6 +132,7 @@ See [journal 134](journey/134-agentwatch-on-the-host.md).
 `checks` builds the gateway image on main and publishes it with a provenance attestation. `release` verifies the attestation and sends the digest, and the host pulls that exact image instead of building it. The release step fell to 51 s, from 248–420 s (median 333 s) for host builds after #352.
 
 - The image build transpiles with esbuild; CI's `typecheck` gates every release.
+  > **Update, 12 November 2026 ([journal 168](journey/168-kite-builds-typescript.md#build-switch-12-november-2026)):** the image build now transpiles with `kite build`, through `kite run build`.
 - A manual release can still build on the host: `gh workflow run deploy.yml --ref main -f host_build=true`.
 - Local sessions reach the host with `ssh chief-prod`, an operator key on the owner's Mac.
 
