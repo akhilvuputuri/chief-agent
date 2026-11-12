@@ -4,6 +4,8 @@
 - **Why.** The first Opus 5.5 job, `9600af57`, spent 102 minutes implementing and ran out of time 40 minutes into its first review. See [journal 169](journey/169-three-hour-coding-attempts.md).
 - **Deployment.** Not yet recorded as live; a dated note follows on release.
 
+> **Update, 12 November 2026:** merged as `92999f8` (PR 460); release run 43159458020 succeeded, the gateway was healthy at `92999f8`, and the live `config/coding-pi.json` has `limits.ms` 10,800,000.
+
 ## Chief builds with `kite build`; worker image with Kite 0.2.0 (12 November 2026)
 
 - **Code.** `kite run build` compiles both projects with `kite build` instead of `tsc`, and the gateway image builds use it instead of the esbuild script, which is removed with the direct `esbuild` dependency. Type checking is unchanged. No migration.
