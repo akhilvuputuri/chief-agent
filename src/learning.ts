@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
-import { isLearned, isNote, MemoryStore } from "./memory.js";
+import { isLearned, isNote, MemoryChanged, MemoryStore } from "./memory.js";
 import {
   DECOYS,
   factProbes,
@@ -38,6 +38,19 @@ import {
   turnSignature,
   unjudged,
 } from "./memory-judge.js";
+import {
+  gateOpen,
+  type JudgeRecord,
+  REPAIR_INSTRUCTIONS,
+  REPAIR_LIMITS,
+  REPAIR_PROMPT_VERSION,
+  type RepairItem,
+  type RepairToolName,
+  repairPrompt,
+  repairToolDescriptions,
+  repairTools,
+  type RepairVerdict,
+} from "./memory-repair.js";
 import * as otel from "./otel.js";
 import {
   ModelError,
@@ -800,7 +813,9 @@ export class Learner {
         ? "procedures"
         : version.startsWith("judge-")
           ? "judge"
-          : "items";
+          : version.startsWith("repair-")
+            ? "repair"
+            : "items";
     const states = (pass: ReturnType<typeof passOf>) =>
       runs.filter((r) => passOf(r.prompt_version) === pass).map((r) => r.state);
     const settled = (pass: ReturnType<typeof passOf>) =>
@@ -831,11 +846,19 @@ export class Learner {
             LEARNING_LIMITS.procedurePasses -
               runs.reduce((n, r) => n + (r.summary.periods ?? 0), 0),
           );
-      } else {
-        if (settled("judge") || spent("judge")) return null;
-        if (!(await this.judgeDue(user, now))) return null;
+      } else if (
+        !settled("judge") &&
+        !spent("judge") &&
+        (await this.judgeDue(user, now))
+      ) {
         version = JUDGE_PROMPT_VERSION;
         start = () => this.runJudge(user, now);
+      } else {
+        // Last, after the judge has read tonight's facts: its verdicts repair memory.
+        if (settled("repair") || spent("repair")) return null;
+        if (!(await this.repairDue(user, now))) return null;
+        version = REPAIR_PROMPT_VERSION;
+        start = () => this.runRepair(user, now);
       }
     }
     if (await this.ownerActive(user)) {
@@ -945,7 +968,9 @@ export class Learner {
         ? "procedures"
         : version === JUDGE_PROMPT_VERSION
           ? "judge"
-          : "learner",
+          : version === REPAIR_PROMPT_VERSION
+            ? "repair"
+            : "learner",
       "chief-learner",
     );
     const finish = async (
@@ -1284,9 +1309,22 @@ export class Learner {
         `SELECT r.id,r.key,r.value,r.source,r.created_at::text AS at FROM memory_heads h
          JOIN memory_revisions r ON r.user_id=h.user_id AND r.id=h.revision_id
          WHERE h.user_id=$1 AND r.status='active' AND r.kind='fact' AND r.origin='learned'
-         AND ($2::timestamptz IS NULL OR (r.created_at,r.id)>($2::timestamptz,$3::uuid))
+         AND (($2::timestamptz IS NULL OR (r.created_at,r.id)>($2::timestamptz,$3::uuid))
+           -- A fault found by an earlier judge prompt is judged again by this one, since the
+           -- repair acts only on the current judge's verdicts.
+           OR EXISTS (SELECT 1 FROM (SELECT e.data->>'verdict' AS verdict,l.prompt_version AS version
+             FROM events e JOIN learner_runs l ON l.run_id=e.run_id AND l.user_id=e.user_id
+             WHERE e.user_id=$1 AND e.type='judge.fact' AND e.data->>'revisionId'=r.id::text
+             AND l.prompt_version LIKE 'judge-%' ORDER BY e.id DESC LIMIT 1) v
+             WHERE v.verdict IN ('overstated','unsupported','contradicted') AND v.version<>$5))
          ORDER BY r.created_at,r.id LIMIT $4`,
-        [user, after?.at ?? null, after?.id ?? NO_ID, limit],
+        [
+          user,
+          after?.at ?? null,
+          after?.id ?? NO_ID,
+          limit,
+          JUDGE_PROMPT_VERSION,
+        ],
       )
     ).rows as Array<{
       id: string;
@@ -1817,6 +1855,410 @@ export class Learner {
         { kind: "turn", turnRunId: t.turn.runId },
         false,
       );
+  }
+
+  /** The judge's record against planted errors over the gate's window (memory-repair.ts). */
+  private async judgeRecord(user: string, now: Date): Promise<JudgeRecord> {
+    const row = (
+      await this.db.query(
+        `SELECT count(*) FILTER (WHERE data->>'mutation'<>'control')::int AS probes,
+         count(*) FILTER (WHERE data->>'mutation'<>'control' AND data->>'verdict'<>'supported')::int AS caught,
+         count(*) FILTER (WHERE data->>'mutation'='control')::int AS controls,
+         count(*) FILTER (WHERE data->>'mutation'='control' AND data->>'verdict'<>'supported')::int AS "falseAlarms"
+         FROM events WHERE user_id=$1 AND type='judge.probe' AND data->>'verdict'<>'missed'
+         AND created_at>$2 AND run_id IN
+           (SELECT run_id FROM learner_runs WHERE user_id=$1 AND prompt_version=$3)`,
+        [
+          user,
+          new Date(now.getTime() - REPAIR_LIMITS.gateDays * 24 * 3600_000),
+          // The record is the current judge's: a new prompt starts with none.
+          JUDGE_PROMPT_VERSION,
+        ],
+      )
+    ).rows[0] as JudgeRecord;
+    return row;
+  }
+
+  /**
+   * Current learned facts the judge has faulted, oldest verdict first. Left out: a verdict a
+   * repeat or the second model contested, a fact the repair chose to keep, and a key already
+   * repaired as often as allowed. Those stay as they are for the owner.
+   */
+  private async repairRows(user: string, limit: number) {
+    return (
+      await this.db.query(
+        `SELECT r.id,r.key,r.value,r.source,r.untrusted_sources,v.verdict,v.reason
+         FROM memory_heads h
+         JOIN memory_revisions r ON r.user_id=h.user_id AND r.id=h.revision_id
+         CROSS JOIN LATERAL (SELECT e.id,e.data->>'verdict' AS verdict,e.data->>'reason' AS reason,
+           l.prompt_version AS version
+           FROM events e JOIN learner_runs l ON l.run_id=e.run_id AND l.user_id=e.user_id
+           WHERE e.user_id=$1 AND e.type='judge.fact'
+           AND e.data->>'revisionId'=r.id::text AND l.prompt_version LIKE 'judge-%'
+           ORDER BY e.id DESC LIMIT 1) v
+         WHERE h.user_id=$1 AND r.status='active' AND r.kind='fact' AND r.origin='learned'
+         AND v.verdict=ANY($2::text[]) AND v.version=$5
+         -- With a message still on record to rewrite from; a fact without one stays as it is,
+         -- and must not hold the queue.
+         AND jsonb_typeof(r.source->'messageIds')='array'
+         AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.source->'messageIds') AS m(id)
+           WHERE EXISTS (SELECT 1 FROM conversation_inputs i WHERE i.user_id=$1 AND i.id::text=m.id)
+           OR EXISTS (SELECT 1 FROM conversation_messages cm WHERE cm.user_id=$1 AND cm.id::text=m.id)
+           OR (m.id LIKE 'request:%' AND EXISTS (SELECT 1 FROM work_tasks t
+             WHERE t.user_id=$1 AND t.id::text=substr(m.id,9))))
+         AND coalesce((r.source->>'repairs')::int,0)<$3
+         AND NOT EXISTS (SELECT 1 FROM events k WHERE k.user_id=$1 AND k.type='repair.kept'
+           AND k.data->>'revisionId'=r.id::text AND k.run_id IN
+             (SELECT run_id FROM learner_runs WHERE user_id=$1 AND prompt_version LIKE 'repair-%'))
+         AND NOT EXISTS (SELECT 1 FROM events c WHERE c.user_id=$1 AND c.type='judge.check'
+           AND c.data->>'revisionId'=r.id::text AND (c.data->>'second'='supported'
+             OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(c.data->'repeats') x
+               WHERE x<>c.data->>'first' AND x<>'missed')))
+         ORDER BY v.id LIMIT $4`,
+        [
+          user,
+          ["overstated", "unsupported", "contradicted"],
+          REPAIR_LIMITS.attempts,
+          limit,
+          // Only what the current judge said: the gate vouches for no other.
+          JUDGE_PROMPT_VERSION,
+        ],
+      )
+    ).rows as Array<{
+      id: string;
+      key: string;
+      value: string;
+      source: Record<string, unknown>;
+      untrusted_sources: string[];
+      verdict: RepairVerdict;
+      reason: string | null;
+    }>;
+  }
+
+  /**
+   * Up to `limit` faulted facts with the messages they rest on. A fact whose messages are gone
+   * has nothing to be rewritten from; it is passed over, and more rows are read so that such
+   * facts cannot hold the queue.
+   */
+  private async repairItems(user: string, limit: number) {
+    const items: Array<
+      RepairItem & { source: Record<string, unknown>; untrusted: string[] }
+    > = [];
+    for (const r of await this.repairRows(user, limit * 4)) {
+      if (items.length >= limit) break;
+      const messages = await this.judgeMessages(user, r.source);
+      if (!messages.length) continue;
+      items.push({
+        id: `r${items.length + 1}`,
+        revisionId: r.id,
+        key: r.key,
+        value: r.value,
+        verdict: r.verdict,
+        reason: clip(r.reason ?? "", 300),
+        ...(r.source.durability === "one_off" ? { note: true } : {}),
+        ...(typeof r.source.until === "string"
+          ? { until: r.source.until }
+          : {}),
+        messages,
+        source: r.source,
+        untrusted: r.untrusted_sources,
+      });
+    }
+    return items;
+  }
+
+  /** Whether the repair has work and the judge has earned it, so other nights open no run. */
+  private async repairDue(user: string, now: Date) {
+    return (
+      (await this.repairItems(user, 1)).length > 0 &&
+      gateOpen(await this.judgeRecord(user, now))
+    );
+  }
+
+  /**
+   * Why a proposed rewrite is refused, or nothing. It must quote the owner from the fact's own
+   * messages, say something of substance, and be no broader than the owner's words: a note of
+   * one occasion, a fact with an end date, or a standing fact made only of words from a quote
+   * in which the owner speaks generally.
+   */
+  private checkRepair(
+    item: RepairItem & { source: Record<string, unknown> },
+    args: any,
+    today: string,
+  ): string | undefined {
+    const quote = norm(args.quote);
+    if (!item.messages.some((m) => norm(m.text).includes(quote)))
+      return "The quote must be the owner's exact words in this fact's messages";
+    const problem = quoteRefusal(args.quote, args.value);
+    if (problem) return problem;
+    if ((args.durability === "time_bound") !== (args.until !== undefined))
+      return "until goes with time_bound, and only with it";
+    if (args.until !== undefined) {
+      const until = Date.parse(`${args.until}T00:00:00Z`);
+      if (Number.isNaN(until) || day(new Date(until)) !== args.until)
+        return "until is not a real date";
+      if (args.until < today)
+        return "That has already ended; make it a one_off note";
+      if (until - Date.parse(today) > LEARNING_LIMITS.untilMaxMs)
+        return "until is more than a year away; that is a standing fact in all but name";
+    }
+    // A note is already the narrowest kind, and any other kind would put it back in every turn.
+    if (item.note && args.durability !== "one_off")
+      return "This is a note of one occasion and stays one; rewrite it as a one_off or keep it";
+    // Anything that stays in every turn must be the owner's own words and nothing more.
+    if (args.durability !== "one_off" && !quoteSupports(args.quote, args.value))
+      return "A standing or dated fact must use only the owner's words from the quote; otherwise make it one_off";
+    if (
+      args.durability === "standing" &&
+      durabilityFlags(args.quote, args.value, "standing", 1).length
+    )
+      return "A standing fact needs a quote in which the owner speaks generally; otherwise make it one_off";
+    if (args.durability !== "standing" && HABIT.test(args.value))
+      return "A note or a dated fact claims no habit: no prefers, usually, always or the like";
+    // A note may be reworded, but not filled out: most of it must be the owner's words, with
+    // no number, negation, address or payment word of its own.
+    if (quoteFlags(args.quote, args.value).some((f) => f !== "paraphrased"))
+      return "That adds to what the owner said; say only what the quote says";
+    if (
+      args.value === item.value &&
+      args.durability === String(item.source.durability ?? "standing") &&
+      args.until === item.source.until
+    )
+      return "That changes nothing; rewrite it, retire it, or keep it with repair_keep";
+    return undefined;
+  }
+
+  /**
+   * The night's repair: the facts the judge faulted, put to the learner's model with the
+   * judge's reason and the owner's messages, a few a night. A rewrite is a new revision of
+   * this run, a retirement likewise, so rolling back the run undoes the night. It runs only
+   * while the judge's record against planted errors passes the gate (repairDue).
+   */
+  private async runRepair(user: string, now: Date) {
+    const { id, run, finish } = await this.open(
+      user,
+      now,
+      REPAIR_PROMPT_VERSION,
+    );
+    const progress = {
+      modelCalls: 0,
+      refused: 0,
+      candidates: 0,
+      narrowed: 0,
+      retired: 0,
+      kept: 0,
+      untouched: 0,
+    };
+    try {
+      const items = await this.repairItems(user, REPAIR_LIMITS.perNight);
+      progress.candidates = items.length;
+      if (!items.length) return await finish("completed", progress);
+      const today = singaporeDay(now);
+      const tools: ToolDefinition[] = Object.entries(repairTools).map(
+        ([name, schema]) => ({
+          name,
+          description: repairToolDescriptions[name as RepairToolName],
+          parameters: jsonSchema(schema),
+        }),
+      );
+      const messages: Message[] = [
+        { role: "system", content: REPAIR_INSTRUCTIONS },
+        { role: "user", content: repairPrompt(items) },
+      ];
+      const decided = new Map<string, { name: RepairToolName; args: any }>();
+      const spend = new Spending(this.db, user, run);
+      for (let i = 0; i < REPAIR_LIMITS.modelCalls; i++) {
+        if (await this.ownerActive(user))
+          return await finish("deferred", {
+            ...progress,
+            reason: "owner_active",
+          });
+        const generation = await spending.run(spend, () =>
+          this.traced(run, messages, () =>
+            this.options.model.generate({
+              messages,
+              tools,
+              reasoning: "medium",
+              signal: AbortSignal.timeout(LEARNING_LIMITS.callMs),
+              cacheKey: `repair:${user}`,
+              maxOutputTokens: LEARNING_LIMITS.reviewOutputTokens,
+            }),
+          ),
+        );
+        progress.modelCalls++;
+        messages.push(generation.message);
+        let refusedNow = 0;
+        for (const call of generation.message.tool_calls ?? []) {
+          const name = call.function.name as RepairToolName;
+          const schema = repairTools[name];
+          let result: Record<string, unknown>;
+          if (!schema) result = { refused: "Unknown tool" };
+          else {
+            const parsed = parseArguments(schema, call.function.arguments);
+            if (!("args" in parsed))
+              result = { refused: "Invalid arguments", detail: parsed.problem };
+            else if (name === "repair_finish") result = { ok: true };
+            else {
+              const args = parsed.args as any;
+              const item = items.find((f) => f.id === args.fact);
+              const problem = !item
+                ? `There is no fact ${args.fact}`
+                : decided.has(item.id)
+                  ? `${item.id} already has a decision`
+                  : name === "repair_retire" && item.verdict !== "contradicted"
+                    ? "Only a contradicted fact is retired here; rewrite this one as what the messages do say, or keep it"
+                    : name === "repair_fact"
+                      ? this.checkRepair(item, args, today)
+                      : undefined;
+              result = problem ? { refused: problem } : { accepted: true };
+              if (!problem) decided.set(item!.id, { name, args });
+            }
+          }
+          if ("refused" in result) {
+            refusedNow++;
+            progress.refused++;
+          }
+          await this.trace(user, run, "repair.proposal", {
+            learnerRun: id,
+            tool: call.function.name,
+            arguments: call.function.arguments,
+            verdict: result,
+          });
+          messages.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: JSON.stringify(result),
+          });
+        }
+        const left = items.filter((f) => !decided.has(f.id)).map((f) => f.id);
+        if (!left.length) break;
+        messages.push({
+          role: "user",
+          content: `No decision yet, or refused (the tool results say why): ${left.join(", ")}. Give each one tool call, then call repair_finish.`,
+        });
+      }
+      // Checked again before anything is written: an owner turn during the last call defers.
+      if (await this.ownerActive(user))
+        return await finish("deferred", {
+          ...progress,
+          reason: "owner_active",
+        });
+      for (const item of items) {
+        const decision = decided.get(item.id);
+        const applied = async (action: string, extra = {}) =>
+          this.trace(user, run, "repair.applied", {
+            learnerRun: id,
+            key: item.key,
+            revisionId: item.revisionId,
+            judged: item.verdict,
+            action,
+            ...extra,
+          });
+        if (!decision) {
+          progress.untouched++;
+          continue;
+        }
+        const { name, args } = decision;
+        try {
+          // The owner may have changed or removed the key since it was read.
+          const head = (await this.store.active(user)).find(
+            (r) => r.key === item.key,
+          );
+          if (head?.id !== item.revisionId) {
+            progress.untouched++;
+            await applied("skipped_changed");
+            continue;
+          }
+          const provenance = {
+            repairedFrom: item.revisionId,
+            judged: item.verdict,
+            repairs: Number(item.source.repairs ?? 0) + 1,
+            learnerRunId: run,
+            promptVersion: REPAIR_PROMPT_VERSION,
+          };
+          if (name === "repair_keep") {
+            progress.kept++;
+            await this.trace(user, run, "repair.kept", {
+              learnerRun: id,
+              revisionId: item.revisionId,
+              key: item.key,
+              reason: args.reason,
+            });
+            await applied("kept");
+          } else if (name === "repair_retire") {
+            await this.store.retire(
+              user,
+              item.key,
+              {
+                origin: "learned",
+                reason: `The judge found it ${item.verdict}. ${args.reason}`,
+                learnerRun: id,
+                untrustedSources: item.untrusted,
+                expect: item.revisionId,
+              },
+              provenance,
+            );
+            progress.retired++;
+            await applied("retired");
+          } else {
+            const saved = await this.store.write(user, {
+              key: item.key,
+              value: args.value,
+              kind: "fact",
+              origin: "learned",
+              reason: `Rewritten after the judge found it ${item.verdict}. ${args.reason}`,
+              source: {
+                // What it rested on is unchanged: the same messages, read more carefully.
+                ...Object.fromEntries(
+                  [
+                    "taskIds",
+                    "turnRunIds",
+                    "runIds",
+                    "workDate",
+                    "messageIds",
+                    "support",
+                    "seenDays",
+                  ]
+                    .filter((k) => item.source[k] !== undefined)
+                    .map((k) => [k, item.source[k]]),
+                ),
+                quote: args.quote,
+                durability: args.durability,
+                ...(args.until ? { until: args.until } : {}),
+                ...provenance,
+              },
+              learnerRun: id,
+              untrustedSources: item.untrusted,
+              flags: quoteFlags(args.quote, args.value),
+              // Checked again under the row's lock: the owner may save the key at any moment.
+              expect: item.revisionId,
+            });
+            progress.narrowed++;
+            await applied("narrowed", {
+              newRevisionId: saved.id,
+              durability: args.durability,
+            });
+          }
+        } catch (error) {
+          progress.untouched++;
+          if (error instanceof MemoryChanged) {
+            await applied("skipped_changed");
+            continue;
+          }
+          await applied("failed", {
+            error: error instanceof Error ? error.name : "unknown",
+          });
+          opsLog("learner.item_refused", "warn", {
+            runId: run,
+            ...errorFields(error),
+          });
+        }
+      }
+      return await finish("completed", progress);
+    } catch (error) {
+      opsLog("learner.failed", "warn", { runId: run, ...errorFields(error) });
+      return finish("failed", { error: "repair_failed", ...progress });
+    }
   }
 
   /**
@@ -2936,6 +3378,11 @@ export class Learner {
               quote: args.quote,
               durability: args.durability,
               ...(args.until ? { until: args.until } : {}),
+              // How often the key has been repaired stays with it, so new evidence does not
+              // restart the count.
+              ...(held && isLearned(held) && held.source.repairs !== undefined
+                ? { repairs: held.source.repairs }
+                : {}),
             }
           : {}),
       };

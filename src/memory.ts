@@ -35,7 +35,16 @@ export interface MemoryWrite {
   flags?: string[];
   outcome?: "success" | "pitfall";
   domain?: string;
+  /**
+   * The revision this change was decided against. When the key's current revision is another
+   * by the time the row is locked, nothing is written and MemoryChanged is thrown: the nightly
+   * repair must not overwrite what the owner saved while it was thinking.
+   */
+  expect?: string;
 }
+
+/** The key's current revision is not the one a change was decided against. */
+export class MemoryChanged extends Error {}
 
 export interface MemoryRevision {
   id: string;
@@ -211,7 +220,7 @@ export const isNote = (r: Pick<MemoryRevision, "origin" | "source">) =>
 // expiry means the fact is wanted back, and with the date it would expire again the next night.
 const lifecycle = (source: Record<string, unknown>, undoneExpiry: boolean) =>
   Object.fromEntries(
-    ["durability", "until", "support", "seenDays", "workDate"]
+    ["durability", "until", "support", "seenDays", "workDate", "repairs"]
       .filter((k) => source[k] !== undefined)
       .filter((k) => k !== "until" || !undoneExpiry)
       .map((k) => [k, source[k]]),
@@ -237,6 +246,8 @@ export class MemoryStore {
       );
     const saved = await transaction(this.db, async (client) => {
       const head = await this.lockHead(client, user, w.key);
+      if (w.expect !== undefined && head?.id !== w.expect)
+        throw new MemoryChanged(w.key);
       if (head && head.kind !== w.kind)
         throw new ToolValidationError(
           `Memory ${w.key} is a ${head.kind}, not a ${w.kind}`,
@@ -285,12 +296,16 @@ export class MemoryStore {
       reason: string;
       learnerRun?: string;
       untrustedSources?: string[];
+      /** The revision the retirement was decided against (MemoryWrite.expect). */
+      expect?: string;
     },
     source: Record<string, unknown> = {},
   ) {
     const untrusted = [...new Set(by.untrustedSources ?? [])].sort();
     const retired = await transaction(this.db, async (client) => {
       const head = await this.lockHead(client, user, key);
+      if (by.expect !== undefined && head?.id !== by.expect)
+        throw new MemoryChanged(key);
       if (!head || head.status !== "active") return null;
       return this.append(client, user, {
         ...this.carry(head),

@@ -144,6 +144,7 @@ export const NEVER_GRANTED = new Set([
   "work_yield",
   "work_cancel",
   "memory_set",
+  "memory_forget",
   "skill_draft",
   "skill_evaluate",
   "skill_activate",

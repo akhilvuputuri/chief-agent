@@ -624,6 +624,17 @@ export const action = z.discriminatedUnion("operation", [
     })
     .strict(),
   z.object({ operation: z.literal("memory_list") }).strict(),
+  // The owner said to forget something, or that it is wrong: the key is retired as theirs,
+  // so the learner does not bring it back (docs/learning.md#correcting-memory-in-conversation).
+  // A forgotten fact comes back only by saving it again; a forgotten procedure only through a
+  // coding session.
+  z
+    .object({
+      operation: z.literal("memory_forget"),
+      key: z.string().regex(/^[a-z0-9_:.-]{1,80}$/),
+      reason: z.string().min(1).max(300).optional(),
+    })
+    .strict(),
   z
     .object({
       operation: z.literal("web_search"),

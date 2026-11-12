@@ -2,6 +2,8 @@
 
 Chief is a coordinator. It keeps the conversation, memory, recall, work tracking, canvases and the job-alignment workflow. Memories are explicit: when the owner states a durable preference or fact, Chief offers to remember it in one short line and calls `memory_set` only after the owner agrees ([journal 117](journey/117-open-loops-and-memory-offers.md)). Domain work runs in agents: each is a separate run with its own context, its own tools and, by default, a cheaper model. Chief starts one with a single generic tool and relays what it reports.
 
+> **Update, 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)):** the coordinator also has `memory_forget`, and corrects or forgets a memory in the same turn when the owner says it is wrong, without asking ([learning](learning.md#correcting-memory-in-conversation)). Offering to save something new still asks first.
+
 Heavy work that needs its own compute is planned as [boxed sub-agents](boxes.md); the light agents described here are unchanged.
 
 This page is the design record for that split: why it exists, how an agent is defined and run, what it may do, and how to add one. The change history is in [journal 49](journey/49-coordinator-agents.md).

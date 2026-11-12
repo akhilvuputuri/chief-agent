@@ -49,11 +49,17 @@ function toolGroup(name: string, result: unknown, id = name): Message[] {
   ];
 }
 
-/** Real coordinator schemas plus owner memory/state, calibrated to the incident's fixed size. */
+// The incident these tests come from had 54,264 characters of fixed context. The coordinator's
+// own schemas and instructions have since grown past that (55,014 with memory_forget, 13
+// November 2026), so the fixture pads to a round size above them; the tests need a fixed
+// context of this order, not that exact figure.
+const FIXED_SIZE = 56000;
+
+/** Real coordinator schemas plus owner memory/state, padded to the incident's order of size. */
 function request(
   message: string,
   history: Message[],
-  fixedSize = 54264,
+  fixedSize = FIXED_SIZE,
 ): AgentRequest {
   const runtime = runtimeContext(
     {
@@ -104,7 +110,7 @@ function recentInvitation(): Message[] {
   ];
 }
 
-test("54k fixed context preserves the actual invitation question and source when the user supplies its time", () => {
+test("a fixed context of the incident's size preserves the actual invitation question and source when the user supplies its time", () => {
   const history = [
     user("Review 22 saved roles"),
     answer("The earlier role review is paused."),
@@ -117,7 +123,7 @@ test("54k fixed context preserves the actual invitation question and source when
   const req = request(message, history);
   req.historyOmitted = 469;
   const input = context(req, [...history, user(message)]);
-  assert.equal(input.fixedSize, 54264);
+  assert.equal(input.fixedSize, FIXED_SIZE);
   assert.equal(input.overBudget, true);
   // The history floor keeps a few older messages even with a full fixed envelope.
   assert.equal(input.omitted, 469);

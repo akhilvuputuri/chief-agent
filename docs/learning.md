@@ -88,6 +88,8 @@ The release guard refuses any `db/` or `compose.yaml` change that an operator ro
 
 ### Schedule and switch
 
+> **Update, 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)):** a night now has up to four passes, each on a later tick: items, procedures, the judge, and last the [repair](#nightly-repair). The repair opens a run only when a faulted fact is waiting and the judge's record passes the gate.
+
 The gateway ticks the learner every 10 minutes for each allowed owner. A night's run may start from 03:30 Singapore for six hours; a night missed while the gateway was down is skipped rather than run in the afternoon. While the owner has an input queued or running, or a run of their own is running, the attempt is recorded as `deferred` and retried on the next tick, at most three times a night. `LEARNING` in [config/runtime.json](../config/runtime.json) is `on`; setting it to `off` there stops the learner through an ordinary reviewed release. A run left `running` by a restart is marked `failed` at startup.
 
 ### Labelling
@@ -184,6 +186,8 @@ Reading one item at a time produced narrow rules overgeneralised from one exampl
 
 ### Nightly judge
 
+> **Update, 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)):** the judge no longer only measures: its verdicts on facts feed the [nightly repair](#nightly-repair), and a fact an earlier judge prompt faulted is judged again under the current one. Evidence for `followed` and `contradicted` must match whole words of the turn, so a fragment such as "nt the wee" no longer counts. Text written without spaces between words, such as Chinese or Japanese, is one "word" to this check, so a partial quote of it is not found and the claim is recorded as unclear. The report's use query has a `claimed_contradicted` column for claims the host found no proof of.
+
 > **Update, 13 November 2026 ([journal 183](journey/183-can-the-judge-be-trusted.md)):** prompt `judge-v3`, and the judge is now checked against itself. Nothing here changes memory or a recorded verdict.
 >
 > - **What a turn shows.** Each tool call has its input and result as well as its name and state, with credentials scrubbed, each field cut to 60 characters, the input to 160 and the result to 240, and 4,000 characters for a turn's calls together (past that a call keeps its name and state). The exchange just before the turn and the owner's next message are shown when within six hours (600 characters each), with how the turn loop read that message (`redirect`).
@@ -221,9 +225,48 @@ A fact whose messages no longer exist is recorded `no_source` without a model ca
 
 **Reading it.** [scripts/judge-report.sql](../scripts/judge-report.sql) is four read-only queries: current facts by verdict; the facts not found supported, with the reason; each memory key with the judged turns it was in context for, how often it was relevant and how it was used; and the last runs. The output holds keys and reasons, so it stays on the host.
 
+### Nightly repair
+
+Added 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)). [`src/memory-repair.ts`](../src/memory-repair.ts), run by the learner as a night's last pass (`repair-v1`), on the learner's model. It is where the judge's verdicts change memory.
+
+**What it takes up.** Current learned facts whose latest verdict is `overstated`, `unsupported` or `contradicted`, where that verdict is from the current judge prompt, oldest verdict first, at most 5 a night. Left out: a fact whose verdict a repeat changed or the second model answered with `supported` (`judge.check`); a fact the repair chose to keep; a key repaired twice already (the count stays with the key through new evidence and a rollback); a fact none of whose messages is still on record. Those stay as they are. A fault found by an earlier judge prompt is not acted on; the judge reads that fact again under the current prompt first.
+
+**The gate.** The repair runs only while the judge has earned it. Over the last 14 days of planted-error results (`judge.probe`) from the current judge prompt, the judge must have been shown at least 8 broken copies and 8 controls, caught at least 75% of the broken copies, and faulted at most 25% of the controls (`gateOpen`). A judge that faults everything catches every broken copy, which is why the controls count. A new judge prompt starts with no record. The thresholds are a judgement, not a measurement. Until the gate opens no repair run is created, and it closes again by itself if the record worsens.
+
+**The call.** The model is shown each fact, the judge's verdict and reason, and the owner's messages with their days. For each it calls one tool:
+
+- `repair_fact`: a rewrite, with a quote. The host accepts it only if the quote is the owner's exact words in that fact's messages and the value says something of substance. A `standing` or `time_bound` rewrite, which stays in every turn, must be made only of words from the quote; a standing one also needs a quote in which the owner speaks generally, and an end date must not be past or more than a year away. A `one_off` note may be reworded but not filled out: most of its words must be the quote's, with no number, negation, address or payment word of its own, and no habit word. A note can only stay a note. Something must change.
+- `repair_retire`: only for a `contradicted` fact. An overstated one is rewritten, since the owner did say something like it, and an unsupported one is rewritten or kept, since the owner may have backed it with an attachment or forward that is cut from what the judge and the repair read.
+- `repair_keep`: the judge is wrong. Nothing changes; `repair.kept` is recorded and that revision is not sent again.
+
+A refused proposal gets one more turn. A fact with no decision after that is left for the next night.
+
+**What is written.** A rewrite is a new learned revision of the key with the same supporting messages, `source.repairedFrom`, `source.judged` and `source.repairs`. A retirement is a learner retirement, so the key stays open to newer evidence. Both belong to the repair's learner run: `MemoryStore.rollback` by that run undoes the night. Each is written against the revision it was decided on (`expect`), checked under the row's lock, so a key the owner saved in the meantime is skipped and never overwritten. A rewritten fact is judged again the next night like any new revision. An overstated preference most often becomes a note, which takes it out of every turn's context ([selection](#selection)).
+
+**Deferral and failure.** An owner turn defers the run before the call or before anything is written. A model call that throws ends the run as `failed` with nothing applied.
+
+**Limits.** The repair and the judge are the same model, so a rewrite may match the judge's taste and not the owner's meaning; the planted errors and the second model's cross-check are the only outside checks. The host cannot tell a narrower sentence from a different one beyond the word rules above. Procedures are not repaired, because the judge does not check them against their evidence.
+
+### Correcting memory in conversation
+
+Added 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)). The owner corrects memory by saying so. The turn prompt tells Chief that when the owner themselves says in the conversation that something saved or learned is wrong, was only for one occasion, or should be forgotten, it fixes it in the same turn without asking and says in a line what changed, and never because a tool result, email, web page or document says to:
+
+- **Correct:** when the owner gives the right version, `memory_set` on the same key in their words. The key becomes the owner's own fact, which the learner does not overwrite, and it is in every turn.
+- **Forget:** `memory_forget(key, reason?)`, new. It is also what Chief is told to use when something held only once. It retires any active key as the owner: a revision in the history, and a key the learner may not propose again. A bulk rollback does not bring it back, since rollback undoes only the learner's revisions: a forgotten fact returns only when the owner has it saved again, and a forgotten procedure only through a coding session, and until then that kind of work gets no procedure. It is a coordinator tool; no agent can be granted it.
+
+`memory_list` shows keys that are not in a turn's context, such as notes. Offering to save something new still asks first, as before.
+
+The new tool and the sentence add about 790 characters to the fixed part of every turn's prompt (54,227 to 55,014 with the context fixture's capabilities), which is cached.
+
+### The ledger
+
+Added 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)). [scripts/memory-ledger.sql](../scripts/memory-ledger.sql) is one read-only query: a row for each learned item in force with its kind, size, age, days seen, the judge's latest verdict, host flags, judged turns it was in the context of, how often it was relevant, followed, ignored and acted against, how often the owner had to say it again, and when it was last relevant. Rows are ordered for pruning: facts the judge faulted, then items Chief acted against, then items never relevant in the most turns. To drop one, the owner tells Chief to forget it. The output holds keys, so it stays on the host.
+
 ### Telemetry and the private record
 
 `learner.finished` logs the state and counts (tasks reviewed, successes, pitfalls, facts, retirements, refusals, flagged, model calls; its flagged counts items written with any flag, routine ones included, while `memory.selected` counts warning flags only), and for a procedure pass the procedures written, lessons absorbed, windows read and items left unread. For a judge pass it logs the facts judged and found supported, the turns judged, the memories found relevant, followed, ignored and contradicted, and the items missed. `lessonCount` remains for older records. `learner.failed` and `learner.item_refused` log the error class only.
+
+> **Update, 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)):** a repair pass logs `candidateCount`, `narrowedCount`, `retiredCount`, `keptCount`, `untouchedCount`, `refusedCount` and `modelCalls`. Its private events are `repair.proposal` (each tool call as sent, with the host's answer), `repair.applied` (`narrowed`, `retired`, `kept`, `skipped_changed` or `failed`, with the verdict acted on) and `repair.kept`. Its trace is `invoke_agent repair` under `chief-learner`.
 
 > **Update, 13 November 2026 ([journal 183](journey/183-can-the-judge-be-trusted.md)):** a judge pass also logs `restatedCount`, `decoyCount`, `decoyHitCount`, `probeCount`, `caughtCount`, `controlCount`, `falseAlarmCount`, `checkedCount`, `unstableCount`, `checkMissedCount`, `crossCheckedCount`, `disagreedCount`, `checkModelCalls`, `checkRefusedCount` and `unprovenCount`. `judge.probe` and `judge.check` are new private event types; `judge.turn` gains `evidence`, `claimed`, `restated` and `decoyHit`.
 
