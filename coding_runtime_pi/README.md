@@ -27,7 +27,7 @@ node dist/cli.js approve TASK_ID PLAN_REVISION PLAN_HASH --state /private/task-s
 node dist/cli.js run TASK_ID --state /private/task-state --local-execution
 ```
 
-`start` clones the repository into a disposable workspace. It defaults to planning; `--mode learn` produces source-grounded findings without an approval plan. `--provider`, `--model` and `--base-url` configure an OpenAI-compatible service. The CLI defaults to OpenRouter and the current development coder choice; production clients supply their own pinned model settings.
+`start` clones the repository into a disposable workspace. It defaults to planning; `--mode learn` produces source-grounded findings without an approval plan. `--model` (a Claude model from Pi's catalogue, default `claude-opus-5-5`) and `--base-url` (default Anthropic's API) configure Pi's Anthropic client; `PI_RUNTIME_API_KEY` is its key. Production clients supply their own pinned model settings.
 
 `reply TASK_ID REVISION MESSAGE` revises scope and requires a new plan. `resume TASK_ID` explicitly resumes inspected interrupted work; it never starts automatically. `cancel TASK_ID` stops active work or prevents a ready task from running. Commands from another CLI process use signed cancellation requests. An interrupted runner lock is reconciled only when its process is gone.
 
