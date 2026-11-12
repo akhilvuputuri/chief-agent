@@ -256,7 +256,7 @@ Added 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)). T
 
 `memory_list` shows keys that are not in a turn's context, such as notes. Offering to save something new still asks first, as before.
 
-The new tool and the sentence add about 740 characters to the fixed part of every turn's prompt (54,227 to 54,964 with the context fixture's capabilities), which is cached.
+The new tool and the sentence add about 790 characters to the fixed part of every turn's prompt (54,227 to 55,014 with the context fixture's capabilities), which is cached.
 
 ### The ledger
 

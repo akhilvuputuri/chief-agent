@@ -46,7 +46,7 @@ The owner approved building it on 13 November ("go, build batch 3"), having been
   - The docs said a forgotten key could be restored by rollback, which undoes only the learner's revisions. Corrected.
   - The gate and the candidates counted every judge prompt version. Only the current judge's record and verdicts count; older faults are judged again first.
   - Smaller: the repair count was lost on new evidence or a restore; the ledger joined across owners.
-- CI failed on `54f7f1a4` for a reason the review did not look at: the new tool and prompt sentence took the coordinator's fixed context from 54,227 to 55,120 characters, past the 54,264 that [tests/context-continuity.test.ts](../../tests/context-continuity.test.ts) pads to, which main was 37 characters under. The sentence was shortened (54,964 now) and the fixture pads to 56,000; those tests need a fixed context of that order, not the incident's exact figure. My local run of related suites had not included that file.
+- CI failed on `54f7f1a4` for a reason the review did not look at: the new tool and prompt sentence took the coordinator's fixed context from 54,227 to 55,120 characters, past the 54,264 that [tests/context-continuity.test.ts](../../tests/context-continuity.test.ts) pads to, which main was 37 characters under. The sentence was shortened (55,014 now) and the fixture pads to 56,000; those tests need a fixed context of that order, not the incident's exact figure. My local run of related suites had not included that file.
 
 ## Verification and outcome
 
