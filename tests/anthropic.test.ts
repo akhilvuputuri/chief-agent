@@ -1822,7 +1822,7 @@ test("parallel tool calls survive the Pi facade and the direct route in both dir
   assert.equal(next.messages.at(-3)!.tool_calls!.length, 2);
 });
 
-test("a direct response with more tool calls than the limit is rejected like OpenRouter's, without fallback", async () => {
+test("with the Pi coding limit, a direct response with more tool calls is rejected like OpenRouter's, without fallback", async () => {
   const calls = (n: number) =>
     Array.from({ length: n }, (_, i) => ({
       type: "tool_use",
@@ -1835,6 +1835,7 @@ test("a direct response with more tool calls than the limit is rejected like Ope
   );
   const accepted = await run(atLimit, [{ role: "user", content: "x" }], {
     requireComplete: true,
+    maxToolCalls: MAX_TOOL_CALLS,
   });
   assert.equal(accepted.message.tool_calls!.length, MAX_TOOL_CALLS);
 
@@ -1861,6 +1862,7 @@ test("a direct response with more tool calls than the limit is rejected like Ope
       reasoning: "medium",
       signal: new AbortController().signal,
       requireComplete: true,
+      maxToolCalls: MAX_TOOL_CALLS,
     }),
     (error: ModelError) => {
       assert.ok(error instanceof ModelError);
@@ -1874,4 +1876,24 @@ test("a direct response with more tool calls than the limit is rejected like Ope
     },
   );
   assert.equal(openRouterCalls, 0);
+});
+
+test("without the Pi coding limit, a direct response keeps every tool call", async () => {
+  // Chief's own loop, agents and the learners (the procedure pass sets requireComplete)
+  // pass no maxToolCalls, so 21 calls are returned as before.
+  const blocks = Array.from({ length: MAX_TOOL_CALLS + 1 }, (_, i) => ({
+    type: "tool_use",
+    id: `toolu_${i}`,
+    name: "memory_set",
+    input: { key: `k${i}` },
+  }));
+  for (const extra of [{}, { requireComplete: true }]) {
+    const { model } = adapter(() => sse(stream(blocks, { stop: "tool_use" })));
+    const result = await run(model, [{ role: "user", content: "x" }], extra);
+    assert.equal(result.finishReason, "tool_calls");
+    assert.deepEqual(
+      result.message.tool_calls!.map((c) => c.id),
+      blocks.map((b) => b.id),
+    );
+  }
 });

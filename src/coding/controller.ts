@@ -68,6 +68,7 @@ import { ownerProgress } from "./progress-text.js";
 import { seal, open } from "../secret-box.js";
 import { errorFields, opsLog } from "../ops-log.js";
 import { ModelError } from "../model.js";
+import { MAX_TOOL_CALLS } from "../tool-call-limit.js";
 import { CodingModelFailure, type CodingFailureCode } from "./model-failure.js";
 import { boxView } from "./box-sandbox.js";
 import { runtimeMemory } from "./memory-schema.js";
@@ -1849,6 +1850,8 @@ export class CodingController {
         ...(job.settings.runtime === "pi"
           ? {
               requireComplete: true,
+              // What the Pi facade accepts back as history (journal 170).
+              maxToolCalls: MAX_TOOL_CALLS,
               maxOutputTokens: Math.min(
                 input.maxOutputTokens ?? allowance,
                 allowance,

@@ -213,6 +213,8 @@ test("Pi compatible model facade preserves role pins, journal replay and native 
   };
   f.setGeneration((_model, input) => {
     assert.equal(input.requireComplete, true);
+    // The most tool calls the facade accepts back as history (journal 170).
+    assert.equal(input.maxToolCalls, 20);
     assert.equal(input.maxOutputTokens, 8000);
     assert.equal(input.messages[1].reasoning_content, "");
     assert.deepEqual(

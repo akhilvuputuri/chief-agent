@@ -75,6 +75,11 @@ export interface ModelAdapter {
     /** Coding opt-in: accept only confirmed complete provider responses. */
     requireComplete?: boolean;
     /**
+     * Pi coding opt-in: reject a response with more tool calls than this, because the Pi
+     * facade could not accept it back as history (journal 170). Other callers set no limit.
+     */
+    maxToolCalls?: number;
+    /**
      * Trusted per-request output allowance. Omitted, it is 8,000. Chief's agent loop sends
      * CHIEF_MAX_OUTPUT_TOKENS; the learner and the judge send their own (LEARNING_LIMITS,
      * JUDGE_LIMITS), and coding calls send their profile's.

@@ -4,7 +4,7 @@
 - **Why.** On job `9600af57` the Opus coder asked for one tool in 168 of 173 responses, nearly all `bash`, and never used `read` or `edit`. See [journal 170](journey/170-coding-tool-guidance.md).
 - **Deployment.** Takes effect only when a worker image built from this change is pinned in `config/coding-pi.json` (a later PR); existing jobs keep their image. Not yet recorded as live.
 
-> **Update, 12 November 2026:** after review, this PR also changes the host: the direct Anthropic adapter rejects a response with more than 20 tool calls, as the OpenRouter route already does, so a coding job cannot end up with history the facade refuses to replay. The host change takes effect on release; the prompt change still needs the image pin. No migration or Compose change.
+> **Update, 12 November 2026 ([journal 170](journey/170-coding-tool-guidance.md)):** after review, this PR also changes the host: on Pi coding calls only, the direct Anthropic adapter rejects a response with more than 20 tool calls, as the OpenRouter route already does, so a coding job cannot end up with history the facade refuses to replay. Chief's own loop, agents and learners keep any number of tool calls. The host change takes effect on release; the prompt change still needs the image pin. No migration or Compose change.
 
 ## Coding attempts may run three hours (12 November 2026)
 
