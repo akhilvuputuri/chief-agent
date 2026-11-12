@@ -57,6 +57,7 @@ Not done here, on purpose: nothing rewrites the 12 existing overstated facts (th
   - Support was carried over when a value changed, so "Prefers window seats" replaced by "Prefers aisle seats" counted two days and showed the judge the window message. Support now carries only for the same value or a promotion.
   - Undoing an expiry lasted one night, because the restored copy kept its end date. It is now restored without it.
   - The two new flags were warnings, which would have marked most turns' `memory.selected` lines for as long as a fact was never repeated. They are routine flags now, still named for pruning.
+  - Review of `9a207dae` found the same gap one step over: a `time_bound` exception ("a window seat for this trip") under a standing preference's key was accepted, and its expiry then left the key with nothing. The host now refuses that too.
   - Smaller: the prompt said "nearly half" of facts turned a request into a habit (it was 10 of 26; nearly half were overstated in all); a failed run could lose its expiry count; the unchanged check compared day counts, which stop at the limit.
 
 ## Verification and outcome

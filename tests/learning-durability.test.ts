@@ -618,6 +618,15 @@ test("a standing fact is never demoted to a note, and a note is not promoted on 
             "one_off",
             osaka,
           ),
+          // An exception with an end date would expire and leave the key with nothing.
+          fact(
+            "seat",
+            "Wants a window seat for the Osaka trip",
+            "Aisle seat for the Osaka trip",
+            "time_bound",
+            osaka,
+            { until: "2026-12-05" },
+          ),
           // A second message on the note's own day is still one occasion.
           fact(
             "early",
@@ -644,8 +653,9 @@ test("a standing fact is never demoted to a note, and a note is not promoted on 
   const refusals = results(inputs[1]).map((r: any) => r.refused ?? "accepted");
   assert.match(refusals[0], /holds a standing fact/);
   assert.match(refusals[1], /holds a standing fact/);
+  assert.match(refusals[2], /time-bound exception its own key/);
   assert.match(
-    refusals[2],
+    refusals[3],
     /only when another day repeats it or the owner says it generally/,
   );
   assert.equal(result.facts, 1);
