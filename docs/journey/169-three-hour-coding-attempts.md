@@ -17,12 +17,12 @@ Coding job `9600af57` (the study-links feature, rerun after [journal 164](164-cl
 
 | Phase                       | Wall time | Model calls | Cost   |
 | --------------------------- | --------- | ----------- | ------ |
-| Plan and requirement check  | 7 min     | 22          | $1.12  |
+| Plan and requirement check  | 7 min     | 22          | $1.68  |
 | Implementation              | 102 min   | 173         | $19.55 |
 | Checks (`kite run check` …) | 8 min     | —           | —      |
 | Review, round 1 (cut off)   | 40 min    | 65          | $6.96  |
 
-Planning was its own attempt the evening before. The implementation attempt, which held implementation, checks and review (102 + 8 + 40 = 150 minutes), started at 01:44:52 UTC and its deadline was 150 minutes later, at 04:14:52; the job paused at 04:14:51 with the reviewer's next call in flight. Every call went `anthropic-direct`, and 99% of prompt tokens were cache reads. Two gateway restarts from unrelated releases each cost one reviewer call.
+Planning was its own attempt the evening before. The implementation attempt, which held implementation, checks and review (102 + 8 + 40 = 150 minutes), started at 01:44:52 UTC and its deadline was 150 minutes later, at 04:14:52; the job paused at 04:14:51 with the reviewer's next call in flight. (The plan row first said $1.12, which was the planner alone; the requirement check's $0.56 is now included. Corrected 12 November 2026.) Every call went `anthropic-direct`, and 99% of prompt tokens were cache reads. Two gateway restarts from unrelated releases each cost one reviewer call.
 
 **Measured, same job, where the coder's time went:**
 
