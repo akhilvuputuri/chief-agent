@@ -33,7 +33,7 @@ const record = z
       .regex(/^[a-f0-9]{40}$/)
       .optional(),
     waitingSince: z.string(),
-    /** When a Pi PR began waiting for CI, mergeability or threads (one notice per revision). */
+    /** When a Pi PR's current wait for CI, mergeability or threads began (one notice per wait). */
     waitingFor: z.string().optional(),
   })
   .strict();
@@ -730,7 +730,7 @@ export class CodingAutomation {
               "INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,$2,$3::jsonb) ON CONFLICT DO NOTHING",
               [
                 j.id,
-                `ci-wait:${j.revision}`,
+                `ci-wait:${j.revision}:${d.waitingFor}`,
                 JSON.stringify({
                   summary:
                     (i.unresolvedThreads ?? 0) > 0
@@ -751,6 +751,14 @@ export class CodingAutomation {
             : "Waiting for exact-head CI, Devin and mergeability.",
         );
         return;
+      }
+      // The wait is over: the next one starts its own hour and its own notice.
+      if (d.waitingFor) {
+        delete d.waitingFor;
+        await this.db.query(
+          "UPDATE coding_events SET payload=payload - 'waitingFor' WHERE job_id=$1 AND event_key=$2",
+          [j.id, key(j.revision)],
+        );
       }
       // A stop for operator work comes last, after review feedback and CI, so the owner's
       // fixes and Devin's still reach the coder first.

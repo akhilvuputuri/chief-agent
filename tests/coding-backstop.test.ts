@@ -335,12 +335,13 @@ test("the owner asking for more work restarts the eight hours; Devin and CI feed
   assert.equal(await f.c.machineSpent(job), false);
 });
 
-test("a lifetime pause whose box never shuts down is told to the owner once, with that cause", async (t) => {
+test("a lifetime pause whose box is slow to shut down is told to the owner once, and continues once it has", async (t) => {
   const { f, id, row } = await running(t);
   const first = await row();
   f.advance(3 * HOUR - 1000);
   await f.c.finish(first, paused());
-  // The box does not go away.
+  // The box does not go away yet.
+  const terminate = f.provider.terminate;
   (f.provider as any).terminate = async () => {};
   await f.c.tick();
   await f.db.query(
@@ -353,7 +354,17 @@ test("a lifetime pause whose box never shuts down is told to the owner once, wit
   assert.equal(stuck.state, "paused");
   assert.equal(stuck.cleanup, "pending");
   assert.match(stuck.summary, /has not shut down/);
-  const notices = await events(f, id, "machine-time:%");
+  const notices = await events(f, id, "box-stuck:%");
   assert.equal(notices.length, 1);
   assert.equal(notices[0].delivery, "pending");
+  // The notice does not keep the job stopped: once the box is gone, it continues once.
+  (f.provider as any).terminate = terminate;
+  for (let i = 0; i < 4; i++) await f.c.tick();
+  const next = await row();
+  assert.equal(next.state, "provisioning");
+  assert.equal(next.revision, first.revision + 1);
+  assert.equal(f.creates(), 2);
+  assert.equal((await events(f, id, "machine-time:%")).length, 0);
+  for (let i = 0; i < 3; i++) await f.c.tick();
+  assert.equal(f.creates(), 2);
 });

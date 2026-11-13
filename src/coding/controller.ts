@@ -2930,25 +2930,32 @@ export class CodingController {
              AND l.event_key IN (j.attempt_id::text||':paused', j.attempt_id::text||':finished')
              AND l.payload->>'cause'='lifetime')
            AND NOT EXISTS(SELECT 1 FROM coding_events m WHERE m.job_id=j.id
-             AND m.event_key='machine-time:'||j.attempt_id::text)`,
+             AND m.event_key='box-stuck:'||j.attempt_id::text)`,
       )
     ).rows as CodingJob[];
+    // Only a notice: once cleanup completes, the job continues as above.
     for (const j of stuck)
       if (this.allowed(j.user_id))
         await this.holdForOwner(
           j,
-          "This job's coding box reached its time limit but has not shut down, so the job cannot continue; the box needs an operator.",
+          "This job's coding box reached its time limit but has not shut down yet, so the job cannot continue until it does; the box may need an operator.",
+          "box-stuck",
         );
   }
   /**
-   * A stopped Pi job the host will not continue by itself: its summary and one owner notice
-   * say why (keyed `machine-time:<attempt>`, so it is sent once per attempt).
+   * A stopped Pi job the host does not continue by itself: its summary and one owner notice
+   * say why, once per attempt. `machine-time:<attempt>` also keeps the job stopped until the
+   * owner acts; `box-stuck:<attempt>` is only a notice.
    */
-  private async holdForOwner(j: CodingJob, summary: string) {
+  private async holdForOwner(
+    j: CodingJob,
+    summary: string,
+    key: "machine-time" | "box-stuck" = "machine-time",
+  ) {
     await this.db.query(
       `WITH changed AS (UPDATE coding_jobs SET summary=$4 WHERE id=$1 AND revision=$2 AND attempt_id=$3 AND state='paused' RETURNING id)
-      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,'machine-time:'||$3::text,jsonb_build_object('summary',$4::text) FROM changed ON CONFLICT DO NOTHING`,
-      [j.id, j.revision, j.attempt_id, summary],
+      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$5::text||':'||$3::text,jsonb_build_object('summary',$4::text) FROM changed ON CONFLICT DO NOTHING`,
+      [j.id, j.revision, j.attempt_id, summary, key],
     );
   }
   async tick() {

@@ -1362,3 +1362,35 @@ test("an hour into a wait for CI the owner hears once, and the PR keeps waiting 
   );
   assert.equal((await f.job()).stage, "awaiting_ci");
 });
+
+test("each wait for CI in one revision gets its own hour and its own notice (journal 193)", async (t) => {
+  const f = await fixture(t);
+  await f.auto.tick();
+  await f.auto.tick();
+  const notices = async () =>
+    (
+      await f.db.query(
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key LIKE 'ci-wait:%'",
+        [f.id],
+      )
+    ).rows;
+  f.advance(3_600_001);
+  await f.auto.tick();
+  assert.equal((await notices()).length, 1);
+  // CI passes: the wait ends and the owner's card is offered.
+  f.setInspection({ checks: "passed" });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_merge_approval");
+  // A new wait in the same revision (threads opened) starts its own hour.
+  f.setInspection({ unresolvedThreads: 1 });
+  await f.auto.tick();
+  assert.equal((await notices()).length, 1);
+  f.advance(1_800_000);
+  await f.auto.tick();
+  assert.equal((await notices()).length, 1);
+  f.advance(1_800_001);
+  await f.auto.tick();
+  const sent = await notices();
+  assert.equal(sent.length, 2);
+  assert(sent.some((n: any) => /review threads/.test(n.payload.summary)));
+});
