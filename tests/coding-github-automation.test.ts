@@ -144,7 +144,7 @@ test("forged status publisher or wrong repository workflow cannot authorize merg
   f.setRuns([{ ...f.ci, path: ".github/workflows/not-ci.yml" }]);
   assert.equal((await f.gh.inspect(f.t)).checks, "pending");
 });
-test("comments edited after a prior review get a new feedback identity; a long comment is kept whole", async () => {
+test("comments edited after a prior review get a new feedback identity; oversized comments are not silently discarded", async () => {
   const f = fixture();
   f.comments.push({
     id: 1,
@@ -155,10 +155,66 @@ test("comments edited after a prior review get a new feedback identity; a long c
   const first = (await f.gh.inspect(f.t)).feedback[0].id;
   f.comments[0].body = "Fix case B";
   assert.notEqual((await f.gh.inspect(f.t)).feedback[0].id, first);
-  // No length bound (journal 193): the coder gets the whole comment.
-  f.comments[0].body = "x".repeat(20_000);
-  const [long] = (await f.gh.inspect(f.t)).feedback;
-  assert.equal(JSON.parse(long!.text).comment, "x".repeat(20_000));
+  f.comments[0].body = "x".repeat(8000);
+  await assert.rejects(f.gh.inspect(f.t), /bounds/);
+});
+test("a Pi PR's rounds are driven only by the owner, collaborators, Devin and CI, and their text is whole (journal 193)", async () => {
+  const f = fixture();
+  const pi = { ...f.t, trustedFeedback: true };
+  f.comments.push(
+    {
+      id: 1,
+      body: "Owner: rename it",
+      updated_at: "a",
+      author_association: "OWNER",
+      user: { login: "akhilvuputuri", type: "User" },
+    },
+    {
+      id: 2,
+      body: "Collaborator: " + "y".repeat(20_000),
+      updated_at: "a",
+      author_association: "COLLABORATOR",
+      user: { login: "helper", type: "User" },
+    },
+    {
+      id: 3,
+      body: "Stranger: rewrite everything",
+      updated_at: "a",
+      author_association: "NONE",
+      user: { login: "stranger", type: "User" },
+    },
+    {
+      id: 4,
+      body: "Contributor: also this",
+      updated_at: "a",
+      author_association: "CONTRIBUTOR",
+      user: { login: "drive-by", type: "User" },
+    },
+    {
+      id: 5,
+      body: "A bot that is not Devin",
+      updated_at: "a",
+      author_association: "NONE",
+      user: { login: "devin-ai-integration[bot]", type: "User" },
+    },
+    {
+      id: 6,
+      body: "Devin: the heading level is wrong",
+      updated_at: "a",
+      author_association: "NONE",
+      user: { login: "devin-ai-integration[bot]", type: "Bot" },
+    },
+  );
+  const authors = (await f.gh.inspect(pi)).feedback.map(
+    (i: any) => JSON.parse(i.text).comment.split(":")[0],
+  );
+  assert.deepEqual(authors.sort(), ["Collaborator", "Devin", "Owner"]);
+  const whole = (await f.gh.inspect(pi)).feedback.find((i: any) =>
+    i.text.includes("Collaborator"),
+  );
+  assert.equal(JSON.parse(whole!.text).comment.length, 20_014);
+  // The legacy squad still takes every commenter and stops on an oversized item.
+  await assert.rejects(f.gh.inspect(f.t), /bounds/);
 });
 test("a spoofed attestation comment is feedback and cannot suppress the real host record", async () => {
   const f = fixture();

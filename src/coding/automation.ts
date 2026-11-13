@@ -23,7 +23,10 @@ const record = z
      * share the job's machine time (journal 193); Pi records written before that still hold it.
      */
     remainingMs: z.number().nonnegative().optional(),
-    /** GitHub and owner feedback already delivered, so it is not delivered twice. */
+    /**
+     * The legacy squad's record of feedback already delivered. A Pi job's delivered GitHub
+     * feedback is its `inbox:gh:<id>` items (journal 193); Pi records keep an empty list.
+     */
     handled: z.array(z.string()),
     mergeSha: z
       .string()
@@ -33,6 +36,10 @@ const record = z
   })
   .strict();
 type Record = z.infer<typeof record>;
+/** The legacy squad's record still holds at most 200 handled items, as before journal 193. */
+const legacyRecord = record.refine((r) => r.handled.length <= 200);
+const recordFor = (j: CodingJob) =>
+  j.settings.prWorkflow ? record : legacyRecord;
 /** Owner-merge feedback rounds so far: each is one requeue keyed `mr-feedback:` (journal 192). */
 export async function feedbackRounds(db: Database, jobId: string) {
   return Number(
@@ -152,7 +159,7 @@ export class CodingAutomation {
     };
     await this.db.query(
       "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,$2,$3::jsonb,'suppressed') ON CONFLICT DO NOTHING",
-      [job.id, key(job.revision), JSON.stringify(record.parse(data))],
+      [job.id, key(job.revision), JSON.stringify(recordFor(job).parse(data))],
     );
   }
   private async phase(
@@ -238,7 +245,8 @@ export class CodingAutomation {
         j.revision,
         main,
         j.stage,
-        JSON.stringify(d.handled),
+        // A Pi job's inbox items are its record of handled feedback.
+        JSON.stringify([]),
         `rebase:${main}:${j.revision}`,
         `The PR conflicts with main; rebasing from ${j.base_sha} onto ${main}`,
         JSON.stringify({
@@ -271,6 +279,23 @@ export class CodingAutomation {
       held: true as const,
     }));
   }
+  /**
+   * Feedback already delivered: the record's list and, for a Pi PR, every GitHub item that
+   * is already an inbox item of the job (journal 193). Inbox keys are unique, so nothing is
+   * delivered twice and no list has to be copied into every round.
+   */
+  private async handled(j: CodingJob, d: Record) {
+    const ids = new Set(d.handled);
+    if (j.settings.prWorkflow === "owner_merge")
+      for (const r of (
+        await this.db.query(
+          "SELECT substr(event_key,10) AS id FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:gh:%'",
+          [j.id],
+        )
+      ).rows)
+        ids.add(r.id);
+    return ids;
+  }
   /** Fix requests the owner sent through Chief for this PR, handled like review feedback. */
   private async ownerRequests(j: CodingJob) {
     return (
@@ -286,6 +311,7 @@ export class CodingAutomation {
   }
   /** Keeps one answerable card for the current revision/head; lost or expired answers are re-offered. */
   private async offerMergeCard(j: CodingJob, d: Record) {
+    const handledCount = (await this.handled(j, d)).size;
     const cards = (
       await this.db.query(
         "SELECT delivery,payload FROM coding_events WHERE job_id=$1 AND payload->'merge'->>'head'=$2 AND (payload->'merge'->>'revision')::int=$3 ORDER BY created_at DESC,id DESC",
@@ -337,7 +363,7 @@ export class CodingAutomation {
         `merge-approval:${j.revision}:${d.head}:${randomUUID()}`,
         JSON.stringify({
           summary: `**Ready to merge**\nCoder's own summary (not verified by Chief): ${summary}${warning}`,
-          question: `${cards.length ? "The PR state changed or the earlier card lapsed, so please confirm again. " : ""}Exact-head CI and Devin passed, ${d.handled.length} review comment(s) were handled, and the independent ${j.settings.reviewerModel} review approved the final candidate (coder: ${j.settings.model}). Merge this PR? Chief will merge only head ${d.head.slice(0, 12)} and then watch the release.`,
+          question: `${cards.length ? "The PR state changed or the earlier card lapsed, so please confirm again. " : ""}Exact-head CI and Devin passed, ${handledCount} review comment(s) were handled, and the independent ${j.settings.reviewerModel} review approved the final candidate (coder: ${j.settings.model}). Merge this PR? Chief will merge only head ${d.head.slice(0, 12)} and then watch the release.`,
           url: (j as any).pr_url,
           merge: { revision: j.revision, head: d.head, tree: d.tree },
         }),
@@ -381,7 +407,7 @@ export class CodingAutomation {
         await this.start(j, publication.tree);
         return;
       }
-      const d = record.parse(raw);
+      const d = recordFor(j).parse(raw);
       data = d;
       const target: MergeTarget = {
         id: j.id,
@@ -389,6 +415,7 @@ export class CodingAutomation {
         url: (j as any).pr_url,
         head: d.head,
         tree: d.tree,
+        trustedFeedback: j.settings.prWorkflow === "owner_merge",
       };
       if (j.stage === "release_pending") {
         if (!d.mergeSha) throw new Error("Merge identity missing");
@@ -528,9 +555,8 @@ export class CodingAutomation {
         ...(await this.ownerRequests(j)),
         ...(await this.heldInbox(j)),
       ];
-      const feedback = [...owner, ...i.feedback].filter(
-        (f) => !d.handled.includes(f.id),
-      );
+      const done = await this.handled(j, d);
+      const feedback = [...owner, ...i.feedback].filter((f) => !done.has(f.id));
       if (feedback.length) {
         const cp = structuredClone(j.checkpoint);
         const pi = j.settings.prWorkflow === "owner_merge" && cp.piState;
@@ -549,6 +575,7 @@ export class CodingAutomation {
         if (
           !pi &&
           ((d.remainingMs ?? 0) <= 0 ||
+            d.handled.length + feedback.length > 200 ||
             j.used_models >= j.settings.limits!.models ||
             (j.checkpoint.squadState?.toolsUsed ?? 0) >=
               j.settings.limits!.tools)
@@ -609,7 +636,7 @@ export class CodingAutomation {
                 },
               }))
           : [];
-        const handled = [...d.handled, ...batch.map((f) => f.id)];
+        const handled = [...done, ...batch.map((f) => f.id)];
         // An owner request is sent once: a retried or resumed round starts with no handled
         // list, and the request must not be fixed (and charged) again. It is marked in the
         // requeue's own statement, so a round that never starts leaves it undelivered.
@@ -626,7 +653,8 @@ export class CodingAutomation {
             j.lease,
             JSON.stringify(cp),
             j.revision,
-            JSON.stringify(handled),
+            // A Pi round's inbox items are its record of what was handled.
+            JSON.stringify(pi ? [] : handled),
             pi ? null : Math.floor(d.remainingMs ?? 0),
             `mr-feedback:${fingerprint}`,
             text,
@@ -738,7 +766,7 @@ export class CodingAutomation {
         target,
         j.settings.reviewerModel,
         artifactHash(j.result.checkpoint),
-        d.handled,
+        [...(await this.handled(j, d))],
       );
       // Feedback/check state can change without changing the Git SHA. Re-read after attestation.
       const final = await this.repository.inspect(target);
@@ -757,11 +785,12 @@ export class CodingAutomation {
         );
         return;
       }
+      const handledNow = await this.handled(j, d);
       const fresh = [
         ...(await this.ownerRequests(j)),
         ...(await this.heldInbox(j)),
         ...final.feedback,
-      ].some((f) => !d.handled.includes(f.id));
+      ].some((f) => !handledNow.has(f.id));
       // Mergeability still being computed keeps the owner's tap; the next tick merges.
       if (
         ownerMerge &&

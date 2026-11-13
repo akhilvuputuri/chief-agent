@@ -78,6 +78,12 @@ export type MergeTarget = {
   head: string;
   url: string;
   tree: string;
+  /**
+   * A Pi owner-merge PR (journal 193): only the repository owner, its collaborators, Devin
+   * and CI drive its feedback rounds, and their text is delivered whole. Without it (the
+   * legacy squad) every commenter counts and an item over 7,000 characters stops the PR.
+   */
+  trustedFeedback?: boolean;
 };
 export type PrOutcome = {
   merged: boolean;

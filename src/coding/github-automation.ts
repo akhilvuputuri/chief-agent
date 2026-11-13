@@ -17,6 +17,17 @@ const digest = (text: string) =>
   createHash("sha256").update(text).digest("hex");
 const sha = (v: unknown): v is string =>
   typeof v === "string" && /^[a-f0-9]{40}$/.test(v);
+/** Devin, as its review status identifies it: this login, as a GitHub App bot. */
+const devin = (user: any) =>
+  user?.login === "devin-ai-integration[bot]" && user?.type === "Bot";
+/**
+ * Who may drive a Pi PR's feedback rounds (journal 193): the repository's owner and its
+ * collaborators, by GitHub's own author association on the comment or review, and Devin.
+ * Anyone else's comment stays on GitHub and reaches no coder. CI results are read from the
+ * repository's own workflow run, not from comments.
+ */
+const trusted = (c: any) =>
+  ["OWNER", "COLLABORATOR"].includes(c.author_association) || devin(c.user);
 
 /** GitHub operations remain on Chief, never in the coding sandbox. */
 export class GitHubAutomation implements PrAutomationRepository {
@@ -187,7 +198,8 @@ export class GitHubAutomation implements PrAutomationRepository {
         // Devin's summary (badge) bodies are verdicts, not findings; its findings arrive inline.
         (c.user?.login === "devin-ai-integration[bot]" &&
           c.path === undefined &&
-          c.body.includes("<!-- devin-review-badge-begin -->"))
+          c.body.includes("<!-- devin-review-badge-begin -->")) ||
+        (t.trustedFeedback && !trusted(c))
       )
         continue;
       const text = JSON.stringify({
@@ -196,6 +208,10 @@ export class GitHubAutomation implements PrAutomationRepository {
         line: c.line,
         comment: c.body,
       });
+      if (!t.trustedFeedback && text.length > 7000)
+        throw new Error(
+          "MR feedback exceeds supported bounds; explicit review needed",
+        );
       result.feedback.push({
         id: digest(`${c.id}:${c.updated_at ?? c.submitted_at}:${text}`),
         text,
@@ -224,6 +240,10 @@ export class GitHubAutomation implements PrAutomationRepository {
           steps: j.steps?.filter((s: any) => s.conclusion !== "success"),
           annotations,
         });
+        if (!t.trustedFeedback && text.length > 7000)
+          throw new Error(
+            "CI feedback exceeds supported bounds; explicit review needed",
+          );
         result.feedback.push({
           id: `ci:${ci.id}:${ci.run_attempt}:${j.id}`,
           text,

@@ -379,6 +379,7 @@ test("declining keeps the PR open and a changed head invalidates an unanswered c
 
 test("MR feedback becomes labelled inbox items for the same coder session, with the work kept", async (t) => {
   const f = await fixture(t);
+  const published = await f.job();
   f.setInspection({
     draft: false,
     feedback: [{ id: "devin-1", text: "Devin: the heading level is wrong" }],
@@ -409,7 +410,21 @@ test("MR feedback becomes labelled inbox items for the same coder session, with 
       [f.id],
     )
   ).rows[0].payload;
-  assert.deepEqual(budget.handled, ["devin-1"]);
+  assert.deepEqual(budget.handled, []);
+  // Published again with the same comment still on GitHub: its inbox item marks it handled.
+  await f.db.query(
+    "UPDATE coding_jobs SET state='pr_ready',stage='pr_ready',result=$2::jsonb WHERE id=$1",
+    [f.id, JSON.stringify(published.result)],
+  );
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT job_id,'automation:2',payload,'suppressed' FROM coding_events WHERE job_id=$1 AND event_key='automation:1'",
+    [f.id],
+  );
+  await f.auto.tick();
+  const again = await f.job();
+  assert.equal(again.state, "pr_ready");
+  assert.notEqual(again.stage, "manual_review", again.summary);
+  assert.equal((await inbox(f)).length, 1);
 
   // A fourth round is delivered like the first: there is no round count (journal 193).
   const later = await fixture(t);
@@ -443,13 +458,14 @@ test("every feedback item is delivered whole, however long or however many (jour
   const items = await inbox(f);
   assert.equal(items.length, 251);
   assert.equal(items.find((i) => i.source === "ci")?.text, ci);
+  // The inbox items are the record of what was handled; no list is copied (journal 193).
   const budget = (
     await f.db.query(
       "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
       [f.id],
     )
   ).rows[0].payload;
-  assert.equal(budget.handled.length, 251);
+  assert.deepEqual(budget.handled, []);
 });
 
 test("owner-confirmed merge is a Pi-only, host-only setting", () => {
@@ -1087,8 +1103,15 @@ test("the owner's fix request on a stopped PR goes to the coder on the same PR",
       [f.id],
     )
   ).rows[0].payload.handled;
-  assert.equal(handled.length, 1);
-  assert.match(handled[0], /^owner:/);
+  // A Pi round copies no handled list (journal 193): the request is marked delivered.
+  assert.deepEqual(handled, []);
+  const marked = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='owner-feedback:fix-1'",
+      [f.id],
+    )
+  ).rows[0].payload;
+  assert.equal(typeof marked.deliveredRound, "number");
 });
 
 test("a fix request waits for the next round on a PR still in checks", async (t) => {
@@ -1275,5 +1298,5 @@ test("an owner message kept while the job was publishing starts a feedback round
       [f.id],
     )
   ).rows[0].payload.handled;
-  assert.match(handled[0], /^inbox:/);
+  assert.deepEqual(handled, []);
 });
