@@ -52,12 +52,8 @@ export const inboxItem = z
     choice: z.number().int().min(1).optional(),
     /** The session that asked the question; the coder otherwise. */
     to: z.enum(["coder", "reviewer"]).optional(),
-    /** A rebase (journal 193): the base the saved work is on, and current main. */
+    /** A rebase (journal 193): the base the saved work is on; main is the job's base. */
     from: z
-      .string()
-      .regex(/^[a-f0-9]{40}$/)
-      .optional(),
-    onto: z
       .string()
       .regex(/^[a-f0-9]{40}$/)
       .optional(),
@@ -89,7 +85,6 @@ const assignmentSchema = z.object({
     .strict()
     .optional(),
   checkpoint,
-  deadline: z.string().datetime(),
   /** When to stop and save, on the host's clock: the box's lifetime less the save margin. */
   stopInMs: z.number().int().nonnegative(),
   /** Every inbox item of the job, oldest first; the checkpoint lists those delivered. */
@@ -182,6 +177,33 @@ export const sessionScope = (role: "coder" | "reviewer", jobId: string) =>
 export const workerRoot = (jobId: string, parent = tmpdir()) =>
   join(parent, `pi-coding-${jobId}`);
 
+/** Git's status codes for an unmerged path. */
+const unmerged = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+type Conflict = NonNullable<
+  NonNullable<Checkpoint["piState"]>["conflicts"]
+>[number];
+/**
+ * One line per conflicted path for the coder (journal 193): what kind of conflict it is and
+ * what git left in the workspace. Some kinds carry no conflict markers at all.
+ */
+export function conflictLine(c: Conflict) {
+  const what: Record<Conflict["status"], string> = {
+    UU: "changed on main and in your change",
+    AA: "added on main and in your change",
+    DU: "deleted on main and changed in your change; your version is in the workspace, so it stays in the candidate unless you delete it",
+    UD: "deleted in your change and changed on main; main's version is in the workspace, so your deletion is not in the candidate unless you delete it again",
+    AU: "added only on main while git matched a rename; check whether it belongs",
+    UA: "added only by your change while git matched a rename; check whether it belongs",
+    DD: "deleted on both sides; nothing is left to resolve",
+  };
+  const markers =
+    c.status === "UU" || c.status === "AA"
+      ? c.markers
+        ? "; it has conflict markers"
+        : "; it has no conflict markers (git could not merge it as text, for example a binary file or a link), and main's version is in the workspace"
+      : "; no conflict markers";
+  return `- ${c.path}: ${what[c.status]}${markers}`;
+}
 export interface PiWorkerClient {
   origin: string;
   token: string;
@@ -269,7 +291,7 @@ export async function runPiWorker(
         !(assignment.checkpoint.piState?.delivered ?? []).includes(i.id),
     )?.from ??
     base;
-  let conflicts: string[] | undefined;
+  let conflicts: Conflict[] | undefined;
   if (workBase === base) await tree.restore(assignment.checkpoint.files);
   else {
     const git = (args: string) =>
@@ -290,9 +312,23 @@ export async function runPiWorker(
       undefined,
       20_000_000,
     );
-    conflicts = (await git("diff --no-ext-diff --name-only --diff-filter=U -z"))
+    // Each unmerged path with git's status code ("us" is main, "them" the change), and
+    // whether git could leave conflict markers in it.
+    conflicts = [];
+    for (const row of (
+      await git("status --porcelain=v1 -z --untracked-files=no")
+    )
       .split("\0")
-      .filter(Boolean);
+      .filter(Boolean)) {
+      const status = row.slice(0, 2);
+      if (!unmerged.has(status)) continue;
+      const path = row.slice(3);
+      const file = join(workspace, path);
+      const info = await lstat(file).catch(() => undefined);
+      const markers =
+        !!info?.isFile() && (await readFile(file, "utf8")).includes("<<<<<<< ");
+      conflicts.push({ path, status: status as Conflict["status"], markers });
+    }
     if (picked.exitCode !== 0 && !conflicts.length)
       throw new Error("Rebasing onto main failed");
     // Only the working tree carries the result: no cherry-pick in progress, nothing staged.
@@ -437,7 +473,7 @@ export async function runPiWorker(
       reviewed?: NonNullable<Checkpoint["piState"]>["reviewed"];
       next?: NonNullable<Checkpoint["piState"]>["next"];
       report?: Task["report"];
-      conflicts?: string[];
+      conflicts?: Conflict[];
     } = {},
   ): NonNullable<Checkpoint["piState"]> => {
     const reviewed = extra.reviewed ?? saved.piState?.reviewed;
@@ -878,11 +914,23 @@ export async function runPiWorker(
         piState: state("build", {
           ...(conflicts!.length
             ? { conflicts }
-            : { next: { step: "review", hash: artifactHash(work) } }),
+            : work.files.length
+              ? { next: { step: "review", hash: artifactHash(work) } }
+              : {}),
         }),
       });
       if (!conflicts!.length)
         rebasedNote = `Main moved to ${base}. Chief rebased your change onto it with git, without conflicts; your workspace is that result.`;
+      // Main already holds the whole change: nothing is left to review or publish.
+      if (!conflicts!.length && !snap.files.length) {
+        const settled = await settle({
+          kind: "no_change",
+          summary:
+            "Main already contains this change, so nothing is left to publish.",
+          checkpoint: saved,
+        });
+        if (settled) return;
+      }
     }
     const unapplied = rebases();
     if (unapplied.length) {
@@ -892,7 +940,7 @@ export async function runPiWorker(
         // Delivered once the coder's session holds it, like any inbox item.
         conflictMessage = inboxMessage({
           ...latest,
-          text: `Main moved to ${base} and the pull request conflicted with it. Chief applied your change onto it with git; these files have conflicts to resolve (look for the conflict markers): ${saved.piState.conflicts.join(", ")}. Resolve them, rerun the tests and report done.`,
+          text: `Main moved to ${base} and the pull request conflicted with it. Chief applied your change onto it with git; these files have conflicts to resolve:\n${saved.piState.conflicts.map(conflictLine).join("\n")}\nWhere main replaced a file with a directory or a link, git may have put your version beside it as <path>~<commit>. Resolve every conflict, rerun the tests and report done.`,
         });
       else delivered.add(latest.id);
     }
@@ -987,6 +1035,8 @@ export async function runPiWorker(
         step = "review";
       }
       if (step === "review") {
+        // A stop that landed after the check above starts no review copy.
+        if (stopping) continue;
         const { verdict, candidate, before } = await reviewRound(
           summary,
           resuming,

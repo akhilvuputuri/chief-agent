@@ -1541,10 +1541,8 @@ export class CodingController {
           ? { choice: r.payload.choice }
           : {}),
         ...(r.payload.to === "reviewer" ? { to: "reviewer" } : {}),
-        // A rebase: the base the job's saved work is on, and current main (journal 193).
-        ...(r.payload.source === "rebase"
-          ? { from: r.payload.from, onto: r.payload.onto }
-          : {}),
+        // A rebase: the base the job's saved work is on (journal 193).
+        ...(r.payload.source === "rebase" ? { from: r.payload.from } : {}),
       }));
   }
   piSessionAppend(job: CodingJob, raw: unknown) {

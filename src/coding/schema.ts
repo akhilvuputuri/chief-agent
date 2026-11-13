@@ -111,8 +111,22 @@ export const checkpoint = z
           .string()
           .regex(/^[a-f0-9]{40}$/)
           .optional(),
-        /** Files a rebase left conflicted, until the coder is told about them. */
-        conflicts: z.array(z.string().min(1).max(240)).max(500).optional(),
+        /**
+         * Files a rebase left conflicted, until the coder is told about them: git's status
+         * code ("us" is main, "them" the change) and whether the file has conflict markers.
+         */
+        conflicts: z
+          .array(
+            z
+              .object({
+                path: z.string().min(1).max(240),
+                status: z.enum(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]),
+                markers: z.boolean(),
+              })
+              .strict(),
+          )
+          .max(500)
+          .optional(),
         /** The candidate the reviewer last judged, so the next round reads what changed since. */
         reviewed: z
           .object({
