@@ -227,3 +227,86 @@ test("the coder's own git configuration never runs in or shapes a snapshot (jour
     "",
   );
 });
+
+test("a snapshot that reuses its own index equals a fresh one, and tampering with that index or its configuration changes nothing (journal 193)", async () => {
+  const { chmod, rename, rm: remove } = await import("node:fs/promises");
+  const root = await mkdtemp(join(tmpdir(), "pi-reuse-"));
+  const repo = join(root, "repo");
+  await mkdir(repo);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.name", "Synthetic");
+  git("config", "user.email", "synthetic@example.invalid");
+  for (const name of ["a.txt", "b.txt", "c.txt", "run.sh"])
+    await writeFile(join(repo, name), `${name}\n`);
+  git("add", ".");
+  git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD");
+  const execute = localExecutor(repo, join(root, "home"), () => {});
+  const signal = new AbortController().signal;
+  const reused = await new Workspace(repo).initialize();
+  const same = async () => {
+    const fresh = await new Workspace(repo).snapshot(execute, signal, base);
+    const kept = await reused.snapshot(execute, signal, base);
+    assert.deepEqual(kept, fresh);
+    return kept;
+  };
+  await same();
+  await writeFile(join(repo, "new.txt"), "added\n");
+  await same();
+  await writeFile(join(repo, "a.txt"), "modified\n");
+  await same();
+  await remove(join(repo, "b.txt"));
+  await same();
+  await rename(join(repo, "c.txt"), join(repo, "moved.txt"));
+  await same();
+  await chmod(join(repo, "run.sh"), 0o755);
+  // A file the coder made, then told git to ignore, leaves the candidate as in a fresh index.
+  await writeFile(join(repo, "build.out"), "generated\n");
+  await same();
+  await writeFile(join(repo, ".gitignore"), "*.out\n");
+  await same();
+  await remove(join(repo, ".gitignore"));
+  await remove(join(repo, "build.out"));
+  const last = await same();
+  assert.deepEqual(
+    last.files.map((f) => [f.path, f.content, f.mode ?? null]).sort(),
+    [
+      ["a.txt", "modified\n", "100644"],
+      ["b.txt", null, null],
+      ["c.txt", null, null],
+      ["moved.txt", "c.txt\n", "100644"],
+      ["new.txt", "added\n", "100644"],
+      ["run.sh", "run.sh\n", "100755"],
+    ],
+  );
+  // A coder that finds the snapshot's directory: a filter in its configuration, an attribute
+  // file naming it, and a skip-worktree flag on its index.
+  const own = (reused as any).own as string;
+  execFileSync(
+    "git",
+    [
+      `--git-dir=${own}`,
+      "--work-tree=.",
+      "update-index",
+      "--skip-worktree",
+      "a.txt",
+    ],
+    { cwd: repo, env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" } },
+  );
+  await writeFile(
+    join(own, "config"),
+    '[core]\n\tbare = true\n[filter "hang"]\n\tclean = sleep 600\n\trequired = true\n',
+  );
+  await mkdir(join(own, "info"), { recursive: true });
+  await writeFile(join(own, "info", "attributes"), "* filter=hang\n");
+  await writeFile(join(repo, "a.txt"), "changed again\n");
+  const started = Date.now();
+  const after = await same();
+  assert(Date.now() - started < 30_000);
+  assert.equal(
+    after.files.find((f) => f.path === "a.txt")?.content,
+    "changed again\n",
+  );
+});
