@@ -25,17 +25,22 @@ const SCRIPT = "scripts/coding-job-profile.sql";
 type Row = Record<string, string>;
 
 /**
- * Runs scripts/coding-job-profile.sql as psql would, against the test database: \set, \pset
- * and \x are display settings and ignored; \if/\elif/\else/\endif, \gset, \echo and \quit are
- * followed; :'name' is quoted as psql quotes it. Returns the printed text and each section's
- * rows under the number its \echo heading gives.
+ * Runs scripts/coding-job-profile.sql as psql would, against the test database: \pset and \x
+ * are display settings and ignored; \set, \if/\elif/\else/\endif, \gset, \echo and \quit are
+ * followed; :'name' is quoted as psql quotes it. With ON_ERROR_ROLLBACK on and ON_ERROR_STOP off
+ * a failed statement is rolled back to a savepoint set before it, its error is printed and the
+ * run goes on, setting ERROR as psql does. Returns the printed text and each section's rows
+ * under the number its \echo heading gives. `fail` makes the statement of that section fail
+ * in the database, to show what a timed-out section leaves.
  */
 async function profile(
   db: { query: (sql: string, params?: unknown[]) => Promise<any> },
   job?: string,
+  fail?: string,
 ) {
   const text = await readFile(SCRIPT, "utf8");
   const vars: Record<string, string> = job === undefined ? {} : { job };
+  vars.ERROR = "false";
   const printed: string[] = [];
   const sections: Record<string, Row[]> = {};
   let section = "";
@@ -102,7 +107,12 @@ async function profile(
           continue;
         }
         if (command === "\\quit") break;
-        if (["\\set", "\\pset", "\\x"].includes(command!)) continue;
+        if (command === "\\set") {
+          const [name, ...value] = rest;
+          vars[name!] = value.join(" ").replace(/^'(.*)'$/, "$1");
+          continue;
+        }
+        if (["\\pset", "\\x"].includes(command!)) continue;
         throw new Error(`Unexpected psql command ${command}`);
       }
       if (/^--/.test(line) || (!buffer && !line)) continue;
@@ -114,7 +124,24 @@ async function profile(
         .replace(/:'(\w+)'/g, (_, n) => quote(n));
       buffer = "";
       if (!active()) continue;
-      const result = await db.query(sql);
+      // psql sets no savepoint around a statement that ends the transaction.
+      const rollback =
+        vars.ON_ERROR_ROLLBACK === "on" && !/^\s*(ROLLBACK|COMMIT)\b/.test(sql);
+      let result: any;
+      try {
+        if (rollback) await db.query("SAVEPOINT psql_statement");
+        result = await db.query(
+          gset || section !== fail ? sql : "SELECT 1/0 AS failed",
+        );
+        if (rollback) await db.query("RELEASE SAVEPOINT psql_statement");
+        vars.ERROR = "false";
+      } catch (error) {
+        if (!rollback || vars.ON_ERROR_STOP !== "off") throw error;
+        await db.query("ROLLBACK TO SAVEPOINT psql_statement");
+        vars.ERROR = "true";
+        printed.push(`ERROR:  ${(error as Error).message}`);
+        continue;
+      }
       const rows = (result.rows ?? []).map((r: Record<string, unknown>) =>
         Object.fromEntries(Object.entries(r).map(([k, v]) => [k, show(v)])),
       ) as Row[];
@@ -610,6 +637,32 @@ async function syntheticJob(t: TestContext) {
     },
     { candidate: first },
   );
+  // The box reaches its lifetime in the middle of review round 1: the worker stops a save
+  // margin before the host's deadline and finishes paused; the host records the cause and
+  // continues in a new box (journal 193), where the same round goes on.
+  const one = await job();
+  f.advance(3 * HOUR - BOX_SAVE_MS + 1000);
+  assert.deepEqual(
+    await f.c.finish(one, {
+      kind: "paused",
+      summary: "The coding box reached its time limit",
+      question: "",
+      checkpoint: one.checkpoint,
+    }),
+    { accepted: true },
+  );
+  await stamp(1540);
+  await attempt(1560, 10 * 60_000);
+  assert.equal(
+    (
+      await db.query(
+        "SELECT payload->>'cause' AS cause FROM coding_events WHERE job_id=$1 AND event_key=$2",
+        [jobId, `${one.attempt_id}:finished`],
+      )
+    ).rows[0].cause,
+    "lifetime",
+  );
+
   await call(
     "review round 1",
     1600,
@@ -626,32 +679,7 @@ async function syntheticJob(t: TestContext) {
     { candidate: first },
   );
 
-  // The box reaches its lifetime: the worker stops a save margin before the host's deadline
-  // and finishes paused; the host records the cause and continues in a new box (journal 193).
-  const one = await job();
-  f.advance(3 * HOUR - BOX_SAVE_MS + 1000);
-  assert.deepEqual(
-    await f.c.finish(one, {
-      kind: "paused",
-      summary: "The coding box reached its time limit",
-      question: "",
-      checkpoint: one.checkpoint,
-    }),
-    { accepted: true },
-  );
-  await stamp(1700);
-  await attempt(1800, 10 * 60_000);
-  assert.equal(
-    (
-      await db.query(
-        "SELECT payload->>'cause' AS cause FROM coding_events WHERE job_id=$1 AND event_key=$2",
-        [jobId, `${one.attempt_id}:finished`],
-      )
-    ).rows[0].cause,
-    "lifetime",
-  );
-
-  // Coder run 2, attempt 2, then review round 2 approves and the PR opens.
+  // Coder run 2, still attempt 2, then review round 2 approves and the PR opens.
   await call(
     "coder run 2",
     1900,
@@ -889,9 +917,9 @@ test("the coding-job profile reports a one-session job's time, cost, loop, rebas
     },
     {
       wait: "box lifetime",
-      from_min: minutes(1700),
-      to_min: "30.0",
-      minutes: minutes(100),
+      from_min: minutes(1540),
+      to_min: "26.0",
+      minutes: minutes(20),
       resumed_by: "automatic",
     },
   ]);
@@ -907,8 +935,8 @@ test("the coding-job profile reports a one-session job's time, cost, loop, rebas
       r.ended,
     ]),
     [
-      ["1", "11.0", "19.0", "6", "2", "box lifetime, continued"],
-      ["2", "30.0", "10.0", "2", "2", "done (PR opened)"],
+      ["1", "11.0", "19.0", "6", "1", "box lifetime, continued"],
+      ["2", "26.0", "10.0", "2", "3", "done (PR opened)"],
       ["3", minutes(2560), "5.0", "0", "1", "done (PR opened)"],
       ["4", "46.0", "6.0", "2", "1", "done (PR opened)"],
     ],
@@ -997,7 +1025,7 @@ test("the coding-job profile reports a one-session job's time, cost, loop, rebas
       ],
       [
         "review round 1",
-        "1",
+        "1-2",
         "25.0",
         minutes(160),
         "2",
@@ -1071,8 +1099,8 @@ test("the coding-job profile reports a one-session job's time, cost, loop, rebas
     [
       ["0.0", "-", "coding_start", "-"],
       ["10.0", "-", "Start", "-"],
-      [minutes(1700), "1", "finished", "lifetime"],
-      ["30.0", "-", "continued in a new box", "-"],
+      [minutes(1540), "1", "finished", "lifetime"],
+      ["26.0", "-", "continued in a new box", "-"],
       ["38.0", "2", "publication committed", second.slice(0, 12)],
       [minutes(2290), "2", "finished", "candidate"],
       [minutes(2300), "2", "PR opened", "#1"],
@@ -1370,6 +1398,17 @@ test("the profile stops with one line for an old-loop job, a prefix that matches
   assert.match(old.text, /^This job was recorded by the old coding loop/);
   assert.equal(old.text.split("\n").length, 1);
   assert.deepEqual(old.sections, {});
+  // An old call with no stored response is caught by its request having no shape.
+  await f.db.query(
+    "UPDATE coding_model_calls SET result=NULL,state='uncertain' WHERE job_id=$1",
+    [job.id],
+  );
+  const unanswered = await profile(f.db, job.id.slice(0, 8));
+  assert.match(
+    unanswered.text,
+    /^This job was recorded by the old coding loop/,
+  );
+  assert.equal(unanswered.text.split("\n").length, 1);
   // A legacy-runtime job is old too.
   await f.db.query("DELETE FROM coding_model_calls WHERE job_id=$1", [job.id]);
   await f.db.query(
@@ -1390,6 +1429,50 @@ test("the profile stops with one line for an old-loop job, a prefix that matches
     "No coding job matches that id prefix.",
   );
   assert.match((await profile(f.db)).text, /^Usage: psql -v job=/);
+});
+
+test("a prefix that matches several jobs stops with one line", async (t) => {
+  const f = await fixture(t);
+  const started = await f.start("several");
+  const twin = `${started.id.slice(0, 8)}-0000-4000-8000-000000000099`;
+  await f.db.query(
+    "INSERT INTO coding_jobs(id,user_id,request_key,request_hash,origin_run,objective,context,mode,base_sha,settings,state,stage) SELECT $2,user_id,'twin',request_hash,origin_run,objective,context,mode,base_sha,settings,state,stage FROM coding_jobs WHERE id=$1",
+    [started.id, twin],
+  );
+  const { text, sections } = await profile(f.db, started.id.slice(0, 8));
+  assert.equal(
+    text,
+    "Several coding jobs match that id prefix; give a longer one.",
+  );
+  assert.deepEqual(sections, {});
+});
+
+test("a section that fails, as on the statement timeout, prints its error and the others still print; a free-text model id is not printed", async (t) => {
+  const j = await running(t);
+  await j.f.db.query(
+    "UPDATE coding_jobs SET settings=settings || jsonb_build_object('model',$2::text) WHERE id=$1",
+    [j.id, `a model; ${MARKER}`],
+  );
+  const { text, sections } = await profile(j.f.db, j.id, "3");
+  assert.match(text, /^ERROR: {2}division by zero$/m);
+  assert.equal(sections["3"], undefined);
+  // Sections before and after the failed one are printed.
+  assert.equal(sections["1"]![0]!.coder_model, "(other)");
+  assert.equal(sections["1"]![0]!.reviewer_model, settings.reviewerModel);
+  assert(sections["1c"] !== undefined);
+  assert(sections["3b"]!.length > 0, "coding_start and its milestones");
+  assert(sections["4"] !== undefined && sections["5"] !== undefined);
+  assert(!text.includes(MARKER));
+  const script = await readFile(SCRIPT, "utf8");
+  // psql's own settings that make this so, after the job is found.
+  assert(
+    script.indexOf("\\set ON_ERROR_ROLLBACK on") >
+      script.indexOf("\\if :profile_old"),
+  );
+  assert(
+    script.indexOf("\\set ON_ERROR_STOP off") >
+      script.indexOf("\\if :profile_old"),
+  );
 });
 
 test("the profile script writes nothing and runs no dynamic SQL", async () => {
