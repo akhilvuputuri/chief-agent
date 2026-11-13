@@ -18,16 +18,8 @@ const digest = (text: string) =>
 const sha = (v: unknown): v is string =>
   typeof v === "string" && /^[a-f0-9]{40}$/.test(v);
 /** Devin, as its review status identifies it: this login, as a GitHub App bot. */
-const devin = (user: any) =>
+const isDevin = (user: any) =>
   user?.login === "devin-ai-integration[bot]" && user?.type === "Bot";
-/**
- * Who may drive a Pi PR's feedback rounds (journal 193): the repository's owner and its
- * collaborators, by GitHub's own author association on the comment or review, and Devin.
- * Anyone else's comment stays on GitHub and reaches no coder. CI results are read from the
- * repository's own workflow run, not from comments.
- */
-const trusted = (c: any) =>
-  ["OWNER", "COLLABORATOR"].includes(c.author_association) || devin(c.user);
 
 /** GitHub operations remain on Chief, never in the coding sandbox. */
 export class GitHubAutomation implements PrAutomationRepository {
@@ -181,6 +173,29 @@ export class GitHubAutomation implements PrAutomationRepository {
         .filter((n: any) => n.isResolved === true)
         .flatMap((n: any) => n.comments.nodes.map((c: any) => c.databaseId)),
     );
+    /**
+     * Who may drive a Pi PR's feedback rounds (journal 193): the repository's owner (GitHub's
+     * author association), people with write access or more (GitHub's collaborator
+     * permission for that login: `write`, which includes maintain, or `admin`; a read-only
+     * collaborator does not count), and Devin. Anyone else's comment stays on GitHub and
+     * reaches no coder. CI results are read from the repository's own workflow run.
+     */
+    const writers = new Map<string, boolean>();
+    const trusted = async (c: any) => {
+      if (isDevin(c.user) || c.author_association === "OWNER") return true;
+      const login = c.user?.login;
+      if (
+        !["COLLABORATOR", "MEMBER"].includes(c.author_association) ||
+        typeof login !== "string" ||
+        !/^[A-Za-z0-9-]{1,39}$/.test(login)
+      )
+        return false;
+      if (!writers.has(login)) {
+        const access = await api(`collaborators/${login}/permission`);
+        writers.set(login, ["admin", "write"].includes(access?.permission));
+      }
+      return writers.get(login)!;
+    };
     for (const c of [
       ...comments,
       ...activeInlineComments(inline, resolved),
@@ -199,7 +214,7 @@ export class GitHubAutomation implements PrAutomationRepository {
         (c.user?.login === "devin-ai-integration[bot]" &&
           c.path === undefined &&
           c.body.includes("<!-- devin-review-badge-begin -->")) ||
-        (t.trustedFeedback && !trusted(c))
+        (t.trustedFeedback && !(await trusted(c)))
       )
         continue;
       const text = JSON.stringify({

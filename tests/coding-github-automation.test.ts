@@ -52,6 +52,12 @@ function fixture() {
     writes: any[] = [];
   let statuses: any[] = [devin],
     runs: any[] = [ci];
+  const permissions: Record<string, string> = {
+    helper: "write",
+    maintainer: "write",
+    reader: "read",
+  };
+  const permissionReads: string[] = [];
   const api = async (path: string, method?: string, body?: any) => {
     if (method === "POST" || method === "PUT") {
       writes.push({ path, body });
@@ -66,6 +72,10 @@ function fixture() {
     if (path === "issues/9/comments?per_page=100") return comments;
     if (path === "pulls/9/comments?per_page=100") return inline;
     if (path === "pulls/9/reviews?per_page=100") return reviews;
+    if (path.startsWith("collaborators/")) {
+      permissionReads.push(path);
+      return { permission: permissions[path.split("/")[1]!] ?? "none" };
+    }
     if (path.includes("/jobs?"))
       return {
         total_count: 1,
@@ -93,6 +103,7 @@ function fixture() {
   };
   const gh = new GitHubAutomation(repo, api, graph);
   return {
+    permissionReads,
     t,
     pr,
     ci,
@@ -177,6 +188,13 @@ test("a Pi PR's rounds are driven only by the owner, collaborators, Devin and CI
       user: { login: "helper", type: "User" },
     },
     {
+      id: 7,
+      body: "Reader: read-only collaborator",
+      updated_at: "a",
+      author_association: "COLLABORATOR",
+      user: { login: "reader", type: "User" },
+    },
+    {
       id: 3,
       body: "Stranger: rewrite everything",
       updated_at: "a",
@@ -209,6 +227,12 @@ test("a Pi PR's rounds are driven only by the owner, collaborators, Devin and CI
     (i: any) => JSON.parse(i.text).comment.split(":")[0],
   );
   assert.deepEqual(authors.sort(), ["Collaborator", "Devin", "Owner"]);
+  // Write access is read from GitHub, once per login and inspection; a read-only
+  // collaborator drives nothing, and nobody else is looked up.
+  assert.deepEqual(f.permissionReads.sort(), [
+    "collaborators/helper/permission",
+    "collaborators/reader/permission",
+  ]);
   const whole = (await f.gh.inspect(pi)).feedback.find((i: any) =>
     i.text.includes("Collaborator"),
   );
