@@ -13,7 +13,7 @@
     },
     "coding": {
       "provider": "ec2",
-      "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:dfbc5b196d84e8166530e232c2c40f7631f892137e4d7c613d25dee8e77792f5",
+      "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:15bca7e83e69b988a4d9c4cb8f1a90e0482440a3290e650dd1fdd30359f3d704",
       "idleTtlMinutes": 15,
       "retentionHours": 0,
       "hardMaxHours": 6,
