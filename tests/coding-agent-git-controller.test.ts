@@ -16,11 +16,11 @@ import { ToolValidationError } from "../src/tool-errors.js";
 
 const pi = codingSettings.parse({
   ...settings,
+  limits: undefined,
   runtime: "pi",
   prWorkflow: "owner_merge",
   agentGit: true,
   model: "fixture/coder",
-  leaderModel: "fixture/coder",
   reviewerModel: "fixture/reviewer",
   maxOutputTokens: 16000,
 });
@@ -150,6 +150,7 @@ test("agent tokens are issued only to a running, approved implementation attempt
     files,
     piState: {
       version: 1,
+      base: job.base_sha,
       delivered: [],
       reportDocument: reportDocument({
         kind: "review",

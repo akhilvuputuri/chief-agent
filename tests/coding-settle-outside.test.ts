@@ -33,6 +33,8 @@ async function setup(t: any) {
     () => true,
     async () => true,
     () => now,
+    async () => true,
+    async () => false,
   );
   (f.c as any).automation = auto;
   const park = async (key: string, stage = "manual_review") => {

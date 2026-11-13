@@ -132,6 +132,7 @@ test("Pi sessions append encrypted immutable entries and survive attempt changes
     job.id,
     JSON.stringify({
       ...settings,
+      limits: undefined,
       runtime: "pi",
       squad: false,
       autoMerge: false,

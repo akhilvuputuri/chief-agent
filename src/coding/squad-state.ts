@@ -44,7 +44,7 @@ export function assertSquadCheckpoint(job: CodingJob, c: Checkpoint) {
     s.revision !== job.revision ||
     s.attemptId !== job.attempt_id ||
     s.scopeHash !== squadScope(job, c.plan) ||
-    s.toolsUsed > job.settings.limits.tools
+    s.toolsUsed > job.settings.limits!.tools
   )
     throw new Error("Squad checkpoint is outside the fenced scope/allocation");
   const prior = job.checkpoint.squadState;

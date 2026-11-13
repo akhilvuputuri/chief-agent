@@ -7,7 +7,11 @@ import { BoxSandbox } from "../src/coding/box-sandbox.js";
 import { fixture, settings } from "./helpers/coding-fixture.js";
 
 test("a coding attempt in a box: the controller pauses a worker that exited as transient (sandbox_stopped) and cleans up only once the box is gone", async (t) => {
-  const pi = codingSettings.parse({ ...settings, runtime: "pi" });
+  const pi = codingSettings.parse({
+    ...settings,
+    limits: undefined,
+    runtime: "pi",
+  });
   const provider = new FakeBoxProvider({ canStop: true });
   let boxes!: BoxController;
   let now = new Date();
@@ -100,7 +104,11 @@ test("a coding attempt in a box: the controller pauses a worker that exited as t
 });
 
 test("a job prepared for a worker that no longer runs is paused before launch and frees the queue", async (t) => {
-  const pi = codingSettings.parse({ ...settings, runtime: "pi" });
+  const pi = codingSettings.parse({
+    ...settings,
+    limits: undefined,
+    runtime: "pi",
+  });
   const provider = new FakeBoxProvider({ canStop: true });
   const current = `ghcr.io/example/coding@sha256:${"e".repeat(64)}`;
   const f = await fixture(t, {

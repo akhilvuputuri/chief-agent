@@ -3,7 +3,7 @@ import { transaction } from "../db-transaction.js";
 import { PiSessions } from "./pi-sessions.js";
 import { z } from "zod";
 import { reviewMetadata, completePlanDelivered } from "./review-proof.js";
-import { CodingAutomation, feedbackRounds } from "./automation.js";
+import { CodingAutomation } from "./automation.js";
 import { codingDiagnostics } from "./diagnostics.js";
 import {
   modelPreferences,
@@ -44,6 +44,7 @@ import {
   workerEvent,
   modelCallTimeoutMs,
   outputAllowance,
+  BOX_SAVE_MS,
   type CodingAction,
   type CodingSettings,
   type Checkpoint,
@@ -109,12 +110,35 @@ function storableCheckpoint<T extends Checkpoint>(c: T, findings?: string): T {
 }
 
 const active = ["provisioning", "running"];
-/** Why the host paused an attempt. Only sandbox_stopped and heartbeat_lost are transient. */
-export type PauseCause = "sandbox_stopped" | "heartbeat_lost";
+/**
+ * Why the host paused an attempt. Only sandbox_stopped and heartbeat_lost are transient;
+ * `lifetime`: a Pi box reached the end of its fixed lifetime, and the job continues in a new
+ * box by itself while it has machine time left (journal 193).
+ */
+export type PauseCause = "sandbox_stopped" | "heartbeat_lost" | "lifetime";
 const hash = (v: unknown) =>
   createHash("sha256").update(canonicalJson(v)).digest("hex");
-/** The longest one Pi attempt runs, inside the box task's four-hour deadline. */
-const PI_ATTEMPT_MS = 10_800_000;
+/**
+ * A Pi box's fixed lifetime: one attempt runs at most this long, inside the box task's
+ * four-hour deadline, so no box outlives its job (journal 193). An infrastructure fact, not a
+ * budget: when it ends, the job continues in a new box.
+ */
+const BOX_LIFETIME_MS = 10_800_000;
+/** Machine time a Pi job may use from the owner's latest Start or resume (journal 193). */
+const JOB_MACHINE_MS = 28_800_000;
+/** What the owner is told, once, when a job stops at its eight hours of machine time. */
+export const MACHINE_TIME_SPENT =
+  "This job has used its eight hours of machine time; resume it to continue.";
+/**
+ * Revisions the host makes by itself. Every other revision of a started job is the owner's
+ * (Start, resume, a reply to a stopped job), and restarts the job's machine time.
+ */
+const AUTOMATIC_REVISIONS = [
+  "auto-retry:%",
+  "continue-box:%",
+  "mr-feedback:%",
+  "rebase:%",
+];
 /** Pi model requests one job may have in flight or waiting (see `piMessages`). */
 const PI_QUEUE = 4;
 /**
@@ -128,6 +152,7 @@ const STATUS_NOTICE = `(e.event_key NOT IN ('cancelled','status-message')
   AND NOT (e.payload ? 'requirements' OR e.payload ? 'merge' OR COALESCE(e.payload->>'question','')<>'')
   AND ((e.payload ? 'stage' AND e.payload ? 'key' AND NOT e.payload ? 'url')
     OR e.event_key LIKE 'auto-retry:%' OR e.event_key LIKE 'rebase:%' OR e.event_key LIKE 'mr-feedback:%'
+    OR e.event_key LIKE 'continue-box:%'
     OR (e.event_key=j.attempt_id::text||':finished' AND j.result->>'kind'='candidate')
     OR (e.event_key LIKE '%:pr' AND EXISTS(SELECT 1 FROM coding_events p WHERE p.job_id=e.job_id AND p.id<>e.id
       AND p.event_key LIKE '%:pr' AND p.created_at<e.created_at AND p.payload->>'url'=e.payload->>'url'))))`;
@@ -193,13 +218,51 @@ export class CodingController {
   readonly merges: CodingMergeApprovals;
   private ticking = false;
   private delivering = false;
-  private activeMs(job: CodingJob) {
-    // Per-attempt operational ceiling. Pi attempts run in EC2 boxes, whose task deadline is
-    // four hours; three hours leaves ample room for the worker's start inside it. (It was
-    // 40 minutes under CodeBuild's 45-minute cap.) Legacy runtimes keep their allocation.
-    return Math.min(
-      job.settings.limits.ms,
-      job.settings.runtime === "pi" ? PI_ATTEMPT_MS : job.settings.limits.ms,
+  /** The longest one attempt of the job runs: a Pi box's lifetime, a legacy job's allocation. */
+  private attemptMs(job: CodingJob) {
+    return job.settings.runtime === "pi"
+      ? BOX_LIFETIME_MS
+      : job.settings.limits!.ms;
+  }
+  /**
+   * The machine time a Pi job used since the owner last asked it to work: the running time
+   * of every box started for it since then, from the boxes' own records (journal 193). The
+   * owner asks by a Start, a resume (of a stopped job or a stopped PR), a reply that restarts
+   * a stopped job, a fix request on its PR, or a message kept while it published; GitHub
+   * feedback from Devin or CI does not.
+   */
+  private async machineMs(job: CodingJob) {
+    const used = await this.db.query(
+      `SELECT COALESCE(sum(b.running_ms + CASE WHEN b.running_since IS NULL THEN 0 ELSE GREATEST(0,(EXTRACT(EPOCH FROM ($2::timestamptz-b.running_since))*1000)::bigint) END),0)::bigint AS ms
+       FROM boxes b WHERE b.subject='coding:'||$1::text
+         AND b.created_at >= GREATEST(
+           COALESCE((SELECT max(v.created_at) FROM coding_revisions v WHERE v.job_id::text=$1::text AND NOT (v.request_key LIKE ANY($3::text[]))),'-infinity'::timestamptz),
+           COALESCE((SELECT max(e.created_at) FROM coding_events e WHERE e.job_id::text=$1::text AND (e.event_key LIKE 'owner-feedback:%' OR e.event_key LIKE 'continue:%' OR (e.event_key LIKE 'inbox:%' AND e.payload ? 'heldBy'))),'-infinity'::timestamptz))`,
+      [job.id, this.clock(), AUTOMATIC_REVISIONS],
+    );
+    return Number(used.rows[0].ms);
+  }
+  /**
+   * Whether a Pi job's machine time is spent: what is left is no more than the worker's save
+   * margin, too little for a box to do anything and save it (journal 193). A box is not
+   * started then; the job waits for the owner.
+   */
+  async machineSpent(job: CodingJob) {
+    return (
+      job.settings.runtime === "pi" &&
+      JOB_MACHINE_MS - (await this.machineMs(job)) <= BOX_SAVE_MS
+    );
+  }
+  /**
+   * The host's own reading of a Pi attempt's end: its deadline is less than the worker's save
+   * margin away (or past). The worker stops itself at that point, so a pause then is the box
+   * reaching its lifetime; a pause before it (a crash, a lost heartbeat, a failure) is not.
+   */
+  private lifetimeReached(job: CodingJob) {
+    return (
+      job.settings.runtime === "pi" &&
+      new Date(job.attempt_deadline).getTime() - BOX_SAVE_MS <=
+        this.clock().getTime()
     );
   }
   private automation?: CodingAutomation;
@@ -236,7 +299,9 @@ export class CodingController {
     /** Pi jobs call Claude only through this direct Anthropic route (journal 190). */
     private anthropic?: CodingAnthropic,
   ) {
-    this.requirements = new CodingRequirements(db, allowed, clock);
+    this.requirements = new CodingRequirements(db, allowed, clock, (job) =>
+      this.begin(job),
+    );
     this.merges = new CodingMergeApprovals(db, allowed, clock);
     if (
       (settings.autoMerge || settings.prWorkflow || legacyAutomationEnabled) &&
@@ -248,6 +313,8 @@ export class CodingController {
         allowed,
         (job) => this.hasReviewerProof(job),
         clock,
+        (job) => this.requirements.approved(job),
+        (job) => this.machineSpent(job),
       );
     if (!/^[a-f0-9]{64}$/i.test(authKey))
       throw new Error(
@@ -267,7 +334,9 @@ export class CodingController {
    * candidate, from a reviewer request whose round named the candidate's artifact hash, is an
    * APPROVE whose findings match the acknowledged review document, recorded after the owner's
    * latest message. An approval of an earlier candidate, one a later REQUEST_CHANGES of the
-   * same candidate overrides, or one older than the owner's last word, is not proof.
+   * same candidate overrides, or one older than the owner's last word, is not proof. Nor is
+   * one older than the job's latest rebase (journal 193): a rebase can leave the files and
+   * patch, and so the artifact hash, as they were, on a new base the reviewer has not read.
    */
   private async hasPiReviewerProof(
     job: CodingJob,
@@ -283,7 +352,7 @@ export class CodingController {
       return false;
     const calls = (
       await db.query(
-        "SELECT id,attempt_id,result_box,created_at > COALESCE((SELECT max(created_at) FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' AND payload->>'source' IN ('owner','ask') AND COALESCE(payload->>'heldBy','')<>$3::text),'-infinity'::timestamptz) AS after_owner FROM coding_model_calls WHERE job_id=$1 AND role='reviewer' AND state='complete' AND result_box IS NOT NULL AND input->>'candidate'=$2 AND COALESCE(input->>'purpose','agent')='agent' ORDER BY created_at DESC,id DESC",
+        "SELECT id,attempt_id,result_box,created_at > COALESCE((SELECT max(created_at) FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' AND payload->>'source' IN ('owner','ask','rebase') AND COALESCE(payload->>'heldBy','')<>$3::text),'-infinity'::timestamptz) AS after_owner FROM coding_model_calls WHERE job_id=$1 AND role='reviewer' AND state='complete' AND result_box IS NOT NULL AND input->>'candidate'=$2 AND COALESCE(input->>'purpose','agent')='agent' ORDER BY created_at DESC,id DESC",
         // The publication commit fixes which owner messages the approval covered: one kept
         // while this attempt was publishing (held by it) goes to the PR's feedback round
         // instead; every other owner message must be older than the approval (journal 192).
@@ -322,6 +391,29 @@ export class CodingController {
     }
     return false;
   }
+  /**
+   * At the owner's Start (journal 193): the base is main as it is now, so a Start a day after
+   * the request still builds on current main. A Pi job runs on the worker image this host was
+   * released with (it has not run yet), and that worker refuses the limits a job of stage D2
+   * carried. If main cannot be read the Start is refused and the card still works.
+   */
+  private async begin(job: CodingJob) {
+    const base = await this.publisher.resolve();
+    if (!/^[a-f0-9]{40}$/.test(base))
+      throw new Error("Repository base identity unavailable");
+    const settings = { ...job.settings };
+    if (
+      settings.runtime === "pi" &&
+      this.settings.runtime === "pi" &&
+      this.settings.image
+    ) {
+      settings.image = this.settings.image;
+      // That worker refuses both on a Pi job (journal 193).
+      delete settings.limits;
+      delete settings.leaderModel;
+    }
+    return { base, settings };
+  }
   async logs(job: CodingJob, raw: unknown) {
     if (!this.allowed(job.user_id)) throw new Error("Owner unavailable");
     return codingDiagnostics(this.db, job.user_id, raw);
@@ -331,7 +423,7 @@ export class CodingController {
     const calls = (
       await this.db.query(
         "SELECT id,state,input,result_box FROM coding_model_calls WHERE job_id=$1 AND attempt_id=$2 AND role='reviewer' ORDER BY created_at DESC,id DESC LIMIT $3",
-        [job.id, job.attempt_id, job.settings.limits.models],
+        [job.id, job.attempt_id, job.settings.limits!.models],
       )
     ).rows;
     const call = calls[0];
@@ -642,18 +734,13 @@ export class CodingController {
       if (!/^[a-f0-9]{40}$/.test(base))
         throw new Error("Repository base identity unavailable");
       const preferred = await modelPreferences(this.db, user, this.settings);
+      // The owner chooses the coder and reviewer; the legacy squad's planner follows its
+      // profile (journal 193).
       const selected = {
         ...this.settings,
-        // Only the legacy squad has a leader; a Pi job is one coder and one reviewer (journal 191).
-        leaderModel: this.settings.squad
-          ? preferred.leader
-          : this.settings.runtime === "pi"
-            ? undefined
-            : this.settings.leaderModel,
         model: preferred.coder,
         reviewerModel: preferred.reviewer,
       };
-      if (selected.leaderModel === undefined) delete selected.leaderModel;
       this.assertDirectPiModels(selected, "No job was started.");
       // Agent publication is snapshotted only when the separate agent App is configured.
       if (selected.agentGit && !this.agentGit) delete selected.agentGit;
@@ -924,11 +1011,11 @@ export class CodingController {
             : job.settings.prWorkflow === "owner_merge" &&
                 (job.stage === "manual_review" ||
                   job.stage === "merge_declined")
-              ? `This job's PR stopped for owner attention (${job.summary}). If the owner asks to continue, use coding_resume on this job: it re-runs the merge checks; holds that still apply (operator steps, exhausted allocation) come back with their reason.`
+              ? `This job's PR stopped for owner attention (${job.summary}). If the owner asks to continue, use coding_resume on this job: it re-runs the merge checks; holds that still apply (such as operator steps) come back with their reason.`
               : job.stage === "manual_review" || job.stage === "merge_declined"
                 ? `This job's PR stopped for owner attention (${job.summary}). It will not continue automatically and Chief cannot merge it in this state; explain the reason, then the owner can act on GitHub or start a new job.`
                 : job.settings.prWorkflow === "owner_merge"
-                  ? "This job already has a PR and continues on its own: Chief handles Devin and MR feedback, runs review and CI again, then sends the owner a Merge / Keep open card. Main moving does not change it; only a merge conflict sends the change back to the coder. Nothing to resume or revise; report its stage from coding_status."
+                  ? "This job already has a PR and continues on its own: Chief handles Devin and MR feedback, runs review and CI again, then sends the owner a Merge / Keep open card. Main moving does not change it; a merge conflict is rebased onto main and reviewed again. Nothing to resume or revise; report its stage from coding_status."
                   : job.settings.autoMerge
                     ? "This job already has a PR and continues through its automatic merge workflow; report its stage from coding_status."
                     : "This job already has a draft PR; it predates the owner-merge workflow, so it can only be merged on GitHub or replaced by a new job.",
@@ -968,8 +1055,6 @@ export class CodingController {
       throw new ToolValidationError(
         "Coding revision changed; read coding_status and retry with the current revision",
       );
-    if (a.leaderModel && !job.settings.squad)
-      throw new ToolValidationError("This job has no leader model to change");
     if (
       a.upgradeWorker &&
       (job.settings.runtime !== "pi" ||
@@ -979,41 +1064,24 @@ export class CodingController {
       throw new ToolValidationError("Only a Pi coding job can change worker");
     const next = {
       ...job.settings,
-      ...(a.leaderModel ? { leaderModel: a.leaderModel } : {}),
       ...(a.coderModel ? { model: a.coderModel } : {}),
       ...(a.reviewerModel ? { reviewerModel: a.reviewerModel } : {}),
       // Only to the image new jobs use: the boxes accept it, and it is the reviewed one.
       ...(a.upgradeWorker ? { image: this.settings.image } : {}),
-      limits: { ...job.settings.limits, ...a.limits },
     };
-    if (job.settings.runtime === "pi" && (a.limits?.ms ?? 0) > PI_ATTEMPT_MS)
-      throw new ToolValidationError(
-        "That time limit is above the most one attempt can run",
-      );
+    // That image's worker refuses the limits a Pi job carried before journal 193.
+    if (a.upgradeWorker) {
+      delete next.limits;
+      delete next.leaderModel;
+    }
     const changes = [
-      ...(job.settings.squad
-        ? [
-            [
-              "Planner",
-              job.settings.leaderModel ?? job.settings.model,
-              next.leaderModel ?? next.model,
-            ],
-          ]
-        : []),
       ["Coder", job.settings.model, next.model],
       ["Reviewer", job.settings.reviewerModel, next.reviewerModel],
-      ["Time limit (ms)", job.settings.limits.ms, next.limits.ms],
-      ["Model calls", job.settings.limits.models, next.limits.models],
-      ["Tool calls", job.settings.limits.tools, next.limits.tools],
       ["Worker image", job.settings.image.slice(-12), next.image.slice(-12)],
     ].filter(([, from, to]) => from !== to);
     if (!changes.length)
       throw new ToolValidationError("The job already has these settings");
-    if ((job.checkpoint.squadState?.toolsUsed ?? 0) > next.limits.tools)
-      throw new ToolValidationError(
-        "The tool-call limit is below what this job has already used",
-      );
-    for (const model of [a.leaderModel, a.coderModel, a.reviewerModel]) {
+    for (const model of [a.coderModel, a.reviewerModel]) {
       if (!model) continue;
       if (!this.catalog) throw new Error("Coding model catalog unavailable");
       await assertEligibleModel(
@@ -1231,35 +1299,8 @@ export class CodingController {
       throw new ToolValidationError(
         "Coding revision changed; read coding_status and retry with the current revision",
       );
-    // Refuse now what the feedback round could never deliver, rather than park the PR on it.
-    const handled =
-      (
-        await this.db.query(
-          "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
-          [job.id, `automation:${job.revision}`],
-        )
-      ).rows[0]?.payload?.handled?.length ?? 0;
-    // Requests already waiting share the next round with this one.
-    const waiting = (
-      await this.db.query(
-        "SELECT payload->>'text' AS text FROM coding_events WHERE job_id=$1 AND event_key LIKE 'owner-feedback:%' AND NOT payload ? 'deliveredRound'",
-        [job.id],
-      )
-    ).rows.map((r: { text: string }) => r.text);
-    const queuedLength = waiting.reduce((n, text) => n + text.length + 20, 0);
-    const refusal =
-      a.message.length > 7000
-        ? "The request is too long for one feedback round; shorten it to under 7,000 characters"
-        : queuedLength + a.message.length > 7000
-          ? "Earlier requests already fill the next round of fixes; send this after that round, or shorten it"
-          : (await feedbackRounds(this.db, job.id)) >= 3
-            ? "This PR has already had three rounds of fixes, so it cannot take another; start a new coding job for further changes"
-            : job.used_models >= job.settings.limits.models
-              ? "This job has used its model allowance, so it cannot take another round of fixes; start a new coding job"
-              : handled + waiting.length >= 200
-                ? "This PR has handled too much feedback to take more; start a new coding job"
-                : undefined;
-    if (refusal) throw new ToolValidationError(`Nothing changed: ${refusal}.`);
+    // Every request is delivered whole in the next feedback round, however many rounds the
+    // PR has had (journal 193); the job's machine time is the only bound.
     if (parked.includes(job.stage))
       await this.assertFreshOrConfirmed(
         job,
@@ -1458,6 +1499,18 @@ export class CodingController {
         : {}),
       checkpoint: job.checkpoint,
       deadline: new Date(job.attempt_deadline).toISOString(),
+      // When the worker stops by itself to save, measured on the host's clock so the two
+      // never disagree about it (journal 193).
+      ...(job.settings.runtime === "pi"
+        ? {
+            stopInMs: Math.max(
+              0,
+              new Date(job.attempt_deadline).getTime() -
+                BOX_SAVE_MS -
+                this.clock().getTime(),
+            ),
+          }
+        : {}),
       usedModels: job.used_models,
       ...(job.settings.runtime === "pi"
         ? { inbox: await this.inbox(job) }
@@ -1488,6 +1541,8 @@ export class CodingController {
           ? { choice: r.payload.choice }
           : {}),
         ...(r.payload.to === "reviewer" ? { to: "reviewer" } : {}),
+        // A rebase: the base the job's saved work is on (journal 193).
+        ...(r.payload.source === "rebase" ? { from: r.payload.from } : {}),
       }));
   }
   piSessionAppend(job: CodingJob, raw: unknown) {
@@ -1503,13 +1558,26 @@ export class CodingController {
         [job.id, `feedback:${job.revision}`],
       )
     ).rows[0]?.payload;
-    const activeMs = Math.min(
-      feedback?.remainingMs ?? job.settings.limits.ms,
-      this.activeMs(job),
-    );
+    // A Pi attempt lasts the box's lifetime, or what is left of the job's machine time if that
+    // is less (journal 193); a legacy attempt keeps its allocation.
+    const attemptMs =
+      job.settings.runtime === "pi"
+        ? job.state === "provisioning"
+          ? Math.max(
+              0,
+              Math.min(
+                BOX_LIFETIME_MS,
+                JOB_MACHINE_MS - (await this.machineMs(job)),
+              ),
+            )
+          : 0
+        : Math.min(
+            feedback?.remainingMs ?? this.attemptMs(job),
+            this.attemptMs(job),
+          );
     const update = await this.db.query(
       "UPDATE coding_jobs SET heartbeat_at=$3,attempt_deadline=CASE WHEN state='provisioning' THEN $3::timestamptz + ($4::bigint * interval '1 millisecond') ELSE attempt_deadline END,state='running',updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id",
-      [job.id, job.attempt_id, this.clock(), activeMs],
+      [job.id, job.attempt_id, this.clock(), attemptMs],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");
     // New messages for the coder ride on the heartbeat (journal 192).
@@ -1559,9 +1627,25 @@ export class CodingController {
     )
       throw new Error("A review needs the started Pi candidate");
   }
+  /**
+   * Work a Pi box saves or publishes is against the job's base and says so (journal 193):
+   * after a conflict the stored work is still on the old base until the box rebases it, and
+   * whole files from the old base published onto main would undo main's changes to them. A
+   * candidate is always checked; any other checkpoint only when it changes the stored one, so
+   * a box that stops before it rebased can still hand back the work as it was.
+   */
+  private assertOnBase(job: CodingJob, c: Checkpoint, candidate = false) {
+    if (job.settings.runtime !== "pi") return;
+    if (
+      (candidate || canonicalJson(c) !== canonicalJson(job.checkpoint)) &&
+      c.piState?.base !== job.base_sha
+    )
+      throw new Error("The saved work must be on the job's base commit");
+  }
   /** Delivery only grows, and names this job's own inbox (journal 192). */
   private async assertDelivery(job: CodingJob, c: Checkpoint) {
     if (job.settings.runtime !== "pi") return;
+    this.assertOnBase(job, c);
     const before = job.checkpoint.piState?.delivered ?? [];
     const now = c.piState?.delivered ?? [];
     const inbox = new Set((await this.inbox(job)).map((i) => i.id));
@@ -1614,49 +1698,7 @@ export class CodingController {
       ],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");
-    // The candidate is about to be reviewed: measure whether a rebase reproduced the
-    // reviewed artifact. Measurement only; it never changes the save.
-    if (c.piState?.phase === "review")
-      await this.noteRebasedCandidate(job, artifactHash(c)).catch(() => {});
     return { saved: true };
-  }
-  /**
-   * Detection only (journal 115): records, once per rebased revision, whether the first
-   * candidate sent to review is byte-identical to the artifact the previous revision's
-   * review approved (same artifact hash: identical whole-file contents and identical diff).
-   * Review still runs; reusing the earlier approval needs a worker change and an owner
-   * decision on the review exception, because the reviewer saw the change against the old
-   * base.
-   */
-  private async noteRebasedCandidate(job: CodingJob, candidate: string) {
-    const carried = (
-      await this.db.query(
-        "SELECT payload->>'carriedArtifact' AS artifact FROM coding_events WHERE job_id=$1 AND event_key=$2",
-        [job.id, `rebase-approval:${job.revision}`],
-      )
-    ).rows[0]?.artifact;
-    if (typeof carried !== "string" || !/^[a-f0-9]{64}$/.test(carried)) return;
-    const identical = carried === candidate;
-    const recorded = await this.db.query(
-      "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,$2,$3::jsonb,'suppressed') ON CONFLICT DO NOTHING RETURNING id",
-      [
-        job.id,
-        `rebase-candidate:${job.revision}`,
-        JSON.stringify({
-          kind: "rebase_candidate",
-          identical,
-          candidate,
-          carriedArtifact: carried,
-        }),
-      ],
-    );
-    if (recorded.rows.length)
-      // `matched`: the rebased candidate is byte-identical to the reviewed artifact.
-      opsLog("coding.rebase_candidate", "info", {
-        taskId: job.id,
-        revision: job.revision,
-        matched: identical,
-      });
   }
   /**
    * The commit point for publishing a Pi candidate (journal 192), before the worker pushes
@@ -1687,6 +1729,7 @@ export class CodingController {
         "Candidate needs an independent review of the exact artifact",
       );
     validateFiles(c.files);
+    this.assertOnBase(job, c, true);
     await this.assertDelivery(job, c);
     if (new Date(job.attempt_deadline).getTime() <= this.clock().getTime())
       throw new Error("Worker allocation expired");
@@ -1801,6 +1844,8 @@ export class CodingController {
           : "Candidate needs passing checks and review of the exact artifact",
       );
     const pi = job.settings.runtime === "pi";
+    if (pi && r.kind === "candidate")
+      this.assertOnBase(job, r.checkpoint, true);
     if (pi) await this.assertDelivery(job, r.checkpoint);
     if (r.kind === "no_change" && (!pi || r.checkpoint.files.length))
       throw new Error("Only a Pi job with no change can finish without one");
@@ -1813,6 +1858,9 @@ export class CodingController {
           ? "paused"
           : r.kind;
     const stage = r.kind === "no_change" ? "no_change" : state;
+    // A Pi worker that stops by itself near the deadline saved its work for the next box
+    // (journal 193): the owner is not told of a pause, and the tick continues the job.
+    const lifetime = pi && r.kind === "paused" && this.lifetimeReached(job);
     // A job that already has a PR keeps it as it was.
     if (r.kind === "no_change" && (job as { pr_url?: string }).pr_url)
       r.summary =
@@ -1859,7 +1907,7 @@ export class CodingController {
         throw new Error("No sealed reviewer approval of this exact candidate");
       return db.query(
         `WITH changed AS (UPDATE coding_jobs SET state=$3,stage=$11,summary=$4,question=$5,checkpoint=$6::jsonb,result=$7::jsonb,cleanup='pending',model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND checkpoint=$10::jsonb RETURNING id)
-      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$8,jsonb_build_object('summary',$4::text,'question',$5::text) || $9::jsonb FROM changed ON CONFLICT DO NOTHING RETURNING id`,
+      INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,$8,jsonb_build_object('summary',$4::text,'question',$5::text) || $9::jsonb,CASE WHEN $12::boolean THEN 'suppressed' ELSE 'pending' END FROM changed ON CONFLICT DO NOTHING RETURNING id`,
         [
           job.id,
           job.attempt_id,
@@ -1869,9 +1917,13 @@ export class CodingController {
           JSON.stringify(r.checkpoint),
           JSON.stringify(r),
           `${job.attempt_id}:finished`,
-          JSON.stringify(r.options?.length ? { options: r.options } : {}),
+          JSON.stringify({
+            ...(r.options?.length ? { options: r.options } : {}),
+            ...(lifetime ? { cause: "lifetime" } : {}),
+          }),
           JSON.stringify(job.checkpoint),
           stage,
+          lifetime,
         ],
       );
     });
@@ -2012,12 +2064,12 @@ export class CodingController {
     let claimed: { rows: unknown[] };
     try {
       claimed = await this.db.query(
-        `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+CASE WHEN $9 THEN 0 ELSE 1 END,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4 RETURNING id)
-      INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input,created_at) SELECT $5,id,$2,$6,$7,$8::jsonb,clock_timestamp() FROM claimed RETURNING id`,
+        // No call count is admitted against (journal 193): `used_models` only counts calls.
+        `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+CASE WHEN $8 THEN 0 ELSE 1 END,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND attempt_deadline>$3 RETURNING id)
+      INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input,created_at) SELECT $4,id,$2,$5,$6,$7::jsonb,clock_timestamp() FROM claimed RETURNING id`,
         [
           job.id,
           job.attempt_id,
-          job.settings.limits.models,
           this.clock(),
           callId,
           role,
@@ -2064,9 +2116,7 @@ export class CodingController {
             ? "Coding attempt is no longer active"
             : new Date(now.attempt_deadline).getTime() <= this.clock().getTime()
               ? "Coding attempt deadline has passed"
-              : now.used_models >= job.settings.limits.models
-                ? "Model allocation exhausted"
-                : "Another model request is already in flight",
+              : "Another model request is already in flight",
         ),
       );
     }
@@ -2229,7 +2279,7 @@ export class CodingController {
     job: CodingJob,
     call: {
       callId: string;
-      role: "leader" | "coder" | "reviewer";
+      role: "coder" | "reviewer";
       purpose?: "agent" | "compaction" | "cache_warm";
       selected: string;
       prices: AnthropicPrices;
@@ -2411,7 +2461,10 @@ export class CodingController {
           ? (job.settings.leaderModel ?? job.settings.model)
           : job.settings.model;
     const enhanced = job.settings.harnessVersion === 2;
-    const allowance = outputAllowance(job.settings, input.role);
+    const allowance = outputAllowance(
+      job.settings,
+      input.role === "reviewer" ? "reviewer" : "coder",
+    );
     const total = AbortSignal.timeout(
       Math.max(
         1,
@@ -2443,7 +2496,7 @@ export class CodingController {
         [
           job.id,
           job.attempt_id,
-          job.settings.limits.models,
+          job.settings.limits!.models,
           this.clock(),
           input.callId,
           input.role,
@@ -2477,7 +2530,7 @@ export class CodingController {
             ? "Coding attempt is no longer active"
             : new Date(now.attempt_deadline).getTime() <= this.clock().getTime()
               ? "Coding attempt deadline has passed"
-              : now.used_models >= job.settings.limits.models
+              : now.used_models >= job.settings.limits!.models
                 ? "Model allocation exhausted"
                 : "Another model request is already in flight",
         );
@@ -2711,7 +2764,7 @@ export class CodingController {
     this.abortModels(j.id);
     await this.db.query(
       `WITH changed AS (UPDATE coding_jobs SET state=CASE WHEN state IN ('provisioning','running') THEN 'paused' ELSE state END,stage=CASE WHEN state IN ('provisioning','running') THEN 'paused' ELSE stage END,summary=CASE WHEN state IN ('provisioning','running') THEN $3 ELSE summary END,sandbox_id=COALESCE($6::text,sandbox_id),cleanup=CASE WHEN state IN ('provisioning','running') THEN CASE WHEN $5 THEN 'pending' ELSE 'none' END ELSE cleanup END,model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND (state IN ('provisioning','running') OR ($6::text IS NOT NULL AND state IN ('paused','cancelled') AND cleanup='pending')) RETURNING id,state)
-      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$3::text) || CASE WHEN $7::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('cause',$7::text) END FROM changed WHERE state='paused' ON CONFLICT DO NOTHING`,
+      INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,$4,jsonb_build_object('summary',$3::text) || CASE WHEN $7::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('cause',$7::text) END,CASE WHEN $7::text='lifetime' THEN 'suppressed' ELSE 'pending' END FROM changed WHERE state='paused' ON CONFLICT DO NOTHING`,
       [
         j.id,
         j.attempt_id,
@@ -2759,6 +2812,12 @@ export class CodingController {
            -- The owner changed this job while it was stopped, and was told it stays stopped.
            AND NOT EXISTS(SELECT 1 FROM coding_events s WHERE s.job_id=j.id
              AND s.event_key LIKE 'settings:%' AND s.created_at>=j.updated_at)
+           AND NOT EXISTS(SELECT 1 FROM coding_events m WHERE m.job_id=j.id
+             AND m.event_key='machine-time:'||j.attempt_id::text)
+           -- A box that reached its lifetime is continued, not retried (journal 193).
+           AND NOT EXISTS(SELECT 1 FROM coding_events l WHERE l.job_id=j.id
+             AND l.event_key IN (j.attempt_id::text||':paused', j.attempt_id::text||':finished')
+             AND l.payload->>'cause'='lifetime')
            AND (EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id=j.id
                   AND e.event_key=j.attempt_id::text||':paused'
                   AND e.payload->>'cause' IN ('sandbox_stopped','heartbeat_lost'))
@@ -2782,6 +2841,11 @@ export class CodingController {
     // Unbounded on purpose (pauses from the last day): revoked owners must not crowd out others.
     const j = candidates.find((c) => this.allowed(c.user_id));
     if (!j) return;
+    // No box is started for a job whose machine time is spent (journal 193).
+    if (await this.machineSpent(j)) {
+      await this.holdForOwner(j, MACHINE_TIME_SPENT);
+      return;
+    }
     const key = `auto-retry:${j.attempt_id}`;
     const message =
       "Automatic retry after a transient fault (the sandbox stopped, its heartbeat was lost, or the model provider failed temporarily)";
@@ -2798,12 +2862,111 @@ export class CodingController {
     );
     if (retried.rows.length) opsLog("coding.auto_retry", "info", { ref: j.id });
   }
+  /**
+   * A Pi box has a fixed lifetime (journal 193). When an attempt reached it, the host (never
+   * the worker's word) recorded the pause with the cause `lifetime`; once the box is cleaned
+   * up, the job continues in a new box with the same sessions and work, while its machine time
+   * since the owner's latest Start or resume is under eight hours. At eight hours it stays
+   * paused and the owner is told once. A crash or a lost heartbeat is not a lifetime: it keeps
+   * the single automatic retry. Keyed `continue-box:<attempt>`, so a repeated tick or finish
+   * continues an attempt at most once; the update is guarded by the revision and state.
+   */
+  async continueAfterLifetime() {
+    const candidates = (
+      await this.db.query(
+        `SELECT j.* FROM coding_jobs j
+         WHERE j.state='paused' AND j.mode='implement' AND NOT j.publication_started
+           AND j.cleanup IN ('none','complete') AND (j.lease IS NULL OR j.lease_until<now())
+           AND j.attempt_id IS NOT NULL AND j.settings->>'runtime'='pi'
+           AND EXISTS(SELECT 1 FROM coding_events l WHERE l.job_id=j.id
+             AND l.event_key IN (j.attempt_id::text||':paused', j.attempt_id::text||':finished')
+             AND l.payload->>'cause'='lifetime')
+           AND NOT EXISTS(SELECT 1 FROM coding_revisions v WHERE v.job_id=j.id
+             AND v.request_key='continue-box:'||j.attempt_id::text)
+           AND NOT EXISTS(SELECT 1 FROM coding_events m WHERE m.job_id=j.id
+             AND m.event_key='machine-time:'||j.attempt_id::text)
+           -- The owner changed this job while it was stopped, and was told it stays stopped.
+           AND NOT EXISTS(SELECT 1 FROM coding_events s WHERE s.job_id=j.id
+             AND s.event_key LIKE 'settings:%' AND s.created_at>=j.updated_at)
+         ORDER BY j.updated_at`,
+      )
+    ).rows as CodingJob[];
+    for (const j of candidates) {
+      if (!this.allowed(j.user_id)) continue;
+      // Never past eight hours of machine time without the owner (nor with too little left
+      // to do anything and save it), and never without the owner's Start of the request.
+      const spent = await this.machineSpent(j);
+      if (spent || !(await this.requirements.approved(j))) {
+        await this.holdForOwner(
+          j,
+          spent
+            ? MACHINE_TIME_SPENT
+            : "This job's coding box reached its time limit, but the job has no Start from you for its current request, so it cannot continue by itself.",
+        );
+        continue;
+      }
+      const key = `continue-box:${j.attempt_id}`;
+      const continued = await this.db.query(
+        `WITH changed AS (
+        UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,summary='Continuing in a new coding box',updated_at=now()
+        WHERE id=$1 AND revision=$2 AND attempt_id=$3 AND state='paused' AND NOT publication_started AND cleanup IN ('none','complete') AND (lease IS NULL OR lease_until<now())
+          AND settings=$5::jsonb RETURNING id,revision,mode
+      ), revised AS (
+        INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$4,'The coding box reached its lifetime; continued in a new box',mode FROM changed RETURNING job_id
+      ) INSERT INTO coding_events(job_id,event_key,payload) SELECT job_id,$4,jsonb_build_object('summary','The coding box reached its time limit; the job continues in a new box.') FROM revised RETURNING job_id`,
+        [j.id, j.revision, j.attempt_id, key, JSON.stringify(j.settings)],
+      );
+      if (continued.rows.length)
+        opsLog("coding.box_continued", "info", { ref: j.id });
+    }
+    // A box that reached its lifetime but never shut down holds the job; the owner is told
+    // once, with that cause (journal 193). The tick normally ends a box within seconds.
+    const stuck = (
+      await this.db.query(
+        `SELECT j.* FROM coding_jobs j
+         WHERE j.state='paused' AND j.cleanup='pending' AND j.attempt_id IS NOT NULL
+           AND j.updated_at < now() - interval '30 minutes'
+           AND EXISTS(SELECT 1 FROM coding_events l WHERE l.job_id=j.id
+             AND l.event_key IN (j.attempt_id::text||':paused', j.attempt_id::text||':finished')
+             AND l.payload->>'cause'='lifetime')
+           AND NOT EXISTS(SELECT 1 FROM coding_events m WHERE m.job_id=j.id
+             AND m.event_key='box-stuck:'||j.attempt_id::text)`,
+      )
+    ).rows as CodingJob[];
+    // Only a notice: once cleanup completes, the job continues as above.
+    for (const j of stuck)
+      if (this.allowed(j.user_id))
+        await this.holdForOwner(
+          j,
+          "This job's coding box reached its time limit but has not shut down yet, so the job cannot continue until it does; the box may need an operator.",
+          "box-stuck",
+        );
+  }
+  /**
+   * A stopped Pi job the host does not continue by itself: its summary and one owner notice
+   * say why, once per attempt. `machine-time:<attempt>` also keeps the job stopped until the
+   * owner acts; `box-stuck:<attempt>` is only a notice.
+   */
+  private async holdForOwner(
+    j: CodingJob,
+    summary: string,
+    key: "machine-time" | "box-stuck" = "machine-time",
+  ) {
+    await this.db.query(
+      `WITH changed AS (UPDATE coding_jobs SET summary=$4 WHERE id=$1 AND revision=$2 AND attempt_id=$3 AND state='paused' RETURNING id)
+      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$5::text||':'||$3::text,jsonb_build_object('summary',$4::text) FROM changed ON CONFLICT DO NOTHING`,
+      [j.id, j.revision, j.attempt_id, summary, key],
+    );
+  }
   async tick() {
     if (this.ticking) return;
     this.ticking = true;
     await this.sweepAgentTokens().catch(() => {});
     await this.autoRetryOnce().catch((error) =>
       opsLog("coding.auto_retry_failed", "warn", errorFields(error)),
+    );
+    await this.continueAfterLifetime().catch((error) =>
+      opsLog("coding.box_continue_failed", "warn", errorFields(error)),
     );
     let j: CodingJob | undefined;
     try {
@@ -2821,7 +2984,11 @@ export class CodingController {
               randomUUID(),
               this.clock(),
               new Date(
-                this.clock().getTime() + this.settings.limits.ms + 300000,
+                this.clock().getTime() +
+                  (this.settings.runtime === "pi"
+                    ? BOX_LIFETIME_MS
+                    : this.settings.limits!.ms) +
+                  300000,
               ),
               randomUUID(),
             ],
@@ -2849,6 +3016,11 @@ export class CodingController {
             );
             return;
           }
+          // Too little machine time left to do anything and save it: no box (journal 193).
+          if (await this.machineSpent(j)) {
+            await this.stopped(j, MACHINE_TIME_SPENT, false);
+            return;
+          }
           const request: SandboxRequest = {
             jobId: j.id,
             attemptId: j.attempt_id,
@@ -2858,7 +3030,7 @@ export class CodingController {
             runtime: j.settings.runtime ?? "node",
             timeoutMinutes: Math.max(
               5,
-              Math.ceil(this.activeMs(j) / 60000) + 5,
+              Math.ceil(this.attemptMs(j) / 60000) + 5,
             ),
           };
           // A job snapshotted with a worker image no sandbox runs any more (one from before
@@ -2889,7 +3061,7 @@ export class CodingController {
         const found = await this.provider.find(
           j.attempt_id,
           active.includes(j.state)
-            ? Math.max(5, Math.ceil(this.activeMs(j) / 60000) + 5)
+            ? Math.max(5, Math.ceil(this.attemptMs(j) / 60000) + 5)
             : undefined,
         );
         if (found) {
@@ -2940,8 +3112,13 @@ export class CodingController {
                 : `The coding box stopped before a result was recorded${exitNote ? ` (${exitNote})` : ""}; saved work is retained`),
             true,
             undefined,
-            // Only a confirmed absence of a provider reason is transient.
-            reason === undefined && !expired ? "sandbox_stopped" : undefined,
+            // Only a confirmed absence of a provider reason is transient. A Pi box gone after
+            // its deadline with no stated reason reached its lifetime (journal 193).
+            reason == null && expired && j.settings.runtime === "pi"
+              ? "lifetime"
+              : reason === undefined && !expired
+                ? "sandbox_stopped"
+                : undefined,
           );
         } else if (
           new Date(j.attempt_deadline).getTime() <= this.clock().getTime()
@@ -2951,6 +3128,10 @@ export class CodingController {
             state === "terminal"
               ? "The coding box stopped without a result after its time ran out; the cause is unconfirmed, and saved work is retained"
               : "Coding time ran out while the coding box was still working; saved work is retained",
+            true,
+            undefined,
+            // The attempt reached its deadline: a Pi box's lifetime (journal 193).
+            j.settings.runtime === "pi" ? "lifetime" : undefined,
           );
         else if (state === "terminal")
           await this.stopped(

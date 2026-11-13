@@ -1,3 +1,10 @@
+## Coding jobs rebase with git, continue across boxes and lose their count caps (13 November 2026)
+
+- **Code.** When GitHub reports a coding job's PR as conflicting with main, the box rebases the change with git; the rebased change gets a reviewer round before it is published, and if git cannot resolve it the coder fixes the named files in its own session. Re-implementing on conflict is deleted. A box that reaches its fixed lifetime stops five minutes early, saves, and the host continues the job in a new box with the same sessions, up to eight hours of machine time since the owner last started or resumed it; then it pauses and tells the owner. Removed for Pi jobs: the 1,500 model-call and 4,000 tool-call caps, the three-round and size caps on PR feedback, the one-hour park while waiting for CI, the per-attempt time settings, and the leftover planner role. The base commit and worker image are taken when the owner taps Start. The worker's snapshot runs outside the coder's git configuration. No migration or Compose change.
+- **Kept.** Review before every publication, the publish commit and push-credential gate, the Start approval, protected paths, and one automatic retry after a crash.
+- **Why.** Job `9600af57` was rebuilt twice on conflicts with main and stopped twice at its time limit. See [journal 193](journey/193-rebase-backstop-limits.md) and [the design](coding-simple-loop.md).
+- **Deployment.** Host and worker change together; a worker image built from this merge is pinned right after. Not yet released.
+
 ## An alert leads to the trace: agentwatch `b11b4a3` live (13 November 2026)
 
 - **What merged.** agentwatch [#22](https://github.com/akhilvuputuri/agentwatch/pull/22) (`090cca1`), [#23](https://github.com/akhilvuputuri/agentwatch/pull/23) (`5acc163`) and [#24](https://github.com/akhilvuputuri/agentwatch/pull/24) (`b11b4a3`): a trace opens on what was asked, what was replied and the first error; a refused sign-in keeps the linked trace; a firing alert records what failed most and up to three traces behind its figure, with links when `serve --public-url` is set; schema 12. Chief [PR 477](https://github.com/akhilvuputuri/chief-agent/pull/477) (`723d04f`): the Telegram relay passes the detail and the links on. Chief [PR 480](https://github.com/akhilvuputuri/chief-agent/pull/480) (`30c4105`): `compose.yaml` pins `sha256:3a00e227…` and sets the public address, and the update procedure copies agentwatch's data before a new image starts and puts it back on a rollback.
@@ -10,6 +17,8 @@
 
 - **Configuration.** New coding jobs pin worker image `sha256:15bca7e8…`, built from `da67cac` (run 43333697171). It carries the worker side of [journal 192](journey/192-one-session-per-job.md). `previousImages` stays empty: the previous image's checkpoints and requests do not fit this gateway, and no coding job is open on it. No code, migration or Compose change.
 - **Deployment.** Not yet recorded as live; a dated note follows on release.
+
+> **Update, 13 November 2026:** merged as `4ebfaef` (PR 486); release run 43336120673 succeeded, the gateway was healthy at `4ebfaef` and the server's `config/coding-pi.json` carried `sha256:15bca7e8…`. No coding job has run on it.
 
 ## One Pi session per coding job (13 November 2026)
 

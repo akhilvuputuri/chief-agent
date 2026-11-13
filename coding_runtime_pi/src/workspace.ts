@@ -3,14 +3,17 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   mkdir,
+  mkdtemp,
   readFile,
+  rm,
   writeFile,
   realpath,
   lstat,
   readdir,
   chmod,
 } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import type { Artifact, FileChange } from "./types.js";
 
 export type Execution = {
@@ -133,6 +136,12 @@ export function localExecutor(
 }
 export class Workspace {
   private root = "";
+  /** The snapshot's own git directory, kept for this workspace's life (journal 193). */
+  private own?: string;
+  /** The base the kept index was started from; another base starts it again. */
+  private indexBase?: string;
+  /** Where that directory is made: the temporary directory when the workspace was opened. */
+  private readonly scratch = tmpdir();
   constructor(readonly requestedRoot: string) {}
   async initialize() {
     this.root = await realpath(this.requestedRoot);
@@ -213,8 +222,16 @@ export class Workspace {
     }
   }
   /**
-   * Diffs the staged tree against the job's base commit, never against HEAD, so commits the
-   * model makes never hide or change the candidate.
+   * The working tree against the job's base commit, never against HEAD, so commits, branches
+   * and staging the model does never hide or change the candidate.
+   *
+   * It runs in a git directory of its own that shares the repository's objects: none of the
+   * coder's repository configuration (filters, hooks, external diff, fsmonitor, its index
+   * flags, `.git/info/exclude`, `core.autocrlf`) or home-directory ignore and attribute files
+   * applies, so nothing the coder configured can run or hang here (journal 193). The
+   * directory lives outside the coder's repository and keeps its index between snapshots, so
+   * unchanged files are not read again (the first snapshot on a base reads every file); its
+   * configuration is written afresh and any index flag cleared before every snapshot.
    */
   async snapshot(
     execute: Executor,
@@ -223,6 +240,38 @@ export class Workspace {
   ): Promise<Artifact> {
     if (!/^[a-f0-9]{40}$/.test(base))
       throw new Error("Artifact base must be a full commit SHA");
+    if (!this.root) await this.initialize();
+    if (!this.own || !(await lstat(this.own).catch(() => undefined))) {
+      this.own = await mkdtemp(join(this.scratch, "chief-snapshot-"));
+      this.indexBase = undefined;
+    }
+    const own = this.own;
+    for (const name of ["hooks", "info", "config.worktree", "commondir"])
+      await rm(join(own, name), { recursive: true, force: true });
+    await mkdir(join(own, "objects", "info"), { recursive: true });
+    await mkdir(join(own, "refs"), { recursive: true });
+    await writeFile(join(own, "HEAD"), "ref: refs/heads/main\n");
+    await writeFile(
+      join(own, "config"),
+      "[core]\n\trepositoryformatversion = 0\n\tbare = true\n",
+    );
+    await writeFile(
+      join(own, "objects", "info", "alternates"),
+      `${join(this.root, ".git", "objects")}\n`,
+    );
+    const fresh = this.indexBase !== base;
+    this.indexBase = undefined;
+    const artifact = await this.snapshotIn(own, execute, signal, base, fresh);
+    this.indexBase = base;
+    return artifact;
+  }
+  private async snapshotIn(
+    own: string,
+    execute: Executor,
+    signal: AbortSignal,
+    base: string,
+    fresh: boolean,
+  ): Promise<Artifact> {
     const quote = (value: string) =>
       "'" + value.replaceAll("'", "'\"'\"'") + "'";
     const run = async (args: string[], max = 20_000_000) => {
@@ -231,10 +280,16 @@ export class Workspace {
       const result = await execute(
         [
           "git",
+          `--git-dir=${own}`,
+          "--work-tree=.",
           "-c",
           "core.hooksPath=/dev/null",
           "-c",
           "core.fsmonitor=false",
+          "-c",
+          "core.excludesFile=/dev/null",
+          "-c",
+          "core.attributesFile=/dev/null",
           ...args,
         ]
           .map(quote)
@@ -247,7 +302,50 @@ export class Workspace {
         throw new Error("Git artifact operation failed or exceeded its bound");
       return result.output;
     };
+    // The base's tree first, so a tracked file an ignore rule matches stays tracked. The
+    // index is kept between snapshots on the same base, so `add` reads only changed files.
+    // The worker builds a fresh index from the base itself, never from the coder's index: the
+    // coder's file times decide what `add` re-reads, and they cannot be trusted (journal 193).
+    if (fresh) await run(["read-tree", base]);
+    // No flag may hide a file from `add`.
+    const flagged = (await run(["ls-files", "-v", "-z"]))
+      .split("\0")
+      .filter((row) => /^(?:[a-z]|S) /.test(row))
+      .map((row) => row.slice(2));
+    // A flagged entry is dropped, so `add` takes the file from the working tree as it is.
+    if (flagged.length)
+      await run(["update-index", "--force-remove", "--", ...flagged]);
     await run(["add", "-A"]);
+    // As a fresh index would have it: a file an ignore rule now matches is in the candidate
+    // only if the base tracks it.
+    if (!fresh) {
+      const ignored = (
+        await run(["ls-files", "-z", "-c", "-i", "--exclude-standard"])
+      )
+        .split("\0")
+        .filter(Boolean);
+      if (ignored.length) {
+        const tracked = new Set(
+          (
+            await run([
+              "--literal-pathspecs",
+              "ls-tree",
+              "-r",
+              "-z",
+              "--name-only",
+              base,
+              "--",
+              ...ignored,
+            ])
+          )
+            .split("\0")
+            .filter(Boolean),
+        );
+        const drop = ignored.filter((path) => !tracked.has(path));
+        if (drop.length)
+          await run(["update-index", "--force-remove", "--", ...drop]);
+      }
+    }
     // `.gitignore`'s `node_modules/` does not match a link, and a dependency link is never
     // an artifact. Matching the base drops an added one and keeps one the repository tracks.
     const links = (await run(["ls-files", "--stage", "-z"]))

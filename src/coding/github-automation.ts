@@ -1,6 +1,7 @@
 import { activeInlineComments } from "./mr-feedback.js";
 import { createHash } from "node:crypto";
 import { MergeRefused } from "./merge-policy.js";
+import { opsLog } from "../ops-log.js";
 import type {
   MergeTarget,
   PrAutomationRepository,
@@ -17,6 +18,9 @@ const digest = (text: string) =>
   createHash("sha256").update(text).digest("hex");
 const sha = (v: unknown): v is string =>
   typeof v === "string" && /^[a-f0-9]{40}$/.test(v);
+/** Devin, as its review status identifies it: this login, as a GitHub App bot. */
+const isDevin = (user: any) =>
+  user?.login === "devin-ai-integration[bot]" && user?.type === "Bot";
 
 /** GitHub operations remain on Chief, never in the coding sandbox. */
 export class GitHubAutomation implements PrAutomationRepository {
@@ -170,6 +174,46 @@ export class GitHubAutomation implements PrAutomationRepository {
         .filter((n: any) => n.isResolved === true)
         .flatMap((n: any) => n.comments.nodes.map((c: any) => c.databaseId)),
     );
+    /**
+     * Who may drive a Pi PR's feedback rounds (journal 193): the repository's owner (GitHub's
+     * author association), people with write access or more (GitHub's collaborator
+     * permission for that login: `write`, which includes maintain, or `admin`; a read-only
+     * collaborator does not count), and Devin. Anyone else's comment stays on GitHub and
+     * reaches no coder. CI results are read from the repository's own workflow run.
+     */
+    const writers = new Map<string, boolean>();
+    const trusted = async (c: any) => {
+      if (isDevin(c.user) || c.author_association === "OWNER") return true;
+      const login = c.user?.login;
+      if (
+        !["COLLABORATOR", "MEMBER"].includes(c.author_association) ||
+        typeof login !== "string" ||
+        !/^[A-Za-z0-9-]{1,39}$/.test(login)
+      )
+        return false;
+      if (!writers.has(login)) {
+        // A failed lookup leaves this login untrusted for this inspection only; it never
+        // stops the reading, so the owner's and Devin's comments still count (journal 193).
+        let permission: unknown;
+        try {
+          permission = (await api(`collaborators/${login}/permission`))
+            ?.permission;
+        } catch (error) {
+          const status = (error as { httpStatus?: number })?.httpStatus;
+          // The status alone: no token, no response body, no login.
+          opsLog("coding.pr_permission_unreadable", "warn", {
+            ref: t.id,
+            ...(status ? { httpStatus: status } : {}),
+          });
+        }
+        writers.set(
+          login,
+          typeof permission === "string" &&
+            ["admin", "write"].includes(permission),
+        );
+      }
+      return writers.get(login)!;
+    };
     for (const c of [
       ...comments,
       ...activeInlineComments(inline, resolved),
@@ -187,7 +231,8 @@ export class GitHubAutomation implements PrAutomationRepository {
         // Devin's summary (badge) bodies are verdicts, not findings; its findings arrive inline.
         (c.user?.login === "devin-ai-integration[bot]" &&
           c.path === undefined &&
-          c.body.includes("<!-- devin-review-badge-begin -->"))
+          c.body.includes("<!-- devin-review-badge-begin -->")) ||
+        (t.trustedFeedback && !(await trusted(c)))
       )
         continue;
       const text = JSON.stringify({
@@ -196,7 +241,7 @@ export class GitHubAutomation implements PrAutomationRepository {
         line: c.line,
         comment: c.body,
       });
-      if (text.length > 7000)
+      if (!t.trustedFeedback && text.length > 7000)
         throw new Error(
           "MR feedback exceeds supported bounds; explicit review needed",
         );
@@ -228,7 +273,7 @@ export class GitHubAutomation implements PrAutomationRepository {
           steps: j.steps?.filter((s: any) => s.conclusion !== "success"),
           annotations,
         });
-        if (text.length > 7000)
+        if (!t.trustedFeedback && text.length > 7000)
           throw new Error(
             "CI feedback exceeds supported bounds; explicit review needed",
           );

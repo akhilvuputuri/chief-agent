@@ -2,7 +2,8 @@ import { ToolValidationError } from "../tool-errors.js";
 import { createHash } from "node:crypto";
 import type { Database } from "../db.js";
 import type { CodingSettings } from "./schema.js";
-export type CodingRole = "leader" | "coder" | "reviewer";
+/** The roles an owner chooses a model for (the legacy squad's planner follows its profile). */
+export type CodingRole = "coder" | "reviewer";
 export interface ModelChoice {
   id: string;
   inputPrice: number;
@@ -27,13 +28,13 @@ export async function modelPreferences(
     )
   ).rows;
   const result = {
-    leader: defaults.leaderModel ?? defaults.model,
     coder: defaults.model,
     reviewer: defaults.reviewerModel,
   };
+  // A stored planner choice (before journal 193) has no role left to apply to.
   for (const row of rows)
     if (
-      ["leader", "coder", "reviewer"].includes(row.data.role) &&
+      ["coder", "reviewer"].includes(row.data.role) &&
       typeof row.data.model === "string"
     )
       result[row.data.role as CodingRole] = row.data.model;

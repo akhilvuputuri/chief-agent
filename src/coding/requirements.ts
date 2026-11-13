@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "../db.js";
 import { ToolValidationError } from "../tool-errors.js";
 import type { CodingJob } from "./controller.js";
+import type { CodingSettings } from "./schema.js";
 import { artifactHash, canonicalJson } from "./github.js";
 
 /**
@@ -41,6 +42,13 @@ export class CodingRequirements {
     private db: Database,
     private allowed: (user: string) => boolean,
     private clock: () => Date,
+    /**
+     * What the job builds on and runs with once the owner starts it (journal 193): main as it
+     * is at the tap, not when the job was created, and the worker that matches this host.
+     */
+    private begin: (
+      job: CodingJob,
+    ) => Promise<{ base: string; settings: CodingSettings }>,
   ) {}
   async approved(job: CodingJob) {
     if (!this.allowed(job.user_id)) return false;
@@ -130,11 +138,12 @@ export class CodingRequirements {
       throw new Error(
         "The request changed or this Start card expired; ask Chief for a fresh one",
       );
+    const start = await this.begin(job);
     const result = await this.db.query(
       `WITH changed AS (
       UPDATE coding_jobs SET mode='implement',revision=revision+1,state='queued',stage='queued',
         summary='Started by the owner; implementation queued',result=NULL,attempt_id=NULL,sandbox_id=NULL,
-        heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,updated_at=now()
+        heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,base_sha=$13,settings=$14::jsonb,updated_at=now()
       WHERE id=$1 AND user_id=$2 AND revision=$3 AND state='plan_ready' AND mode='plan' AND cleanup IN ('none','complete')
         AND (lease IS NULL OR lease_until<now()) AND checkpoint=$4::jsonb AND objective=$9 AND context=$10 AND base_sha=$11 AND settings=$12::jsonb
         AND EXISTS(SELECT 1 FROM coding_events WHERE id=$5 AND job_id=$1 AND delivery='sent' AND NOT(payload ? 'decision') AND payload->>'telegramMessageId'=$6 AND (payload->>'confirmUntil')::timestamptz>$7)
@@ -160,6 +169,8 @@ export class CodingRequirements {
         job.context,
         job.base_sha,
         JSON.stringify(job.settings),
+        start.base,
+        JSON.stringify(start.settings),
       ],
     );
     if (!result.rows.length)

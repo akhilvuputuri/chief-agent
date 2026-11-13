@@ -31,6 +31,7 @@ async function setup(
   const f = await fixture(t);
   const selected = codingSettings.parse({
     ...settings,
+    limits: undefined,
     runtime: "pi",
     squad: false,
     autoMerge: false,
@@ -98,6 +99,9 @@ async function setup(
     f.db,
     () => true,
     () => new Date(),
+    async () => {
+      throw new Error("This test never starts a job");
+    },
   );
   return { f, c, row, update, requirements, id: started.id as string };
 }
@@ -291,43 +295,38 @@ test("a transiently paused job the owner changed is not retried automatically", 
   assert.equal((await row()).state, "paused");
 });
 
-test("an inherited time limit does not block a model change", async (t) => {
+test("a job stored with the limits of stage D2 changes models, and moving it to the current worker drops them (journal 193)", async (t) => {
   const { f, row, update, id } = await setup(t);
   const before = await row();
+  const old = `ghcr.io/example/worker@sha256:${"9".repeat(64)}`;
   await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
     id,
     JSON.stringify({
       ...before.settings,
-      limits: { ...before.settings.limits, ms: 14_400_000 },
+      image: old,
+      limits: { ms: 10_800_000, models: 1500, tools: 4000 },
+      leaderModel: "synthetic/planner",
     }),
   ]);
   await update({ coderModel: opus });
   assert.equal((await row()).settings.model, opus);
+  assert.deepEqual((await row()).settings.limits, {
+    ms: 10_800_000,
+    models: 1500,
+    tools: 4000,
+  });
+  await f.db.query("UPDATE coding_jobs SET revision=1 WHERE id=$1", [id]);
+  await update({ upgradeWorker: true }, "upgrade");
+  const after = await row();
+  assert.equal(after.settings.image, settings.image);
+  assert.equal(after.settings.limits, undefined);
+  assert.equal(after.settings.leaderModel, undefined);
 });
 
-test("squad tool use counts toward the tool-call limit", async (t) => {
-  const { f, row, update, id } = await setup(t);
-  const before = await row();
-  await f.db.query("UPDATE coding_jobs SET checkpoint=$2::jsonb WHERE id=$1", [
-    id,
-    JSON.stringify({
-      plan: before.checkpoint.plan,
-      patch: "",
-      summary: "",
-      files: [],
-      squadState: { toolsUsed: 10 },
-    }),
-  ]);
-  await assert.rejects(update({ limits: { tools: 5 } }), /already used/);
-});
-
-test("a limit is refused when it cannot take effect", async (t) => {
+test("a job update has no limits or planner to change (journal 193)", async (t) => {
   const { update } = await setup(t);
-  // A Pi worker no longer counts tool calls (journal 192); the squad's count is checked above.
-  await assert.rejects(
-    update({ limits: { ms: 14_400_000 } }),
-    /most one attempt/,
-  );
+  await assert.rejects(update({ limits: { ms: 3_600_000 } }));
+  await assert.rejects(update({ leaderModel: opus }));
 });
 
 test("a job update refuses active jobs, stale revisions, ineligible models and other owners", async (t) => {
@@ -426,12 +425,15 @@ test("after a reviewer switch the review continues in the same reviewer session 
   git("commit", "-qm", "Fixture");
   const commit = git("rev-parse", "HEAD").toString().trim();
   const started = await f.start("pi-switch", true);
+  // The owner's Start builds on main as it is then (journal 193).
+  (f.publisher as any).resolve = async () => commit;
   await f.db.query(
     "UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3 WHERE id=$1",
     [
       started.id,
       JSON.stringify({
         ...settings,
+        limits: undefined,
         runtime: "pi",
         squad: false,
         autoMerge: false,

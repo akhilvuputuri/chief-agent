@@ -6,15 +6,11 @@ import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { CodingAutomation } from "../src/coding/automation.js";
 import { CodingMergeApprovals } from "../src/coding/merge-approvals.js";
-import {
-  CodingRequirements,
-  requirementScope,
-} from "../src/coding/requirements.js";
+import { requirementScope } from "../src/coding/requirements.js";
 import { CodingController, type CodingJob } from "../src/coding/controller.js";
 import { ToolValidationError } from "../src/tool-errors.js";
 import { codingSettings, outcome } from "../src/coding/schema.js";
 import { artifactHash, canonicalJson } from "../src/coding/github.js";
-import { setOpsSink } from "../src/ops-log.js";
 import type { PrInspection } from "../src/coding/merge-policy.js";
 
 const base = "a".repeat(40),
@@ -26,13 +22,11 @@ const settings = codingSettings.parse({
   branch: "main",
   image: `ghcr.io/example/worker@sha256:${"a".repeat(64)}`,
   model: "fixture/coder",
-  leaderModel: "fixture/coder",
   reviewerModel: "fixture/reviewer",
   runtime: "pi",
   prWorkflow: "owner_merge",
   maxOutputTokens: 16000,
   effort: "high",
-  limits: { ms: 900000, models: 40, tools: 100 },
 });
 
 /** The job's inbox items, oldest first (journal 192). */
@@ -140,12 +134,16 @@ async function fixture(
     },
     release: async () => release,
   };
+  let started = true;
+  let spent = false;
   const auto = new CodingAutomation(
     db,
     repository,
     () => true,
     async () => true,
     () => now,
+    async () => started,
+    async () => spent,
   );
   const approvals = new CodingMergeApprovals(
     db,
@@ -196,6 +194,10 @@ async function fixture(
       (inspection = { ...inspection, ...i }),
     setRelease: (v: typeof release) => (release = v),
     advance: (ms: number) => (now = new Date(now.getTime() + ms)),
+    /** The job no longer has the owner's Start of its current request. */
+    withoutStart: () => (started = false),
+    /** The job's eight hours of machine time are spent. */
+    outOfTime: () => (spent = true),
     counts: () => ({ merges, readies }),
   };
 }
@@ -381,6 +383,7 @@ test("declining keeps the PR open and a changed head invalidates an unanswered c
 
 test("MR feedback becomes labelled inbox items for the same coder session, with the work kept", async (t) => {
   const f = await fixture(t);
+  const published = await f.job();
   f.setInspection({
     draft: false,
     feedback: [{ id: "devin-1", text: "Devin: the heading level is wrong" }],
@@ -411,19 +414,62 @@ test("MR feedback becomes labelled inbox items for the same coder session, with 
       [f.id],
     )
   ).rows[0].payload;
-  assert.deepEqual(budget.handled, ["devin-1"]);
+  assert.deepEqual(budget.handled, []);
+  // Published again with the same comment still on GitHub: its inbox item marks it handled.
+  await f.db.query(
+    "UPDATE coding_jobs SET state='pr_ready',stage='pr_ready',result=$2::jsonb WHERE id=$1",
+    [f.id, JSON.stringify(published.result)],
+  );
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT job_id,'automation:2',payload,'suppressed' FROM coding_events WHERE job_id=$1 AND event_key='automation:1'",
+    [f.id],
+  );
+  await f.auto.tick();
+  const again = await f.job();
+  assert.equal(again.state, "pr_ready");
+  assert.notEqual(again.stage, "manual_review", again.summary);
+  assert.equal((await inbox(f)).length, 1);
 
-  const limit = await fixture(t);
-  await priorRounds(limit, 3);
-  limit.setInspection({
+  // A fourth round is delivered like the first: there is no round count (journal 193).
+  const later = await fixture(t);
+  await priorRounds(later, 3);
+  later.setInspection({
     draft: false,
     feedback: [{ id: "devin-9", text: "Devin: still wrong" }],
   });
-  await limit.auto.tick();
-  const stopped = await limit.job();
-  assert.equal(stopped.state, "pr_ready");
-  assert.equal(stopped.stage, "manual_review");
-  assert.equal(limit.counts().merges, 0);
+  await later.auto.tick();
+  assert.equal((await later.job()).state, "queued");
+  assert.deepEqual(
+    (await inbox(later)).map((i) => i.key),
+    ["inbox:gh:devin-9"],
+  );
+  assert.equal(later.counts().merges, 0);
+});
+
+test("every feedback item is delivered whole, however long or however many (journal 193)", async (t) => {
+  const f = await fixture(t);
+  const ci = JSON.stringify({ job: "check", log: "x".repeat(20_000) });
+  const many = Array.from({ length: 250 }, (_, n) => ({
+    id: `devin-${n}`,
+    text: `Devin finding ${n}: ${"y".repeat(100)}`,
+  }));
+  f.setInspection({
+    draft: false,
+    feedback: [{ id: "ci:1:1:9", text: ci }, ...many],
+  });
+  await f.auto.tick();
+  assert.equal((await f.job()).state, "queued");
+  const items = await inbox(f);
+  assert.equal(items.length, 251);
+  assert.equal(items.find((i) => i.source === "ci")?.text, ci);
+  // The inbox items are the record of what was handled; no list is copied (journal 193).
+  const budget = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
+      [f.id],
+    )
+  ).rows[0].payload;
+  assert.deepEqual(budget.handled, []);
 });
 
 test("owner-confirmed merge is a Pi-only, host-only setting", () => {
@@ -574,42 +620,15 @@ test("the bundled Pi profile enables owner-confirmed merge and never automatic m
   assert.equal(bundled.autoMerge, false);
 });
 
-test("each Pi owner-merge feedback round gets a fresh active window even after the first is spent", async (t) => {
-  const f = await fixture(t);
-  await f.db.query(
-    "UPDATE coding_events SET payload=jsonb_set(payload,'{remainingMs}','0'::jsonb) WHERE job_id=$1 AND event_key='automation:1'",
-    [f.id],
-  );
-  f.setInspection({
-    draft: false,
-    feedback: [{ id: "human-1", text: "Reviewer: rename the heading" }],
-  });
-  await f.auto.tick();
-  const queued = await f.job();
-  assert.equal(queued.state, "queued");
-  const budget = (
-    await f.db.query(
-      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
-      [f.id],
-    )
-  ).rows[0].payload;
-  assert.equal(budget.remainingMs, 900000);
-  assert.equal(queued.used_models, 12);
-});
-
-test("a PR that conflicts with main is re-applied on current main with its approval carried over (interim, journal 180)", async (t) => {
-  const f = await fixture(t, { version: 1, delivered: [] });
+test("a PR that conflicts with main goes back to its box with its work, sessions and Start kept, to be rebased (journal 193)", async (t) => {
+  const reviewed = {
+    hash: "1".repeat(64),
+    base,
+    patch: "fixture",
+    verdict: "APPROVE" as const,
+  };
+  const f = await fixture(t, { version: 1, delivered: [], reviewed });
   const before = await f.job();
-  await f.db.query(
-    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'owner-approved',$2::jsonb,'suppressed')",
-    [
-      f.id,
-      JSON.stringify({
-        decision: "approved",
-        approvedScope: requirementScope(before),
-      }),
-    ],
-  );
   const moved = "f".repeat(40);
   f.setInspection({
     checks: "passed",
@@ -622,38 +641,33 @@ test("a PR that conflicts with main is re-applied on current main with its appro
   assert.equal(queued.state, "queued");
   assert.equal(queued.revision, 2);
   assert.equal(queued.base_sha, moved);
-  assert.deepEqual(queued.checkpoint.files, []);
-  assert.equal(queued.checkpoint.plan, before.checkpoint.plan);
-  assert.deepEqual(queued.checkpoint.piState, { version: 1, delivered: [] });
+  // The work and the job's sessions are kept as they were: nothing is re-implemented.
+  assert.deepEqual(queued.checkpoint, before.checkpoint);
   assert.equal(f.counts().merges, 0);
-  // The coder's session continues, so an inbox item tells it the base moved (journal 192).
-  const [told] = await inbox(f);
-  assert.equal(told.source, "chief");
-  assert.match(told.text, new RegExp(`base is now ${moved}`));
-  assert.match(told.text, /not carried over/);
-  const requirements = new CodingRequirements(
-    f.db,
-    () => true,
-    () => new Date(),
+  const [rebase] = await inbox(f);
+  assert.equal(rebase.key, `inbox:rebase:${moved}:2`);
+  assert.equal(rebase.source, "rebase");
+  assert.equal(rebase.from, base);
+  assert.equal(rebase.onto, moved);
+  // The owner's Start carries over because the request it approved did not change: the
+  // approval covers the request, not the base. No approval is copied.
+  assert.equal(requirementScope(queued), requirementScope(before));
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT 1 FROM coding_events WHERE job_id=$1 AND (event_key LIKE 'rebase-approval:%' OR event_key LIKE 'rebase-candidate:%')",
+        [f.id],
+      )
+    ).rows.length,
+    0,
   );
-  assert.equal(await requirements.approved(queued), true);
-  const carried = (
-    await f.db.query(
-      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='rebase-approval:2'",
-      [f.id],
-    )
-  ).rows[0].payload;
-  assert.equal(carried.approvedScope, requirementScope(queued));
-  assert.equal(carried.carriedFrom, requirementScope(before));
-  // The reviewed artifact is recorded so the rebased candidate can be compared with it.
-  assert.equal(carried.carriedArtifact, artifactHash(before.result.checkpoint));
   const budget = (
     await f.db.query(
       "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
       [f.id],
     )
   ).rows[0].payload;
-  assert.equal(budget.remainingMs, 900000);
+  assert.deepEqual(budget, { handled: [] });
   const notice = (
     await f.db.query(
       "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND payload->>'summary' LIKE 'The PR conflicts with recent changes on main%'",
@@ -662,21 +676,15 @@ test("a PR that conflicts with main is re-applied on current main with its appro
   ).rows;
   assert.equal(notice.length, 1);
   assert.equal(notice[0].delivery, "pending");
+  assert.match(notice[0].payload.summary, /rebasing your change onto main/);
+  // A second tick finds the job queued and does nothing more.
+  await f.auto.tick();
+  assert.equal((await inbox(f)).length, 1);
 });
 
-/** Re-applies the fixture job on a moved, conflicting main and starts its new attempt. */
-async function rebasedAttempt(f: Awaited<ReturnType<typeof fixture>>) {
-  const before = await f.job();
-  await f.db.query(
-    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'owner-approved',$2::jsonb,'suppressed')",
-    [
-      f.id,
-      JSON.stringify({
-        decision: "approved",
-        approvedScope: requirementScope(before),
-      }),
-    ],
-  );
+test("a conflict on a job without the owner's Start of its request stops for the owner", async (t) => {
+  const f = await fixture(t);
+  f.withoutStart();
   f.setInspection({
     checks: "passed",
     draft: false,
@@ -684,109 +692,34 @@ async function rebasedAttempt(f: Awaited<ReturnType<typeof fixture>>) {
     mergeable: false,
   });
   await f.auto.tick();
-  await f.db.query(
-    "UPDATE coding_jobs SET state='running',stage='implementing',attempt_id=$2,attempt_deadline=$3 WHERE id=$1",
-    [f.id, randomUUID(), new Date(Date.now() + 600000)],
-  );
   const job = await f.job();
-  assert.equal(job.revision, 2);
-  const c = new CodingController(
-    f.db,
-    settings,
-    {} as any,
-    {} as any,
-    "c".repeat(64),
-    "https://coding.example.com",
-    () => true,
-    () => ({
-      generate: async () => ({ message: { role: "assistant", content: "" } }),
-    }),
-    () => new Date(),
-  );
-  /** The worker's checked candidate, saved just before its first reviewer call. */
-  const review = (
-    files: { path: string; content: string }[],
-    patch: string,
-  ) => {
-    const cp: any = {
-      ...job.checkpoint,
-      files,
-      patch,
-      piState: { ...job.checkpoint.piState },
-    };
-    cp.piState = { ...cp.piState, phase: "review" };
-    return c.save(job, cp);
-  };
-  const recorded = async () =>
-    (
-      await f.db.query(
-        "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND event_key='rebase-candidate:2'",
-        [f.id],
-      )
-    ).rows;
-  return { before, review, recorded };
-}
-
-test("a rebase that reproduces the reviewed artifact byte for byte is recorded, and review still runs", async (t) => {
-  const f = await fixture(t);
-  const { before, review, recorded } = await rebasedAttempt(f);
-  const logs: any[] = [];
-  const previous = setOpsSink((line) => logs.push(JSON.parse(line)));
-  t.after(() => setOpsSink(previous));
-  await review(before.checkpoint.files, before.checkpoint.patch);
-  const rebased = logs.filter((l) => l.event === "coding.rebase_candidate");
-  assert.equal(rebased.length, 1);
-  assert.equal(rebased[0].taskId, f.id);
-  assert.equal(rebased[0].revision, 2);
-  assert.equal(rebased[0].matched, true);
-  const [row] = await recorded();
-  assert.equal(row.delivery, "suppressed");
-  assert.equal(row.payload.identical, true);
-  assert.equal(row.payload.candidate, artifactHash(before.result.checkpoint));
-  // Detection only: nothing about the attempt or its approval changes.
-  const job = await f.job();
-  assert.equal(job.state, "running");
-  assert.equal(job.result, null);
-  assert.equal(job.checkpoint.piState.phase, "review");
+  assert.equal(job.state, "pr_ready");
+  assert.equal(job.stage, "manual_review");
+  assert.equal(job.base_sha, base);
+  assert.match(job.summary, /no owner Start of its current request/);
+  assert.equal((await inbox(f)).length, 0);
 });
 
-test("a rebase whose candidate differs at all is recorded as not identical", async (t) => {
+test("feedback on a job without the owner's Start of its request goes to the owner, not to a box that would refuse it", async (t) => {
   const f = await fixture(t);
-  const { before, review, recorded } = await rebasedAttempt(f);
-  const logs: any[] = [];
-  const previous = setOpsSink((line) => logs.push(JSON.parse(line)));
-  t.after(() => setOpsSink(previous));
-  await review(
-    before.checkpoint.files.map((file: any) => ({
-      ...file,
-      content: `${file.content}\n`,
-    })),
-    before.checkpoint.patch,
-  );
-  const rows = await recorded();
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].payload.identical, false);
-  const rebased = logs.filter((l) => l.event === "coding.rebase_candidate");
-  assert.equal(rebased.length, 1);
-  assert.equal(rebased[0].revision, 2);
-  assert.equal(rebased[0].matched, false);
+  f.withoutStart();
+  f.setInspection({
+    draft: false,
+    feedback: [{ id: "devin-1", text: "Devin: rename it" }],
+  });
+  await f.auto.tick();
+  const job = await f.job();
+  assert.equal(job.state, "pr_ready");
+  assert.equal(job.stage, "manual_review");
+  assert.match(job.summary, /no owner Start of its current request/);
+  assert.equal((await inbox(f)).length, 0);
 });
 
-test("a conflicting PR is re-applied however many times main conflicted before", async (t) => {
+test("a conflicting PR is rebased however many times main conflicted before", async (t) => {
   const f = await fixture(t);
-  await f.db.query(
-    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'owner-approved',$2::jsonb,'suppressed')",
-    [
-      f.id,
-      JSON.stringify({
-        decision: "approved",
-        approvedScope: requirementScope(await f.job()),
-      }),
-    ],
-  );
   for (const n of [1, 2, 3])
     await f.db.query(
-      "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,$2,$3,'Earlier re-apply','implement')",
+      "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,$2,$3,'Earlier rebase','implement')",
       [f.id, 10 + n, `rebase:earlier-${n}`],
     );
   f.setInspection({
@@ -887,7 +820,7 @@ test("unknown mergeability waits without dropping the card or the owner's tap, a
   assert.equal(cards.length, 1);
 });
 
-test("a conflict reading with main unmoved is stale: it waits and nothing is re-applied", async (t) => {
+test("a conflict reading with main unmoved is stale: it waits and nothing is rebased", async (t) => {
   const f = await fixture(t);
   f.setInspection({ checks: "passed", draft: false, mergeable: false });
   await f.auto.tick();
@@ -976,22 +909,6 @@ test("unknown mergeability never keeps a tap alive past a real change to the PR"
   assert.equal(e.counts().merges, 0);
 });
 
-test("a re-apply never carries over a scope the owner did not approve", async (t) => {
-  const f = await fixture(t);
-  f.setInspection({
-    checks: "passed",
-    draft: false,
-    main: "f".repeat(40),
-    mergeable: false,
-  });
-  await f.auto.tick();
-  // The fixture job has no recorded approval for its scope.
-  const job = await f.job();
-  assert.equal(job.state, "pr_ready");
-  assert.equal(job.stage, "manual_review");
-  assert.match(job.summary, /no recorded owner approval/);
-});
-
 /** The owner's "continue" as Chief's coding_resume call, through the real controller. */
 async function continueAsOwner(
   f: Awaited<ReturnType<typeof fixture>>,
@@ -1023,14 +940,30 @@ async function continueAsOwner(
   });
 }
 
+test("a PR waiting days for CI keeps waiting; it is never parked for the wait (journal 193)", async (t) => {
+  const f = await fixture(t);
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_ci");
+  f.advance(2 * 86400000);
+  await f.auto.tick();
+  f.setInspection({ mergeable: null, unresolvedThreads: 1 });
+  f.advance(2 * 86400000);
+  await f.auto.tick();
+  const job = await f.job();
+  assert.equal(job.stage, "awaiting_ci");
+  assert.match(job.summary, /resolve outstanding GitHub threads/);
+});
+
 test("an owner continue re-runs the gates with fresh waits and a hold that applies again is a new notice", async (t) => {
   const f = await fixture(t);
-  // Checks stayed unavailable for over an hour, so the PR stopped for the owner.
+  // GitHub could not be read for over an hour, so the PR stopped for the owner.
   await f.db.query(
     "UPDATE coding_events SET payload=jsonb_set(payload,'{waitingSince}',to_jsonb($2::text)) WHERE job_id=$1 AND event_key='automation:1'",
     [f.id, new Date(Date.now() - 2 * 86400000).toISOString()],
   );
-  await f.auto.tick();
+  f.onNextInspect(async () => {
+    throw new Error("GitHub unavailable");
+  });
   await f.auto.tick();
   assert.equal((await f.job()).stage, "manual_review");
   const notices = async () =>
@@ -1174,8 +1107,15 @@ test("the owner's fix request on a stopped PR goes to the coder on the same PR",
       [f.id],
     )
   ).rows[0].payload.handled;
-  assert.equal(handled.length, 1);
-  assert.match(handled[0], /^owner:/);
+  // A Pi round copies no handled list (journal 193): the request is marked delivered.
+  assert.deepEqual(handled, []);
+  const marked = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='owner-feedback:fix-1'",
+      [f.id],
+    )
+  ).rows[0].payload;
+  assert.equal(typeof marked.deliveredRound, "number");
 });
 
 test("a fix request waits for the next round on a PR still in checks", async (t) => {
@@ -1234,22 +1174,22 @@ test("a hard-stop PR never merges, even with an owner approval already recorded"
   assert.equal(cards.rows.length, 0);
 });
 
-test("a fix request that a feedback round could not deliver is refused up front", async (t) => {
+test("a fix request is taken after any number of rounds and at any length (journal 193)", async (t) => {
   const f = await fixture(t);
   await priorRounds(f, 3);
   await f.db.query("UPDATE coding_jobs SET stage='manual_review' WHERE id=$1", [
     f.id,
   ]);
-  await assert.rejects(
-    replyAsOwner(f, "fix-5", "One more fix."),
-    /three rounds of fixes/,
+  await replyAsOwner(f, "fix-5", "One more fix.");
+  await replyAsOwner(f, "fix-6", "x".repeat(20_000));
+  assert.equal((await f.job()).stage, "awaiting_ci");
+  f.setInspection({ draft: false });
+  await f.auto.tick();
+  assert.equal((await f.job()).state, "queued");
+  assert.deepEqual(
+    (await inbox(f)).map((i) => i.text.length).sort((a, b) => a - b),
+    ["One more fix.".length, 20_000],
   );
-  assert.equal((await f.job()).stage, "manual_review");
-  const g = await fixture(t);
-  await g.db.query("UPDATE coding_jobs SET stage='manual_review' WHERE id=$1", [
-    g.id,
-  ]);
-  await assert.rejects(replyAsOwner(g, "fix-6", "x".repeat(7001)), /too long/);
 });
 
 test("a fix request on a PR stopped for over a day needs the owner's explicit say-so", async (t) => {
@@ -1324,14 +1264,15 @@ test("a round that loses its lease leaves the owner's request for the next one",
   assert.equal((await f.job()).state, "queued");
 });
 
-test("requests that would not fit one round together are refused", async (t) => {
+test("requests waiting together all reach the next round (journal 193)", async (t) => {
   const f = await fixture(t);
   await f.auto.tick();
   await replyAsOwner(f, "fix-10", "a".repeat(5000));
-  await assert.rejects(
-    replyAsOwner(f, "fix-11", "b".repeat(5000)),
-    /already fill the next round/,
-  );
+  await replyAsOwner(f, "fix-11", "b".repeat(5000));
+  f.setInspection({ draft: false });
+  await f.auto.tick();
+  assert.equal((await f.job()).state, "queued");
+  assert.equal((await inbox(f)).length, 2);
 });
 
 test("an owner message kept while the job was publishing starts a feedback round once the PR is open", async (t) => {
@@ -1361,5 +1302,95 @@ test("an owner message kept while the job was publishing starts a feedback round
       [f.id],
     )
   ).rows[0].payload.handled;
-  assert.match(handled[0], /^inbox:/);
+  assert.deepEqual(handled, []);
+});
+
+test("with its machine time spent, feedback and a conflict stop for the owner instead of starting a box (journal 193)", async (t) => {
+  const f = await fixture(t);
+  f.outOfTime();
+  f.setInspection({
+    draft: false,
+    feedback: [{ id: "ci:1:1:1", text: "CI failed" }],
+  });
+  await f.auto.tick();
+  let job = await f.job();
+  assert.equal(job.state, "pr_ready");
+  assert.equal(job.stage, "manual_review");
+  assert.equal(
+    job.summary,
+    "This job has used its eight hours of machine time; resume it to continue.",
+  );
+  assert.equal((await inbox(f)).length, 0);
+  const g = await fixture(t);
+  g.outOfTime();
+  g.setInspection({
+    checks: "passed",
+    draft: false,
+    main: "f".repeat(40),
+    mergeable: false,
+  });
+  await g.auto.tick();
+  job = await g.job();
+  assert.equal(job.stage, "manual_review");
+  assert.equal(job.base_sha, base);
+  assert.match(job.summary, /eight hours of machine time/);
+});
+
+test("an hour into a wait for CI the owner hears once, and the PR keeps waiting (journal 193)", async (t) => {
+  const f = await fixture(t);
+  await f.auto.tick();
+  await f.auto.tick();
+  const notices = async () =>
+    (
+      await f.db.query(
+        "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND event_key LIKE 'ci-wait:%'",
+        [f.id],
+      )
+    ).rows;
+  assert.equal((await notices()).length, 0);
+  f.advance(3_600_001);
+  await f.auto.tick();
+  f.advance(3 * 3_600_000);
+  await f.auto.tick();
+  const sent = await notices();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].delivery, "pending");
+  assert.match(sent[0].payload.summary, /waited an hour for CI/);
+  assert.equal(
+    sent[0].payload.url,
+    "https://github.com/akhilvuputuri/chief-agent/pull/7",
+  );
+  assert.equal((await f.job()).stage, "awaiting_ci");
+});
+
+test("each wait for CI in one revision gets its own hour and its own notice (journal 193)", async (t) => {
+  const f = await fixture(t);
+  await f.auto.tick();
+  await f.auto.tick();
+  const notices = async () =>
+    (
+      await f.db.query(
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key LIKE 'ci-wait:%'",
+        [f.id],
+      )
+    ).rows;
+  f.advance(3_600_001);
+  await f.auto.tick();
+  assert.equal((await notices()).length, 1);
+  // CI passes: the wait ends and the owner's card is offered.
+  f.setInspection({ checks: "passed" });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_merge_approval");
+  // A new wait in the same revision (threads opened) starts its own hour.
+  f.setInspection({ unresolvedThreads: 1 });
+  await f.auto.tick();
+  assert.equal((await notices()).length, 1);
+  f.advance(1_800_000);
+  await f.auto.tick();
+  assert.equal((await notices()).length, 1);
+  f.advance(1_800_001);
+  await f.auto.tick();
+  const sent = await notices();
+  assert.equal(sent.length, 2);
+  assert(sent.some((n: any) => /review threads/.test(n.payload.summary)));
 });

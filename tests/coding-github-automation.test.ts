@@ -52,6 +52,13 @@ function fixture() {
     writes: any[] = [];
   let statuses: any[] = [devin],
     runs: any[] = [ci];
+  const permissions: Record<string, string> = {
+    helper: "write",
+    maintainer: "write",
+    reader: "read",
+  };
+  const permissionReads: string[] = [];
+  let lookupFailure: number | "network" | undefined;
   const api = async (path: string, method?: string, body?: any) => {
     if (method === "POST" || method === "PUT") {
       writes.push({ path, body });
@@ -66,6 +73,17 @@ function fixture() {
     if (path === "issues/9/comments?per_page=100") return comments;
     if (path === "pulls/9/comments?per_page=100") return inline;
     if (path === "pulls/9/reviews?per_page=100") return reviews;
+    if (path.startsWith("collaborators/")) {
+      permissionReads.push(path);
+      const failure = lookupFailure;
+      if (failure === "network") throw new TypeError("fetch failed");
+      if (failure)
+        throw Object.assign(
+          new Error(`GitHub repository request failed (${failure})`),
+          { httpStatus: failure },
+        );
+      return { permission: permissions[path.split("/")[1]!] ?? "none" };
+    }
     if (path.includes("/jobs?"))
       return {
         total_count: 1,
@@ -93,6 +111,8 @@ function fixture() {
   };
   const gh = new GitHubAutomation(repo, api, graph);
   return {
+    failLookup: (failure: number | "network") => (lookupFailure = failure),
+    permissionReads,
     t,
     pr,
     ci,
@@ -156,6 +176,77 @@ test("comments edited after a prior review get a new feedback identity; oversize
   f.comments[0].body = "Fix case B";
   assert.notEqual((await f.gh.inspect(f.t)).feedback[0].id, first);
   f.comments[0].body = "x".repeat(8000);
+  await assert.rejects(f.gh.inspect(f.t), /bounds/);
+});
+test("a Pi PR's rounds are driven only by the owner, collaborators, Devin and CI, and their text is whole (journal 193)", async () => {
+  const f = fixture();
+  const pi = { ...f.t, trustedFeedback: true };
+  f.comments.push(
+    {
+      id: 1,
+      body: "Owner: rename it",
+      updated_at: "a",
+      author_association: "OWNER",
+      user: { login: "akhilvuputuri", type: "User" },
+    },
+    {
+      id: 2,
+      body: "Collaborator: " + "y".repeat(20_000),
+      updated_at: "a",
+      author_association: "COLLABORATOR",
+      user: { login: "helper", type: "User" },
+    },
+    {
+      id: 7,
+      body: "Reader: read-only collaborator",
+      updated_at: "a",
+      author_association: "COLLABORATOR",
+      user: { login: "reader", type: "User" },
+    },
+    {
+      id: 3,
+      body: "Stranger: rewrite everything",
+      updated_at: "a",
+      author_association: "NONE",
+      user: { login: "stranger", type: "User" },
+    },
+    {
+      id: 4,
+      body: "Contributor: also this",
+      updated_at: "a",
+      author_association: "CONTRIBUTOR",
+      user: { login: "drive-by", type: "User" },
+    },
+    {
+      id: 5,
+      body: "A bot that is not Devin",
+      updated_at: "a",
+      author_association: "NONE",
+      user: { login: "devin-ai-integration[bot]", type: "User" },
+    },
+    {
+      id: 6,
+      body: "Devin: the heading level is wrong",
+      updated_at: "a",
+      author_association: "NONE",
+      user: { login: "devin-ai-integration[bot]", type: "Bot" },
+    },
+  );
+  const authors = (await f.gh.inspect(pi)).feedback.map(
+    (i: any) => JSON.parse(i.text).comment.split(":")[0],
+  );
+  assert.deepEqual(authors.sort(), ["Collaborator", "Devin", "Owner"]);
+  // Write access is read from GitHub, once per login and inspection; a read-only
+  // collaborator drives nothing, and nobody else is looked up.
+  assert.deepEqual(f.permissionReads.sort(), [
+    "collaborators/helper/permission",
+    "collaborators/reader/permission",
+  ]);
+  const whole = (await f.gh.inspect(pi)).feedback.find((i: any) =>
+    i.text.includes("Collaborator"),
+  );
+  assert.equal(JSON.parse(whole!.text).comment.length, 20_014);
+  // The legacy squad still takes every commenter and stops on an oversized item.
   await assert.rejects(f.gh.inspect(f.t), /bounds/);
 });
 test("a spoofed attestation comment is feedback and cannot suppress the real host record", async () => {
@@ -280,4 +371,61 @@ test("Devin's all-clear summary review is not feedback, while its inline finding
   assert.equal(i.feedback.length, 2);
   assert.match(JSON.stringify(i.feedback), /Heading level is wrong/);
   assert.match(JSON.stringify(i.feedback), /keep the older entries/);
+});
+
+test("a permission lookup that fails ignores only that commenter; the owner's and Devin's comments still count (journal 193)", async () => {
+  const { setOpsSink } = await import("../src/ops-log.js");
+  for (const failure of [403, 404, "network"] as const) {
+    const f = fixture();
+    f.failLookup(failure);
+    const logs: any[] = [];
+    const previous = setOpsSink((line) => logs.push(JSON.parse(line)));
+    try {
+      f.comments.push(
+        {
+          id: 1,
+          body: "Collaborator: change it",
+          updated_at: "a",
+          author_association: "COLLABORATOR",
+          user: { login: "helper", type: "User" },
+        },
+        {
+          id: 2,
+          body: "Owner: rename it",
+          updated_at: "a",
+          author_association: "OWNER",
+          user: { login: "akhilvuputuri", type: "User" },
+        },
+        {
+          id: 3,
+          body: "Devin: the heading level is wrong",
+          updated_at: "a",
+          author_association: "NONE",
+          user: { login: "devin-ai-integration[bot]", type: "Bot" },
+        },
+      );
+      const { feedback } = await f.gh.inspect({
+        ...f.t,
+        trustedFeedback: true,
+      });
+      assert.deepEqual(
+        feedback
+          .map((i: any) => JSON.parse(i.text).comment.split(":")[0])
+          .sort(),
+        ["Devin", "Owner"],
+        String(failure),
+      );
+      const logged = logs.filter(
+        (l) => l.event === "coding.pr_permission_unreadable",
+      );
+      assert.equal(logged.length, 1);
+      assert.equal(
+        logged[0].httpStatus,
+        failure === "network" ? undefined : failure,
+      );
+      assert(!JSON.stringify(logged).includes("helper"));
+    } finally {
+      setOpsSink(previous);
+    }
+  }
 });

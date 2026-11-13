@@ -190,6 +190,7 @@ test("on the Pi route, a reply with such text reaches Pi exactly and is stored r
     started.id,
     JSON.stringify({
       ...settings,
+      limits: undefined,
       runtime: "pi",
       squad: false,
       autoMerge: false,

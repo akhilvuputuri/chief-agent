@@ -10,9 +10,15 @@ import {
 import { fixture, settings } from "./helpers/coding-fixture.js";
 
 // Job d5a8bd74 paused when its planning report reached 16,000 output tokens (journal 156).
-const pi = { ...settings, runtime: "pi", squad: false, autoMerge: false };
+const pi = {
+  ...settings,
+  limits: undefined,
+  runtime: "pi",
+  squad: false,
+  autoMerge: false,
+};
 
-test("coder and planner allowances reach 128,000; the reviewer keeps 16,000 unless set", () => {
+test("the coder allowance reaches 128,000; the reviewer keeps 16,000 unless set", () => {
   assert(codingSettings.safeParse({ ...pi, maxOutputTokens: 128000 }).success);
   for (const changes of [
     { maxOutputTokens: 128001 },
@@ -25,7 +31,6 @@ test("coder and planner allowances reach 128,000; the reviewer keeps 16,000 unle
       .success,
   );
   const wide = { maxOutputTokens: 128000 };
-  assert.equal(outputAllowance(wide, "leader"), 128000);
   assert.equal(outputAllowance(wide, "coder"), 128000);
   assert.equal(outputAllowance(wide, "reviewer"), 16000);
   assert.equal(
@@ -52,7 +57,7 @@ test("the shipped profile leaves room for the largest report plus heavy reasonin
   );
   // A token is at least one character of report text; observed planning reasoning reached 11,169 tokens.
   const needed = reportLimits.document + 32000;
-  for (const role of ["leader", "coder"] as const)
+  for (const role of ["coder"] as const)
     assert(
       outputAllowance(shipped, role) >= needed,
       `${role} allowance ${outputAllowance(shipped, role)} is below ${needed}`,

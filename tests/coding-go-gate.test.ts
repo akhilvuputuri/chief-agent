@@ -276,9 +276,16 @@ test("the Pi worker refuses a plan assignment", async (t) => {
     context: "",
     mode: "plan",
     baseSha: "a".repeat(40),
-    settings: { ...settings, runtime: "pi", squad: false, autoMerge: false },
+    settings: {
+      ...settings,
+      limits: undefined,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+    },
     checkpoint: { plan: "", patch: "", summary: "" },
     deadline: new Date(Date.now() + 600000).toISOString(),
+    stopInMs: 300000,
     usedModels: 0,
   };
   await assert.rejects(
@@ -348,6 +355,7 @@ test("a dormant job of the old shape does not break a tick, delivery or status",
       "b".repeat(40),
       JSON.stringify({
         ...settings,
+        limits: undefined,
         runtime: "pi",
         squad: false,
         autoMerge: false,
@@ -420,4 +428,60 @@ test("the Start card shows the goal as written: no link, no markup, and a cut ca
       assert(!sent.text.includes("words"));
     }
   }
+});
+
+test("Start builds on main as it is at the tap and runs on this host's worker; a job of stage D2 waiting for Start keeps working (journal 193)", async (t) => {
+  const image = `ghcr.io/example/worker@sha256:${"b".repeat(64)}`;
+  const f = await fixture(t, {
+    settings: {
+      ...settings,
+      limits: undefined,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+      image,
+    } as any,
+  });
+  const r = await startCard(f);
+  const created = await f.row(r.jobId);
+  assert.equal(created.base_sha, "a".repeat(40));
+  // As stage D2 stored it: its own worker image and limits.
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    r.jobId,
+    JSON.stringify({
+      ...created.settings,
+      image: `ghcr.io/example/worker@sha256:${"9".repeat(64)}`,
+      limits: { ms: 10_800_000, models: 1500, tools: 4000 },
+      leaderModel: "anthropic/claude-opus-5.5",
+    }),
+  ]);
+  // Main moved during the day the card waited.
+  const main = "e".repeat(40);
+  (f.publisher as any).resolve = async () => main;
+  await f.c.requirements.confirm("a", r.approvalId, "a", r.messageId);
+  const queued = await f.row(r.jobId);
+  assert.equal(queued.state, "queued");
+  assert.equal(queued.base_sha, main);
+  assert.equal(queued.settings.image, image);
+  assert.equal(queued.settings.limits, undefined);
+  assert.equal(queued.settings.leaderModel, undefined);
+  assert.equal(await f.c.requirements.approved(queued), true);
+});
+
+test("a Start while main cannot be read is refused, and the same card starts the job afterwards (journal 193)", async (t) => {
+  const f = await fixture(t);
+  const r = await startCard(f);
+  (f.publisher as any).resolve = async () => {
+    throw new Error("GitHub unavailable");
+  };
+  await assert.rejects(
+    f.c.requirements.confirm("a", r.approvalId, "a", r.messageId),
+    /GitHub unavailable/,
+  );
+  assert.equal((await f.row(r.jobId)).state, "plan_ready");
+  (f.publisher as any).resolve = async () => "f".repeat(40);
+  await f.c.requirements.confirm("a", r.approvalId, "a", r.messageId);
+  const queued = await f.row(r.jobId);
+  assert.equal(queued.state, "queued");
+  assert.equal(queued.base_sha, "f".repeat(40));
 });
