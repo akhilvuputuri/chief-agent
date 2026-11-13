@@ -64,6 +64,7 @@ ROLLBACK;
 \set ON_ERROR_ROLLBACK on
 \set profile_calls '[]'
 \set profile_shapeless f
+\set profile_calls_read f
 WITH k AS (
   SELECT x.i ? 'shape' AS shaped, jsonb_build_object(
     'i', c.id, 'a', c.attempt_id, 'r', c.role, 's', c.state, 't', c.created_at,
@@ -121,9 +122,14 @@ WITH k AS (
   WHERE c.job_id = :'profile_job'::uuid)
 -- No ORDER BY here: sorting would carry each request copy through the sort. Every section
 -- orders the calls itself.
-SELECT coalesce(jsonb_agg(k), '[]')::text AS profile_calls, coalesce(bool_or(NOT shaped), false) AS profile_shapeless FROM k \gset
-\if :ERROR
-\echo 'The model calls could not be read in time; every figure taken from them is missing below.'
+SELECT coalesce(jsonb_agg(k), '[]')::text AS profile_calls, coalesce(bool_or(NOT shaped), false) AS profile_shapeless,
+  true AS profile_calls_read FROM k \gset
+-- If that read failed, no figure that needs the calls is printed: sections built only from them
+-- say they are not available, and the others leave their call columns empty ("-").
+\if :profile_calls_read
+\else
+\echo 'The model calls could not be read (see the error above). Not available below: sections 3, 3d, 4 to 4d, 5 and 5b; in section 1 the run, round,'
+\echo 'findings, approval and conflicting-rebase counts; in 1c the call counts; in 2 write_1h; in 3c first_seen. Whether every call has the one-session shape was not checked.'
 \endif
 \if :profile_shapeless
 \echo 'This job was recorded by the old coding loop (planner, OpenAI-shaped calls or host checks); this script reads only the one-session loop. Use the journal 172 draft for it.'
@@ -218,13 +224,13 @@ SELECT left(j.id::text, 8) AS job, j.state, j.stage, j.revision,
   (SELECT count(*) FROM coding_events WHERE job_id = j.id AND event_key LIKE 'machine-time:%') AS eight_hour_pauses,
   (SELECT count(*) FROM boxes_used) AS boxes,
   (SELECT count(*) FROM att) AS attempts,
-  (SELECT count(DISTINCT seg) FROM s WHERE role = 'coder') AS coder_runs,
-  (SELECT count(DISTINCT seg) FROM s WHERE role = 'reviewer') AS review_rounds,
-  (SELECT count(*) FROM calls WHERE role = 'reviewer' AND purpose = 'agent' AND verdict = 'REQUEST_CHANGES') AS findings_reports,
-  (SELECT count(*) FROM calls WHERE role = 'reviewer' AND purpose = 'agent' AND verdict = 'APPROVE') AS approvals,
+  CASE WHEN :'profile_calls_read'::boolean THEN (SELECT count(DISTINCT seg) FROM s WHERE role = 'coder') END AS coder_runs,
+  CASE WHEN :'profile_calls_read'::boolean THEN (SELECT count(DISTINCT seg) FROM s WHERE role = 'reviewer') END AS review_rounds,
+  CASE WHEN :'profile_calls_read'::boolean THEN (SELECT count(*) FROM calls WHERE role = 'reviewer' AND purpose = 'agent' AND verdict = 'REQUEST_CHANGES') END AS findings_reports,
+  CASE WHEN :'profile_calls_read'::boolean THEN (SELECT count(*) FROM calls WHERE role = 'reviewer' AND purpose = 'agent' AND verdict = 'APPROVE') END AS approvals,
   (SELECT count(*) FROM coding_revisions WHERE job_id = j.id AND request_key LIKE 'rebase:%') AS rebases,
-  (SELECT count(*) FROM coding_events e JOIN seen ON seen.id = e.id::text
-    WHERE e.job_id = j.id AND e.event_key LIKE 'inbox:rebase:%') AS conflicting_rebases,
+  CASE WHEN :'profile_calls_read'::boolean THEN (SELECT count(*) FROM coding_events e JOIN seen ON seen.id = e.id::text
+    WHERE e.job_id = j.id AND e.event_key LIKE 'inbox:rebase:%') END AS conflicting_rebases,
   (SELECT count(*) FROM coding_revisions WHERE job_id = j.id AND request_key LIKE 'mr-feedback:%') AS pr_feedback_rounds,
   j.pr_url IS NOT NULL AS has_pr,
   substring(j.pr_url FROM '/pull/([0-9]{1,9})$') AS pr_number
@@ -292,7 +298,7 @@ SELECT a.n || ' ' || left(a.attempt, 8) AS attempt, coalesce(box.state, '(no box
   round(extract(epoch FROM a.started - j.created_at) / 60, 1) AS start_min,
   round(extract(epoch FROM a.last_activity - a.started) / 60, 1) AS wall_min,
   round(box.ms / 60000.0, 1) AS machine_min,
-  coalesce(n.coder, 0) AS coder_calls, coalesce(n.reviewer, 0) AS reviewer_calls,
+  CASE WHEN :'profile_calls_read'::boolean THEN coalesce(n.coder, 0) END AS coder_calls, CASE WHEN :'profile_calls_read'::boolean THEN coalesce(n.reviewer, 0) END AS reviewer_calls,
   CASE WHEN EXISTS(SELECT 1 FROM e WHERE event_key = a.attempt || ':pr') THEN 'done (PR opened)'
     WHEN EXISTS(SELECT 1 FROM e WHERE event_key = a.attempt || ':publish-approved') THEN 'publishing'
     WHEN EXISTS(SELECT 1 FROM e WHERE event_key = 'machine-time:' || a.attempt) THEN 'eight-hour pause'
@@ -340,11 +346,12 @@ SELECT CASE WHEN GROUPING(role) = 1 THEN 'total' ELSE role END AS role,
   CASE WHEN GROUPING(purpose) = 1 THEN '' ELSE purpose END AS purpose,
   sum(calls) AS calls, sum(incomplete) AS incomplete,
   sum(prompt - cache_read - cache_write) AS input, sum(cache_read) AS cache_read, sum(cache_write) AS cache_write,
-  sum(write_1h) AS write_1h, sum(output) AS output, sum(thinking) AS thinking,
+  CASE WHEN :'profile_calls_read'::boolean THEN sum(write_1h) END AS write_1h, sum(output) AS output, sum(thinking) AS thinking,
   round(100 * sum(thinking) / nullif(sum(output) FILTER (WHERE thinking IS NOT NULL), 0), 1) AS thinking_pct,
   round(sum(cost), 4) AS cost_usd, sum(dropped) AS thinking_dropped
 FROM r GROUP BY GROUPING SETS ((role, purpose), ()) ORDER BY GROUPING(role), role, purpose;
 
+\if :profile_calls_read
 \echo '3. The loop: each coder run and review round in order (a run is consecutive calls of one role, across a box the host continued it in)'
 WITH j AS (SELECT * FROM coding_jobs WHERE id = :'profile_job'::uuid),
 calls AS MATERIALIZED (
@@ -400,6 +407,9 @@ SELECT CASE seg.role WHEN 'coder' THEN 'coder run ' WHEN 'reviewer' THEN 'review
     WHEN seg.report_kind IN ('done', 'ask') THEN seg.report_kind WHEN seg.report_kind IS NOT NULL THEN '(other)' END AS report,
   left(seg.candidate, 12) || CASE WHEN seg.candidates > 1 THEN ' (+' || (seg.candidates - 1) || ')' ELSE '' END AS candidate
 FROM seg CROSS JOIN j LEFT JOIN ucost USING (seg) ORDER BY seg.started;
+\else
+\echo '3. not available: the model calls could not be read'
+\endif
 
 \echo '3b. Milestones: Start, boxes continued or retried, rebases, publication, PR and its feedback rounds'
 WITH j AS (SELECT * FROM coding_jobs WHERE id = :'profile_job'::uuid),
@@ -472,11 +482,13 @@ seen AS (
   ORDER BY x.id, calls.created_at, calls.id)
 SELECT i.source, round(extract(epoch FROM i.created_at - j.created_at) / 60, 1) AS at_min, i.held,
   coalesce(j.checkpoint->'piState'->'delivered', '[]'::jsonb) ? i.id::text AS delivered,
-  round(extract(epoch FROM seen.created_at - j.created_at) / 60, 1) AS first_seen_min, seen.role AS seen_by
+  CASE WHEN :'profile_calls_read'::boolean THEN round(extract(epoch FROM seen.created_at - j.created_at) / 60, 1) END AS first_seen_min,
+  CASE WHEN :'profile_calls_read'::boolean THEN seen.role END AS seen_by
 FROM i CROSS JOIN j LEFT JOIN seen ON seen.id = i.id::text
 -- The host's own inbox order (CodingController.inbox).
 ORDER BY i.created_at, i.seq, i.id;
 
+\if :profile_calls_read
 \echo '3d. Rebases onto main: clean (straight to review) or conflicting (the coder resolved them), and the review round that followed'
 WITH j AS (SELECT * FROM coding_jobs WHERE id = :'profile_job'::uuid),
 calls AS MATERIALIZED (
@@ -513,7 +525,11 @@ FROM r CROSS JOIN j
 LEFT JOIN LATERAL (SELECT rounds.n, rounds.started, rounds.verdict FROM rounds WHERE rounds.started > coalesce(r.coder_saw, r.created_at)
   ORDER BY rounds.started LIMIT 1) f ON true
 ORDER BY r.created_at, r.id;
+\else
+\echo '3d. not available: the model calls could not be read'
+\endif
 
+\if :profile_calls_read
 \echo '4. Tool use per assistant turn (completed agent calls; Anthropic tool_use blocks)'
 WITH calls AS MATERIALIZED (
   SELECT (e->>'i')::uuid AS id, e->>'a' AS attempt, e->>'r' AS role, e->>'p' AS purpose, e->>'s' AS state,
@@ -525,7 +541,11 @@ SELECT role, count(*) AS turns, count(*) FILTER (WHERE jsonb_array_length(tools)
   count(*) FILTER (WHERE jsonb_array_length(tools) >= 3) AS three_or_more,
   sum(jsonb_array_length(tools)) AS tool_calls, max(jsonb_array_length(tools)) AS most_in_one_turn
 FROM calls WHERE state = 'complete' AND purpose = 'agent' GROUP BY role ORDER BY role;
+\else
+\echo '4. not available: the model calls could not be read'
+\endif
 
+\if :profile_calls_read
 \echo '4b. Tool calls by name (a name that is not one of Pi''s tools or report is shown as (other))'
 WITH calls AS MATERIALIZED (
   SELECT (e->>'i')::uuid AS id, e->>'a' AS attempt, e->>'r' AS role, e->>'p' AS purpose, e->>'s' AS state,
@@ -535,7 +555,11 @@ WITH calls AS MATERIALIZED (
 t AS (SELECT calls.role, x.v->>0 AS tool FROM calls CROSS JOIN LATERAL jsonb_array_elements(calls.tools) AS x(v)
   WHERE calls.state = 'complete' AND calls.purpose = 'agent')
 SELECT role, tool, count(*) AS calls FROM t GROUP BY role, tool ORDER BY role, count(*) DESC, tool;
+\else
+\echo '4b. not available: the model calls could not be read'
+\endif
 
+\if :profile_calls_read
 \echo '4c. bash commands by class, from the first program word against a fixed list (no command text is printed)'
 WITH calls AS MATERIALIZED (
   SELECT (e->>'i')::uuid AS id, e->>'a' AS attempt, e->>'r' AS role, e->>'p' AS purpose, e->>'s' AS state,
@@ -545,7 +569,11 @@ WITH calls AS MATERIALIZED (
 t AS (SELECT calls.role, x.v->>1 AS class FROM calls CROSS JOIN LATERAL jsonb_array_elements(calls.tools) AS x(v)
   WHERE calls.state = 'complete' AND calls.purpose = 'agent' AND x.v->>0 = 'bash')
 SELECT role, class, count(*) AS calls FROM t GROUP BY role, class ORDER BY role, count(*) DESC, class;
+\else
+\echo '4c. not available: the model calls could not be read'
+\endif
 
+\if :profile_calls_read
 \echo '4d. The coder''s exploration: agent calls before its first edit or write, and the largest request context per role'
 WITH j AS (SELECT * FROM coding_jobs WHERE id = :'profile_job'::uuid),
 calls AS MATERIALIZED (
@@ -564,7 +592,11 @@ SELECT c.role, count(*) AS agent_calls, min(firsts.before_edit) AS calls_before_
   max(c.context) AS largest_context,
   round(extract(epoch FROM min(largest.created_at) - min(j.created_at)) / 60, 1) AS largest_at_min
 FROM c CROSS JOIN j LEFT JOIN firsts USING (role) LEFT JOIN largest USING (role) GROUP BY c.role ORDER BY c.role;
+\else
+\echo '4d. not available: the model calls could not be read'
+\endif
 
+\if :profile_calls_read
 \echo '5. Context per agent call (input + cache read + cache write) by run, and Pi''s compactions'
 WITH calls AS MATERIALIZED (
   SELECT (e->>'i')::uuid AS id, e->>'a' AS attempt, e->>'r' AS role, e->>'p' AS purpose, e->>'s' AS state,
@@ -591,7 +623,11 @@ SELECT role, CASE WHEN GROUPING(run) = 1 THEN 'all' ELSE run::text END AS run,
   (array_agg(context ORDER BY created_at DESC) FILTER (WHERE purpose = 'agent' AND context IS NOT NULL))[1] AS last,
   count(*) FILTER (WHERE purpose = 'compaction') AS compactions
 FROM x GROUP BY GROUPING SETS ((role, run), (role)) ORDER BY role, GROUPING(run), run;
+\else
+\echo '5. not available: the model calls could not be read'
+\endif
 
+\if :profile_calls_read
 \echo '5b. Each compaction: when, the context it summarised, and the next agent call''s context in that role'
 WITH j AS (SELECT * FROM coding_jobs WHERE id = :'profile_job'::uuid),
 calls AS MATERIALIZED (
@@ -602,5 +638,8 @@ calls AS MATERIALIZED (
 SELECT k.role, round(extract(epoch FROM k.created_at - j.created_at) / 60, 1) AS at_min, k.state, k.context AS summarised_context,
   (SELECT n.context FROM calls n WHERE n.role = k.role AND n.purpose = 'agent' AND n.created_at > k.created_at ORDER BY n.created_at LIMIT 1) AS next_context
 FROM calls k CROSS JOIN j WHERE k.purpose = 'compaction' ORDER BY k.created_at;
+\else
+\echo '5b. not available: the model calls could not be read'
+\endif
 
 ROLLBACK;

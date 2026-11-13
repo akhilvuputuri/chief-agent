@@ -31,7 +31,8 @@ type Row = Record<string, string>;
  * a failed statement is rolled back to a savepoint set before it, its error is printed and the
  * run goes on, setting ERROR as psql does. Returns the printed text and each section's rows
  * under the number its \echo heading gives. `fail` makes the statement of that section fail
- * in the database, to show what a timed-out section leaves.
+ * in the database, to show what a timed-out section leaves; `fail: "calls"` fails the
+ * statement that reads the model calls.
  */
 async function profile(
   db: { query: (sql: string, params?: unknown[]) => Promise<any> },
@@ -130,9 +131,11 @@ async function profile(
       let result: any;
       try {
         if (rollback) await db.query("SAVEPOINT psql_statement");
-        result = await db.query(
-          gset || section !== fail ? sql : "SELECT 1/0 AS failed",
-        );
+        const failing =
+          fail === "calls"
+            ? gset && sql.includes("AS profile_calls")
+            : !gset && section === fail;
+        result = await db.query(failing ? "SELECT 1/0 AS failed" : sql);
         if (rollback) await db.query("RELEASE SAVEPOINT psql_statement");
         vars.ERROR = "false";
       } catch (error) {
@@ -1473,6 +1476,57 @@ test("a section that fails, as on the statement timeout, prints its error and th
     script.indexOf("\\set ON_ERROR_STOP off") >
       script.indexOf("\\if :profile_old"),
   );
+});
+
+test("when the model calls cannot be read, no figure that needs them is printed, and the rest is", async (t) => {
+  const { db, jobId } = await syntheticJob(t);
+  const { text, sections } = await profile(db, jobId.slice(0, 8), "calls");
+  assert.match(text, /^ERROR: {2}division by zero$/m);
+  assert.match(
+    text,
+    /The model calls could not be read \(see the error above\)/,
+  );
+  // Sections built only from the calls say so and print no rows.
+  for (const n of ["3", "3d", "4", "4b", "4c", "4d", "5", "5b"]) {
+    assert.equal(sections[n], undefined, n);
+    assert.match(
+      text,
+      new RegExp(
+        `^${n}\\. not available: the model calls could not be read$`,
+        "m",
+      ),
+    );
+  }
+  // Mixed sections keep what the events, revisions and boxes give, with the call columns empty.
+  const [s] = sections["1"]!;
+  for (const k of [
+    "coder_runs",
+    "review_rounds",
+    "findings_reports",
+    "approvals",
+    "conflicting_rebases",
+  ])
+    assert.equal(s![k], "-", k);
+  assert.equal(s!.start_at_min, "10.0");
+  assert.equal(s!.machine_min, "40.0");
+  assert.equal(s!.rebases, "2");
+  assert.deepEqual(
+    sections["1c"]!.map((r) => [r.coder_calls, r.reviewer_calls, r.ended]),
+    [
+      ["-", "-", "box lifetime, continued"],
+      ["-", "-", "done (PR opened)"],
+      ["-", "-", "done (PR opened)"],
+      ["-", "-", "done (PR opened)"],
+    ],
+  );
+  for (const r of sections["2"]!) assert.equal(r.write_1h, "-");
+  assert.equal(row(sections["2"], { role: "total" }).calls, "16");
+  for (const r of sections["3c"]!) {
+    assert.equal(r.first_seen_min, "-");
+    assert.equal(r.seen_by, "-");
+  }
+  assert(sections["3b"]!.length > 0);
+  assert(!text.includes(MARKER));
 });
 
 test("the profile script writes nothing and runs no dynamic SQL", async () => {
