@@ -65,11 +65,14 @@ FROM events WHERE type='judge.probe' AND created_at>now()-interval '30 days'
 GROUP BY data->>'mutation' ORDER BY data->>'mutation';
 
 -- 6. Planted decoy memories, last 30 days: judged turns that carried one, and how many times
--- the judge called it relevant.
+-- the judge called it relevant. Turns judged before decoys were planted (judge-v1 and v2) are
+-- left out; counting them doubled the first figure read from this query.
 SELECT 'decoy' AS row, count(*) AS turns,
   count(*) FILTER (WHERE (data->>'decoyHit')::boolean) AS called_relevant
 FROM events WHERE type='judge.turn' AND data->>'state'='judged'
-  AND created_at>now()-interval '30 days';
+  AND created_at>now()-interval '30 days'
+  AND run_id IN (SELECT run_id FROM learner_runs
+    WHERE prompt_version LIKE 'judge-%' AND prompt_version NOT IN ('judge-v1','judge-v2'));
 
 -- 7. Verdicts judged again, last 30 days: how often the same model repeated its first
 -- verdict (a repeat that gave no verdict is "missed" and is not stable), and how often the

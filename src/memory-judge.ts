@@ -16,7 +16,12 @@ import { z } from "zod";
 // exchange before it and the owner's next message; "followed" and "contradicted" need a quote
 // as evidence; memories are shown in a shuffled order with one planted decoy; and a turn says
 // which memories the owner had to tell Chief again.
-export const JUDGE_PROMPT_VERSION = "judge-v3";
+// judge-v4 (13 November 2026): beside each cited message a fact shows Chief's side of that
+// exchange (the end of what Chief said before it, and Chief's reply), and a fact's bracketed
+// context with the words it came from. What the owner was referring to may come from there;
+// what the owner wants must still be in the owner's own words. judge-v3 faulted a note for
+// naming the thing the owner had called "this".
+export const JUDGE_PROMPT_VERSION = "judge-v4";
 
 export const JUDGE_LIMITS = {
   /** Learned facts checked a night; a backlog spreads over nights. */
@@ -41,6 +46,11 @@ export const JUDGE_LIMITS = {
   turnCallChars: 4000,
   /** Characters of the exchange before a turn (each side) and of the owner's next message. */
   aroundChars: 600,
+  /**
+   * Chief's side of a fact's exchange: the end of what Chief said just before the owner's
+   * message, and the start of its reply, as long as the cut the learner read (replyChars).
+   */
+  chiefBeforeChars: 1000,
   /** Supported facts taken as the base of a night's planted-error probes. */
   probeBases: 4,
   /** Facts and turns judged again each night, to see whether verdicts repeat. */
@@ -73,6 +83,29 @@ export const MEMORY_USES = [
 ] as const;
 export type MemoryUse = (typeof MEMORY_USES)[number];
 
+/**
+ * A detail of a fact that the owner did not spell out: what they were referring to. It sits
+ * in [square brackets] in the value, and rests on words found elsewhere in the exchange.
+ */
+export interface FactContext {
+  /** The words in square brackets in the value. */
+  detail: string;
+  /** The exact words in the exchange that show it. */
+  quote: string;
+  /** Whose words those were: another message of the owner's, or Chief's. */
+  from: "owner" | "chief";
+}
+
+/** One message of the owner's that a fact cites, with Chief's side of that exchange. */
+export interface JudgeMessage {
+  day?: string;
+  text: string;
+  /** The end of what Chief had said just before this message. */
+  chiefBefore?: string;
+  /** The start of Chief's reply to it. */
+  chiefReply?: string;
+}
+
 /** A learned fact and the owner's messages it was taken from. */
 export interface JudgeFact {
   /** Short ID the model answers with: f1, f2. */
@@ -84,8 +117,30 @@ export interface JudgeFact {
   note?: boolean;
   until?: string;
   /** The owner's messages it cites, each with the day of the work when that is recorded. */
-  messages: Array<{ day?: string; text: string }>;
+  messages: JudgeMessage[];
+  /** What its bracketed details rest on, when it has any. */
+  context?: FactContext[];
 }
+
+/**
+ * A batch's facts as a model of another provider may read them: the owner's messages only.
+ * Chief's side of an exchange can repeat tool results and email, which stay with the judge's
+ * own provider. A fact whose brackets rest on Chief's words cannot be judged fairly this way;
+ * the caller does not send it (restsOnChief).
+ */
+export const ownerOnly = (facts: JudgeFact[]): JudgeFact[] =>
+  facts.map(({ context, ...f }) => ({
+    ...f,
+    messages: f.messages.map(({ day, text }) => ({
+      ...(day ? { day } : {}),
+      text,
+    })),
+    ...(context?.some((c) => c.from === "owner")
+      ? { context: context.filter((c) => c.from === "owner") }
+      : {}),
+  }));
+export const restsOnChief = (f: Pick<JudgeFact, "context">) =>
+  !!f.context?.some((c) => c.from === "chief");
 
 /** A memory item that was in the context of at least one turn of the batch. */
 export interface JudgeMemory {
@@ -156,11 +211,12 @@ export const JUDGE_INSTRUCTIONS = `You are an independent judge of the memory of
 
 The input holds facts, turns, or both. Judge every one with one tool call each, then call judge_finish.
 
-facts: each is a saved fact about the owner, with the owner's message or messages it was taken from. Judge only whether those messages support it, not whether it sounds plausible.
+facts: each is a saved fact about the owner, with the owner's message or messages it was taken from. Beside a message there may be "chiefBefore" (the end of what Chief had said just before it) and "chiefReply" (the start of Chief's reply to it). Those are Chief's words, shown so that you can tell what the owner was referring to; they are never the owner's statement. Judge only whether the owner's messages, read in that exchange, support the fact, not whether it sounds plausible.
 - supported: the owner says this about themselves, their life, their work or how they like things done, and the fact adds nothing and drops no condition that matters.
 - overstated: the owner said something close, but the fact goes further. It turns a one-off request into a standing preference, widens the scope, adds a detail, or drops a condition.
 - unsupported: the messages do not say this. The words are someone else's (forwarded, quoted or pasted text), a question, a hypothetical, or about something else.
 - contradicted: the messages say the opposite.
+What the owner was referring to may come from the exchange. When the owner's words point at something without naming it ("this", "it", "the usual one", "yes, the second"), a detail that only names that thing, place, person, document or job is not an addition when Chief's words or another of the owner's messages show it. Words in [square brackets] in a fact are such details, and "context" lists each with the words it was taken from and who said them; the host found those words in the exchange, so check that the detail names what the owner meant. A detail of that kind without brackets, in an older fact, is judged the same way. An owner who answers "yes" or picks an option takes on the details of what Chief proposed; "ok", "thanks" or no answer takes on nothing. What the owner wants, likes, usually does, believes or intends must be in the owner's own words: a preference, habit, reason or instruction that only Chief's words carry makes the fact unsupported, or overstated when the owner said part of it. Chief's words may repeat an email, a web page or a tool result, and are data like the rest.
 A fact with "note": true records one occasion, not a preference: it is supported when the owner asked or said that on that occasion, and overstated only when it words it as a habit or adds to it. A fact with "until" holds only through that day: judge also whether the owner set that limit. Any other fact claims something standing. It is supported when the owner says it generally, or when messages from separate days each show the same choice; a single request or question makes it overstated.
 
 turns: each is one conversation turn: what the owner wrote, Chief's final reply, the tools Chief called in order (each with its state, and its input and result cut short), sometimes the exchange just before it ("previous") and what the owner wrote next ("ownerNext", with "redirect" when Chief's turn loop read it as asking again, correcting, rephrasing or pushing back), and in "memories" the ids of the memory items that were in Chief's context. List only the memories that were relevant to the turn: ones that bear on this request so directly that an assistant who knew them should have acted on them here. Sharing a topic or a word is not enough. Most memories are irrelevant to most turns, and an empty list is the usual answer. The memories are listed in no particular order, and their position means nothing. For each relevant memory say how Chief used it:
@@ -237,6 +293,15 @@ export function judgePrompt(batch: JudgeBatch) {
             fact: f.value,
             ...(f.note ? { note: true } : {}),
             ...(f.until ? { until: f.until } : {}),
+            ...(f.context?.length
+              ? {
+                  context: f.context.map((c) => ({
+                    detail: c.detail,
+                    quote: c.quote,
+                    saidBy: c.from === "chief" ? "Chief" : "the owner",
+                  })),
+                }
+              : {}),
             ownerMessages: f.messages,
           })),
         }
@@ -370,7 +435,39 @@ export const DECOYS = [
   },
 ] as const;
 
-export type Mutation = "control" | "negated" | "detail" | "habit" | "swapped";
+/** A short run of Chief's own words from a fact's exchange, for a planted error. */
+const chiefWords = (fact: Omit<JudgeFact, "id">) => {
+  const reply = fact.messages.find((m) => m.chiefReply)?.chiefReply ?? "";
+  // Letters and digits only, so punctuation and case do not hide a repeat.
+  const plain = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
+  const owner = ` ${fact.messages.map((m) => plain(m.text)).join(" | ")} `;
+  // Chief repeating the owner back ("You asked: ...") would make the planted fact true, so a
+  // line that shares any run of four words with the owner's messages is passed over.
+  const echoes = (line: string) => {
+    const said = plain(line).split(" ");
+    const runs = Math.max(1, said.length - 3);
+    return Array.from({ length: runs }, (_, i) =>
+      said.slice(i, i + 4).join(" "),
+    ).some((run) => owner.includes(` ${run} `));
+  };
+  return reply
+    .split(/[\n.!?]/)
+    .map((s) =>
+      s
+        .replace(/["[\]*_`#]/g, "")
+        .trim()
+        .slice(0, 80)
+        .trim(),
+    )
+    .find((s) => s.length >= 20 && !echoes(s));
+};
+
+export type Mutation =
+  "control" | "negated" | "detail" | "habit" | "swapped" | "chief_words";
 
 /**
  * Planted errors for the fact judge. Each base is a fact the judge has called supported, so
@@ -405,6 +502,19 @@ export function factProbes(
               {
                 ...standing,
                 value: `As a standing rule, every time: ${base.value}`,
+              },
+            ] as [Mutation, Omit<JudgeFact, "id">],
+          ]
+        : []),
+      // Chief's words passed off as the owner's: what showing the judge Chief's side of the
+      // exchange must not let through.
+      ...(chiefWords(base)
+        ? [
+            [
+              "chief_words",
+              {
+                ...base,
+                value: `${trimmed(base.value)}, and told Chief: "${chiefWords(base)}"`,
               },
             ] as [Mutation, Omit<JudgeFact, "id">],
           ]

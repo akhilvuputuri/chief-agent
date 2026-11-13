@@ -14,7 +14,9 @@ import {
   judgePrompt,
   judgeTools,
   newJudgements,
+  ownerOnly,
   recordJudgement,
+  restsOnChief,
   shownInTurn,
   shuffled,
   turnScore,
@@ -488,14 +490,20 @@ test("the judge checks a new fact against the message it cites, and a turn again
   const result = await judge(db, adapter);
   assert.equal(result.state, "completed");
   assert.equal(inputs.length, 2);
-  // Facts: only the one whose message still exists goes to the model, as the owner's words.
+  // Facts: only the one whose message still exists goes to the model, as the owner's words,
+  // with Chief's reply to it beside them.
   const facts = JSON.parse(inputs[0].messages[1].content);
   assert.deepEqual(facts, {
     facts: [
       {
         id: "f1",
         fact: "Prefers aisle seats",
-        ownerMessages: [{ text: "For this trip only, get me an aisle seat" }],
+        ownerMessages: [
+          {
+            text: "For this trip only, get me an aisle seat",
+            chiefReply: "Done",
+          },
+        ],
       },
     ],
   });
@@ -1051,7 +1059,11 @@ test("the judge is told a fact's kind and each message's day, so a note or a rep
       fact: "Asked for an aisle seat on the Tokyo flight",
       note: true,
       ownerMessages: [
-        { day: "2026-11-23", text: "Get me an aisle seat on the Tokyo flight" },
+        {
+          day: "2026-11-23",
+          text: "Get me an aisle seat on the Tokyo flight",
+          chiefReply: "Booked",
+        },
       ],
     },
     {
@@ -1059,8 +1071,16 @@ test("the judge is told a fact's kind and each message's day, so a note or a rep
       fact: "Prefers aisle seats",
       // Both days, oldest first: the repeat is what supports a preference.
       ownerMessages: [
-        { day: "2026-11-23", text: "Get me an aisle seat on the Tokyo flight" },
-        { day: "2026-11-25", text: "Aisle seat again for Osaka" },
+        {
+          day: "2026-11-23",
+          text: "Get me an aisle seat on the Tokyo flight",
+          chiefReply: "Booked",
+        },
+        {
+          day: "2026-11-25",
+          text: "Aisle seat again for Osaka",
+          chiefReply: "Booked",
+        },
       ],
     },
     {
@@ -1068,7 +1088,11 @@ test("the judge is told a fact's kind and each message's day, so a note or a rep
       fact: "Wants aisle seats this month",
       until: "2026-11-30",
       ownerMessages: [
-        { day: "2026-11-25", text: "Aisle seat again for Osaka" },
+        {
+          day: "2026-11-25",
+          text: "Aisle seat again for Osaka",
+          chiefReply: "Booked",
+        },
       ],
     },
   ]);
@@ -1347,11 +1371,23 @@ test("the judge is checked each night: planted errors, repeats and a second mode
   );
   assert.ok(["negated", "detail"].includes(planted[1]!.mutation));
   // The repeats read the night's facts and turns. The other family is shown the facts and
-  // the owner's messages only: a turn's tool calls stay with the judge's own provider.
+  // the owner's messages only: a turn's tool calls and Chief's replies, which can repeat
+  // them, stay with the judge's own provider.
   assert.equal(shownTo(main.inputs[4]).turns.length, 1);
+  assert.equal(
+    shownTo(main.inputs[4]).facts[0].ownerMessages[0].chiefReply,
+    "Noted.",
+  );
   assert.deepEqual(shownTo(second.inputs[0]), {
-    facts: shownTo(main.inputs[4]).facts,
+    facts: [
+      {
+        id: "f1",
+        fact: "Is vegetarian",
+        ownerMessages: [{ text: "I am vegetarian" }],
+      },
+    ],
   });
+  assert.doesNotMatch(JSON.stringify(second.inputs[0]), /Noted\./);
   assert.deepEqual(
     [
       result.checked,
@@ -1536,5 +1572,252 @@ test("a claim of use the host cannot find in the turn is recorded as unclear, wi
   assert.deepEqual(
     [event!.relevant[0].use, event!.relevant[0].claimed],
     ["unclear", "followed"],
+  );
+});
+
+test("the judge reads Chief's side of a fact's exchange and the fact's bracketed context, at high effort", async (t) => {
+  const db = await setup(t);
+  // What Chief had said shortly before, and its reply to the owner's message.
+  await turn(db, {
+    says: "Are my library books overdue?",
+    reply:
+      "Two of your library books are overdue. Want me to open the renewal form on the tablet?",
+    ago: 3 * DAY + 3600_000,
+    selected: [],
+  });
+  const asked = await turn(db, {
+    says: "Can you check if this opens on the tablet",
+    reply:
+      "I opened the library renewal form for the two overdue books on the tablet and it loaded.",
+    ago: 3 * DAY,
+    selected: [],
+  });
+  const context = [
+    {
+      detail: "the library renewal form",
+      quote: "the library renewal form for the two overdue books",
+      from: "chief",
+    },
+  ];
+  await new MemoryStore(db).write("owner", {
+    key: "browser_check",
+    value: "Asked for a tablet check of [the library renewal form]",
+    kind: "fact",
+    origin: "learned",
+    reason: "test",
+    source: { messageIds: [asked.input], durability: "one_off", context },
+  });
+  const { adapter, inputs } = model((input) =>
+    (shownTo(input).facts ?? []).map((f: any) => [
+      "judge_fact",
+      {
+        fact: f.id,
+        verdict: "supported",
+        reason: "Chief's reply names the form",
+      },
+    ]),
+  );
+  const result = await judge(db, adapter);
+  assert.deepEqual([result.state, result.supported], ["completed", 1]);
+  assert.deepEqual(shownTo(inputs[0]).facts, [
+    {
+      id: "f1",
+      fact: "Asked for a tablet check of [the library renewal form]",
+      note: true,
+      context: [
+        {
+          detail: "the library renewal form",
+          quote: "the library renewal form for the two overdue books",
+          saidBy: "Chief",
+        },
+      ],
+      ownerMessages: [
+        {
+          text: "Can you check if this opens on the tablet",
+          chiefBefore:
+            "Two of your library books are overdue. Want me to open the renewal form on the tablet?",
+          chiefReply:
+            "I opened the library renewal form for the two overdue books on the tablet and it loaded.",
+        },
+      ],
+    },
+  ]);
+  const instructions = inputs[0].messages[0].content as string;
+  assert.match(
+    instructions,
+    /What the owner was referring to may come from the exchange/,
+  );
+  assert.match(instructions, /must be in the owner's own words/);
+  assert.equal(inputs[0].reasoning, "high");
+  assert.equal(JUDGE_PROMPT_VERSION, "judge-v4");
+});
+
+test("another provider's model is shown the owner's words only, and Chief's words passed off as the owner's are a planted error", () => {
+  const fact = {
+    id: "f1",
+    revisionId: "a",
+    key: "a",
+    value: "Asked for a check of [the renewal page] for [the blue pair]",
+    context: [
+      {
+        detail: "the renewal page",
+        quote: "the renewal page loaded",
+        from: "chief" as const,
+      },
+      {
+        detail: "the blue pair",
+        quote: "the blue pair from Uniqlo",
+        from: "owner" as const,
+      },
+    ],
+    messages: [
+      {
+        day: "2026-11-24",
+        text: "Check this for the blue pair from Uniqlo",
+        chiefBefore: "Shall I open it?",
+        chiefReply:
+          "I opened it and the renewal page loaded without a login. Anything else?",
+      },
+    ],
+  };
+  assert.deepEqual(ownerOnly([fact]), [
+    {
+      id: "f1",
+      revisionId: "a",
+      key: "a",
+      value: fact.value,
+      context: [fact.context[1]],
+      messages: [{ day: "2026-11-24", text: fact.messages[0]!.text }],
+    },
+  ]);
+  // Judged from the owner's words alone, a detail resting on Chief's would look made up.
+  assert.equal(restsOnChief(fact), true);
+  assert.equal(restsOnChief({ context: [fact.context[1]!] }), false);
+  assert.equal(restsOnChief({}), false);
+  // The planted error quotes Chief and says the owner told Chief so.
+  const { id: _id, ...base } = fact;
+  const seen = new Set<string>();
+  for (let seed = 0; seed < 60; seed++)
+    for (const p of factProbes([base], String(seed)))
+      if (p.mutation === "chief_words") seen.add(p.fact.value);
+  assert.deepEqual(
+    [...seen],
+    [
+      `${fact.value}, and told Chief: "I opened it and the renewal page loaded without a login"`,
+    ],
+  );
+});
+
+test("a planted error never quotes words the owner wrote, and a fact resting on Chief's words is kept from the second model", async (t) => {
+  // Chief repeating the owner back would make the planted fact true, so that line is passed over.
+  const echo = {
+    revisionId: "a",
+    key: "a",
+    value: "Asked for the renewal form",
+    messages: [
+      {
+        text: "Open the renewal form for my two overdue library books please",
+        chiefReply:
+          "You asked: open the renewal form for my two overdue library books. The form is open and ready to sign.",
+      },
+    ],
+  };
+  const quoted = new Set<string>();
+  for (let seed = 0; seed < 60; seed++)
+    for (const p of factProbes([echo], String(seed)))
+      if (p.mutation === "chief_words") quoted.add(p.fact.value);
+  assert.deepEqual(
+    [...quoted],
+    [
+      'Asked for the renewal form, and told Chief: "The form is open and ready to sign"',
+    ],
+  );
+  const only = {
+    ...echo,
+    messages: [
+      {
+        ...echo.messages[0]!,
+        chiefReply: "Open the renewal form for my two overdue library books.",
+      },
+    ],
+  };
+  for (let seed = 0; seed < 60; seed++)
+    assert.ok(
+      factProbes([only], String(seed)).every(
+        (p) => p.mutation !== "chief_words",
+      ),
+    );
+
+  // Two faulted facts, one resting on Chief's words: the second model reads only the other.
+  const db = await setup(t);
+  const asked = await turn(db, {
+    says: "Can you check if this opens on the tablet",
+    reply: "I opened the library renewal form on the tablet and it loaded.",
+    ago: 3 * DAY,
+    selected: [],
+  });
+  const store = new MemoryStore(db);
+  const bracketed = await store.write("owner", {
+    key: "tablet_check",
+    value: "Usually checks [the library renewal form] on the tablet",
+    kind: "fact",
+    origin: "learned",
+    reason: "test",
+    source: {
+      messageIds: [asked.input],
+      durability: "one_off",
+      context: [
+        {
+          detail: "the library renewal form",
+          quote: "the library renewal form on the tablet",
+          from: "chief",
+        },
+      ],
+    },
+  });
+  const plain = await learned(
+    db,
+    "tablet_habit",
+    "Always checks things on the tablet",
+    [asked.input],
+  );
+  const answer = (input: any): Call[] =>
+    (shownTo(input).facts ?? []).map((f: any) => [
+      "judge_fact",
+      { fact: f.id, verdict: "overstated", reason: "One request" },
+    ]);
+  const main = model(answer);
+  const second = model(answer);
+  const result = (await (
+    new Learner(db, {
+      model: main.adapter,
+      modelName: "judge/model",
+      judgeSecond: { model: second.adapter, modelName: "other/model" },
+      clock: () => NIGHT,
+    }) as any
+  ).runJudge("owner", NIGHT)) as Record<string, any>;
+  assert.equal(result.state, "completed");
+  assert.equal(second.inputs.length, 1);
+  assert.deepEqual(
+    shownTo(second.inputs[0]).facts.map((f: any) => [f.fact, f.ownerMessages]),
+    [
+      [
+        "Always checks things on the tablet",
+        [{ text: "Can you check if this opens on the tablet" }],
+      ],
+    ],
+  );
+  assert.doesNotMatch(JSON.stringify(second.inputs[0]), /library renewal form/);
+  const checks = await events(db, "judge.check");
+  assert.deepEqual(
+    checks.map((e) => [e.revisionId, e.chiefSide, e.second]).sort(),
+    [
+      [bracketed.id, true, undefined],
+      [plain.id, true, "overstated"],
+    ].sort(),
+  );
+  assert.deepEqual(
+    [result.checked, result.crossChecked, result.disagreed],
+    [2, 1, 0],
   );
 });
