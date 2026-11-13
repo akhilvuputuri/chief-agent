@@ -1,7 +1,15 @@
+## Read-only profile script for coding jobs (14 November 2026)
+
+- **Code.** `scripts/coding-job-profile.sql` prints where one coding job's time and money went on the rebuilt loop, from `coding_jobs`, `coding_events`, `coding_model_calls` and `boxes`. It runs in a read-only transaction with statement and lock timeouts and prints totals and known names only. No runtime code, migration or Compose change.
+- **Why.** To read the first real job on the rebuilt loop against job `9600af57`. See [journal 194](journey/194-coding-job-profile.md).
+- **Deployment.** A script run by hand against production; nothing is deployed.
+
 ## Worker image for the rebuilt coding loop (14 November 2026)
 
 - **Configuration.** New coding jobs pin worker image `sha256:8e23a9ab…`, built from `6bf095e` (run 43359937805). It carries the worker side of [journal 193](journey/193-rebase-backstop-limits.md) and completes the loop in [the design](coding-simple-loop.md). `previousImages` stays empty: the previous image refuses rebase items and its saves do not record a base, and no coding job is open on it. No code, migration or Compose change.
 - **Deployment.** Not yet recorded as live; a dated note follows on release.
+
+> **Update, 14 November 2026:** merged as `412ef05` (PR 489); release run 43361922954 succeeded, the gateway was healthy at `412ef05` and the server's `config/coding-pi.json` carried `sha256:8e23a9ab…` with no `limits`, `leaderModel` or `planCheck`. No coding job has run on the rebuilt loop yet.
 
 ## Coding jobs rebase with git, continue across boxes and lose their count caps (13 November 2026)
 

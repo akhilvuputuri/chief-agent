@@ -131,3 +131,5 @@ Built as separate pieces, each reviewed and merged by itself:
 - **D.** The loop, in three stages. D1: go gate, no planner (journal 191). D2: one session per job, the review copy, the inbox, short asks, the host check stage and worker limits removed (journal 192). D3: in-box rebase on conflict, the eight-hour backstop with automatic continuation, remaining caps removed (journal 193). Host and worker.
 
 Worker changes reach jobs through a new worker image pinned by digest in `config/coding-pi.json`. The gateway is released before the pin. Between the host release of B or D and the pin, no coding job should be started. Then one real job is run and read with `scripts/coding-job-profile.sql` (PR 467).
+
+> **Update, 13 November 2026 ([journal 194](journey/194-coding-job-profile.md)):** the profile script is rewritten for this loop (Anthropic-shaped call records, coder and reviewer runs, the inbox, boxes and machine time) and replaces PR 467's draft; it refuses an old-loop job in one line.

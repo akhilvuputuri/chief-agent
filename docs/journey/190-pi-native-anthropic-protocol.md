@@ -61,6 +61,9 @@ Not released. The worker image must be rebuilt and pinned with this runtime, and
 ## Follow-up and next iteration
 
 - The profile script (`scripts/coding-job-profile.sql` on `origin/coding-job-profile`) reads `result->'message'->'tool_calls'`; it needs `result->'content'` with `tool_use` blocks. The orchestrator will update it.
+
+  > **Update, 13 November 2026 ([journal 194](194-coding-job-profile.md)):** done: the script reads the `tool_use` blocks of the stored Anthropic responses.
+
 - The manual acceptance kits (`scripts/pi-acceptance/`, `scripts/fixtures/pi-report-proxy.mjs`) still describe the OpenRouter route and the terminal-recovery probe; they need porting or retiring.
 
 > **Update, 13 November 2026:** retired. The runner, broker, provider helper and report proxy and their tests are deleted; the workload manifest, oracle template, `prepare-oracle.mjs`, `metrics.mjs` (its test passes) and recorded results are kept unchanged ([verification contract](../pi-runtime-verification.md)).
