@@ -81,6 +81,8 @@ const assignmentSchema = z.object({
     .optional(),
   checkpoint,
   deadline: z.string().datetime(),
+  /** When to stop and save, on the host's clock: the box's lifetime less the save margin. */
+  stopInMs: z.number().int().nonnegative(),
   /** Every inbox item of the job, oldest first; the checkpoint lists those delivered. */
   inbox: z.array(inboxItem).default([]),
 });
@@ -207,6 +209,8 @@ export async function runPiWorker(
     );
   await client.request("heartbeat", {});
   assignment = assignmentSchema.parse(await client.request("assignment"));
+  // Measured from the moment the host stated it, on this box's own clock.
+  const stopAt = Date.now() + assignment.stopInMs;
   const base = assignment.baseSha;
   // A fixed path: a new box restores the sessions, whose tool history names these paths.
   const root = workerRoot(assignment.id);
@@ -447,11 +451,20 @@ export async function runPiWorker(
   const cancelActive = () => {
     if (active) void active.runtime.cancel(active.id);
   };
-  const deadline = setTimeout(
-    cancelActive,
-    Math.max(1, Date.parse(assignment.deadline) - Date.now()),
+  /**
+   * The box has a fixed lifetime (journal 193). The worker stops by itself a save margin before
+   * the host's deadline, so the session and workspace it saves still reach the host, and the
+   * host continues the job in a new box. Nothing new starts once it is stopping.
+   */
+  let stopping = false;
+  const lifetime = setTimeout(
+    () => {
+      stopping = true;
+      cancelActive();
+    },
+    Math.max(0, stopAt - Date.now()),
   );
-  deadline.unref();
+  lifetime.unref();
   stop.addEventListener("abort", cancelActive, { once: true });
   /**
    * New inbox items reach the running session they are for at its next prompt, through Pi's
@@ -497,6 +510,11 @@ export async function runPiWorker(
     if (role === "coder" && !restoredOnce)
       record(await restoreSession(task, scopes.coder), "coder");
     restoredOnce = false;
+    if (stopping)
+      return {
+        ...(await runtime.inspect(task.id)),
+        status: "cancelled",
+      } as Task;
     active = { runtime, id: task.id, role };
     try {
       return await runtime.run(task.id, message);
@@ -714,10 +732,14 @@ export async function runPiWorker(
     if (!pending().length) throw new Error("The host refused the finish");
     return false;
   };
+  const atLifetime = "The coding box reached its time limit; the work is saved";
   const finishStopped = async (task: Task, askedBy?: "coder" | "reviewer") =>
     settle({
       kind: task.status === "waiting_input" ? "awaiting_input" : "paused",
-      summary: task.summary || "Pi work paused; inspect retained state",
+      summary:
+        (stopping && task.status !== "waiting_input" ? atLifetime : "") ||
+        task.summary ||
+        "Pi work paused; inspect retained state",
       question: task.status === "waiting_input" ? (task.question ?? "") : "",
       ...(task.status === "waiting_input" && task.options?.length
         ? { options: task.options }
@@ -786,6 +808,16 @@ export async function runPiWorker(
     else
       message = `The previous box ended. Your workspace was restored from the last saved state: ${saved.files.length} changed file${saved.files.length === 1 ? "" : "s"} on the base commit ${base}${saved.files.length ? "" : " (none: the checkout is the base as it is)"}. Installed dependencies and build output were not restored. Continue the work and report when you are finished.`;
     for (;;) {
+      // Nothing new starts after the stop: what is saved continues in the next box.
+      if (stopping) {
+        await settle({
+          kind: "paused",
+          summary: atLifetime,
+          question: "",
+          checkpoint: saved,
+        });
+        return;
+      }
       if (step === "coder") {
         const result = await runRole(coderRuntime, coder, "coder", message!);
         message = undefined;
@@ -894,6 +926,8 @@ export async function runPiWorker(
           patchHash: candidate,
         },
       };
+      // Publication starts only with time left to finish it; the next box finishes otherwise.
+      if (stopping) continue;
       // The host commits the publication before anything is pushed (journal 192): an inbox
       // item still on its way, or a missing approval, stops it here.
       const committed = await client.request("publish", finished);
@@ -938,7 +972,7 @@ export async function runPiWorker(
       return;
     }
   } finally {
-    clearTimeout(deadline);
+    clearTimeout(lifetime);
     clearInterval(heartbeat);
     stop.removeEventListener("abort", cancelActive);
   }

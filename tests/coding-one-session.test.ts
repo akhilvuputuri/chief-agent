@@ -15,6 +15,7 @@ import {
   fence,
 } from "../src/coding/pi-worker.js";
 import { codingApi } from "../src/coding/api.js";
+import { BOX_SAVE_MS } from "../src/coding/schema.js";
 import { server } from "../src/server.js";
 import { telegram } from "../src/telegram.js";
 import { readConfig } from "../src/config.js";
@@ -1417,4 +1418,77 @@ test("after the publication commit the checkpoint is final", async (t) => {
   assert.deepEqual(await j.f.c.finish(publishing, candidate), {
     accepted: true,
   });
+});
+
+/** A box record for the job, as the boxes controller writes it; its running time is machine time. */
+async function machineTime(j: { f: any; id: string }, runningMs: number) {
+  await j.f.db.query(
+    "DELETE FROM boxes WHERE subject=$1 AND request_key LIKE 'synthetic:%'",
+    [`coding:${j.id}`],
+  );
+  await j.f.db.query(
+    `INSERT INTO boxes(id,user_id,request_key,profile,provider,environment,subject,image,credential_hash,absolute_deadline,running_ms)
+     VALUES(gen_random_uuid(),'a','synthetic:'||gen_random_uuid(),'coding','ec2','test',$1,'image','hash',now()+interval '1 day',$2)`,
+    [`coding:${j.id}`, runningMs],
+  );
+}
+
+test("a box reaching its lifetime stops by itself with its session and work saved, and the job continues in a new box (journal 193)", async (t) => {
+  let stoppedAt = 0;
+  const j = await piJob(t, {
+    coder: (_input, turn) => {
+      if (turn === 1) {
+        // The host's clock passes the worker's stop time while this command runs.
+        j.f.advance(2000);
+        return bash("sleep 6");
+      }
+      return [
+        edit("a - b", "a + b"),
+        undefined,
+        report("done", "Changed the operator after the new box."),
+      ][turn]!;
+    },
+    reviewer: () => report("review", "Correct.", { verdict: "APPROVE" }),
+  });
+  // The job has 1.5 seconds left before the worker must stop to save.
+  await machineTime(j, 8 * 3_600_000 - BOX_SAVE_MS - 1500);
+  const started = Date.now();
+  await j.run();
+  stoppedAt = Date.now() - started;
+  const first = await j.row();
+  assert.equal(first.state, "paused", first.summary);
+  // It stopped itself well before the six-second command ended, and saved the edit.
+  assert(stoppedAt < 6000, `stopped after ${stoppedAt} ms`);
+  assert.deepEqual(
+    first.checkpoint.files.map((f: any) => f.content),
+    ["export const sum = (a, b) => a + b;\n"],
+  );
+  const finished = (
+    await j.f.db.query(
+      "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND event_key=$2",
+      [j.id, `${first.attempt_id}:finished`],
+    )
+  ).rows[0];
+  assert.equal(finished.payload.cause, "lifetime");
+  assert.equal(finished.delivery, "suppressed");
+  const sessionBefore = Number(
+    (
+      await j.f.db.query(
+        "SELECT count(*)::int AS n FROM coding_events WHERE job_id=$1 AND event_key LIKE $2",
+        [j.id, `pi-session:${sessionScope("coder", j.id)}:%`],
+      )
+    ).rows[0].n,
+  );
+  assert(sessionBefore > 0);
+  // The host cleans up the box and continues the job in a new one by itself.
+  await j.f.c.tick();
+  await j.f.c.tick();
+  await machineTime(j, 0);
+  await j.run();
+  const done = await j.row();
+  assert.equal(done.state, "publishing", done.summary);
+  // The new box's coder continued the same session: its first call holds the earlier edit.
+  const resumed = text(j.inputs.coder[2]);
+  assert.match(resumed, /a \+ b/);
+  assert.match(resumed, /The previous box ended/);
 });

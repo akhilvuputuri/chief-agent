@@ -285,6 +285,7 @@ test("the Pi worker refuses a plan assignment", async (t) => {
     },
     checkpoint: { plan: "", patch: "", summary: "" },
     deadline: new Date(Date.now() + 600000).toISOString(),
+    stopInMs: 300000,
     usedModels: 0,
   };
   await assert.rejects(

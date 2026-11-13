@@ -4,6 +4,13 @@ import { z } from "zod";
 import { MAX_OUTPUT_TOKENS } from "../model.js";
 import { reportLimits, reportDocument } from "@chief-agent/pi-runtime/report";
 
+/**
+ * How long before its attempt's deadline a Pi worker stops by itself, so the session and the
+ * workspace it saves reach the host while the host still accepts them (journal 193). A
+ * paused finish the host receives this close to the deadline means the box reached its
+ * lifetime. It covers one session upload, one snapshot and one checkpoint.
+ */
+export const BOX_SAVE_MS = 300_000;
 /** The header a reviewer request names its round's candidate in (journal 192). */
 export const candidateHeader = "x-chief-candidate";
 const id = z.string().uuid();
