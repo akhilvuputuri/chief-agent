@@ -1,9 +1,3 @@
-## Read-only profile script for coding jobs (14 November 2026)
-
-- **Code.** `scripts/coding-job-profile.sql` prints where one coding job's time and money went on the rebuilt loop, from `coding_jobs`, `coding_events`, `coding_model_calls` and `boxes`. It runs in a read-only transaction with statement and lock timeouts and prints totals and known names only. No runtime code, migration or Compose change.
-- **Why.** To read the first real job on the rebuilt loop against job `9600af57`. See [journal 194](journey/194-coding-job-profile.md).
-- **Deployment.** A script run by hand against production; nothing is deployed.
-
 ## A fact names what the owner pointed at; the judge and the repair read Chief's side (13 November 2026)
 
 - **Code.** A learned fact may carry, in square brackets, a detail the owner did not spell out, backed by exact words found in the exchange (`source.context`), which the host checks when the fact is written. A detail taken from Chief's words is accepted on a note of one occasion only, so it reaches no turn; a standing or dated fact stays the owner's own words throughout. The judge (`judge-v4`) and the repair (`repair-v2`) now read Chief's side of each cited exchange and run at high reasoning effort; the learner (`learner-v7`) is told outright that one request is no trait. A new planted error passes Chief's words off as the owner's. The second model is still sent facts and the owner's messages only. A repaired fact may stay standing when shown messages from separate days each contain all of it and none is a question. The report's decoy query no longer counts turns judged before decoys existed.
@@ -11,6 +5,12 @@
 - **Review.** Independent review (Claude Opus 5.5) requested changes on `14f23d5c`, approved `11f5d6af` with one more gap, and approved the merged head `3abbb607`; each round is in journal 195. Hosted CI passed on that head, and the full suite passed locally on `11f5d6af` (1,803 tests).
 - **Deployment.** Merged as `b8fe585` (PR 491). Live from 20:20 SGT on 13 November by release run 43424149266; the gateway reported `b8fe585`, healthy, with no error lines in its first minute. No migration or Compose change.
 - **Not measured.** No night has run with it. The judge reads again every fact an earlier prompt faulted, and its planted-error record starts from none, so the repair cannot run before the judge's second night under `judge-v4`. The repair gate itself is unchanged; whether to tighten it is with the owner.
+
+## Read-only profile script for coding jobs (14 November 2026)
+
+- **Code.** `scripts/coding-job-profile.sql` prints where one coding job's time and money went on the rebuilt loop, from `coding_jobs`, `coding_events`, `coding_model_calls` and `boxes`. It runs in a read-only transaction with statement and lock timeouts and prints totals and known names only. No runtime code, migration or Compose change.
+- **Why.** To read the first real job on the rebuilt loop against job `9600af57`. See [journal 194](journey/194-coding-job-profile.md).
+- **Deployment.** A script run by hand against production; nothing is deployed.
 
 ## Worker image for the rebuilt coding loop (14 November 2026)
 
