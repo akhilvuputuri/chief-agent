@@ -67,3 +67,21 @@ Limits: examples are read when an alert fires and not updated; a trace named in 
 ### Release closure
 
 Pending: review and merge agentwatch#24; pin its image and add `--public-url` to the agentwatch command through the reviewed update procedure; owner acceptance from a phone.
+
+> **Update, 13 November 2026 (rolled out):** the rollout pull request, [#480](https://github.com/akhilvuputuri/chief-agent/pull/480), merged as `30c4105` with the owner's go-ahead, at the head its second review (Opus 5.5, **approve with nits**, all taken in `6fa4983`) had approved. Before it merged, the host's `compose.yaml` and `db/` matched main (`4ebfaef`), so nothing else rode along.
+>
+> **Measured on the host.** The update ran from an exact archive of `30c4105` through `systemd-run -p TimeoutStopSec=300`, from 02:56:45 to 02:57:09 UTC by the unit's own log: 24 seconds for the whole run, so agentwatch was down for less than that (the copy is stamped 02:57:01 and the new container started at 02:57:03). It reported `sha256:3a00e227…` healthy and the copy at `/var/backups/agentwatch-update/20261113T025701Z-30c410554bbf` (root only; one file, `agentwatch.duckdb`, 29,110,272 bytes; no write-ahead file was left to copy after the stop). Read back afterwards:
+>
+> - agentwatch healthy on the new digest, its command carrying `--public-url https://traces.52-77-47-24.sslip.io`; the gateway healthy and not restarted; `RELEASE` unchanged; the live `compose.yaml` hashes the same as main's.
+> - 369 traces listed before and 370 after (the procedure sends one labelled test span), 4 alerts and 11 monitors both times; alerts now carry `detail`, `examples` and `url`.
+> - Through Caddy on the host: `/` answers 303 to the sign-in, `/api/traces` 401, `/healthz` 200, and a post to `/v1/traces` 404.
+>
+> **The first alert with pointers.** A test monitor (tool error rate above 2% over seven days, at least 20 calls) fired on its first pass: 14.3% of 210 tool calls, with the detail "public_browser failed 8 of 55 calls" and three examples (`public_browser: TOOL_FAILED`, `public_browser: INVALID_INPUT`, `agent_report: VALIDATION_FAILED`), each with an `https` link to the trace and the failed span. The gateway then marked it delivered, which it does only after Telegram accepts the message, and logged no send failure. The test monitor was then deleted, which sends its "resolved" message; the alert stays listed.
+>
+> **The next automatic release was not held up.** The release of `30c4105` (run 43356008361) passed once the host matched main: `RELEASE` reads `30c4105`, the gateway restarted healthy at 03:01 UTC, and agentwatch was left running.
+>
+> **Now exercised on the host:** Compose's own stop and start, and the copy, on Docker 29.1.3, on the success path. **Still not exercised anywhere but the rehearsal:** the rollback and `--restore` on the host, and a stop request arriving through systemd.
+>
+> **Not yet verified:** how the message reads in Telegram on the owner's phone, and that a tapped link opens the trace there after signing in (iOS Safari and Telegram's own browser have not been tried). That acceptance is the owner's.
+>
+> **Seen in passing, not acted on:** the six threshold monitors watch short windows and read OK, while over seven days one tool call in seven failed, `public_browser` most often. That is the gap the plan's change 10 (failures grouped by tool and error type) is for.
