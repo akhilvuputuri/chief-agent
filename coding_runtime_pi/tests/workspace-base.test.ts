@@ -310,3 +310,38 @@ test("a snapshot that reuses its own index equals a fresh one, and tampering wit
     "changed again\n",
   );
 });
+
+test("a same-size edit in the second the coder's index was written is still in the snapshot (journal 193)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-racy-"));
+  const repo = join(root, "repo");
+  await mkdir(repo);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.name", "Synthetic");
+  git("config", "user.email", "synthetic@example.invalid");
+  await writeFile(join(repo, "seed.txt"), "seed\n");
+  git("add", ".");
+  git("commit", "-qm", "first");
+  // At the start of a second: the file, the index that records it, and a same-size edit all
+  // land in that second, so the index's times match the edited file.
+  while (Date.now() % 1000 > 50)
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  await writeFile(join(repo, "sum.js"), "a - b\n");
+  git("add", "sum.js");
+  git("commit", "-qm", "base");
+  await writeFile(join(repo, "sum.js"), "a + b\n");
+  const base = git("rev-parse", "HEAD");
+  // A later snapshot sees the index from a later second.
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  const execute = localExecutor(repo, join(root, "home"), () => {});
+  const snapshot = await new Workspace(repo).snapshot(
+    execute,
+    new AbortController().signal,
+    base,
+  );
+  assert.deepEqual(
+    snapshot.files.map((f) => [f.path, f.content]),
+    [["sum.js", "a + b\n"]],
+  );
+});

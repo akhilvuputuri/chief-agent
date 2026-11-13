@@ -2,7 +2,6 @@ import { processCleanup } from "./process-boundary.js";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  copyFile,
   mkdir,
   mkdtemp,
   readFile,
@@ -231,8 +230,8 @@ export class Workspace {
    * flags, `.git/info/exclude`, `core.autocrlf`) or home-directory ignore and attribute files
    * applies, so nothing the coder configured can run or hang here (journal 193). The
    * directory lives outside the coder's repository and keeps its index between snapshots, so
-   * unchanged files are not read again; its configuration is written afresh and any index
-   * flag cleared before every snapshot.
+   * unchanged files are not read again (the first snapshot on a base reads every file); its
+   * configuration is written afresh and any index flag cleared before every snapshot.
    */
   async snapshot(
     execute: Executor,
@@ -305,24 +304,9 @@ export class Workspace {
     };
     // The base's tree first, so a tracked file an ignore rule matches stays tracked. The
     // index is kept between snapshots on the same base, so `add` reads only changed files.
-    if (fresh) {
-      // A checkout of the base (a new box, a coder that never staged anything) has an index
-      // of exactly the base's tree: its file times spare reading every file once.
-      const seeded = await copyFile(
-        join(this.root, ".git", "index"),
-        join(own, "index"),
-      ).then(
-        () => true,
-        () => false,
-      );
-      const matches =
-        seeded &&
-        (await run(["write-tree"]).then(
-          (tree) => tree.trim(),
-          () => "",
-        )) === (await run(["rev-parse", `${base}^{tree}`])).trim();
-      if (!matches) await run(["read-tree", base]);
-    }
+    // The worker builds a fresh index from the base itself, never from the coder's index: the
+    // coder's file times decide what `add` re-reads, and they cannot be trusted (journal 193).
+    if (fresh) await run(["read-tree", base]);
     // No flag may hide a file from `add`.
     const flagged = (await run(["ls-files", "-v", "-z"]))
       .split("\0")

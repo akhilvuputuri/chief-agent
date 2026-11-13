@@ -187,7 +187,17 @@ async function reviewWith(t: any, command: string) {
   assert(approvalId);
   await f.c.requirements.confirm("a", approvalId, "a", approvedMessage);
   await f.c.tick();
-  return { f, id: started.id as string, run };
+  /**
+   * Runs the attempt and requires that it reached review and ran the reviewer's command: a
+   * job that never reviewed fails the test instead of passing by accident (journal 193).
+   */
+  const reviewed = async (expected?: RegExp) => {
+    const attempt = run();
+    if (expected) await assert.rejects(attempt, expected);
+    else await attempt;
+    assert((turns.get("review") ?? 0) >= 1, "The attempt never reached review");
+  };
+  return { f, id: started.id as string, run: reviewed };
 }
 
 test("a reviewer may run commands and change files in its own copy, which never reach the candidate", async (t) => {
@@ -206,7 +216,7 @@ test("a reviewer may run commands and change files in its own copy, which never 
 
 test("a reviewer that changes the coder's checkout stops the attempt", async (t) => {
   const { run } = await reviewWith(t, "printf hook > ../workspace/sneaky.txt");
-  await assert.rejects(run(), /workspace changed during review/);
+  await run(/workspace changed during review/);
 });
 
 test("a reviewer that plants a git hook in the coder's checkout stops the attempt", async (t) => {
@@ -214,7 +224,7 @@ test("a reviewer that plants a git hook in the coder's checkout stops the attemp
     t,
     "printf '#!/bin/sh' > ../workspace/.git/hooks/pre-commit",
   );
-  await assert.rejects(run(), /workspace changed during review/);
+  await run(/workspace changed during review/);
 });
 
 for (const [label, command] of [
@@ -241,5 +251,5 @@ for (const [label, command] of [
 ] as const)
   test(`a reviewer that ${label} stops the attempt`, async (t) => {
     const { run } = await reviewWith(t, command);
-    await assert.rejects(run(), /workspace changed during review/);
+    await run(/workspace changed during review/);
   });
