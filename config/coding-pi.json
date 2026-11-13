@@ -5,11 +5,6 @@
   "model": "anthropic/claude-sonnet-5.5",
   "reviewerModel": "anthropic/claude-opus-5.5",
   "effort": "medium",
-  "limits": {
-    "ms": 10800000,
-    "models": 1500,
-    "tools": 4000
-  },
   "runtime": "pi",
   "squad": false,
   "autoMerge": false,

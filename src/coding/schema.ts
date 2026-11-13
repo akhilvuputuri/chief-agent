@@ -51,7 +51,7 @@ export const codingModels = z
 export const codingModelSet = z
   .object({
     operation: z.literal("coding_model_set"),
-    role: z.enum(["leader", "coder", "reviewer"]),
+    role: z.enum(["coder", "reviewer"]),
     model: z.string().min(1).max(120),
   })
   .strict();
@@ -63,19 +63,10 @@ export const codingJobUpdate = z
     requestKey: z.string().min(1).max(100),
     /** Only after the owner asked for this change on this job, and confirmed it if unclear. */
     ownerConfirmed: z.literal(true),
-    leaderModel: z.string().min(1).max(120).optional(),
     coderModel: z.string().min(1).max(120).optional(),
     reviewerModel: z.string().min(1).max(120).optional(),
     /** Move a stopped Pi job to the worker image new jobs use, keeping its work. */
     upgradeWorker: z.literal(true).optional(),
-    limits: z
-      .object({
-        ms: z.number().int().positive().max(14_400_000).optional(),
-        models: z.number().int().positive().max(2000).optional(),
-        tools: z.number().int().positive().max(5000).optional(),
-      })
-      .strict()
-      .optional(),
   })
   .strict();
 export const codingAction = z.discriminatedUnion("operation", [
@@ -268,6 +259,7 @@ export const codingSettings = z
       .or(z.literal("")),
     model: z.string().min(1).max(120),
     reviewerModel: z.string().min(1).max(120),
+    /** The legacy squad's planner; a Pi job is one coder and one reviewer (journal 193). */
     leaderModel: z.string().min(1).max(120).optional(),
     squad: z.boolean().optional(),
     autoMerge: z.boolean().optional(),
@@ -295,6 +287,11 @@ export const codingSettings = z
     agentGit: z.boolean().optional(),
     /** Host-only operator switch (default on): re-queue a job once after a classified transient pause. */
     autoRetryTransientOnce: z.boolean().optional(),
+    /**
+     * The legacy runtimes' per-attempt time, model-call and tool-call allowances. A Pi job has
+     * none: a box has a fixed lifetime and the job eight hours of machine time from each owner
+     * Start or resume (journal 193).
+     */
     limits: z
       .object({
         ms: z.number().int().positive().max(14_400_000),
@@ -302,10 +299,27 @@ export const codingSettings = z
         models: z.number().int().positive().max(2000),
         tools: z.number().int().positive().max(5000),
       })
-      .strict(),
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (value.runtime === "pi" && value.limits !== undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "A Pi job has no time or call limits; its box lifetime and machine time bound it",
+      });
+    if (value.runtime === "pi" && value.leaderModel !== undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A Pi job has no planner model",
+      });
+    if (value.runtime !== "pi" && value.limits === undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "The legacy runtimes need their limits",
+      });
     if (
       (value.maxOutputTokens !== undefined ||
         value.reviewerMaxOutputTokens !== undefined) &&
@@ -358,10 +372,10 @@ export type CodingSettings = z.infer<typeof codingSettings>;
 export function modelCallTimeoutMs(allowance: number) {
   return Math.max(300000, allowance * 10);
 }
-/** The output allowance for one model role of a job. */
+/** The output allowance for one model role of a job (the legacy squad's leader has the coder's). */
 export function outputAllowance(
   settings: Pick<CodingSettings, "maxOutputTokens" | "reviewerMaxOutputTokens">,
-  role: "leader" | "coder" | "reviewer",
+  role: "coder" | "reviewer",
 ) {
   const coder = settings.maxOutputTokens ?? 8000;
   return role === "reviewer"

@@ -196,10 +196,6 @@ export class GitHubAutomation implements PrAutomationRepository {
         line: c.line,
         comment: c.body,
       });
-      if (text.length > 7000)
-        throw new Error(
-          "MR feedback exceeds supported bounds; explicit review needed",
-        );
       result.feedback.push({
         id: digest(`${c.id}:${c.updated_at ?? c.submitted_at}:${text}`),
         text,
@@ -228,10 +224,6 @@ export class GitHubAutomation implements PrAutomationRepository {
           steps: j.steps?.filter((s: any) => s.conclusion !== "success"),
           annotations,
         });
-        if (text.length > 7000)
-          throw new Error(
-            "CI feedback exceeds supported bounds; explicit review needed",
-          );
         result.feedback.push({
           id: `ci:${ci.id}:${ci.run_attempt}:${j.id}`,
           text,

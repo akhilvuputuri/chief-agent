@@ -25,7 +25,13 @@ async function proofFixture(t: any) {
   const job = {
     ...base,
     attempt_id: randomUUID(),
-    settings: { ...settings, runtime: "pi", squad: false, autoMerge: false },
+    settings: {
+      ...settings,
+      limits: undefined,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+    },
   };
   const controller = f.c as any;
   /** One sealed reviewer reply the host recorded, from a round that named `candidate`. */

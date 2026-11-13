@@ -4,7 +4,7 @@ import { codingSettings } from "../src/coding/schema.js";
 import { settings } from "./helpers/coding-fixture.js";
 
 // Boxes have no CodeBuild-era 45-minute cap, so attempts may run longer and do more.
-test("coding limits allow up to four hours, 2,000 model calls and 5,000 tool calls", () => {
+test("legacy coding limits allow up to four hours, 2,000 model calls and 5,000 tool calls", () => {
   const limits = (l: object) =>
     codingSettings.safeParse({
       ...settings,
@@ -15,6 +15,35 @@ test("coding limits allow up to four hours, 2,000 model calls and 5,000 tool cal
   assert.equal(limits({ ms: 14_400_001 }), false);
   assert.equal(limits({ models: 2001 }), false);
   assert.equal(limits({ tools: 5001 }), false);
+});
+
+test("a Pi job has no time, model-call or tool-call limits; the legacy runtimes keep theirs (journal 193)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const pi = {
+    ...settings,
+    limits: undefined,
+    runtime: "pi",
+    squad: false,
+    autoMerge: false,
+  };
+  assert.equal(codingSettings.safeParse(pi).success, true);
+  assert.equal(
+    codingSettings.safeParse({ ...pi, limits: settings.limits }).success,
+    false,
+  );
+  assert.equal(
+    codingSettings.safeParse({ ...pi, leaderModel: "fixture/coder" }).success,
+    false,
+  );
+  assert.equal(
+    codingSettings.safeParse({ ...settings, limits: undefined }).success,
+    false,
+  );
+  const shipped = JSON.parse(
+    readFileSync(new URL("../config/coding-pi.json", import.meta.url), "utf8"),
+  );
+  assert.equal(shipped.limits, undefined);
+  assert.equal(codingSettings.parse(shipped).limits, undefined);
 });
 
 test("checkpoints and publishing accept large changes: 1 MB files, 500 files, 10 MB in all", async () => {
@@ -60,6 +89,7 @@ test("a Pi session entry may be as large as one model request", async (t) => {
     job.id,
     JSON.stringify({
       ...settings,
+      limits: undefined,
       runtime: "pi",
       squad: false,
       autoMerge: false,

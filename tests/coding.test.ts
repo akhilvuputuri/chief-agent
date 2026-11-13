@@ -58,7 +58,7 @@ import {
   fixture,
   startCard,
 } from "./helpers/coding-fixture.js";
-test("two-hour Pi settings get their full two hours, under the three-hour ceiling and four-hour box task deadline", async (t) => {
+test("a Pi attempt runs for the box's lifetime, whatever time limit a job of stage D2 carried (journal 193)", async (t) => {
   const f = await fixture(t),
     job = await f.start("pi-bounded-attempt");
   const historical = {
@@ -74,14 +74,14 @@ test("two-hour Pi settings get their full two hours, under the three-hour ceilin
   ]);
   await f.c.tick();
   let current = await f.row(job.id);
-  assert.equal(f.sandboxRequests()[0].timeoutMinutes, 125);
-  assert.deepEqual((await f.c.assignment(current)).settings, historical);
+  // Three hours of lifetime, inside the four-hour box task deadline, plus five to start.
+  assert.equal(f.sandboxRequests()[0].timeoutMinutes, 185);
   await f.c.heartbeat(current);
   current = await f.row(job.id);
   assert.equal(
     new Date(current.attempt_deadline).getTime() -
       new Date(current.heartbeat_at).getTime(),
-    7200000,
+    10_800_000,
   );
   const deadline = new Date(current.attempt_deadline).getTime();
   await f.c.heartbeat(current);
@@ -89,13 +89,13 @@ test("two-hour Pi settings get their full two hours, under the three-hour ceilin
     new Date((await f.row(job.id)).attempt_deadline).getTime(),
     deadline,
   );
-  assert.deepEqual((await f.c.status("a", job.id)).limits, historical.limits);
 });
 test("Pi output allowance is captured per job and cannot be changed by caller hints", async (t) => {
   const f = await fixture(t),
     started = await f.start("pi-output-snapshot");
   const current = {
     ...settings,
+    limits: undefined,
     runtime: "pi",
     squad: false,
     autoMerge: false,

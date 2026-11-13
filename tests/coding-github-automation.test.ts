@@ -144,7 +144,7 @@ test("forged status publisher or wrong repository workflow cannot authorize merg
   f.setRuns([{ ...f.ci, path: ".github/workflows/not-ci.yml" }]);
   assert.equal((await f.gh.inspect(f.t)).checks, "pending");
 });
-test("comments edited after a prior review get a new feedback identity; oversized comments are not silently discarded", async () => {
+test("comments edited after a prior review get a new feedback identity; a long comment is kept whole", async () => {
   const f = fixture();
   f.comments.push({
     id: 1,
@@ -155,8 +155,10 @@ test("comments edited after a prior review get a new feedback identity; oversize
   const first = (await f.gh.inspect(f.t)).feedback[0].id;
   f.comments[0].body = "Fix case B";
   assert.notEqual((await f.gh.inspect(f.t)).feedback[0].id, first);
-  f.comments[0].body = "x".repeat(8000);
-  await assert.rejects(f.gh.inspect(f.t), /bounds/);
+  // No length bound (journal 193): the coder gets the whole comment.
+  f.comments[0].body = "x".repeat(20_000);
+  const [long] = (await f.gh.inspect(f.t)).feedback;
+  assert.equal(JSON.parse(long!.text).comment, "x".repeat(20_000));
 });
 test("a spoofed attestation comment is feedback and cannot suppress the real host record", async () => {
   const f = fixture();

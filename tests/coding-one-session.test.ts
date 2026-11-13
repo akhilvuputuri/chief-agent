@@ -71,6 +71,7 @@ async function piJob(
       started.id,
       JSON.stringify({
         ...settings,
+        limits: undefined,
         runtime: "pi",
         squad: false,
         autoMerge: false,

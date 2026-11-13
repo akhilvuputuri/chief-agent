@@ -59,12 +59,14 @@ test("Pi profile rejects Python selectors and automatic merge", async () => {
   assert(
     codingSettings.safeParse({
       ...settings,
+      limits: undefined,
       runtime: "pi",
       maxOutputTokens: 16000,
     }).success,
   );
   assert.equal(
-    codingSettings.parse({ ...settings, runtime: "pi" }).maxOutputTokens,
+    codingSettings.parse({ ...settings, limits: undefined, runtime: "pi" })
+      .maxOutputTokens,
     undefined,
   );
   for (const changes of [
@@ -73,8 +75,12 @@ test("Pi profile rejects Python selectors and automatic merge", async () => {
     { maxOutputTokens: 1.5 },
   ])
     assert(
-      !codingSettings.safeParse({ ...settings, runtime: "pi", ...changes })
-        .success,
+      !codingSettings.safeParse({
+        ...settings,
+        limits: undefined,
+        runtime: "pi",
+        ...changes,
+      }).success,
     );
   assert(
     !codingSettings.safeParse({
@@ -86,6 +92,7 @@ test("Pi profile rejects Python selectors and automatic merge", async () => {
   assert(
     codingSettings.safeParse({
       ...settings,
+      limits: undefined,
       runtime: "pi",
       squad: false,
       autoMerge: false,
@@ -97,8 +104,12 @@ test("Pi profile rejects Python selectors and automatic merge", async () => {
     { autoMerge: true },
   ])
     assert(
-      !codingSettings.safeParse({ ...settings, runtime: "pi", ...changes })
-        .success,
+      !codingSettings.safeParse({
+        ...settings,
+        limits: undefined,
+        runtime: "pi",
+        ...changes,
+      }).success,
     );
 });
 test("a Pi default retains legacy automation support without granting it to Pi jobs", async (t) => {
@@ -106,6 +117,7 @@ test("a Pi default retains legacy automation support without granting it to Pi j
   let initialized = 0;
   const pi = codingSettings.parse({
     ...settings,
+    limits: undefined,
     runtime: "pi",
     squad: false,
     autoMerge: false,
@@ -191,6 +203,7 @@ for (const { documentLength, terminalRecovery } of [
     const started = await f.start("pi-e2e", true);
     const profile = {
       ...settings,
+      limits: undefined,
       runtime: "pi",
       squad: false,
       autoMerge: false,
@@ -467,6 +480,7 @@ test("a replacement Pi worker continues the stored session at the same fixed pat
       started.id,
       JSON.stringify({
         ...settings,
+        limits: undefined,
         runtime: "pi",
         squad: false,
         autoMerge: false,

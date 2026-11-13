@@ -16,11 +16,11 @@ import { ToolValidationError } from "../src/tool-errors.js";
 
 const pi = codingSettings.parse({
   ...settings,
+  limits: undefined,
   runtime: "pi",
   prWorkflow: "owner_merge",
   agentGit: true,
   model: "fixture/coder",
-  leaderModel: "fixture/coder",
   reviewerModel: "fixture/reviewer",
   maxOutputTokens: 16000,
 });

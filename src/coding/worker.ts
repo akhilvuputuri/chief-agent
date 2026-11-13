@@ -141,8 +141,8 @@ export async function runWorker(
   const a = assignment.parse(await client.request("assignment"));
   assertCodingBrief(a.objective, a.context);
   const budget: LoopBudget = {
-    models: Math.max(0, a.settings.limits.models - a.usedModels),
-    tools: a.settings.limits.tools,
+    models: Math.max(0, a.settings.limits!.models - a.usedModels),
+    tools: a.settings.limits!.tools,
   };
   const root = await mkdtemp(join(tmpdir(), "chief-code-"));
   const w = new Workspace(root, signal);

@@ -3,7 +3,7 @@ import { transaction } from "../db-transaction.js";
 import { PiSessions } from "./pi-sessions.js";
 import { z } from "zod";
 import { reviewMetadata, completePlanDelivered } from "./review-proof.js";
-import { CodingAutomation, feedbackRounds } from "./automation.js";
+import { CodingAutomation } from "./automation.js";
 import { codingDiagnostics } from "./diagnostics.js";
 import {
   modelPreferences,
@@ -197,10 +197,9 @@ export class CodingController {
     // Per-attempt operational ceiling. Pi attempts run in EC2 boxes, whose task deadline is
     // four hours; three hours leaves ample room for the worker's start inside it. (It was
     // 40 minutes under CodeBuild's 45-minute cap.) Legacy runtimes keep their allocation.
-    return Math.min(
-      job.settings.limits.ms,
-      job.settings.runtime === "pi" ? PI_ATTEMPT_MS : job.settings.limits.ms,
-    );
+    return job.settings.runtime === "pi"
+      ? PI_ATTEMPT_MS
+      : job.settings.limits!.ms;
   }
   private automation?: CodingAutomation;
   /** Resolves when a job's current Pi model call frees its slot. */
@@ -331,7 +330,7 @@ export class CodingController {
     const calls = (
       await this.db.query(
         "SELECT id,state,input,result_box FROM coding_model_calls WHERE job_id=$1 AND attempt_id=$2 AND role='reviewer' ORDER BY created_at DESC,id DESC LIMIT $3",
-        [job.id, job.attempt_id, job.settings.limits.models],
+        [job.id, job.attempt_id, job.settings.limits!.models],
       )
     ).rows;
     const call = calls[0];
@@ -642,18 +641,13 @@ export class CodingController {
       if (!/^[a-f0-9]{40}$/.test(base))
         throw new Error("Repository base identity unavailable");
       const preferred = await modelPreferences(this.db, user, this.settings);
+      // The owner chooses the coder and reviewer; the legacy squad's planner follows its
+      // profile (journal 193).
       const selected = {
         ...this.settings,
-        // Only the legacy squad has a leader; a Pi job is one coder and one reviewer (journal 191).
-        leaderModel: this.settings.squad
-          ? preferred.leader
-          : this.settings.runtime === "pi"
-            ? undefined
-            : this.settings.leaderModel,
         model: preferred.coder,
         reviewerModel: preferred.reviewer,
       };
-      if (selected.leaderModel === undefined) delete selected.leaderModel;
       this.assertDirectPiModels(selected, "No job was started.");
       // Agent publication is snapshotted only when the separate agent App is configured.
       if (selected.agentGit && !this.agentGit) delete selected.agentGit;
@@ -924,11 +918,11 @@ export class CodingController {
             : job.settings.prWorkflow === "owner_merge" &&
                 (job.stage === "manual_review" ||
                   job.stage === "merge_declined")
-              ? `This job's PR stopped for owner attention (${job.summary}). If the owner asks to continue, use coding_resume on this job: it re-runs the merge checks; holds that still apply (operator steps, exhausted allocation) come back with their reason.`
+              ? `This job's PR stopped for owner attention (${job.summary}). If the owner asks to continue, use coding_resume on this job: it re-runs the merge checks; holds that still apply (such as operator steps) come back with their reason.`
               : job.stage === "manual_review" || job.stage === "merge_declined"
                 ? `This job's PR stopped for owner attention (${job.summary}). It will not continue automatically and Chief cannot merge it in this state; explain the reason, then the owner can act on GitHub or start a new job.`
                 : job.settings.prWorkflow === "owner_merge"
-                  ? "This job already has a PR and continues on its own: Chief handles Devin and MR feedback, runs review and CI again, then sends the owner a Merge / Keep open card. Main moving does not change it; only a merge conflict sends the change back to the coder. Nothing to resume or revise; report its stage from coding_status."
+                  ? "This job already has a PR and continues on its own: Chief handles Devin and MR feedback, runs review and CI again, then sends the owner a Merge / Keep open card. Main moving does not change it; a merge conflict is rebased onto main and reviewed again. Nothing to resume or revise; report its stage from coding_status."
                   : job.settings.autoMerge
                     ? "This job already has a PR and continues through its automatic merge workflow; report its stage from coding_status."
                     : "This job already has a draft PR; it predates the owner-merge workflow, so it can only be merged on GitHub or replaced by a new job.",
@@ -968,8 +962,6 @@ export class CodingController {
       throw new ToolValidationError(
         "Coding revision changed; read coding_status and retry with the current revision",
       );
-    if (a.leaderModel && !job.settings.squad)
-      throw new ToolValidationError("This job has no leader model to change");
     if (
       a.upgradeWorker &&
       (job.settings.runtime !== "pi" ||
@@ -979,41 +971,21 @@ export class CodingController {
       throw new ToolValidationError("Only a Pi coding job can change worker");
     const next = {
       ...job.settings,
-      ...(a.leaderModel ? { leaderModel: a.leaderModel } : {}),
       ...(a.coderModel ? { model: a.coderModel } : {}),
       ...(a.reviewerModel ? { reviewerModel: a.reviewerModel } : {}),
       // Only to the image new jobs use: the boxes accept it, and it is the reviewed one.
       ...(a.upgradeWorker ? { image: this.settings.image } : {}),
-      limits: { ...job.settings.limits, ...a.limits },
     };
-    if (job.settings.runtime === "pi" && (a.limits?.ms ?? 0) > PI_ATTEMPT_MS)
-      throw new ToolValidationError(
-        "That time limit is above the most one attempt can run",
-      );
+    // That image's worker refuses the limits a Pi job carried before journal 193.
+    if (a.upgradeWorker) delete next.limits;
     const changes = [
-      ...(job.settings.squad
-        ? [
-            [
-              "Planner",
-              job.settings.leaderModel ?? job.settings.model,
-              next.leaderModel ?? next.model,
-            ],
-          ]
-        : []),
       ["Coder", job.settings.model, next.model],
       ["Reviewer", job.settings.reviewerModel, next.reviewerModel],
-      ["Time limit (ms)", job.settings.limits.ms, next.limits.ms],
-      ["Model calls", job.settings.limits.models, next.limits.models],
-      ["Tool calls", job.settings.limits.tools, next.limits.tools],
       ["Worker image", job.settings.image.slice(-12), next.image.slice(-12)],
     ].filter(([, from, to]) => from !== to);
     if (!changes.length)
       throw new ToolValidationError("The job already has these settings");
-    if ((job.checkpoint.squadState?.toolsUsed ?? 0) > next.limits.tools)
-      throw new ToolValidationError(
-        "The tool-call limit is below what this job has already used",
-      );
-    for (const model of [a.leaderModel, a.coderModel, a.reviewerModel]) {
+    for (const model of [a.coderModel, a.reviewerModel]) {
       if (!model) continue;
       if (!this.catalog) throw new Error("Coding model catalog unavailable");
       await assertEligibleModel(
@@ -1231,35 +1203,8 @@ export class CodingController {
       throw new ToolValidationError(
         "Coding revision changed; read coding_status and retry with the current revision",
       );
-    // Refuse now what the feedback round could never deliver, rather than park the PR on it.
-    const handled =
-      (
-        await this.db.query(
-          "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
-          [job.id, `automation:${job.revision}`],
-        )
-      ).rows[0]?.payload?.handled?.length ?? 0;
-    // Requests already waiting share the next round with this one.
-    const waiting = (
-      await this.db.query(
-        "SELECT payload->>'text' AS text FROM coding_events WHERE job_id=$1 AND event_key LIKE 'owner-feedback:%' AND NOT payload ? 'deliveredRound'",
-        [job.id],
-      )
-    ).rows.map((r: { text: string }) => r.text);
-    const queuedLength = waiting.reduce((n, text) => n + text.length + 20, 0);
-    const refusal =
-      a.message.length > 7000
-        ? "The request is too long for one feedback round; shorten it to under 7,000 characters"
-        : queuedLength + a.message.length > 7000
-          ? "Earlier requests already fill the next round of fixes; send this after that round, or shorten it"
-          : (await feedbackRounds(this.db, job.id)) >= 3
-            ? "This PR has already had three rounds of fixes, so it cannot take another; start a new coding job for further changes"
-            : job.used_models >= job.settings.limits.models
-              ? "This job has used its model allowance, so it cannot take another round of fixes; start a new coding job"
-              : handled + waiting.length >= 200
-                ? "This PR has handled too much feedback to take more; start a new coding job"
-                : undefined;
-    if (refusal) throw new ToolValidationError(`Nothing changed: ${refusal}.`);
+    // Every request is delivered whole in the next feedback round, however many rounds the
+    // PR has had (journal 193); the job's machine time is the only bound.
     if (parked.includes(job.stage))
       await this.assertFreshOrConfirmed(
         job,
@@ -1504,7 +1449,7 @@ export class CodingController {
       )
     ).rows[0]?.payload;
     const activeMs = Math.min(
-      feedback?.remainingMs ?? job.settings.limits.ms,
+      feedback?.remainingMs ?? this.activeMs(job),
       this.activeMs(job),
     );
     const update = await this.db.query(
@@ -2012,12 +1957,12 @@ export class CodingController {
     let claimed: { rows: unknown[] };
     try {
       claimed = await this.db.query(
-        `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+CASE WHEN $9 THEN 0 ELSE 1 END,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4 RETURNING id)
-      INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input,created_at) SELECT $5,id,$2,$6,$7,$8::jsonb,clock_timestamp() FROM claimed RETURNING id`,
+        // No call count is admitted against (journal 193): `used_models` only counts calls.
+        `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+CASE WHEN $8 THEN 0 ELSE 1 END,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND attempt_deadline>$3 RETURNING id)
+      INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input,created_at) SELECT $4,id,$2,$5,$6,$7::jsonb,clock_timestamp() FROM claimed RETURNING id`,
         [
           job.id,
           job.attempt_id,
-          job.settings.limits.models,
           this.clock(),
           callId,
           role,
@@ -2064,9 +2009,7 @@ export class CodingController {
             ? "Coding attempt is no longer active"
             : new Date(now.attempt_deadline).getTime() <= this.clock().getTime()
               ? "Coding attempt deadline has passed"
-              : now.used_models >= job.settings.limits.models
-                ? "Model allocation exhausted"
-                : "Another model request is already in flight",
+              : "Another model request is already in flight",
         ),
       );
     }
@@ -2229,7 +2172,7 @@ export class CodingController {
     job: CodingJob,
     call: {
       callId: string;
-      role: "leader" | "coder" | "reviewer";
+      role: "coder" | "reviewer";
       purpose?: "agent" | "compaction" | "cache_warm";
       selected: string;
       prices: AnthropicPrices;
@@ -2411,7 +2354,10 @@ export class CodingController {
           ? (job.settings.leaderModel ?? job.settings.model)
           : job.settings.model;
     const enhanced = job.settings.harnessVersion === 2;
-    const allowance = outputAllowance(job.settings, input.role);
+    const allowance = outputAllowance(
+      job.settings,
+      input.role === "reviewer" ? "reviewer" : "coder",
+    );
     const total = AbortSignal.timeout(
       Math.max(
         1,
@@ -2443,7 +2389,7 @@ export class CodingController {
         [
           job.id,
           job.attempt_id,
-          job.settings.limits.models,
+          job.settings.limits!.models,
           this.clock(),
           input.callId,
           input.role,
@@ -2477,7 +2423,7 @@ export class CodingController {
             ? "Coding attempt is no longer active"
             : new Date(now.attempt_deadline).getTime() <= this.clock().getTime()
               ? "Coding attempt deadline has passed"
-              : now.used_models >= job.settings.limits.models
+              : now.used_models >= job.settings.limits!.models
                 ? "Model allocation exhausted"
                 : "Another model request is already in flight",
         );
@@ -2821,7 +2767,11 @@ export class CodingController {
               randomUUID(),
               this.clock(),
               new Date(
-                this.clock().getTime() + this.settings.limits.ms + 300000,
+                this.clock().getTime() +
+                  (this.settings.runtime === "pi"
+                    ? PI_ATTEMPT_MS
+                    : this.settings.limits!.ms) +
+                  300000,
               ),
               randomUUID(),
             ],

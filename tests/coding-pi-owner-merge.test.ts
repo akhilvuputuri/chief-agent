@@ -26,13 +26,11 @@ const settings = codingSettings.parse({
   branch: "main",
   image: `ghcr.io/example/worker@sha256:${"a".repeat(64)}`,
   model: "fixture/coder",
-  leaderModel: "fixture/coder",
   reviewerModel: "fixture/reviewer",
   runtime: "pi",
   prWorkflow: "owner_merge",
   maxOutputTokens: 16000,
   effort: "high",
-  limits: { ms: 900000, models: 40, tools: 100 },
 });
 
 /** The job's inbox items, oldest first (journal 192). */
@@ -413,17 +411,45 @@ test("MR feedback becomes labelled inbox items for the same coder session, with 
   ).rows[0].payload;
   assert.deepEqual(budget.handled, ["devin-1"]);
 
-  const limit = await fixture(t);
-  await priorRounds(limit, 3);
-  limit.setInspection({
+  // A fourth round is delivered like the first: there is no round count (journal 193).
+  const later = await fixture(t);
+  await priorRounds(later, 3);
+  later.setInspection({
     draft: false,
     feedback: [{ id: "devin-9", text: "Devin: still wrong" }],
   });
-  await limit.auto.tick();
-  const stopped = await limit.job();
-  assert.equal(stopped.state, "pr_ready");
-  assert.equal(stopped.stage, "manual_review");
-  assert.equal(limit.counts().merges, 0);
+  await later.auto.tick();
+  assert.equal((await later.job()).state, "queued");
+  assert.deepEqual(
+    (await inbox(later)).map((i) => i.key),
+    ["inbox:gh:devin-9"],
+  );
+  assert.equal(later.counts().merges, 0);
+});
+
+test("every feedback item is delivered whole, however long or however many (journal 193)", async (t) => {
+  const f = await fixture(t);
+  const ci = JSON.stringify({ job: "check", log: "x".repeat(20_000) });
+  const many = Array.from({ length: 250 }, (_, n) => ({
+    id: `devin-${n}`,
+    text: `Devin finding ${n}: ${"y".repeat(100)}`,
+  }));
+  f.setInspection({
+    draft: false,
+    feedback: [{ id: "ci:1:1:9", text: ci }, ...many],
+  });
+  await f.auto.tick();
+  assert.equal((await f.job()).state, "queued");
+  const items = await inbox(f);
+  assert.equal(items.length, 251);
+  assert.equal(items.find((i) => i.source === "ci")?.text, ci);
+  const budget = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
+      [f.id],
+    )
+  ).rows[0].payload;
+  assert.equal(budget.handled.length, 251);
 });
 
 test("owner-confirmed merge is a Pi-only, host-only setting", () => {
@@ -574,29 +600,6 @@ test("the bundled Pi profile enables owner-confirmed merge and never automatic m
   assert.equal(bundled.autoMerge, false);
 });
 
-test("each Pi owner-merge feedback round gets a fresh active window even after the first is spent", async (t) => {
-  const f = await fixture(t);
-  await f.db.query(
-    "UPDATE coding_events SET payload=jsonb_set(payload,'{remainingMs}','0'::jsonb) WHERE job_id=$1 AND event_key='automation:1'",
-    [f.id],
-  );
-  f.setInspection({
-    draft: false,
-    feedback: [{ id: "human-1", text: "Reviewer: rename the heading" }],
-  });
-  await f.auto.tick();
-  const queued = await f.job();
-  assert.equal(queued.state, "queued");
-  const budget = (
-    await f.db.query(
-      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
-      [f.id],
-    )
-  ).rows[0].payload;
-  assert.equal(budget.remainingMs, 900000);
-  assert.equal(queued.used_models, 12);
-});
-
 test("a PR that conflicts with main is re-applied on current main with its approval carried over (interim, journal 180)", async (t) => {
   const f = await fixture(t, { version: 1, delivered: [] });
   const before = await f.job();
@@ -653,7 +656,6 @@ test("a PR that conflicts with main is re-applied on current main with its appro
       [f.id],
     )
   ).rows[0].payload;
-  assert.equal(budget.remainingMs, 900000);
   const notice = (
     await f.db.query(
       "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND payload->>'summary' LIKE 'The PR conflicts with recent changes on main%'",
@@ -1023,14 +1025,30 @@ async function continueAsOwner(
   });
 }
 
+test("a PR waiting days for CI keeps waiting; it is never parked for the wait (journal 193)", async (t) => {
+  const f = await fixture(t);
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_ci");
+  f.advance(2 * 86400000);
+  await f.auto.tick();
+  f.setInspection({ mergeable: null, unresolvedThreads: 1 });
+  f.advance(2 * 86400000);
+  await f.auto.tick();
+  const job = await f.job();
+  assert.equal(job.stage, "awaiting_ci");
+  assert.match(job.summary, /resolve outstanding GitHub threads/);
+});
+
 test("an owner continue re-runs the gates with fresh waits and a hold that applies again is a new notice", async (t) => {
   const f = await fixture(t);
-  // Checks stayed unavailable for over an hour, so the PR stopped for the owner.
+  // GitHub could not be read for over an hour, so the PR stopped for the owner.
   await f.db.query(
     "UPDATE coding_events SET payload=jsonb_set(payload,'{waitingSince}',to_jsonb($2::text)) WHERE job_id=$1 AND event_key='automation:1'",
     [f.id, new Date(Date.now() - 2 * 86400000).toISOString()],
   );
-  await f.auto.tick();
+  f.onNextInspect(async () => {
+    throw new Error("GitHub unavailable");
+  });
   await f.auto.tick();
   assert.equal((await f.job()).stage, "manual_review");
   const notices = async () =>
@@ -1234,22 +1252,22 @@ test("a hard-stop PR never merges, even with an owner approval already recorded"
   assert.equal(cards.rows.length, 0);
 });
 
-test("a fix request that a feedback round could not deliver is refused up front", async (t) => {
+test("a fix request is taken after any number of rounds and at any length (journal 193)", async (t) => {
   const f = await fixture(t);
   await priorRounds(f, 3);
   await f.db.query("UPDATE coding_jobs SET stage='manual_review' WHERE id=$1", [
     f.id,
   ]);
-  await assert.rejects(
-    replyAsOwner(f, "fix-5", "One more fix."),
-    /three rounds of fixes/,
+  await replyAsOwner(f, "fix-5", "One more fix.");
+  await replyAsOwner(f, "fix-6", "x".repeat(20_000));
+  assert.equal((await f.job()).stage, "awaiting_ci");
+  f.setInspection({ draft: false });
+  await f.auto.tick();
+  assert.equal((await f.job()).state, "queued");
+  assert.deepEqual(
+    (await inbox(f)).map((i) => i.text.length).sort((a, b) => a - b),
+    ["One more fix.".length, 20_000],
   );
-  assert.equal((await f.job()).stage, "manual_review");
-  const g = await fixture(t);
-  await g.db.query("UPDATE coding_jobs SET stage='manual_review' WHERE id=$1", [
-    g.id,
-  ]);
-  await assert.rejects(replyAsOwner(g, "fix-6", "x".repeat(7001)), /too long/);
 });
 
 test("a fix request on a PR stopped for over a day needs the owner's explicit say-so", async (t) => {
@@ -1324,14 +1342,15 @@ test("a round that loses its lease leaves the owner's request for the next one",
   assert.equal((await f.job()).state, "queued");
 });
 
-test("requests that would not fit one round together are refused", async (t) => {
+test("requests waiting together all reach the next round (journal 193)", async (t) => {
   const f = await fixture(t);
   await f.auto.tick();
   await replyAsOwner(f, "fix-10", "a".repeat(5000));
-  await assert.rejects(
-    replyAsOwner(f, "fix-11", "b".repeat(5000)),
-    /already fill the next round/,
-  );
+  await replyAsOwner(f, "fix-11", "b".repeat(5000));
+  f.setInspection({ draft: false });
+  await f.auto.tick();
+  assert.equal((await f.job()).state, "queued");
+  assert.equal((await inbox(f)).length, 2);
 });
 
 test("an owner message kept while the job was publishing starts a feedback round once the PR is open", async (t) => {

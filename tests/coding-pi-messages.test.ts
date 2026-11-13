@@ -39,6 +39,7 @@ async function piJob(t: TestContext) {
     job.id,
     JSON.stringify({
       ...settings,
+      limits: undefined,
       runtime: "pi",
       squad: false,
       autoMerge: false,
@@ -710,13 +711,20 @@ for (const stop of ["cancel", "deadline", "disconnect"] as const)
 
 test("Pi jobs and coding model choices must use a model Chief calls directly at Anthropic", async (t) => {
   const f = await fixture(t, {
-    settings: { ...settings, runtime: "pi", model: "unrouted/model" },
+    settings: {
+      ...settings,
+      limits: undefined,
+      runtime: "pi",
+      model: "unrouted/model",
+    },
   });
   await assert.rejects(
     f.start("unrouted"),
     /Coding jobs call Claude directly at Anthropic, and unrouted\/model is not a Claude model Chief calls directly.*No job was started/,
   );
-  const g = await fixture(t, { settings: { ...settings, runtime: "pi" } });
+  const g = await fixture(t, {
+    settings: { ...settings, limits: undefined, runtime: "pi" },
+  });
   await assert.rejects(
     g.c.call("a", g.run, {
       operation: "coding_model_set",
@@ -779,6 +787,7 @@ async function throughHost(
     job.id,
     JSON.stringify({
       ...settings,
+      limits: undefined,
       runtime: "pi",
       squad: false,
       autoMerge: false,

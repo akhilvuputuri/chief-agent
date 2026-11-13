@@ -63,6 +63,7 @@ test("coding model-role commands snapshot new Pi jobs without changing existing 
   const f = await fixture(t);
   const selected = codingSettings.parse({
     ...settings,
+    limits: undefined,
     runtime: "pi",
     squad: false,
     autoMerge: false,
@@ -110,7 +111,7 @@ test("coding model-role commands snapshot new Pi jobs without changing existing 
   const original = await start("original-pi-models");
   const saved = (await f.row(original.id)).settings;
   for (const [index, choice] of catalog.entries()) {
-    for (const role of ["leader", "coder", "reviewer"] as const) {
+    for (const role of ["coder", "reviewer"] as const) {
       const prior = (await controller.call("a", f.run, {
         operation: "coding_models",
       })) as any;
@@ -121,21 +122,33 @@ test("coding model-role commands snapshot new Pi jobs without changing existing 
       })) as any;
       assert.equal(result[role], choice.id);
       assert.equal(result.appliesTo, "new jobs only");
-      for (const other of ["leader", "coder", "reviewer"].filter(
-        (r) => r !== role,
-      ))
+      for (const other of ["coder", "reviewer"].filter((r) => r !== role))
         assert.equal(result[other], prior.preferences[other]);
     }
     const fresh = await start(`model-${index}`);
     const snapshot = (await f.row(fresh.id)).settings;
-    // A Pi job has no planner (journal 191): the leader preference does not apply to it.
+    // A Pi job has no planner (journals 191 and 193).
     assert.equal(snapshot.leaderModel, undefined);
+    assert.equal(snapshot.limits, undefined);
     assert.equal(snapshot.model, choice.id);
     assert.equal(snapshot.reviewerModel, choice.id);
     assert.equal(snapshot.runtime, "pi");
     assert.equal(snapshot.autoMerge, false);
     assert.deepEqual((await f.row(original.id)).settings, saved);
   }
+  // There is no planner role to choose a model for (journal 193).
+  await assert.rejects(
+    controller.call("a", f.run, {
+      operation: "coding_model_set",
+      role: "leader",
+      model: catalog[0].id,
+    } as any),
+  );
+  assert.equal(
+    ((await controller.call("a", f.run, { operation: "coding_models" })) as any)
+      .preferences.leader,
+    undefined,
+  );
   await assert.rejects(
     controller.call("b", f.run, {
       operation: "coding_model_set",
@@ -163,6 +176,7 @@ test("Pi report documents bind checkpoint content and support the full escaped t
     started.id,
     JSON.stringify({
       ...settings,
+      limits: undefined,
       runtime: "pi",
       squad: false,
       autoMerge: false,
@@ -300,6 +314,7 @@ for (const {
     const started = await f.start("pi-e2e", true);
     const profile = {
       ...settings,
+      limits: undefined,
       runtime: "pi",
       squad: false,
       autoMerge: false,
