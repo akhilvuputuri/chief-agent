@@ -4,7 +4,9 @@ Issue #326, batch 3 of the memory-loop review. A fourth nightly pass rewrites th
 
 > **Update, 13 November 2026:** live in `a869463` (PR 478) from 02:32 SGT on 13 November.
 
-# An alert leads to the trace — not yet released, 13 November 2026
+# An alert leads to the trace — live, phone acceptance pending, 13 November 2026
+
+> **Update, 13 November 2026 (rolled out):** the agentwatch update ran on the host from `30c4105` (PR 480): the image of agentwatch `b11b4a3` is live with its public address, after 27 seconds for the whole run and with a copy of the data kept in `/var/backups/agentwatch-update/`. A test alert fired with its detail ("public_browser failed 8 of 55 calls") and three linked traces, and the gateway delivered it to Telegram. Pending: the owner opening a link from the phone. The same test showed one tool call in seven failing over the last week, which no threshold monitor reports; that belongs to step 3 of the plan.
 
 > **Update, 13 November 2026:** all four changes are merged (agentwatch `090cca1`, `5acc163`, `b11b4a3`; Chief's relay `723d04f`, live and inert until agentwatch is updated). What remains is the operator rollout of the agentwatch image `sha256:3a00e227…` with `--public-url`, which changes agentwatch's database format; the update procedure now copies the data first so a rollback is real.
 
