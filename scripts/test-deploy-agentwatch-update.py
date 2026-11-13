@@ -4,8 +4,11 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import pathlib
 import re
+import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -61,6 +64,12 @@ SIGNED_ENV = ('PRIVATE_SENTINEL=must-stay-private\n'
               'AGENTWATCH_PASSWORD_HASH=scrypt:32768:8:3:c2FsdHNhbHRzYWx0c2FsdA:secret-sentinel-hash\n'
               'AGENTWATCH_API_KEY=' + KEY + '\n')
 UP = ('compose', 'up', '-d', '--no-deps', 'agentwatch')
+STOP = ('compose', 'stop', 'agentwatch')
+HELPER = ('docker', 'run', '--rm', '--pull', 'never', '--sig-proxy=false', '--network', 'none', '--read-only',
+          '--security-opt', 'no-new-privileges:true', '--user', '0:0', '--entrypoint', 'python')
+VOLUME = ('docker', 'volume', 'inspect', update.DATA_VOLUME)
+PUBLIC = ('        "--allow-host",\n        "traces.example.com",\n'
+          '        "--public-url",\n        "https://traces.example.com",\n')
 IMAGE_ID = ('docker', 'inspect', '--format', '{{.Image}}', update.AGENTWATCH_CONTAINER)
 HEALTH = ('docker', 'inspect', '--format', '{{.State.Health.Status}}', update.AGENTWATCH_CONTAINER)
 GATEWAY = ('curl', '--fail', '--silent', '--max-time', '3', 'http://127.0.0.1:3000/healthz')
@@ -89,7 +98,9 @@ class AgentwatchUpdateTests(unittest.TestCase):
                  gateway_after=True, new_health='healthy', ingest_failure=False,
                  old_health='healthy', expected_error=None,
                  env='PRIVATE_SENTINEL=must-stay-private\n', open_without_key=False,
-                 gateway='172.18.0.1 '):
+                 gateway='172.18.0.1 ', backup_failure=False, restore_failure=False,
+                 stop_failure=False, rollback_stop_failure=False, earlier_backups=(),
+                 interrupt_at=None, volume_missing=False, expected=RuntimeError, live_after=None):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             live = root / 'live'
@@ -135,11 +146,62 @@ class AgentwatchUpdateTests(unittest.TestCase):
                         archive.addfile(member, io.BytesIO(b'x'))
 
             commands = []
-            container = {'image': None if current_missing else 'sha256:old'}
+            container = {'image': None if current_missing else 'sha256:old', 'running': True}
+            # The data files' format, as the image that last ran left it. The new image
+            # rewrites them, and the old image cannot open what it wrote.
+            volume = {'format': 'old'}
+            backups = root / 'backups'
+            for name in earlier_backups:
+                (backups / name).mkdir(parents=True)
+
+            def helper(args):
+                """The copy container: what it was given, and the copy it would make."""
+                self.assertEqual(args[:len(HELPER)], HELPER)
+                mounts = [args[i + 1] for i, part in enumerate(args) if part == '--volume']
+                image, isolated, flag, script = args[-4:]
+                self.assertEqual((image, isolated, flag), ('sha256:old', '-I', '-c'))
+                self.assertEqual(commands[-2], VOLUME)  # checked to exist just before
+                self.assertFalse(container['running'], 'copied while agentwatch was running')
+                data, backup = (mount.split(':') for mount in mounts)
+                self.assertEqual(data[0], update.DATA_VOLUME)
+                folder = pathlib.Path(backup[0])
+                self.assertEqual(folder.parent, backups)
+                if script == update.COPY_OUT:
+                    self.assertEqual((data[1:], backup[1:]), (['/data', 'ro'], ['/backup']))
+                    # Written under a name that marks it unfinished.
+                    self.assertTrue(folder.name.endswith(update.PARTIAL))
+                    (folder / 'agentwatch.duckdb').write_text(volume['format'])
+                    if backup_failure:
+                        raise subprocess.CalledProcessError(1, args, stderr='PRIVATE_SENTINEL')
+                else:
+                    self.assertEqual(script, update.COPY_BACK)
+                    self.assertEqual((data[1:], backup[1:]), (['/data'], ['/backup', 'ro']))
+                    self.assertRegex(folder.name, update.COPY_NAME)
+                    if restore_failure:
+                        raise subprocess.CalledProcessError(1, args, stderr='PRIVATE_SENTINEL')
+                    volume['format'] = (folder / 'agentwatch.duckdb').read_text()
+                return subprocess.CompletedProcess(args, 0, stdout='')
 
             def run(args, **kwargs):
                 args = tuple(args)
                 commands.append(args)
+                if args == VOLUME and volume_missing:
+                    raise subprocess.CalledProcessError(1, args, stderr='PRIVATE_SENTINEL')
+                if args[:2] == ('docker', 'run'):
+                    # Out of reach of a Ctrl-C at the terminal.
+                    self.assertIs(kwargs.get('start_new_session'), True)
+                    if container['image'] == 'sha256:new' or UP in commands:
+                        self.assertEqual(signal.getsignal(signal.SIGINT), signal.SIG_IGN)
+                    return helper(args)
+                if args[:2] == ('docker', 'pull') and interrupt_at == 'pull':
+                    raise KeyboardInterrupt
+                if args[:2] == ('docker', 'pull') and interrupt_at == 'signal':
+                    self.assertEqual(signal.getsignal(signal.SIGTERM), update._interrupt)
+                    self.assertEqual(signal.getsignal(signal.SIGHUP), update._interrupt)
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    for _ in range(1000):
+                        pass  # the handler runs between two of these
+                    raise AssertionError('the stop request did not interrupt')
                 if args[:3] == ('docker', 'network', 'inspect'):
                     return subprocess.CompletedProcess(args, 0, stdout=gateway + '\n')
                 if args[:2] == ('docker', 'pull') and pull_failure:
@@ -150,6 +212,8 @@ class AgentwatchUpdateTests(unittest.TestCase):
                     if args == IMAGE_ID:
                         return subprocess.CompletedProcess(args, 0, stdout=container['image'] + '\n')
                     state = new_health if container['image'] == 'sha256:new' else old_health
+                    if container['image'] == 'sha256:old' and volume['format'] != 'old':
+                        state = 'unhealthy'  # the previous image refuses a newer database
                     return subprocess.CompletedProcess(args, 0, stdout=state + '\n')
                 if args == GATEWAY and not (gateway_after if UP in commands else gateway_before):
                     raise subprocess.CalledProcessError(7, args)
@@ -163,30 +227,47 @@ class AgentwatchUpdateTests(unittest.TestCase):
 
             def compose(*args, **kwargs):
                 commands.append(('compose', *args))
+                if ('compose', *args) == STOP:
+                    if stop_failure or (rollback_stop_failure and UP in commands):
+                        raise subprocess.CalledProcessError(1, args, stderr='PRIVATE_SENTINEL')
+                    container['running'] = False
                 if ('compose', *args) == UP:
+                    if interrupt_at == 'up' and commands.count(UP) == 1:
+                        raise KeyboardInterrupt
                     current = (live / 'compose.yaml').read_text()
                     container['image'] = 'sha256:new' if current == staged_compose else 'sha256:old'
+                    container['running'] = True
+                    if container['image'] == 'sha256:new':
+                        volume['format'] = 'new'
                 return subprocess.CompletedProcess(args, 0, stdout='')
 
             output = io.StringIO()
             with patch.object(update, 'LIVE', live), \
+                    patch.object(update, 'BACKUPS', backups), \
                     patch.object(update, 'LOCK', root / 'release.lock'), \
                     patch.object(sys, 'argv', ['deploy-agentwatch-update.py', str(archive_path), requested_sha]), \
                     patch.object(update, 'run', side_effect=run), \
                     patch.object(update, 'compose', side_effect=compose), \
                     patch.object(update.time, 'sleep'), \
                     contextlib.redirect_stdout(output):
+                handlers = [signal.getsignal(n) for n in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)]
                 if expected_error:
-                    with self.assertRaisesRegex(RuntimeError, expected_error) as caught:
+                    with self.assertRaisesRegex(expected, expected_error) as caught:
                         update.main()
                     self.assertNotIn('PRIVATE_SENTINEL', str(caught.exception))
                 else:
                     update.main()
+                # Whatever happened, the process's signal handling is as it was.
+                self.assertEqual([signal.getsignal(n) for n in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)],
+                                 handlers)
+                self.assertEqual(sorted(path.name for path in live.iterdir() if path.name.startswith('.compose')), [])
 
-            # Never the gateway (beyond its read-only health), RELEASE, source, volume or .env.
+            # Never the gateway (beyond its read-only health), RELEASE, source or .env; the
+            # volume only through the copy container, which `helper` checked.
             for command in commands:
-                self.assertTrue(command in (UP, GATEWAY) or command[0] == 'curl' and ':4318/' in command[-1]
+                self.assertTrue(command in (UP, STOP, GATEWAY, VOLUME) or command[0] == 'curl' and ':4318/' in command[-1]
                                 or command[:2] in (('docker', 'pull'), ('docker', 'inspect'))
+                                or command[:len(HELPER)] == HELPER
                                 or command[:3] == ('docker', 'network', 'inspect'), command)
                 if command != GATEWAY:
                     self.assertFalse(any('gateway' in part or ':3000' in part for part in command), command)
@@ -196,22 +277,36 @@ class AgentwatchUpdateTests(unittest.TestCase):
             for secret in ('PRIVATE_SENTINEL', 'secret-sentinel'):
                 self.assertNotIn(secret, output.getvalue())
                 self.assertFalse(any(secret in ' '.join(c) for c in commands), secret)
+            self.kept = sorted(path.name for path in backups.iterdir()) if backups.exists() else []
+            self.assertFalse(any(name.endswith(update.PARTIAL) for name in self.kept
+                                 if name not in earlier_backups), self.kept)
+            self.volume = volume['format']
             if not expected_error:
                 image = re.search(r'    image: (\S+)\n', staged_compose).group(1)
-                self.assertEqual(json.loads(output.getvalue()), {'agentwatch': image, 'healthy': True})
+                result = json.loads(output.getvalue())
+                made = pathlib.Path(result.pop('backup'))
+                self.assertEqual(result, {'agentwatch': image, 'healthy': True})
+                # The data as it was, in a directory only root can read, named by time and commit.
+                self.assertEqual((made.parent, made.name[-13:]), (backups, '-' + SHA[:12]))
+                self.assertEqual((made / 'agentwatch.duckdb').read_text(), 'old')
+                self.assertEqual(made.stat().st_mode & 0o777, 0o700)
+                self.assertEqual(backups.stat().st_mode & 0o777, 0o700)
+                self.assertEqual(volume['format'], 'new')
                 self.assertIn(('docker', 'pull', image), commands)
                 self.assertEqual((live / 'compose.yaml').read_text(), staged_compose)
                 self.assertEqual(container['image'], 'sha256:new')
                 post = next(i for i, c in enumerate(commands) if c[-1].endswith('/v1/traces'))
                 read = next(i for i, c in enumerate(commands) if '/api/traces/' in c[-1])
                 gateway_checks = [i for i, c in enumerate(commands) if c == GATEWAY]
+                copied = next(i for i, c in enumerate(commands) if c[:2] == ('docker', 'run'))
                 order = [commands.index(('docker', 'pull', image)), commands.index(IMAGE_ID), gateway_checks[0],
+                         commands.index(STOP), copied,
                          commands.index(UP), commands.index(HEALTH), post, read, gateway_checks[-1]]
                 self.assertEqual(order, sorted(order))
                 self.assertEqual(commands.count(UP), 1)
             else:
                 self.assertEqual(output.getvalue(), '')
-                self.assertEqual((live / 'compose.yaml').read_text(), live_compose)
+                self.assertEqual((live / 'compose.yaml').read_text(), live_after or live_compose)
             return commands
 
     def test_success_recreates_only_agentwatch(self):
@@ -466,11 +561,266 @@ class AgentwatchUpdateTests(unittest.TestCase):
                 commands = self.scenario(**args, expected_error='agentwatch update failed; previous agentwatch restored')
                 self.assertEqual(commands.count(UP), 2)
                 self.assertEqual(commands[-1], IMAGE_ID)
+                # The data is put back before the previous image starts: it could not open
+                # what the new image wrote (the harness reports it unhealthy if it had to).
+                self.assertEqual(self.volume, 'old')
+                copies = [i for i, c in enumerate(commands) if c[:2] == ('docker', 'run')]
+                ups = [i for i, c in enumerate(commands) if c == UP]
+                stops = [i for i, c in enumerate(commands) if c == STOP]
+                self.assertEqual(len(copies), 2)
+                self.assertLess(ups[0], stops[1])
+                self.assertLess(stops[1], copies[1])
+                self.assertLess(copies[1], ups[1])
+                self.assertEqual(len(self.kept), 1)  # kept for inspection after a failure
 
     def test_unhealthy_rollback_requires_operator_inspection(self):
-        commands = self.scenario(new_health='unhealthy', old_health='unhealthy',
-                                 expected_error='Rollback needs operator inspection')
+        commands = self.scenario(
+            new_health='unhealthy', old_health='unhealthy',
+            expected_error='Rollback needs operator inspection: it failed while checking the previous agentwatch; '
+                           'the previous agentwatch was started but is not healthy; gateway untouched; '
+                           'compose.yaml is the previous one; the data as it was before the update is in .*-'
+                           + SHA[:12] + r' \(put it back with --restore')
         self.assertEqual(commands.count(UP), 2)
+
+    def test_a_failed_stop_or_copy_starts_nothing_new(self):
+        # Nothing was changed yet: the previous agentwatch is started again on its own data,
+        # and a copy that did not finish is not left looking like one that did.
+        for args in [{'stop_failure': True}, {'backup_failure': True}, {'volume_missing': True}]:
+            with self.subTest(args=args):
+                commands = self.scenario(**args, expected_error='agentwatch update failed; previous agentwatch restored')
+                self.assertEqual(commands.count(UP), 1)
+                self.assertEqual(self.volume, 'old')
+                self.assertEqual(self.kept, [])
+                self.assertEqual(sum(c[:2] == ('docker', 'run') for c in commands), 1 if 'backup_failure' in args else 0)
+
+    def test_a_restore_that_fails_leaves_agentwatch_for_the_operator(self):
+        commands = self.scenario(
+            new_health='unhealthy', restore_failure=True,
+            expected_error='failed while putting its data back; agentwatch is stopped and its volume may be part '
+                           'emptied; .*the data as it was before the update is in ')
+        # Not started on files it cannot open.
+        self.assertEqual(commands.count(UP), 1)
+        self.assertEqual(self.volume, 'new')
+        self.assertEqual(len(self.kept), 1)
+
+    def test_a_new_agentwatch_that_will_not_stop_is_said_to_be_running(self):
+        commands = self.scenario(
+            new_health='unhealthy', rollback_stop_failure=True,
+            expected_error='failed while stopping the new agentwatch; agentwatch may be stopped or running the new image')
+        self.assertEqual(commands.count(UP), 1)
+        self.assertEqual(sum(c[:2] == ('docker', 'run') for c in commands), 1)  # nothing put back under it
+
+    def test_an_interrupt_after_the_stop_rolls_back_and_one_before_changes_nothing(self):
+        commands = self.scenario(interrupt_at='up', expected_error='agentwatch update failed; previous agentwatch restored')
+        self.assertEqual(commands.count(UP), 2)
+        self.assertEqual(self.volume, 'old')
+        commands = self.scenario(interrupt_at='pull', expected=KeyboardInterrupt, expected_error='^$')
+        self.assertNotIn(STOP, commands)
+        self.assertNotIn(UP, commands)
+
+    def test_a_stop_request_is_an_interrupt(self):
+        with self.assertRaises(KeyboardInterrupt):
+            update._interrupt(signal.SIGTERM, None)
+        # main installs it for the stop requests a terminal does not send: a real SIGTERM
+        # during the pull, before anything is stopped, ends the update with nothing changed.
+        commands = self.scenario(interrupt_at='signal', expected=KeyboardInterrupt, expected_error='^$')
+        self.assertNotIn(STOP, commands)
+        self.assertFalse(update.progress['stopped'])
+
+    def test_a_rollback_that_cannot_write_compose_does_not_say_it_did(self):
+        real = update.write_compose
+        calls = []
+
+        def write(content):
+            calls.append(content)
+            if len(calls) == 2:
+                raise OSError('disk full')
+            return real(content)
+
+        with patch.object(update, 'write_compose', side_effect=write):
+            self.scenario(new_health='unhealthy', live_after=STAGED_COMPOSE,
+                          expected_error='failed while restoring compose.yaml; agentwatch may be stopped or '
+                                         'running the new image; gateway untouched; compose.yaml may be the new one')
+        self.assertEqual(len(calls), 2)
+
+    def test_restore_by_hand_puts_a_finished_copy_back(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            live, backups = root / 'live', root / 'backups'
+            live.mkdir()
+            (live / 'compose.yaml').write_text(LIVE_COMPOSE)
+            good = backups / ('20261113T010203Z-' + SHA[:12])
+            good.mkdir(parents=True)
+            (good / 'agentwatch.duckdb').write_text('old')
+            empty = backups / ('20261113T010204Z-' + SHA[:12])
+            empty.mkdir()
+            (backups / (good.name + update.PARTIAL)).mkdir()
+            commands = []
+            health = {'state': 'healthy'}
+
+            def run(args, **kwargs):
+                commands.append(tuple(args))
+                return subprocess.CompletedProcess(args, 0, stdout=health['state'] + '\n')
+
+            def compose(*args, **kwargs):
+                commands.append(('compose', *args))
+                # Not to be interrupted from the first step on.
+                self.assertEqual(signal.getsignal(signal.SIGTERM), signal.SIG_IGN)
+                return subprocess.CompletedProcess(args, 0, stdout='')
+
+            def restore_from(path, error=None):
+                commands.clear()
+                output = io.StringIO()
+                with patch.object(update, 'LIVE', live), patch.object(update, 'BACKUPS', backups), \
+                        patch.object(update, 'LOCK', root / 'release.lock'), \
+                        patch.object(sys, 'argv', ['deploy-agentwatch-update.py', '--restore', str(path)]), \
+                        patch.object(update, 'run', side_effect=run), \
+                        patch.object(update, 'compose', side_effect=compose), \
+                        patch.object(update.time, 'sleep'), contextlib.redirect_stdout(output):
+                    if error:
+                        with self.assertRaisesRegex(RuntimeError, error):
+                            update.main()
+                    else:
+                        update.main()
+                return output.getvalue()
+
+            printed = json.loads(restore_from(good))
+            self.assertEqual(printed, {'agentwatch': OLD_IMAGE, 'healthy': True, 'restored': str(good)})
+            copy = next(c for c in commands if c[:2] == ('docker', 'run'))
+            # From the image the live compose.yaml names, into the volume, the copy read-only.
+            self.assertEqual(copy[:len(HELPER)], HELPER)
+            self.assertEqual(copy[-4:], (OLD_IMAGE, '-I', '-c', update.COPY_BACK))
+            self.assertIn(update.DATA_VOLUME + ':/data', copy)
+            self.assertIn(str(good) + ':/backup:ro', copy)
+            order = [commands.index(STOP), commands.index(VOLUME), commands.index(copy), commands.index(UP)]
+            self.assertEqual(order, sorted(order))
+            # Only a finished copy made by this procedure, named as it names them.
+            for bad in (empty, backups / (good.name + update.PARTIAL), backups / 'manual', root / good.name,
+                        backups / good.name / '..' / good.name):
+                self.assertEqual(restore_from(bad, 'Not a finished copy made by this procedure; nothing changed'), '')
+                self.assertEqual(commands, [])
+            health['state'] = 'unhealthy'
+            restore_from(good, 'Restore failed while starting agentwatch; agentwatch may be stopped; the copy in .* is unchanged')
+
+    def test_the_copy_scripts_copy_everything_and_restore_exactly(self):
+        """The scripts that run inside the copy container, run here on two directories."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            data, backup = root / 'data', root / 'backup'
+            data.mkdir()
+            backup.mkdir()
+
+            def inside(script):
+                source = script.replace('"/data', '"' + str(data)).replace('"/backup', '"' + str(backup))
+                self.assertNotIn('"/data', source)
+                return subprocess.run([sys.executable, '-I', '-c', source], capture_output=True, text=True)
+
+            def tree(folder):
+                return sorted(str(path.relative_to(folder)) + ('@' if path.is_symlink() else '/' if path.is_dir() else '')
+                              for path in folder.rglob('*'))
+
+            # Nothing to copy is not a copy.
+            self.assertIn('no database to copy', inside(update.COPY_OUT).stderr)
+            (data / 'agentwatch.duckdb').write_bytes(b'old database')
+            (data / 'agentwatch.duckdb').chmod(0o640)
+            (data / 'agentwatch.duckdb.wal').write_bytes(b'old log')
+            # A directory, a file in it and a link are part of the data, as they are.
+            (data / '.cache' / 'deep').mkdir(parents=True)
+            (data / '.cache' / 'deep' / 'file').write_bytes(b'kept')
+            (data / '.cache').chmod(0o750)
+            (data / 'current').symlink_to('agentwatch.duckdb')
+            (data / 'dangling').symlink_to('nowhere')
+            # Scratch directories a killed agentwatch leaves behind are not.
+            (data / 'agentwatch.duckdb.tmp').mkdir()
+            (data / 'agentwatch.duckdb.tmp' / 'spill').write_bytes(b'x')
+            (data / 'agentwatch-ab12').mkdir()
+            done = inside(update.COPY_OUT)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            kept = ['.cache/', '.cache/deep/', '.cache/deep/file', 'agentwatch.duckdb', 'agentwatch.duckdb.wal',
+                    'current@', 'dangling@']
+            self.assertEqual(tree(backup), kept)
+            self.assertEqual((backup / 'agentwatch.duckdb').read_bytes(), b'old database')
+            self.assertEqual((backup / 'agentwatch.duckdb').stat().st_mode & 0o777, 0o640)
+            self.assertEqual((backup / '.cache').stat().st_mode & 0o777, 0o750)
+            self.assertEqual(os.readlink(backup / 'dangling'), 'nowhere')
+
+            # The new image rewrote the file, left a different log, its own scratch directory
+            # and changed the rest.
+            (data / 'agentwatch.duckdb').write_bytes(b'new format')
+            (data / 'agentwatch.duckdb.wal').write_bytes(b'log for the new format')
+            (data / 'agentwatch-cd34').mkdir()
+            (data / 'agentwatch-cd34' / 'part').write_bytes(b'y')
+            (data / '.cache' / 'deep' / 'file').write_bytes(b'changed')
+            (data / 'extra').write_bytes(b'new file')
+            done = inside(update.COPY_BACK)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(tree(data), kept)
+            self.assertEqual((data / 'agentwatch.duckdb').read_bytes(), b'old database')
+            self.assertEqual((data / 'agentwatch.duckdb.wal').read_bytes(), b'old log')
+            self.assertEqual((data / '.cache' / 'deep' / 'file').read_bytes(), b'kept')
+            self.assertEqual((data / 'agentwatch.duckdb').stat().st_mode & 0o777, 0o640)
+            self.assertEqual((data / '.cache').stat().st_mode & 0o777, 0o750)
+
+            # Anything that is neither a file, a directory nor a link stops the copy, naming it.
+            shutil.rmtree(backup)
+            backup.mkdir()
+            os.mkfifo(data / 'pipe')
+            done = inside(update.COPY_OUT)
+            self.assertNotEqual(done.returncode, 0)
+            self.assertIn('neither a file, a directory nor a link: ' + str(data / 'pipe'), done.stderr)
+            (data / 'pipe').unlink()
+
+            # A copy without a database empties nothing.
+            shutil.rmtree(backup)
+            backup.mkdir()
+            done = inside(update.COPY_BACK)
+            self.assertIn('the copy holds no database', done.stderr)
+            self.assertEqual(tree(data), kept)
+
+    def test_the_copy_scripts_keep_each_entrys_owner(self):
+        """Ownership cannot change without root, so the call is checked here, and its effect
+        in the rehearsal on a Docker host (journal 184)."""
+        for script in (update.COPY_OUT, update.COPY_BACK):
+            self.assertIn('    os.chown(target, found.st_uid, found.st_gid, follow_symlinks=False)\n', script)
+            self.assertIn('    found = os.lstat(source)\n', script)
+
+    def test_only_the_newest_copies_are_kept(self):
+        earlier = ('20260101T000000Z-aaaaaaaaaaaa', '20260201T000000Z-bbbbbbbbbbbb',
+                   '20260301T000000Z-cccccccccccc')
+        # Not copies of this procedure's making: never counted and never removed.
+        others = ('manual-before-migration', '20260101T000000Z-aaaaaaaaaaaa' + update.PARTIAL)
+        self.scenario(earlier_backups=earlier + others)
+        finished = [name for name in self.kept if name not in others]
+        self.assertEqual(len(finished), update.KEPT_BACKUPS)
+        self.assertEqual(finished[:2], list(earlier[1:]))
+        self.assertTrue(finished[2].endswith('-' + SHA[:12]))
+        self.assertTrue(set(others) <= set(self.kept))
+        # A failed update removes nothing.
+        self.scenario(earlier_backups=earlier, new_health='unhealthy',
+                      expected_error='previous agentwatch restored')
+        self.assertEqual(len(self.kept), 4)
+
+    def test_a_public_url_is_the_https_address_of_a_public_name_with_signing_in(self):
+        signed = SIGNED_COMPOSE.replace(SIGN_IN, SIGN_IN + PUBLIC)
+        self.scenario(staged_compose=signed, env=SIGNED_ENV)
+        refused = 'agentwatch --public-url must be https://'
+        for changed in (
+                signed.replace('"https://traces.example.com"', '"http://traces.example.com"'),
+                signed.replace('"https://traces.example.com"', '"https://traces.example.com/"'),
+                signed.replace('"https://traces.example.com"', '"https://traces.example.com:8443"'),
+                signed.replace('"https://traces.example.com"', '"https://owner@traces.example.com"'),
+                signed.replace('"https://traces.example.com"', '"https://elsewhere.example.com"'),
+                signed.replace('"https://traces.example.com"', '"https://agentwatch"')
+                      .replace('"traces.example.com"', '"agentwatch"'),
+                signed.replace('"https://traces.example.com"', '"https://TRACES.example.com"')):
+            with self.subTest(changed=changed[-420:-300]):
+                self.scenario(staged_compose=changed, env=SIGNED_ENV, expected_error=refused)
+        # Without signing in there is no public name to link to.
+        unsigned = STAGED_COMPOSE.replace('        "50",\n', '        "50",\n' + PUBLIC)
+        with self.assertRaises(AssertionError):
+            # (refused earlier, for the public --allow-host itself)
+            self.scenario(staged_compose=unsigned, expected_error=refused)
+        self.scenario(staged_compose=unsigned, expected_error='public host name only with signing in on')
 
 
 if __name__ == '__main__':

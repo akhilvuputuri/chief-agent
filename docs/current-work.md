@@ -6,6 +6,8 @@ Issue #326, batch 3 of the memory-loop review. A fourth nightly pass rewrites th
 
 # An alert leads to the trace — not yet released, 13 November 2026
 
+> **Update, 13 November 2026:** all four changes are merged (agentwatch `090cca1`, `5acc163`, `b11b4a3`; Chief's relay `723d04f`, live and inert until agentwatch is updated). What remains is the operator rollout of the agentwatch image `sha256:3a00e227…` with `--public-url`, which changes agentwatch's database format; the update procedure now copies the data first so a rollback is real.
+
 Issue #323. A review of agentwatch on 13 November found it had not been used to answer one production question: 82 of 367 stored traces held a failed span and no real alert had fired. Step 1 of the plan that followed is the path from an alert to the answer. agentwatch's trace page now opens on what was asked, what was replied and the first error, a wrong password keeps the linked trace, and a firing alert records the worst tool or model and up to three traces behind its figure. Chief's relay passes those on: the Telegram message names the worst contributor and links to the traces. Pending: agentwatch's alert change in review, then its image pinned and rolled out with its public address, then acceptance from a phone. See [journal 184](journey/184-alert-to-answer.md); the full plan is the owner's `reports/agentwatch improvement review.md`.
 
 # The memory judge checks itself — not yet released, 13 November 2026
