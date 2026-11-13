@@ -133,6 +133,16 @@ Each task shown to the model is held to about 12,000 characters: steps are dropp
 
 ### Host checks
 
+> **Update, 13 November 2026 ([journal 195](journey/195-what-the-owner-pointed-at.md)):** prompt `learner-v7`. A fact may name what the owner only pointed at, and the prompt says outright that one request is no trait.
+>
+> - **Brackets and context.** When the owner's words point at something without naming it ("this", "it", "the usual one"), the value may name it in `[square brackets]`, and `learn_fact` then takes `context`: one entry for each bracketed detail, with `detail` (the bracketed words) and `quote` (exact words of the exchange that show it). Up to three.
+> - **What the host accepts.** Brackets and entries pair up one to one. The quote must be found in Chief's reply as the learner was shown it, or in another of the owner's messages, in the cited item the fact's own quote is from. Every word of the detail other than function words must be in that quote. A detail with a habit word ("prefers", "wants", "usually", "always" and the like) or a negation is refused: brackets name a thing, place, person, document or job, never what the owner wants. Unpaired or nested brackets are refused.
+> - **The claim is checked without its brackets.** The quote checks and the flags above apply to the value with the bracketed parts taken out, so the owner's claim is held to the owner's quote and the brackets to their own.
+> - **What is stored.** `source.context` holds each entry with `from`: `owner` or `chief`, the owner's words tried first. Another message of the owner's that a detail rests on is cited with the fact, so the judge reads it. A detail resting on Chief's words adds the flag `chief_context`, which is routine like `paraphrased`; an address or link in such a detail adds `unquoted_contact` and a payment word `unquoted_payment`, the same warnings a value gets. A restored copy keeps its context.
+> - **In a turn.** The learned block says that words in square brackets were filled in from the conversation, not said by the owner. It says so only when a learned item in view has brackets, so the cached prefix is otherwise unchanged.
+> - **The prompt.** It now says never to infer a trait, skill, mood, habit or preference from the topic, the tone or one request, and that a fact is standing only when the owner marks it as general or states a like, a dislike or a fact about themselves outright. The wording follows a rule another assistant project measured on its own prompt; nothing has been measured here.
+> - **Limits.** The host checks that a detail's words are in its quote, not that the detail is what the owner meant. A want worded without a habit word is not caught. Chief's reply can repeat an email or a web page, and a fact keeps the untrusted tags of its items as before. A tool's parameter descriptions are not sent to a model (`jsonSchema` drops them), so the model learns the `context` fields from the instructions.
+
 > **Update, 13 November 2026 ([journal 181](journey/181-one-request-is-not-a-preference.md)):** four additions, all in [src/learning.ts](../src/learning.ts).
 >
 > - **End dates.** `until` goes with `time_bound` and only with it. It must be a real date, not before the cited work, not before today in Singapore, and at most a year past the work. On the night after it, the item pass retires the fact as a revision of that run (`learner.applied` action `expired`, reason "Held until …"). A rollback of that run restores it without the end date, so it then stays until pruned. The cited work's day is a UTC day and today is a Singapore day, so an end date worked out from an early-morning message can be a day early.
@@ -186,6 +196,17 @@ Reading one item at a time produced narrow rules overgeneralised from one exampl
 
 ### Nightly judge
 
+> **Update, 13 November 2026 ([journal 195](journey/195-what-the-owner-pointed-at.md)):** prompt `judge-v4`, at `high` reasoning effort (`medium` before).
+>
+> - **Chief's side of the exchange.** Beside a fact's cited message the judge now sees `chiefBefore`, the last 1,000 characters of what Chief said in the turn before it when that was within six hours, and `chiefReply`, the first 2,000 characters of Chief's reply, the cut the learner read. They are on the first cited message of each turn. A tracked task's request has neither.
+> - **Context.** A fact's bracketed details are listed with the words they rest on and who said them ([host checks](#host-checks)).
+> - **The rule.** What the owner was referring to may come from the exchange: a detail that only names a thing, place, person, document or job is not an addition when Chief's words or another of the owner's messages show it, with or without brackets. An owner who answers "yes" or picks an option takes on the details of what Chief proposed; "ok", "thanks" or no answer takes on nothing. What the owner wants, likes, usually does, believes or intends must be in the owner's own words. `judge-v3` had called a note overstated for naming the thing the owner had called "this".
+> - **Read again.** Because the prompt changed, every fact an earlier prompt faulted is judged again, and the planted-error record that gates the repair starts from none.
+> - **A new planted error, `chief_words`.** A copy of a supported fact that quotes up to 80 characters of Chief's reply and says the owner told Chief so. It is offered only when the base's exchange has a reply with a run of 20 characters or more. Showing the judge Chief's side must not let Chief's words stand as the owner's.
+> - **The second model.** It is still sent the facts and the owner's messages only. Chief's side is removed, and a fact whose brackets rest on Chief's words is not sent to it at all. `judge.check` carries `chiefSide: true` when the judge's own model saw Chief's side, so a split on those facts can be read apart.
+> - **Report.** The decoy query counts only turns judged since decoys were planted; it had counted every judged turn (60 for 30 on 13 November).
+> - **Limits.** What the owner pointed at can sit outside both cuts. Chief's replies go to the judge's own provider, which already saw them in the turn; they can repeat tool results, and the judge is told they are data.
+
 > **Update, 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)):** the judge no longer only measures: its verdicts on facts feed the [nightly repair](#nightly-repair), and a fact an earlier judge prompt faulted is judged again under the current one. Evidence for `followed` and `contradicted` must match whole words of the turn, so a fragment such as "nt the wee" no longer counts. Text written without spaces between words, such as Chinese or Japanese, is one "word" to this check, so a partial quote of it is not found and the claim is recorded as unclear. The report's use query has a `claimed_contradicted` column for claims the host found no proof of.
 
 > **Update, 13 November 2026 ([journal 183](journey/183-can-the-judge-be-trusted.md)):** prompt `judge-v3`, and the judge is now checked against itself. Nothing here changes memory or a recorded verdict.
@@ -226,6 +247,14 @@ A fact whose messages no longer exist is recorded `no_source` without a model ca
 **Reading it.** [scripts/judge-report.sql](../scripts/judge-report.sql) is four read-only queries: current facts by verdict; the facts not found supported, with the reason; each memory key with the judged turns it was in context for, how often it was relevant and how it was used; and the last runs. The output holds keys and reasons, so it stays on the host.
 
 ### Nightly repair
+
+> **Update, 13 November 2026 ([journal 195](journey/195-what-the-owner-pointed-at.md)):** prompt `repair-v2`, at `high` reasoning effort (`medium` before). No repair had run before this change.
+>
+> - **It reads what the judge reads:** Chief's side of each exchange, and a fact's existing context ([nightly judge](#nightly-judge)).
+> - **A detail that names what the owner pointed at stays**, in square brackets, with `context` on `repair_fact` checked as the learner's is ([host checks](#host-checks)). `repair-v1` was told to take out every detail the owner's messages did not state. A bracketed detail with an address, a link or a payment word is refused here, where the learner's is flagged.
+> - **One request saved as a preference becomes a note.** The prompt says not to look for a narrower standing wording of it.
+> - **Days count.** A standing rewrite is accepted when its quote shows the owner speaking generally or the fact was seen on two or more separate days (`seenDays`). Before, only the quote counted, so a choice the owner had made on two days had to become a note.
+> - **The gate is unchanged**, and reads the current judge prompt's record only, so it cannot open before the judge's second night under `judge-v4`.
 
 Added 13 November 2026 ([journal 185](journey/185-verdicts-repair-memory.md)). [`src/memory-repair.ts`](../src/memory-repair.ts), run by the learner as a night's last pass (`repair-v1`), on the learner's model. It is where the judge's verdicts change memory.
 

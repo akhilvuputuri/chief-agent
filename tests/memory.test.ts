@@ -438,6 +438,23 @@ test("a turn gets owner facts as before, learned items only when present, and re
     [1, 0],
     [1, 1],
   ]);
+  // What square brackets mean is said only once a learned item has some, so the prefix is
+  // otherwise unchanged.
+  assert.doesNotMatch(prefixes[1]!, /square brackets/);
+  await store.write("owner", {
+    key: "renewal_form",
+    value: "Renews books on [the library renewal form]",
+    kind: "fact",
+    origin: "learned",
+    reason: "r",
+    source: {},
+    learnerRun: run,
+  });
+  await assistant.respond("owner", "and again");
+  assert.match(
+    prefixes[2]!,
+    /words in \[square brackets\] were filled in from the conversation, not said by the owner\): \[/,
+  );
 });
 
 const owner = (store: MemoryStore, key: string, value: string) =>

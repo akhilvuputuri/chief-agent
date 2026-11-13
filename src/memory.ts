@@ -166,6 +166,9 @@ export const ROUTINE_FLAGS = new Set([
   // for as long as the fact is never repeated.
   "habitual_framing",
   "quoted_question",
+  // A bracketed detail that rests on Chief's words, not the owner's (learning.ts): how the
+  // fact was built, for pruning, not a risk in itself.
+  "chief_context",
 ]);
 
 // Flag, never block: a flagged item is applied and listed first in the digest.
@@ -220,7 +223,16 @@ export const isNote = (r: Pick<MemoryRevision, "origin" | "source">) =>
 // expiry means the fact is wanted back, and with the date it would expire again the next night.
 const lifecycle = (source: Record<string, unknown>, undoneExpiry: boolean) =>
   Object.fromEntries(
-    ["durability", "until", "support", "seenDays", "workDate", "repairs"]
+    [
+      "durability",
+      "until",
+      "support",
+      "seenDays",
+      "workDate",
+      "repairs",
+      // What the value's bracketed details rest on; the value is restored with them.
+      "context",
+    ]
       .filter((k) => source[k] !== undefined)
       .filter((k) => k !== "until" || !undoneExpiry)
       .map((k) => [k, source[k]]),

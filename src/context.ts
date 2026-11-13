@@ -34,6 +34,9 @@ function learnedText(items: NonNullable<AgentRequest["learned"]>) {
     (items.some((i) => i.until)
       ? "; an item with until holds only through that day"
       : "") +
+    (items.some((i) => i.kind === "fact" && /\[[^[\]]+\]/.test(i.value))
+      ? "; words in [square brackets] were filled in from the conversation, not said by the owner"
+      : "") +
     "): " +
     JSON.stringify(items)
   );

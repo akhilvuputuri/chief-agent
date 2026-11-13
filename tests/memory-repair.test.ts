@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import type { Database } from "../src/db.js";
@@ -83,6 +83,28 @@ async function said(db: Database, message: string, ago = 3 * DAY) {
     [id, run, message, at],
   );
   return id;
+}
+
+let ordinal = 1000;
+/** Chief's reply in the turn of one of the owner's messages. */
+async function replied(db: Database, input: string, reply: string) {
+  const run = (
+    await db.query("SELECT run_id FROM conversation_inputs WHERE id=$1", [
+      input,
+    ])
+  ).rows[0].run_id as string;
+  const payload = { role: "assistant", content: reply };
+  const hash = createHash("sha256")
+    .update(JSON.stringify(payload) + ++ordinal)
+    .digest("hex");
+  await db.query(
+    "INSERT INTO message_contents(user_id,hash,payload,characters) VALUES('owner',$1,$2::jsonb,$3)",
+    [hash, JSON.stringify(payload), reply.length],
+  );
+  await db.query(
+    "INSERT INTO conversation_messages(user_id,ordinal,hash,run_id) VALUES('owner',$1,$2,$3)",
+    [ordinal, hash, run],
+  );
 }
 
 /** A learned fact resting on one message. */
@@ -1071,4 +1093,145 @@ test("how often a key was repaired stays with it through new evidence and a roll
     [restored.value, restored.source.repairs, result.narrowed],
     ["Asked for an aisle seat on the Tokyo flight", 2, 1],
   );
+});
+
+test("the repair keeps what the owner was pointing at, in brackets backed by Chief's words, and refuses a want carried in them", async (t) => {
+  const db = await setup(t);
+  const fact = await learned(
+    db,
+    "browser_check",
+    "Checks the library renewal form on the tablet",
+    "Can you check if this opens on the tablet",
+  );
+  const reply =
+    "I opened the library renewal form for the two overdue books on the tablet and it loaded.";
+  await replied(
+    db,
+    ((await head(db, "browser_check"))!.source.messageIds as string[])[0]!,
+    reply,
+  );
+  await judged(db, [verdict(fact, "overstated"), ...good]);
+  const quote = "check if this opens on the tablet";
+  const page = {
+    detail: "the library renewal form",
+    quote: "the library renewal form for the two overdue books",
+  };
+  const { adapter, inputs } = model((_input, n) =>
+    n === 1
+      ? [
+          [
+            "repair_fact",
+            {
+              fact: "r1",
+              value: "Asked for a tablet check [and prefers the tablet]",
+              quote,
+              durability: "one_off",
+              context: [
+                {
+                  detail: "and prefers the tablet",
+                  quote: "on the tablet and it loaded",
+                },
+              ],
+              reason: "One request",
+            },
+          ],
+          ["repair_finish", {}],
+        ]
+      : [
+          [
+            "repair_fact",
+            {
+              fact: "r1",
+              value: `Asked for a tablet check of [${page.detail}]`,
+              quote,
+              durability: "one_off",
+              context: [page],
+              reason: "One request, about the form Chief had opened",
+            },
+          ],
+          ["repair_finish", {}],
+        ],
+  );
+  const result = await repair(db, adapter);
+  assert.deepEqual(
+    [result.state, result.narrowed, result.refused],
+    ["completed", 1, 1],
+  );
+  // The repair reads Chief's reply beside the owner's message, at high effort.
+  assert.deepEqual(shown(inputs[0]).facts[0].ownerMessages, [
+    {
+      day: "2026-11-24",
+      text: "Can you check if this opens on the tablet",
+      chiefReply: reply,
+    },
+  ]);
+  assert.equal(inputs[0].reasoning, "high");
+  assert.match(inputs[0].messages[0].content, /stays, in \[square brackets\]/);
+  assert.match(
+    results(inputs[1])[0].refused,
+    /only names what the owner was referring to/,
+  );
+  const note = (await head(db, "browser_check"))!;
+  assert.equal(isNote(note), true);
+  assert.equal(note.value, `Asked for a tablet check of [${page.detail}]`);
+  assert.deepEqual(note.source.context, [{ ...page, from: "chief" }]);
+  assert.deepEqual(note.flags, ["chief_context"]);
+  assert.equal(note.source.promptVersion, "repair-v2");
+  assert.equal(REPAIR_PROMPT_VERSION, "repair-v2");
+});
+
+test("a choice seen on separate days may stay standing after a repair, and one day's request may not", async (t) => {
+  const db = await setup(t);
+  const value =
+    "For coding jobs, wants a plan first and a clear request for approval";
+  const twice = await learned(
+    db,
+    "plan_first",
+    value,
+    "Start a fresh coding job. Plan first.",
+    {
+      seenDays: ["2026-10-11", "2026-11-24"],
+    },
+  );
+  const once = await learned(
+    db,
+    "plan_once",
+    value,
+    "Start another coding job. Plan first.",
+  );
+  await judged(db, [
+    verdict(twice, "overstated"),
+    verdict(once, "overstated"),
+    ...good,
+  ]);
+  const narrowed = (fact: string) =>
+    [
+      "repair_fact",
+      {
+        fact,
+        value: "Wants a plan first",
+        quote: "Plan first.",
+        durability: "standing",
+        reason: "Only the plan was asked for",
+      },
+    ] as Call;
+  const { adapter, inputs } = model((_input, n) =>
+    n === 1
+      ? [narrowed("r1"), narrowed("r2"), ["repair_finish", {}]]
+      : [
+          ["repair_keep", { fact: "r2", reason: "Left for the owner" }],
+          ["repair_finish", {}],
+        ],
+  );
+  const result = await repair(db, adapter);
+  assert.deepEqual([result.narrowed, result.kept, result.refused], [1, 1, 1]);
+  assert.deepEqual(results(inputs[1])[0], { accepted: true });
+  assert.match(
+    results(inputs[1])[1].refused,
+    /speaks generally, or messages from separate days/,
+  );
+  const kept = (await head(db, "plan_first"))!;
+  assert.equal(kept.value, "Wants a plan first");
+  assert.equal(isNote(kept), false);
+  assert.equal((await head(db, "plan_once"))!.value, value);
 });
