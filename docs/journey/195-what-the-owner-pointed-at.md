@@ -61,6 +61,7 @@ The owner asked how this happens and then for research into how other memory sys
   - Should fix: "wanted", "requested", "uses", "only" and similar words passed the check that a detail names a thing. They are refused in a detail.
   - Low, fixed: the repair was shown existing context under field names its tool does not take; the planted error could quote Chief repeating the owner back, which would make it true; no test covered what the second model is sent when a fact rests on Chief's words.
   - Low, left: within one day, which of a turn's several owner messages carries Chief's side follows database order.
+- The second review approved `11f5d6af` with one more gap, reproduced: the repair's day count took a question as a day of the choice ("Plan first." on one day, "Can you plan first?" on another). A message that asks is now left out of the count. Still open from it: the count is a word test, so a message that merely contains the words counts; refusing "only", "owner" and similar words in a detail also refuses a real name that contains one; and a fact written before this change that happens to hold square brackets would get the turn's sentence about them.
 
 ## Verification and outcome
 

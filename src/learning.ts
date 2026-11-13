@@ -2238,10 +2238,13 @@ export class Learner {
     // A choice the owner made on separate days is a preference, and the first version of this
     // forced it into a note. The days are counted from the messages shown here that state
     // the whole claim, not from the fact's recorded days: those vouch for the old wording,
-    // which the judge has just faulted, and can outlive the messages themselves.
+    // which the judge has just faulted, and can outlive the messages themselves. A message
+    // that asks is not a choice, so a question does not count as a day.
     const days = new Set(
       item.messages
-        .filter((m) => m.day && quoteSupports(m.text, claim))
+        .filter(
+          (m) => m.day && !m.text.includes("?") && quoteSupports(m.text, claim),
+        )
         .map((m) => m.day),
     ).size;
     if (

@@ -1262,10 +1262,16 @@ test("a repaired fact stays standing only when messages from separate days each 
     [await said(db, "Can you plan first?", 47 * DAY), "2026-10-11"],
     [await said(db, "Can you plan first?"), "2026-11-24"],
   ]);
+  // Said once and asked once: the question is not a second day of the choice.
+  const mixed = await fact("plan_mixed", [
+    [await said(db, "Plan first please.", 47 * DAY), "2026-10-11"],
+    [await said(db, "Can you plan first?"), "2026-11-24"],
+  ]);
   await judged(db, [
     verdict(twice, "overstated"),
     verdict(recorded, "overstated"),
     verdict(asked, "overstated"),
+    verdict(mixed, "overstated"),
     ...good,
   ]);
   const narrowed = (id: string, quote: string) =>
@@ -1285,19 +1291,21 @@ test("a repaired fact stays standing only when messages from separate days each 
           narrowed("r1", "Plan first."),
           narrowed("r2", "Plan first."),
           narrowed("r3", "Can you plan first?"),
+          narrowed("r4", "Plan first please"),
           ["repair_finish", {}],
         ]
       : [
           ["repair_keep", { fact: "r2", reason: "Left for the owner" }],
           ["repair_keep", { fact: "r3", reason: "Left for the owner" }],
+          ["repair_keep", { fact: "r4", reason: "Left for the owner" }],
           ["repair_finish", {}],
         ],
   );
   const result = await repair(db, adapter);
-  assert.deepEqual([result.narrowed, result.kept, result.refused], [1, 2, 2]);
+  assert.deepEqual([result.narrowed, result.kept, result.refused], [1, 3, 3]);
   const answers = results(inputs[1]);
   assert.deepEqual(answers[0], { accepted: true });
-  for (const refused of [answers[1], answers[2]])
+  for (const refused of [answers[1], answers[2], answers[3]])
     assert.match(
       refused.refused,
       /speaks generally and asks nothing, or messages from separate days that each state all of it/,
@@ -1307,4 +1315,5 @@ test("a repaired fact stays standing only when messages from separate days each 
   assert.equal(isNote(kept), false);
   assert.equal((await head(db, "plan_recorded"))!.value, value);
   assert.equal((await head(db, "plan_asked"))!.value, value);
+  assert.equal((await head(db, "plan_mixed"))!.value, value);
 });
