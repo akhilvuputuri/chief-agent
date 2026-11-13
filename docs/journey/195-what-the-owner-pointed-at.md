@@ -77,7 +77,7 @@ Tested only. A scripted model shows the plumbing and the host's checks, not what
 
 Not released. Pending: independent review, merge, the automatic release, and the first nights.
 
-> **Update, 13 November 2026:** [PR 491](https://github.com/akhilvuputuri/chief-agent/pull/491) merged at the approved head `3abbb607` as `b8fe585`, after CI passed. Release run 43424149266 finished at 20:20 SGT on 13 November; the gateway reported `RELEASE_SHA` `b8fe585`, healthy, with no error lines in its first minute. Read-only on production the same evening: no learned fact holds square brackets, so the turn's sentence about them cannot yet be wrong about an older fact. Still pending: the first nights, listed above.
+> **Update, 13 November 2026:** [PR 491](https://github.com/akhilvuputuri/chief-agent/pull/491) merged at the approved head `3abbb607` as `b8fe585`, after CI passed. That head is the fix for the second review's gap; the same reviewer ran its reproduction again, saw the question case refused, and approved `3abbb607` before the merge. The full suite passed locally on `11f5d6af` (1,803 tests); `3abbb607` changed one condition and one test after it, and was run through the affected test files and hosted CI. Release run 43424149266 finished at 20:20 SGT on 13 November; the gateway reported `RELEASE_SHA` `b8fe585`, healthy, with no error lines in its first minute. Read-only on production the same evening: no learned fact holds square brackets, so the turn's sentence about them cannot yet be wrong about an older fact. Still pending: the first nights, listed above.
 
 ## Follow-up and next iteration
 
