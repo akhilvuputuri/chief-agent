@@ -1605,18 +1605,24 @@ export class CodingController {
       throw new Error("A review needs the started Pi candidate");
   }
   /**
-   * Delivery only grows, and names this job's own inbox (journal 192). Work the box saves is
-   * against the job's base: after a conflict, the box rebases the kept work before it saves
-   * or publishes anything (journal 193).
+   * Work a Pi box saves or publishes is against the job's base and says so (journal 193):
+   * after a conflict the stored work is still on the old base until the box rebases it, and
+   * whole files from the old base published onto main would undo main's changes to them. A
+   * candidate is always checked; any other checkpoint only when it changes the stored one, so
+   * a box that stops before it rebased can still hand back the work as it was.
    */
-  private async assertDelivery(job: CodingJob, c: Checkpoint) {
+  private assertOnBase(job: CodingJob, c: Checkpoint, candidate = false) {
     if (job.settings.runtime !== "pi") return;
     if (
-      c.piState?.base &&
-      c.piState.base !== job.base_sha &&
-      canonicalJson(c) !== canonicalJson(job.checkpoint)
+      (candidate || canonicalJson(c) !== canonicalJson(job.checkpoint)) &&
+      c.piState?.base !== job.base_sha
     )
       throw new Error("The saved work must be on the job's base commit");
+  }
+  /** Delivery only grows, and names this job's own inbox (journal 192). */
+  private async assertDelivery(job: CodingJob, c: Checkpoint) {
+    if (job.settings.runtime !== "pi") return;
+    this.assertOnBase(job, c);
     const before = job.checkpoint.piState?.delivered ?? [];
     const now = c.piState?.delivered ?? [];
     const inbox = new Set((await this.inbox(job)).map((i) => i.id));
@@ -1700,6 +1706,7 @@ export class CodingController {
         "Candidate needs an independent review of the exact artifact",
       );
     validateFiles(c.files);
+    this.assertOnBase(job, c, true);
     await this.assertDelivery(job, c);
     if (new Date(job.attempt_deadline).getTime() <= this.clock().getTime())
       throw new Error("Worker allocation expired");
@@ -1814,6 +1821,8 @@ export class CodingController {
           : "Candidate needs passing checks and review of the exact artifact",
       );
     const pi = job.settings.runtime === "pi";
+    if (pi && r.kind === "candidate")
+      this.assertOnBase(job, r.checkpoint, true);
     if (pi) await this.assertDelivery(job, r.checkpoint);
     if (r.kind === "no_change" && (!pi || r.checkpoint.files.length))
       throw new Error("Only a Pi job with no change can finish without one");

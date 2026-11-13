@@ -194,7 +194,12 @@ test("Pi report documents bind checkpoint content and support the full escaped t
     patch: "\u0001".repeat(400000),
     summary: doc.summary,
     files: [],
-    piState: { version: 1, delivered: [], reportDocument: doc },
+    piState: {
+      version: 1,
+      base: job.base_sha,
+      delivered: [],
+      reportDocument: doc,
+    },
   };
   assert(Buffer.byteLength(JSON.stringify(body)) > 800000);
   const app = server();

@@ -368,6 +368,7 @@ test("the host refuses a candidate while an inbox item is undelivered", async (t
     files: [{ path: "sum.js", content: "x\n" }],
     piState: {
       version: 1,
+      base: j.base,
       delivered: [],
       reportDocument: (
         await import("@chief-agent/pi-runtime/report")
@@ -404,6 +405,7 @@ test("the host refuses a candidate while an inbox item is undelivered", async (t
       ...checkpoint,
       piState: {
         version: 1,
+        base: j.base,
         delivered: ["00000000-0000-4000-8000-000000000000"],
       },
     }),
@@ -870,6 +872,7 @@ test("a follow-up and the candidate's finish never cross: the message holds the 
     files: [{ path: "sum.js", content: "x\n" }],
     piState: {
       version: 1,
+      base: j.base,
       delivered: [],
       reportDocument: (
         await import("@chief-agent/pi-runtime/report")
@@ -1072,7 +1075,7 @@ test("a question or 'nothing to change' waits for an undelivered message; no_cha
     patch: "",
     summary: "",
     files: [],
-    piState: { version: 1, delivered: [] },
+    piState: { version: 1, base: j.base, delivered: [] },
   };
   for (const body of [
     {
@@ -1099,7 +1102,10 @@ test("a question or 'nothing to change' waits for an undelivered message; no_cha
     "UPDATE coding_jobs SET pr_url='https://github.com/example/repo/pull/9' WHERE id=$1",
     [j.id],
   );
-  const delivered = { ...empty, piState: { version: 1, delivered: [item.id] } };
+  const delivered = {
+    ...empty,
+    piState: { version: 1, base: j.base, delivered: [item.id] },
+  };
   await j.f.c.save(running, delivered);
   const after = await j.row();
   await j.f.c.finish(after, {
@@ -1154,6 +1160,7 @@ async function committed(t: TestContext) {
     files: [{ path: "sum.js", content: "x\n" }],
     piState: {
       version: 1,
+      base: j.base,
       delivered: [],
       reportDocument: reportDocument({
         kind: "review",
@@ -1761,4 +1768,56 @@ test("main moving again during the rebase gets another rebase from the base the 
     job.checkpoint.files.map((f: any) => f.path),
     ["sum.js"],
   );
+});
+
+test("after a rebase the approved candidate from the old base is never published, even with a new approval of its hash (journal 193)", async (t) => {
+  const { j, record, candidate } = await committed(t);
+  // The PR conflicted: the job's base moved while the stored work is still on the old one.
+  const main = "e".repeat(40);
+  await j.f.db.query("UPDATE coding_jobs SET base_sha=$2 WHERE id=$1", [
+    j.id,
+    main,
+  ]);
+  await j.f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'inbox:rebase:x',$2::jsonb,'suppressed')",
+    [
+      j.id,
+      JSON.stringify({
+        kind: "inbox",
+        source: "rebase",
+        from: j.base,
+        onto: main,
+        text: "Main moved",
+      }),
+    ],
+  );
+  const [rebase] = (await j.inbox()).filter(
+    (i: any) => i.payload.source === "rebase",
+  );
+  const stale = {
+    ...candidate,
+    checkpoint: {
+      ...candidate.checkpoint,
+      piState: { ...candidate.checkpoint.piState, delivered: [rebase.id] },
+    },
+  };
+  // A reviewer call after the rebase names the old candidate's hash.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await record();
+  await assert.rejects(
+    j.f.c.approvePublication(await j.row(), stale),
+    /job's base commit/,
+  );
+  await assert.rejects(j.f.c.finish(await j.row(), stale), /job's base commit/);
+  // A changed checkpoint that records no base is refused too.
+  const { base: _base, ...unbased } = candidate.checkpoint.piState as any;
+  await assert.rejects(
+    j.f.c.save(await j.row(), {
+      ...candidate.checkpoint,
+      patch: "changed",
+      piState: { ...unbased, delivered: [rebase.id] },
+    }),
+    /job's base commit/,
+  );
+  assert.notEqual((await j.row()).stage, "publishing");
 });

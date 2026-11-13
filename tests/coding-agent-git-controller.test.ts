@@ -150,6 +150,7 @@ test("agent tokens are issued only to a running, approved implementation attempt
     files,
     piState: {
       version: 1,
+      base: job.base_sha,
       delivered: [],
       reportDocument: reportDocument({
         kind: "review",

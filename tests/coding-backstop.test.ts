@@ -17,7 +17,7 @@ const empty = {
   patch: "",
   summary: "",
   files: [],
-  piState: { version: 1, delivered: [] },
+  piState: { version: 1, base: "a".repeat(40), delivered: [] },
 };
 
 /** A started Pi job in its first box, after the worker's first heartbeat. */
