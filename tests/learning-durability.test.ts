@@ -736,28 +736,32 @@ test("a value's bracketed details must each rest on words of the exchange that n
     detail: "the library renewal form",
     quote: "the library renewal form for the two overdue books",
   };
+  const pair = { detail: "the blue pair", quote: "the blue pair from Uniqlo" };
   const value = `Asked for a tablet check of [${page.detail}]`;
   assert.deepEqual(bracketed(value), [page.detail]);
   assert.equal(claimOf(value), "Asked for a tablet check of");
   assert.equal(claimOf("Asked for [the form], twice"), "Asked for, twice");
   // Nothing in brackets and no context is the ordinary case.
   assert.equal(
-    contextProblem("Prefers aisle seats", undefined, said),
+    contextProblem("Prefers aisle seats", undefined, said, "one_off"),
     undefined,
   );
-  assert.equal(contextProblem(value, [page], said), undefined);
+  assert.equal(contextProblem(value, [page], said, "one_off"), undefined);
   // Brackets and entries pair up one to one.
-  assert.match(contextProblem(value, undefined, said)!, /exactly one context/);
   assert.match(
-    contextProblem("Asked for a tablet check", [page], said)!,
+    contextProblem(value, undefined, said, "one_off")!,
     /exactly one context/,
   );
   assert.match(
-    contextProblem(value, [page, page], said)!,
+    contextProblem("Asked for a tablet check", [page], said, "one_off")!,
     /exactly one context/,
   );
   assert.match(
-    contextProblem("Asked for [a [nested] check", undefined, said)!,
+    contextProblem(value, [page, page], said, "one_off")!,
+    /exactly one context/,
+  );
+  assert.match(
+    contextProblem("Asked for [a [nested] check", undefined, said, "one_off")!,
     /pair up/,
   );
   // The quote must be in the exchange, and the detail's own words in the quote.
@@ -766,6 +770,7 @@ test("a value's bracketed details must each rest on words of the exchange that n
       value,
       [{ ...page, quote: "the renewal page of your library" }],
       said,
+      "one_off",
     )!,
     /exact words of Chief's reply/,
   );
@@ -774,6 +779,7 @@ test("a value's bracketed details must each rest on words of the exchange that n
       "Asked for a tablet check of [the gym booking]",
       [{ detail: "the gym booking", quote: page.quote }],
       said,
+      "one_off",
     )!,
     /words taken from its context quote/,
   );
@@ -782,36 +788,68 @@ test("a value's bracketed details must each rest on words of the exchange that n
       "Asked for a tablet check of [the one]",
       [{ detail: "the one", quote: page.quote }],
       said,
+      "one_off",
     )!,
     /must name something/,
   );
-  // A want, a habit or a refusal is never context, whoever's words carry it.
+  // A want, a habit, a refusal or what the owner did is never context, whoever's words carry
+  // it: framing words that are fine in a claim ("wanted", "uses", "only") are not in a detail.
   for (const detail of [
     "and prefers the tablet",
     "always on the tablet",
     "not the renewal form",
+    "wanted the library renewal form",
+    "requested the library renewal form",
+    "uses the library renewal form",
+    "only the library renewal form",
   ])
     assert.match(
       contextProblem(
         `Asked for a tablet check [${detail}]`,
         [{ detail, quote: REPLIED }],
         said,
+        "one_off",
       )!,
       /only names what the owner was referring to/,
     );
   // Whose words a detail rests on is recorded, the owner's first.
-  const pair = { detail: "the blue pair", quote: "the blue pair from Uniqlo" };
-  assert.deepEqual(placeContext([page, pair], said), [
+  assert.deepEqual(placeContext([page, pair], said, "one_off"), [
     { ...page, from: "chief" },
     { ...pair, from: "owner" },
   ]);
   assert.deepEqual(
-    placeContext([{ detail: "x", quote: "nowhere said" }], said),
+    placeContext([{ detail: "x", quote: "nowhere said" }], said, "one_off"),
     [],
   );
-  // A detail from Chief's words is marked for pruning, and an address in it is a warning.
-  assert.deepEqual(contextFlags(placeContext([pair], said)), []);
-  assert.deepEqual(contextFlags(placeContext([page], said)), ["chief_context"]);
+  // Only a note, which no turn is shown, may rest on Chief's words.
+  for (const durability of ["standing", "time_bound"] as const)
+    assert.match(
+      contextProblem(
+        `Checks [${page.detail}] on the tablet`,
+        [page],
+        said,
+        durability,
+      )!,
+      /Only a one_off note may carry a detail taken from Chief's words/,
+    );
+  assert.equal(
+    contextProblem("Wears [the blue pair] to work", [pair], said, "standing"),
+    undefined,
+  );
+  // A detail from Chief's words is marked for pruning, and a number or an address in it is a
+  // warning, as it is in a value.
+  assert.deepEqual(
+    contextFlags([{ detail: "card 4471-2290", quote: "q", from: "chief" }]),
+    ["chief_context", "unquoted_number"],
+  );
+  assert.deepEqual(
+    contextFlags([{ detail: "card 4471-2290", quote: "q", from: "owner" }]),
+    [],
+  );
+  assert.deepEqual(contextFlags(placeContext([pair], said, "one_off")), []);
+  assert.deepEqual(contextFlags(placeContext([page], said, "one_off")), [
+    "chief_context",
+  ]);
   assert.deepEqual(
     contextFlags([
       { detail: "the page at track.example.com", quote: "q", from: "chief" },
@@ -912,7 +950,11 @@ test("a note may name what the owner pointed at, backed by Chief's reply, and th
   );
   assert.match(
     instructions,
-    /What the owner wants, likes or usually does is never context/,
+    /What the owner asked, wants, likes, uses or usually does is never context/,
+  );
+  assert.match(
+    instructions,
+    /Only a one_off note may take a detail from Chief's reply/,
   );
   // The tool takes the context, and a fact without brackets needs none.
   const tool = inputs[0].tools.find((x: any) => x.name === "learn_fact");

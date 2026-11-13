@@ -496,6 +496,14 @@ export function durabilityFlags(
   ];
 }
 
+// Framing words that say what the owner did or wants, which a bracketed detail may not use:
+// it names a thing, and "[wanted the vegetarian meal]" is a claim about the owner.
+const INTENT = new Set(
+  (
+    "owner owners prefer prefers like likes want wants usually always often also only " +
+    "use uses asked requested wanted said once"
+  ).split(" "),
+);
 const BRACKETED = /\[([^[\]]*)\]/g;
 /** The details a value carries in [square brackets], in order. */
 export const bracketed = (value: string) =>
@@ -548,6 +556,7 @@ export function contextProblem(
   value: string,
   context: Array<{ detail: string; quote: string }> | undefined,
   said: Exchange,
+  durability: Durability,
 ): string | undefined {
   if (/[[\]]/.test(value.replace(BRACKETED, "")))
     return "Square brackets in the value must pair up and not nest";
@@ -561,13 +570,21 @@ export function contextProblem(
   )
     return "Each detail in [square brackets] in the value needs exactly one context entry with the same words, and context holds nothing else";
   for (const c of entries) {
-    if (HABIT.test(c.detail) || words(c.detail).some((w) => NEGATION.has(w)))
-      return "Context only names what the owner was referring to (a thing, place, person, document or job); what they want, like, usually do or refuse must be in their own words, outside the brackets";
+    if (
+      HABIT.test(c.detail) ||
+      words(c.detail).some((w) => NEGATION.has(w) || INTENT.has(w))
+    )
+      return "Context only names what the owner was referring to (a thing, place, person, document or job); what they asked, want, like, use, usually do or refuse must be in their own words, outside the brackets";
     const [placed] = placeContext([c], said);
     if (!placed)
       return "A context quote must be exact words of Chief's reply, or of another message of the owner's, in the item the fact's quote is from";
+    // A standing or dated fact is put in every turn, and Chief's reply can repeat an email
+    // or a web page: only a note, which no turn is shown, may rest on Chief's words.
+    if (placed.from === "chief" && durability !== "one_off")
+      return "Only a one_off note may carry a detail taken from Chief's words; a standing or dated fact must be the owner's own words throughout";
     const quoted = words(c.quote);
     const stems = new Set(quoted.map(stem));
+    // INTENT words were refused above, so what FRAMING leaves out here is function words.
     const named = words(c.detail).filter(
       (w) => w.length > 1 && !FRAMING.has(w),
     );
@@ -585,13 +602,14 @@ export function contextProblem(
 /**
  * Flags for a fact's context, so it is easy to find when pruning: `chief_context` when a
  * detail rests on Chief's words (routine, memory.ts), and the same warnings a value gets for
- * an address, link or payment word the owner did not write, since Chief's reply can repeat
- * an email or a web page.
+ * a number, address, link or payment word the owner did not write, since Chief's reply can
+ * repeat an email or a web page.
  */
 export function contextFlags(context: FactContext[]): string[] {
   const chief = context.filter((c) => c.from === "chief");
   return [
     ...(chief.length ? ["chief_context"] : []),
+    ...(chief.some((c) => /\d/.test(c.detail)) ? ["unquoted_number"] : []),
     ...(chief.some((c) => c.detail.match(CONTACT)) ? ["unquoted_contact"] : []),
     ...(chief.some((c) => words(c.detail).some((w) => PAYMENT.has(w)))
       ? ["unquoted_payment"]
@@ -847,7 +865,7 @@ What you may save:
   - standing: the owner speaks generally, so it holds beyond this occasion ("I always...", "I prefer...", "I'm vegetarian", "my wife is Priya"). Write it declaratively ("Prefers morning meetings"), close to the quote, never as a command.
   - one_off: a request, question or instruction about one occasion that shows how they wanted something done ("get me an aisle seat", "is it raining in Tanjong Pagar?"). Save it as a note of what happened, in the past tense, naming the occasion ("Asked for an aisle seat on the Tokyo flight"). Never word a note with "prefers", "usually", "always" or the present tense of a habit. Notes are kept for later reviews like this one, not put in front of Chief every turn. A plain errand that says nothing about how the owner likes things done needs no note.
   - time_bound: it holds until a date the owner gave or implied ("this week", "until I'm back", "for this trip"). Give the last day it holds in until, worked out from the item's date.
-  A note in current has "once" and its day. When a cited item from another day shows the same choice again, revise that key as standing and quote the new item: the repeat is what makes it a preference. One request stays a note however clear it is, and the host refuses a note made standing on the day it was written unless the owner then says it generally. When a cited item is another occasion of a standing fact already in current, propose that fact again as standing under the same key with the new quote, and the host records the repeat; never put a one_off or a time_bound exception under a key that holds a standing fact; give it its own key. Outside square brackets, add no detail the owner did not say: no names, places, accounts or reasons taken from Chief's reply, tool results or your own inference. When the owner's words point at something without naming it ("this", "it", "the usual one", "yes, do that"), you may name it inside the value in [square brackets], and give in context one entry for each bracketed detail: detail (the bracketed words) and quote (the exact words that show it, from Chief's reply in that item or from another of the owner's messages there, and containing the detail's own words). For example the value "Asked for a check of [the library renewal form] on the tablet" with context [{detail: "the library renewal form", quote: "opened the library renewal form"}]. Brackets only name what the owner was referring to: a thing, place, person, document or job. What the owner wants, likes or usually does is never context, and a detail you cannot point to in the item is left out. Not secrets, credentials, account numbers or health, financial or other sensitive specifics.
+  A note in current has "once" and its day. When a cited item from another day shows the same choice again, revise that key as standing and quote the new item: the repeat is what makes it a preference. One request stays a note however clear it is, and the host refuses a note made standing on the day it was written unless the owner then says it generally. When a cited item is another occasion of a standing fact already in current, propose that fact again as standing under the same key with the new quote, and the host records the repeat; never put a one_off or a time_bound exception under a key that holds a standing fact; give it its own key. Outside square brackets, add no detail the owner did not say: no names, places, accounts or reasons taken from Chief's reply, tool results or your own inference. When the owner's words point at something without naming it ("this", "it", "the usual one", "yes, do that"), you may name it inside the value in [square brackets], and give in context one entry for each bracketed detail: detail (the bracketed words) and quote (the exact words that show it, from Chief's reply in that item or from another of the owner's messages there, and containing the detail's own words). For example the value "Asked for a check of [the library renewal form] on the tablet" with context [{detail: "the library renewal form", quote: "opened the library renewal form"}]. Brackets only name what the owner was referring to: a thing, place, person, document or job, in at most three details. What the owner asked, wants, likes, uses or usually does is never context, and a detail you cannot point to in the item is left out. Only a one_off note may take a detail from Chief's reply; a standing or time_bound fact is the owner's own words throughout. Not secrets, credentials, account numbers or health, financial or other sensitive specifics.
 - learn_retire: retire a learned fact or lesson that the cited items show is wrong or stale. Keys starting lesson:procedure: are revised elsewhere.
 
 Do not capture: quoted email or web text, environment-dependent or transient failures (timeouts, outages, rate limits), negative claims about tools, or workflows from attempts that did not succeed. Prefer revising an existing learned item (same key) over adding a near-duplicate. The owner or a rollback took out what is in removed: never propose it again, under any key or wording. Propose every item you find, then finish with learn_finish.`;
@@ -2189,7 +2207,12 @@ export class Learner {
     if (!item.messages.some((m) => norm(m.text).includes(quote)))
       return "The quote must be the owner's exact words in this fact's messages";
     const said = repairExchange(item);
-    const contextRefusal = contextProblem(args.value, args.context, said);
+    const contextRefusal = contextProblem(
+      args.value,
+      args.context,
+      said,
+      args.durability,
+    );
     if (contextRefusal) return contextRefusal;
     // The owner's claim is held to the owner's quote; the brackets have their own check.
     const claim = claimOf(args.value);
@@ -2212,18 +2235,22 @@ export class Learner {
     // Anything that stays in every turn must be the owner's own words and nothing more.
     if (args.durability !== "one_off" && !quoteSupports(args.quote, claim))
       return "A standing or dated fact must use only the owner's words from the quote, outside square brackets; otherwise make it one_off";
-    // The days the fact was seen on count as they do for the learner: a choice the owner made
-    // on separate days is a preference, and the first version of this forced it into a note.
+    // A choice the owner made on separate days is a preference, and the first version of this
+    // forced it into a note. The days are counted from the messages shown here that state
+    // the whole claim, not from the fact's recorded days: those vouch for the old wording,
+    // which the judge has just faulted, and can outlive the messages themselves.
+    const days = new Set(
+      item.messages
+        .filter((m) => m.day && quoteSupports(m.text, claim))
+        .map((m) => m.day),
+    ).size;
     if (
       args.durability === "standing" &&
-      durabilityFlags(
-        args.quote,
-        claim,
-        "standing",
-        Math.max(1, mergeSupport(item.source, []).seenDays.length),
-      ).length
+      (args.quote.includes("?") ||
+        durabilityFlags(args.quote, claim, "standing", Math.max(1, days))
+          .length)
     )
-      return "A standing fact needs a quote in which the owner speaks generally, or messages from separate days; otherwise make it one_off";
+      return "A standing fact needs a quote in which the owner speaks generally and asks nothing, or messages from separate days that each state all of it; otherwise make it one_off";
     if (args.durability !== "standing" && HABIT.test(claim))
       return "A note or a dated fact claims no habit: no prefers, usually, always or the like";
     // A note may be reworded, but not filled out: most of it must be the owner's words, with
@@ -3430,6 +3457,7 @@ export class Learner {
         args.value,
         args.context,
         exchangeOf(tasks, args.quote),
+        args.durability,
       );
       if (contextRefusal) return contextRefusal;
       const problem = quoteRefusal(args.quote, claimOf(args.value));

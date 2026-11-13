@@ -35,12 +35,13 @@ The owner asked how this happens and then for research into how other memory sys
 - **The fault is in what the judge is shown, not in its judgement.** Read against the owner's message alone, the name of the thing is an addition. A stronger model would reach the same verdict from the same input.
 - **Banning the detail makes the note useless; trusting Chief's side lets anything in.** Chief's reply can repeat an email, a web page or a tool result. The rule taken from the research separates two things. What the owner was referring to may come from the exchange. What the owner wants, likes, usually does or believes must be in the owner's own words.
 - **Brackets in the value, and what they rest on beside it.** A detail the owner did not spell out goes in `[square brackets]` in the value, and `source.context` holds, for each, exact words of the exchange and whose they were. The host checks both when the fact is written, so the judge does not have to take the learner's word for it.
+- **Only a note may rest on Chief's words.** A note is in no turn's context. A standing or dated fact is in every turn, and it stays the owner's own words throughout; it may bracket a detail only from another of the owner's messages. The case that started this was a note.
   - Alternative considered: a separate `claim` field and no brackets. Every reader of a value (turns, `memory_list`, the judge, the ledger) would need the second field to make sense of it. Brackets keep one string and still mark what is not the owner's.
   - Alternative considered: only change the judge's prompt and inputs. Nothing would then stop the learner writing a preference from Chief's words, and the judge would be the only check on it.
 - **The judge and the repair read Chief's side.** Beside each cited message they see the end of what Chief said just before it, where a question or proposal sits, and the start of Chief's reply, cut as the learner read it. An owner who answers "yes" or picks an option takes on the details of the proposal; "ok", "thanks" or silence takes on nothing.
 - **The second model still reads the owner's words only.** Chief's replies can carry tool content, which stays with the judge's own provider. A fact whose brackets rest on Chief's words is left out of the cross-check, since it cannot be judged fairly from the owner's words alone.
 - **A planted error for the door this opens.** A copy of a supported fact that quotes Chief's reply and says the owner told Chief so. A judge that lets Chief's words stand as the owner's will call it supported.
-- **The repair counts days as the learner does.** A fact seen on two separate days may stay standing in the owner's words. Before, the repair had to turn it into a note, which takes a repeated choice out of every turn.
+- **The repair counts days it can see.** A rewrite may stay standing when messages from two separate days, among those shown to the repair, each state all of it. Before, the repair had to turn such a fact into a note, which takes a repeated choice out of every turn. The fact's recorded days are not counted: they vouch for the wording the judge faulted.
 - **Effort.** `high` on the judge and the repair, which judge and are small. The learner stays at `medium`. A stronger model was considered and deferred by the owner; it would not have fixed the input.
 - **Not done here:** the repair gate still opens at 8 broken copies and 8 controls. Six of eight caught is consistent with a true catch rate anywhere from about 41% to 93%. The owner has been told and has not decided.
 
@@ -53,6 +54,13 @@ The owner asked how this happens and then for research into how other memory sys
 - Tests, scripted models on a test database: [tests/learning-durability.test.ts](../../tests/learning-durability.test.ts), [tests/memory-judge.test.ts](../../tests/memory-judge.test.ts), [tests/memory-repair.test.ts](../../tests/memory-repair.test.ts), [tests/memory.test.ts](../../tests/memory.test.ts).
 - Design: [learning](../learning.md#host-checks), with notes under the judge and the repair.
 - The examples in tests, prompts and comments are invented. The owner's message that showed the problem is not in the repository.
+- Independent review (Claude Opus 5.5) requested changes on `14f23d5c`, reproducing four findings in throwaway tests.
+  - Blocking: the repair took a fact's recorded days as a bare count, so a rewrite quoting a question could stay standing though no second message was there to show for it. Days are now counted from the shown messages that state the whole rewrite, and a question never backs a standing rewrite.
+  - Blocking: a number from Chief's reply could ride in a bracketed detail with only the routine flag. It now adds `unquoted_number`, which the repair refuses.
+  - Should fix: a standing rewrite could carry a verb phrase from Chief's reply in brackets, a way for email or web text to reach every turn. A detail from Chief's words is now accepted on a note only, for the learner and the repair.
+  - Should fix: "wanted", "requested", "uses", "only" and similar words passed the check that a detail names a thing. They are refused in a detail.
+  - Low, fixed: the repair was shown existing context under field names its tool does not take; the planted error could quote Chief repeating the owner back, which would make it true; no test covered what the second model is sent when a fact rests on Chief's words.
+  - Low, left: within one day, which of a turn's several owner messages carries Chief's side follows database order.
 
 ## Verification and outcome
 
@@ -73,6 +81,6 @@ Not released. Pending: independent review, merge, the automatic release, and the
 - The gate decision above.
 - Chief's reply is cut at 2,000 characters and the previous one at its last 1,000, so what the owner pointed at can fall outside both. A tracked task has no Chief's side.
 - The host checks that a bracketed detail's words are in its quote, not that the detail is what the owner meant. That is left to the judge.
-- A habit word is the only test for "a want" in brackets. A want worded without one is not caught by the host.
+- A list of words is the only test for "a want" in brackets. A want worded without one is not caught by the host, which is one reason a detail from Chief's words stays on notes.
 - Parameter descriptions never reach a model. Whether to send them is a separate question for every tool.
 - The rest of the plan from the research: a small always-loaded core with procedures loaded by kind of work, procedures as numbered rules edited one at a time with a replay check, and retiring unused items to an archive.

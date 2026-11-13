@@ -297,8 +297,8 @@ export function judgePrompt(batch: JudgeBatch) {
               ? {
                   context: f.context.map((c) => ({
                     detail: c.detail,
+                    quote: c.quote,
                     saidBy: c.from === "chief" ? "Chief" : "the owner",
-                    words: c.quote,
                   })),
                 }
               : {}),
@@ -438,11 +438,32 @@ export const DECOYS = [
 /** A short run of Chief's own words from a fact's exchange, for a planted error. */
 const chiefWords = (fact: Omit<JudgeFact, "id">) => {
   const reply = fact.messages.find((m) => m.chiefReply)?.chiefReply ?? "";
-  const line = reply
+  // Letters and digits only, so punctuation and case do not hide a repeat.
+  const plain = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
+  const owner = ` ${fact.messages.map((m) => plain(m.text)).join(" | ")} `;
+  // Chief repeating the owner back ("You asked: ...") would make the planted fact true, so a
+  // line that shares any run of four words with the owner's messages is passed over.
+  const echoes = (line: string) => {
+    const said = plain(line).split(" ");
+    const runs = Math.max(1, said.length - 3);
+    return Array.from({ length: runs }, (_, i) =>
+      said.slice(i, i + 4).join(" "),
+    ).some((run) => owner.includes(` ${run} `));
+  };
+  return reply
     .split(/[\n.!?]/)
-    .map((s) => s.replace(/["[\]*_`#]/g, "").trim())
-    .find((s) => s.length >= 20);
-  return line ? line.slice(0, 80).trim() : undefined;
+    .map((s) =>
+      s
+        .replace(/["[\]*_`#]/g, "")
+        .trim()
+        .slice(0, 80)
+        .trim(),
+    )
+    .find((s) => s.length >= 20 && !echoes(s));
 };
 
 export type Mutation =

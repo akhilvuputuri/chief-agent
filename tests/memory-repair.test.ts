@@ -1104,7 +1104,7 @@ test("the repair keeps what the owner was pointing at, in brackets backed by Chi
     "Can you check if this opens on the tablet",
   );
   const reply =
-    "I opened the library renewal form for the two overdue books on the tablet and it loaded.";
+    "I opened the library renewal form for the two overdue books on the tablet and it loaded. Your card 4471-2290 is on file.";
   await replied(
     db,
     ((await head(db, "browser_check"))!.source.messageIds as string[])[0]!,
@@ -1135,6 +1135,35 @@ test("the repair keeps what the owner was pointing at, in brackets backed by Chi
               reason: "One request",
             },
           ],
+          // What stays in every turn may not rest on Chief's words.
+          [
+            "repair_fact",
+            {
+              fact: "r1",
+              value: `Checks [${page.detail}] on the tablet`,
+              quote,
+              durability: "standing",
+              context: [page],
+              reason: "Narrower",
+            },
+          ],
+          // Nor may a number ride in from Chief's reply, even on a note.
+          [
+            "repair_fact",
+            {
+              fact: "r1",
+              value: "Asked for a tablet check of [card 4471-2290]",
+              quote,
+              durability: "one_off",
+              context: [
+                {
+                  detail: "card 4471-2290",
+                  quote: "Your card 4471-2290 is on file",
+                },
+              ],
+              reason: "One request",
+            },
+          ],
           ["repair_finish", {}],
         ]
       : [
@@ -1155,7 +1184,7 @@ test("the repair keeps what the owner was pointing at, in brackets backed by Chi
   const result = await repair(db, adapter);
   assert.deepEqual(
     [result.state, result.narrowed, result.refused],
-    ["completed", 1, 1],
+    ["completed", 1, 3],
   );
   // The repair reads Chief's reply beside the owner's message, at high effort.
   assert.deepEqual(shown(inputs[0]).facts[0].ownerMessages, [
@@ -1171,6 +1200,13 @@ test("the repair keeps what the owner was pointing at, in brackets backed by Chi
     results(inputs[1])[0].refused,
     /only names what the owner was referring to/,
   );
+  assert.match(
+    results(inputs[1])[1].refused,
+    /Only a one_off note may carry a detail/,
+  );
+  assert.match(results(inputs[1])[2].refused, /adds to what the owner said/);
+  // An entry already on a fact is shown under the names repair_fact takes.
+  assert.match(inputs[0].messages[0].content, /At most three details/);
   const note = (await head(db, "browser_check"))!;
   assert.equal(isNote(note), true);
   assert.equal(note.value, `Asked for a tablet check of [${page.detail}]`);
@@ -1180,58 +1216,95 @@ test("the repair keeps what the owner was pointing at, in brackets backed by Chi
   assert.equal(REPAIR_PROMPT_VERSION, "repair-v2");
 });
 
-test("a choice seen on separate days may stay standing after a repair, and one day's request may not", async (t) => {
+test("a repaired fact stays standing only when messages from separate days each state it, never on a question or on recorded days alone", async (t) => {
   const db = await setup(t);
+  const store = new MemoryStore(db);
   const value =
     "For coding jobs, wants a plan first and a clear request for approval";
-  const twice = await learned(
-    db,
-    "plan_first",
-    value,
-    "Start a fresh coding job. Plan first.",
-    {
-      seenDays: ["2026-10-11", "2026-11-24"],
-    },
+  const fact = (
+    key: string,
+    messages: Array<[string, string]>,
+    more: Record<string, unknown> = {},
+  ) =>
+    store.write("owner", {
+      key,
+      value,
+      kind: "fact",
+      origin: "learned",
+      reason: "test",
+      source: {
+        messageIds: messages.map(([id]) => id),
+        support: messages.map(([id, date]) => ({ id, date })),
+        seenDays: messages.map(([, date]) => date),
+        durability: "standing",
+        ...more,
+      },
+    });
+  // The same choice in two messages on two days, both shown to the repair.
+  const twice = await fact("plan_first", [
+    [
+      await said(db, "Start a fresh coding job. Plan first.", 47 * DAY),
+      "2026-10-11",
+    ],
+    [
+      await said(db, "New coding job for the importer. Plan first."),
+      "2026-11-24",
+    ],
+  ]);
+  // Two days on record, and one message left to show for them.
+  const recorded = await fact(
+    "plan_recorded",
+    [[await said(db, "Start another coding job. Plan first."), "2026-11-24"]],
+    { seenDays: ["2026-10-11", "2026-11-24"] },
   );
-  const once = await learned(
-    db,
-    "plan_once",
-    value,
-    "Start another coding job. Plan first.",
-  );
+  // Asked on two days, which is still asking.
+  const asked = await fact("plan_asked", [
+    [await said(db, "Can you plan first?", 47 * DAY), "2026-10-11"],
+    [await said(db, "Can you plan first?"), "2026-11-24"],
+  ]);
   await judged(db, [
     verdict(twice, "overstated"),
-    verdict(once, "overstated"),
+    verdict(recorded, "overstated"),
+    verdict(asked, "overstated"),
     ...good,
   ]);
-  const narrowed = (fact: string) =>
+  const narrowed = (id: string, quote: string) =>
     [
       "repair_fact",
       {
-        fact,
+        fact: id,
         value: "Wants a plan first",
-        quote: "Plan first.",
+        quote,
         durability: "standing",
         reason: "Only the plan was asked for",
       },
     ] as Call;
   const { adapter, inputs } = model((_input, n) =>
     n === 1
-      ? [narrowed("r1"), narrowed("r2"), ["repair_finish", {}]]
+      ? [
+          narrowed("r1", "Plan first."),
+          narrowed("r2", "Plan first."),
+          narrowed("r3", "Can you plan first?"),
+          ["repair_finish", {}],
+        ]
       : [
           ["repair_keep", { fact: "r2", reason: "Left for the owner" }],
+          ["repair_keep", { fact: "r3", reason: "Left for the owner" }],
           ["repair_finish", {}],
         ],
   );
   const result = await repair(db, adapter);
-  assert.deepEqual([result.narrowed, result.kept, result.refused], [1, 1, 1]);
-  assert.deepEqual(results(inputs[1])[0], { accepted: true });
-  assert.match(
-    results(inputs[1])[1].refused,
-    /speaks generally, or messages from separate days/,
-  );
+  assert.deepEqual([result.narrowed, result.kept, result.refused], [1, 2, 2]);
+  const answers = results(inputs[1]);
+  assert.deepEqual(answers[0], { accepted: true });
+  for (const refused of [answers[1], answers[2]])
+    assert.match(
+      refused.refused,
+      /speaks generally and asks nothing, or messages from separate days that each state all of it/,
+    );
   const kept = (await head(db, "plan_first"))!;
   assert.equal(kept.value, "Wants a plan first");
   assert.equal(isNote(kept), false);
-  assert.equal((await head(db, "plan_once"))!.value, value);
+  assert.equal((await head(db, "plan_recorded"))!.value, value);
+  assert.equal((await head(db, "plan_asked"))!.value, value);
 });

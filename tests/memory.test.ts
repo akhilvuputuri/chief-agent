@@ -453,7 +453,7 @@ test("a turn gets owner facts as before, learned items only when present, and re
   await assistant.respond("owner", "and again");
   assert.match(
     prefixes[2]!,
-    /words in \[square brackets\] were filled in from the conversation, not said by the owner\): \[/,
+    /words in \[square brackets\] come from another message of the owner's in that conversation\): \[/,
   );
 });
 
