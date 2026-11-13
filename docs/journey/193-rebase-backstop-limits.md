@@ -1,0 +1,85 @@
+# 193 — Rebase in the box, the eight-hour backstop, and the last caps
+
+Work date(s): 2026-11-13. Written/revised: 2026-11-13.
+Status: implemented and tested offline on branch `coding-revamp/d3-rebase-backstop` from `da67cac1` (main with pieces A, B, C, D1 and D2). Independent review, merge, release and a worker image are pending. Stage D3 of piece D in [the coding-loop specification](../coding-simple-loop.md).
+
+## User-visible problem and preceding iteration
+
+After stage D2 ([journal 192](192-one-session-per-job.md)) a job is one coder session and one reviewer session, but three things from the old loop remained. A PR that conflicted with main had its files emptied and the coder re-implemented the change on the new base: the cause of two-thirds of the first full job's cost ([journal 179](179-first-full-coding-job-review.md)). A box ended at its deadline exactly when the host stopped accepting the worker's requests, so the end-of-run save was refused and up to a turn was lost; the job then paused and waited for the owner. And Pi jobs still carried caps the owner's rule removes: 1,500 model calls, 4,000 tool calls, three feedback rounds, a 7,600-character feedback batch, 200 handled items, 7,000-character requests and GitHub items, and a one-hour stop while a PR waited for CI.
+
+## Evidence
+
+- **Verified in source (before):** `CodingAutomation.rebase()` set `files: []`, `patch: ""`, kept only `delivered`, wrote a `rebase-approval:` carry event and an inbox item telling the coder to re-apply the change; `noteRebasedCandidate` recorded `rebase-candidate:` measurements at each review save.
+- **Verified in source (before):** the worker's timer cancelled the active run at `assignment.deadline`; `authenticate`, `save`, `finish` and the model route refuse once `attempt_deadline` has passed. A run cancelled then saves at its end (Pi's run-end checkpoint), and that save is refused (D2's reviewers reported this).
+- **Verified in source:** box machine time is already recorded per box (`boxes.running_ms`, `running_since`, `subject='coding:<job>'`), so no migration is needed.
+- **Measured locally:** a snapshot in a fresh git directory sharing this repository's objects (1,081 tracked files, `read-tree` then `add -A`) took about 0.2 seconds; with a reused index, 0.02 seconds.
+
+## Diagnosis and alternatives
+
+- **Rebase.** Re-implementing was the cause of the waste, and git can do the rebase. The candidate stays "the working tree against the job's base", so a rebase is a cherry-pick of that tree onto main, done by the worker in a box's fresh clone (no coder configuration exists there yet), with hooks off and the worker's identity. Rejected: keeping a real branch with the coder's commits (they never survive a box change and publication builds its own commit); asking the coder to rebase (it would spend a model session on what git does).
+- **Approval on a rebase.** The approval is bound to the artifact hash, and a clean rebase can leave files and patch, and so the hash, unchanged on a new base the reviewer has not read. Rather than add a base to the hash (which would void every stored approval and every hash comparison), the host's proof now also requires the approving call to be newer than the job's latest rebase item, as it already required for the owner's latest message. Every rebase therefore gets a reviewer round (decision Q2), and the worker always runs one.
+- **Backstop.** The cause of the lost save is that the worker's stop time equalled the host's refusal time. The worker now stops a fixed margin earlier, measured from the host's own clock (`stopInMs` in the assignment, counted from when the worker received it), so both sides agree regardless of the box's clock. The margin (five minutes) covers one session upload, one snapshot and one checkpoint; it is a mechanism parameter, not a limit on work. Rejected: a grace period on the host after the deadline (it would keep a box's capability alive past its lifetime).
+- **Telling a lifetime from other stops.** Only the host's clock decides, never a worker flag: a paused finish accepted when the attempt's deadline is less than the margin away, or the tick finding the attempt still active (or its box gone without a stated reason) at or after the deadline, is recorded with cause `lifetime`. A crash, a lost heartbeat or a provider failure before that is not, and keeps the existing single automatic retry, which now skips lifetime pauses. A paused finish in the last five minutes for another reason is also treated as a lifetime; that is harmless because it is bounded by the eight hours.
+- **Caps.** Each was containment around something already bounded (the job's machine time, storage bounds) or around the removed re-implementation.
+
+## Implementation and review
+
+Host:
+
+- `src/coding/automation.ts`: `rebase()` queues the job with its checkpoint unchanged, `base_sha` set to main, `revision+1`, the handled list carried, a `rebase:<main>:<rev>` revision and status notice, and an inbox item `inbox:rebase:<main>:<rev>` with `source: "rebase"`, `from` (old base) and `onto` (main). It and the feedback requeue first check the owner's Start of the current request (a new `approved` constructor argument, `CodingRequirements.approved`) and stop for the owner without it (carried note a). Deleted: the re-implementation, the `rebase-approval:` carry, the allocation check before a rebase, the Pi round, batch, handled and allocation caps, and the one-hour wait stop for Pi PRs (its wait time now restarts with each successful reading, so the kept read-error stop measures an hour of failed readings).
+- `src/coding/controller.ts`: `BOX_LIFETIME_MS` (three hours, renamed from `PI_ATTEMPT_MS`), `JOB_MACHINE_MS` (eight hours), `machineMs()` (running time of the job's boxes created since its latest owner revision; host-made revisions `auto-retry:`, `continue-box:`, `mr-feedback:` and `rebase:` do not restart it), `lifetimeReached()`, the heartbeat deadline `min(lifetime, machine time left)`, `stopInMs` in the assignment, the `lifetime` cause in `finish` and the tick (suppressed, not sent to the owner), and `continueAfterLifetime()` in the tick. `begin()` gives the job the current main and, for Pi, the host's worker image without limits at Start (carried note b). `noteRebasedCandidate` deleted; the proof's "newer than" query includes rebase items; `assertDelivery` refuses saved or published work whose `piState.base` is not the job's base (an unchanged checkpoint passes). `requestPrChanges` refusals, the Pi `used_models` admission, `updateJob` limits and leader, and `activeMs` deleted.
+- `src/coding/requirements.ts`: `confirm` takes the base and settings from `begin` in the same guarded statement.
+- `src/coding/schema.ts`: `BOX_SAVE_MS`; `piState.base` and `piState.conflicts`; `limits` optional and refused for Pi, required for the legacy runtimes; `leaderModel` refused for Pi; `coding_model_set` roles `coder`, `reviewer`; `coding_job_update` without `leaderModel` and `limits`; `outputAllowance` takes only `coder` or `reviewer`.
+- `src/coding/github-automation.ts`: the 7,000-character feedback and CI item throws deleted. `src/coding/model-settings.ts`: no leader preference. `config/coding-pi.json`: `limits` deleted.
+
+Worker:
+
+- `src/coding/pi-worker.ts`: the rebase at the start of a box (restore on `from`, commit, check out main, `cherry-pick --no-commit`, `cherry-pick --quit` on conflict, `reset -q`), saved before anything runs; a clean result goes to review, conflicts to the coder as a message carrying the rebase item's header (so delivery is proven by the session as for any item), kept in `piState.conflicts` until then. Rebase items are never steered or listed as messages. The review round names the moved base before checking for an unchanged hash. The lifetime stop: `stopping` ends the current run, starts nothing new and finishes `paused` with the saved work. Session uploads go in batches of up to 32 entries within the host's 8 MB request bound, and a session this attempt fully uploaded is rebuilt from its in-memory copy instead of being downloaded (carried note e).
+- `coding_runtime_pi/src/workspace.ts`: `snapshot` runs in a git directory of its own per snapshot (a bare directory whose `objects/info/alternates` points at the repository's objects), with `core.excludesFile` and `core.attributesFile` set to `/dev/null`, after `read-tree <base>`. No filter, fsmonitor, hook, index flag or home ignore or attribute file of the coder's applies, and the coder's index is never touched (carried note d).
+
+Caps:
+
+| Cap                                                                                               | Decision                                                                                                  |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 1,500 model calls, 4,000 tool calls (`config/coding-pi.json`), `settings.limits` for Pi           | Removed; the schema refuses `limits` on a Pi profile. The legacy runtimes keep theirs (decision Q1).      |
+| Host `used_models < limits.models` admission (Pi route)                                           | Removed; `used_models` still counts calls. The legacy `generate` keeps it.                                |
+| `coding_job_update.limits`                                                                        | Removed.                                                                                                  |
+| Owner-merge rounds ≤ 3 (automation and `requestPrChanges`)                                        | Removed.                                                                                                  |
+| 7,600-character batch and "too large" park                                                        | Removed for Pi. Kept for the legacy squad: its findings field holds 8,000 characters.                     |
+| 200 handled items (record schema, automation, `requestPrChanges`)                                 | Removed; the handled list stays as the record of what was delivered.                                      |
+| 7,000-character owner request and queue (`requestPrChanges`)                                      | Removed.                                                                                                  |
+| 7,000-character GitHub comment and CI item (`github-automation.ts`)                               | Removed.                                                                                                  |
+| One hour awaiting CI, mergeability or threads, then `manual_review`                               | Removed for Pi; kept for the legacy squad, unchanged.                                                     |
+| One hour of failed GitHub reads, then park; immediate park on bound, identity or untrusted errors | Kept: a report to the owner that GitHub could not be read, not containment of work.                       |
+| One hour with the release unverified                                                              | Kept: an unverified production release must reach a person.                                               |
+| 15 minutes of uncertain merge acknowledgement                                                     | Kept: an uncertain write is never replayed.                                                               |
+| GitHub pagination bounds (fewer than 100 items)                                                   | Kept: fail closed rather than miss feedback.                                                              |
+| `PI_ATTEMPT_MS`, `activeMs`, `remainingMs` and `limits.ms` for Pi                                 | Removed; `BOX_LIFETIME_MS` is the box's fixed lifetime (infrastructure) and the eight hours the backstop. |
+| Four Pi requests in flight per job                                                                | Kept (stage D2): a gateway resource bound against an untrusted box.                                       |
+
+No new cap was added. The five-minute save margin is when the worker stops, not a bound on work.
+
+What happens to old rows (no migration): a job created under stage D2 and waiting for Start keeps working; at Start it takes the current main, the host's worker image and loses its stored `limits`. A D2 job at a Merge card goes through the merge as before; its automation record parses (`remainingMs` is optional). If it then needs a feedback round or a rebase, the box is started with its stored image; once the orchestrator pins the new image with an empty `previousImages`, the host pauses it before launch with the existing message, and `coding_job_update` with `upgradeWorker` (which also drops its limits) and a resume continue it on the new worker with its sessions. A D2 worker would refuse a rebase item, so a D2 image must not be kept in `previousImages` for such a job. A job mid-build cannot exist at deploy (the orchestrator holds the merge). Rows of any older shape pass through the continuation and the tick untouched (tested).
+
+Tests: new `tests/coding-backstop.test.ts` (the lifetime and stop time, a continuation that happens once and is not told to the owner, an ordinary pause, the deadline as a lifetime and a crash with its one retry, the machine time left, the eight-hour pause with one notice and a resume with a new window, no continuation without the owner's Start or after a settings change, an old row). `tests/coding-one-session.test.ts`: a box stopping by itself with its session and work saved and continuing in a new box; a clean rebase reviewed with `range-diff` and published on the new base without the coder; conflicts named to the coder, with a coder that commits, branches and leaves a stray file; a box ending right after the rebase; main moving again during a rebase. `tests/coding-pi-reviewer-proof.test.ts`: an approval older than the latest rebase is not proof. `tests/coding-pi-owner-merge.test.ts`: the rebase requeue, no Start, feedback without a Start, a fourth round, 251 items and a 20,000-character CI item delivered whole, a days-long CI wait, fix requests of any number and length. `tests/coding-go-gate.test.ts`: Start on current main with the host's worker, and a refused Start while main cannot be read. `coding_runtime_pi/tests/workspace-base.test.ts`: the coder's filter, fsmonitor, skip-worktree flag and home ignore and attribute files neither run nor shape a snapshot. Rewritten or deleted: the re-implementation, rebase-candidate and approval-carry cases, the limit cases in `coding-job-update`, the leader cases in `coding-model-profile` and `coding-output-allowance`, the fresh-window round case.
+
+## Verification and outcome
+
+Run locally on 13 November 2026, offline with the repository's fakes (no paid model call):
+
+- `kite ci`, `kite run build:pi`: passed.
+- Every `tests/coding*.test.ts` file, `box-coding-task` and `open-loops`: 416 of 416 passed. `coding_runtime_pi` tests: 41 of 41.
+- `kite run check` with the Python venv active: passed (types; TypeScript tests 1,778, 1,777 passed and 1 skipped, 0 failed; script tests 77 of 77; the legacy Python runtime's checks and 62 tests and the other Python suites; `coding_runtime_pi` 41 of 41). `kite run format:check`: passed.
+
+Not verified: a real job on a worker image, a real three-hour box, the cherry-pick on the production repository, and Telegram rendering.
+
+## Deployment status
+
+Not deployed. The host change needs the gateway release and the worker change a new worker image pinned in `config/coding-pi.json` and `config/boxes.json`; no coding job should be started between the two (specification, "Build and rollout").
+
+## Follow-up and next iteration
+
+- A reviewer-only capability issued by the host when the reviewer starts, as hardening for the reviewer proof (carried note f; not done here).
+- Lifting the artifact bounds (500 files, 1 MB per file, 10 MB in all, text files only; carried note c) is not small: binary files need a content encoding in the checkpoint schema and the artifact hash (changing every stored hash), in the snapshot, restore, review copy and both publishers, and larger artifacts need checkpoints that stop carrying whole files in one `jsonb` row and one 64 MB request. Not done here.
+- An automation read error at a waiting Merge card still parks at once if the record's wait time is over an hour old (it is restarted only while waiting for CI); this predates this stage.
+- The legacy python and node runtimes, with their limits and leader, are for the separate deletion piece.
