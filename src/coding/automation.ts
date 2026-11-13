@@ -4,7 +4,6 @@ import type { Database } from "../db.js";
 import type { CodingJob } from "./controller.js";
 import { errorFields, opsLog } from "../ops-log.js";
 import { artifactHash } from "./github.js";
-import { requirementScope } from "./requirements.js";
 import {
   MergeRefused,
   approvedArtifact,
@@ -68,6 +67,8 @@ export class CodingAutomation {
     private allowed: (user: string) => boolean,
     private reviewProof: (job: CodingJob) => Promise<boolean>,
     private now: () => Date,
+    /** The owner's Start of the job's current request (`CodingRequirements.approved`). */
+    private approved: (job: CodingJob) => Promise<boolean>,
   ) {}
   /**
    * Finishes a parked job whose PR was merged or closed on GitHub. Only GitHub's own answer
@@ -206,65 +207,46 @@ export class CodingAutomation {
     await this.phase(j, d, "manual_review", reason, true);
   }
   /**
-   * GitHub reports the PR conflicts with main: re-apply the started request on current main
-   * (owner policy, 17 October 2026: the Start carries over; CI, review and the
-   * Merge card repeat). Main moving without a conflict never reaches this (journal 180).
-   *
-   * Interim (journal 180): re-implementing from the plan is the remaining way a conflict is
-   * resolved; a later piece replaces it with an in-box `git rebase` of the reviewed commit.
+   * GitHub reports the PR conflicts with main (journal 193): the job goes back to its box with
+   * its work and sessions kept, its base moved to current main, and a rebase item in its inbox.
+   * The worker applies the change onto main with git; the coder resolves what git cannot, and
+   * the reviewer reads the difference before anything is published. The owner's Start carries
+   * over unchanged, because the approved request is unchanged: the approval covers the
+   * request, not the base. Main moving without a conflict never reaches this (journal 180).
    */
   private async rebase(j: CodingJob, d: Record, main: string) {
     if (!/^[a-f0-9]{40}$/.test(main))
       throw new Error("Untrusted main identity");
-    // Carry over only an approval the owner actually gave for this exact scope.
-    const approved = (
-      await this.db.query(
-        "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload->>'decision'='approved' AND payload->>'approvedScope'=$2 LIMIT 1",
-        [j.id, requirementScope(j)],
-      )
-    ).rows.length;
-    if (!approved) {
+    if (!(await this.approved(j))) {
       await this.manual(
         j,
         d,
-        "The PR conflicts with main, but this job's current scope has no recorded owner approval to carry over; explicit owner action is needed.",
+        "The PR conflicts with main, but this job has no owner Start of its current request; explicit owner action is needed.",
       );
       return;
     }
-    const cp = structuredClone(j.checkpoint);
-    // A fresh implementation on current main; whole-file contents from the old base are not reused.
-    cp.files = [];
-    cp.patch = "";
-    // Interim until stage D3's in-box rebase: the job's sessions continue on the new base.
-    cp.piState = { version: 1, delivered: cp.piState?.delivered ?? [] };
-    const scope = requirementScope({ ...j, checkpoint: cp });
-    const message = `The PR conflicts with main; re-applying on current main ${main}: the owner's Start carries over (owner policy, 17 October 2026)`;
     const changed = await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',base_sha=$5,summary='The PR conflicts with main; re-applying the started change on current main before review, CI and the Merge card',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$8 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision),
-      budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$6::jsonb),'suppressed' FROM changed RETURNING job_id),
-      approval AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'rebase-approval:'||revision,jsonb_build_object('decision','approved','approvedScope',$7::text,'carriedFrom',$9::text,'reason','rebase','carriedArtifact',$12::text),'suppressed' FROM changed RETURNING job_id),
-      revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$10,$11,'implement' FROM changed RETURNING job_id),
-      told AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'inbox:rebase:'||$5::text||':'||revision,$13::jsonb,'suppressed' FROM changed ON CONFLICT DO NOTHING RETURNING job_id)
-      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$10,jsonb_build_object('summary','The PR conflicts with recent changes on main, so Chief is re-applying your change on current main; review and CI run again before you are asked to merge.') FROM changed ON CONFLICT DO NOTHING RETURNING job_id`,
+      `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',base_sha=$5,summary='The PR conflicts with main; rebasing the change onto it before review, CI and the Merge card',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$6 AND lease_until>now() AND state='pr_ready' AND revision=$4 AND base_sha=$3 RETURNING id,revision),
+      budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$7::jsonb),'suppressed' FROM changed RETURNING job_id),
+      revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$8,$9,'implement' FROM changed RETURNING job_id),
+      told AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'inbox:rebase:'||$5::text||':'||revision,$10::jsonb,'suppressed' FROM changed ON CONFLICT DO NOTHING RETURNING job_id)
+      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$8,jsonb_build_object('summary','The PR conflicts with recent changes on main, so Chief is rebasing your change onto main; review and CI run again before you are asked to merge.') FROM changed ON CONFLICT DO NOTHING RETURNING job_id`,
       [
         j.id,
         j.lease,
-        JSON.stringify(cp),
+        j.base_sha,
         j.revision,
         main,
-        JSON.stringify(d.handled),
-        scope,
         j.stage,
-        requirementScope(j),
+        JSON.stringify(d.handled),
         `rebase:${main}:${j.revision}`,
-        message,
-        // The reviewed artifact, so the rebased candidate can be compared with it (journal 115).
-        artifactHash(j.result.checkpoint),
-        // The coder's session continues, so it is told what happened (journal 192).
+        `The PR conflicts with main; rebasing from ${j.base_sha} onto ${main}`,
         JSON.stringify({
           kind: "inbox",
-          source: "chief",
-          text: `Main moved to ${main} and the pull request conflicted with it. The job's base is now ${main}, and your earlier change was not carried over: the checkout is that base with no changes. Re-apply the change the owner asked for on it, rerun the tests and report done.`,
+          source: "rebase",
+          from: j.base_sha,
+          onto: main,
+          text: `Main moved to ${main} and the pull request conflicted with it. Chief applies the change onto it with git.`,
         }),
       ],
     );
@@ -552,6 +534,16 @@ export class CodingAutomation {
       if (feedback.length) {
         const cp = structuredClone(j.checkpoint);
         const pi = j.settings.prWorkflow === "owner_merge" && cp.piState;
+        // The box refuses a job without the owner's Start of its current request, so such a
+        // job would be queued only to stop with no card (journal 193); it waits for the owner.
+        if (pi && !(await this.approved(j))) {
+          await this.manual(
+            j,
+            d,
+            "Review feedback arrived, but this job has no owner Start of its current request; explicit owner action is needed.",
+          );
+          return;
+        }
         // The legacy squad keeps its allowances; a Pi job delivers every item, however many
         // rounds the PR has had, and its machine time is the only bound (journal 193).
         if (

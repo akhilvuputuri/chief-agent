@@ -6,15 +6,11 @@ import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { CodingAutomation } from "../src/coding/automation.js";
 import { CodingMergeApprovals } from "../src/coding/merge-approvals.js";
-import {
-  CodingRequirements,
-  requirementScope,
-} from "../src/coding/requirements.js";
+import { requirementScope } from "../src/coding/requirements.js";
 import { CodingController, type CodingJob } from "../src/coding/controller.js";
 import { ToolValidationError } from "../src/tool-errors.js";
 import { codingSettings, outcome } from "../src/coding/schema.js";
 import { artifactHash, canonicalJson } from "../src/coding/github.js";
-import { setOpsSink } from "../src/ops-log.js";
 import type { PrInspection } from "../src/coding/merge-policy.js";
 
 const base = "a".repeat(40),
@@ -138,12 +134,14 @@ async function fixture(
     },
     release: async () => release,
   };
+  let started = true;
   const auto = new CodingAutomation(
     db,
     repository,
     () => true,
     async () => true,
     () => now,
+    async () => started,
   );
   const approvals = new CodingMergeApprovals(
     db,
@@ -194,6 +192,8 @@ async function fixture(
       (inspection = { ...inspection, ...i }),
     setRelease: (v: typeof release) => (release = v),
     advance: (ms: number) => (now = new Date(now.getTime() + ms)),
+    /** The job no longer has the owner's Start of its current request. */
+    withoutStart: () => (started = false),
     counts: () => ({ merges, readies }),
   };
 }
@@ -600,19 +600,15 @@ test("the bundled Pi profile enables owner-confirmed merge and never automatic m
   assert.equal(bundled.autoMerge, false);
 });
 
-test("a PR that conflicts with main is re-applied on current main with its approval carried over (interim, journal 180)", async (t) => {
-  const f = await fixture(t, { version: 1, delivered: [] });
+test("a PR that conflicts with main goes back to its box with its work, sessions and Start kept, to be rebased (journal 193)", async (t) => {
+  const reviewed = {
+    hash: "1".repeat(64),
+    base,
+    patch: "fixture",
+    verdict: "APPROVE" as const,
+  };
+  const f = await fixture(t, { version: 1, delivered: [], reviewed });
   const before = await f.job();
-  await f.db.query(
-    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'owner-approved',$2::jsonb,'suppressed')",
-    [
-      f.id,
-      JSON.stringify({
-        decision: "approved",
-        approvedScope: requirementScope(before),
-      }),
-    ],
-  );
   const moved = "f".repeat(40);
   f.setInspection({
     checks: "passed",
@@ -625,37 +621,33 @@ test("a PR that conflicts with main is re-applied on current main with its appro
   assert.equal(queued.state, "queued");
   assert.equal(queued.revision, 2);
   assert.equal(queued.base_sha, moved);
-  assert.deepEqual(queued.checkpoint.files, []);
-  assert.equal(queued.checkpoint.plan, before.checkpoint.plan);
-  assert.deepEqual(queued.checkpoint.piState, { version: 1, delivered: [] });
+  // The work and the job's sessions are kept as they were: nothing is re-implemented.
+  assert.deepEqual(queued.checkpoint, before.checkpoint);
   assert.equal(f.counts().merges, 0);
-  // The coder's session continues, so an inbox item tells it the base moved (journal 192).
-  const [told] = await inbox(f);
-  assert.equal(told.source, "chief");
-  assert.match(told.text, new RegExp(`base is now ${moved}`));
-  assert.match(told.text, /not carried over/);
-  const requirements = new CodingRequirements(
-    f.db,
-    () => true,
-    () => new Date(),
+  const [rebase] = await inbox(f);
+  assert.equal(rebase.key, `inbox:rebase:${moved}:2`);
+  assert.equal(rebase.source, "rebase");
+  assert.equal(rebase.from, base);
+  assert.equal(rebase.onto, moved);
+  // The owner's Start carries over because the request it approved did not change: the
+  // approval covers the request, not the base. No approval is copied.
+  assert.equal(requirementScope(queued), requirementScope(before));
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT 1 FROM coding_events WHERE job_id=$1 AND (event_key LIKE 'rebase-approval:%' OR event_key LIKE 'rebase-candidate:%')",
+        [f.id],
+      )
+    ).rows.length,
+    0,
   );
-  assert.equal(await requirements.approved(queued), true);
-  const carried = (
-    await f.db.query(
-      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='rebase-approval:2'",
-      [f.id],
-    )
-  ).rows[0].payload;
-  assert.equal(carried.approvedScope, requirementScope(queued));
-  assert.equal(carried.carriedFrom, requirementScope(before));
-  // The reviewed artifact is recorded so the rebased candidate can be compared with it.
-  assert.equal(carried.carriedArtifact, artifactHash(before.result.checkpoint));
   const budget = (
     await f.db.query(
       "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
       [f.id],
     )
   ).rows[0].payload;
+  assert.deepEqual(budget, { handled: [] });
   const notice = (
     await f.db.query(
       "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND payload->>'summary' LIKE 'The PR conflicts with recent changes on main%'",
@@ -664,21 +656,15 @@ test("a PR that conflicts with main is re-applied on current main with its appro
   ).rows;
   assert.equal(notice.length, 1);
   assert.equal(notice[0].delivery, "pending");
+  assert.match(notice[0].payload.summary, /rebasing your change onto main/);
+  // A second tick finds the job queued and does nothing more.
+  await f.auto.tick();
+  assert.equal((await inbox(f)).length, 1);
 });
 
-/** Re-applies the fixture job on a moved, conflicting main and starts its new attempt. */
-async function rebasedAttempt(f: Awaited<ReturnType<typeof fixture>>) {
-  const before = await f.job();
-  await f.db.query(
-    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'owner-approved',$2::jsonb,'suppressed')",
-    [
-      f.id,
-      JSON.stringify({
-        decision: "approved",
-        approvedScope: requirementScope(before),
-      }),
-    ],
-  );
+test("a conflict on a job without the owner's Start of its request stops for the owner", async (t) => {
+  const f = await fixture(t);
+  f.withoutStart();
   f.setInspection({
     checks: "passed",
     draft: false,
@@ -686,109 +672,34 @@ async function rebasedAttempt(f: Awaited<ReturnType<typeof fixture>>) {
     mergeable: false,
   });
   await f.auto.tick();
-  await f.db.query(
-    "UPDATE coding_jobs SET state='running',stage='implementing',attempt_id=$2,attempt_deadline=$3 WHERE id=$1",
-    [f.id, randomUUID(), new Date(Date.now() + 600000)],
-  );
   const job = await f.job();
-  assert.equal(job.revision, 2);
-  const c = new CodingController(
-    f.db,
-    settings,
-    {} as any,
-    {} as any,
-    "c".repeat(64),
-    "https://coding.example.com",
-    () => true,
-    () => ({
-      generate: async () => ({ message: { role: "assistant", content: "" } }),
-    }),
-    () => new Date(),
-  );
-  /** The worker's checked candidate, saved just before its first reviewer call. */
-  const review = (
-    files: { path: string; content: string }[],
-    patch: string,
-  ) => {
-    const cp: any = {
-      ...job.checkpoint,
-      files,
-      patch,
-      piState: { ...job.checkpoint.piState },
-    };
-    cp.piState = { ...cp.piState, phase: "review" };
-    return c.save(job, cp);
-  };
-  const recorded = async () =>
-    (
-      await f.db.query(
-        "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND event_key='rebase-candidate:2'",
-        [f.id],
-      )
-    ).rows;
-  return { before, review, recorded };
-}
-
-test("a rebase that reproduces the reviewed artifact byte for byte is recorded, and review still runs", async (t) => {
-  const f = await fixture(t);
-  const { before, review, recorded } = await rebasedAttempt(f);
-  const logs: any[] = [];
-  const previous = setOpsSink((line) => logs.push(JSON.parse(line)));
-  t.after(() => setOpsSink(previous));
-  await review(before.checkpoint.files, before.checkpoint.patch);
-  const rebased = logs.filter((l) => l.event === "coding.rebase_candidate");
-  assert.equal(rebased.length, 1);
-  assert.equal(rebased[0].taskId, f.id);
-  assert.equal(rebased[0].revision, 2);
-  assert.equal(rebased[0].matched, true);
-  const [row] = await recorded();
-  assert.equal(row.delivery, "suppressed");
-  assert.equal(row.payload.identical, true);
-  assert.equal(row.payload.candidate, artifactHash(before.result.checkpoint));
-  // Detection only: nothing about the attempt or its approval changes.
-  const job = await f.job();
-  assert.equal(job.state, "running");
-  assert.equal(job.result, null);
-  assert.equal(job.checkpoint.piState.phase, "review");
+  assert.equal(job.state, "pr_ready");
+  assert.equal(job.stage, "manual_review");
+  assert.equal(job.base_sha, base);
+  assert.match(job.summary, /no owner Start of its current request/);
+  assert.equal((await inbox(f)).length, 0);
 });
 
-test("a rebase whose candidate differs at all is recorded as not identical", async (t) => {
+test("feedback on a job without the owner's Start of its request goes to the owner, not to a box that would refuse it", async (t) => {
   const f = await fixture(t);
-  const { before, review, recorded } = await rebasedAttempt(f);
-  const logs: any[] = [];
-  const previous = setOpsSink((line) => logs.push(JSON.parse(line)));
-  t.after(() => setOpsSink(previous));
-  await review(
-    before.checkpoint.files.map((file: any) => ({
-      ...file,
-      content: `${file.content}\n`,
-    })),
-    before.checkpoint.patch,
-  );
-  const rows = await recorded();
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].payload.identical, false);
-  const rebased = logs.filter((l) => l.event === "coding.rebase_candidate");
-  assert.equal(rebased.length, 1);
-  assert.equal(rebased[0].revision, 2);
-  assert.equal(rebased[0].matched, false);
+  f.withoutStart();
+  f.setInspection({
+    draft: false,
+    feedback: [{ id: "devin-1", text: "Devin: rename it" }],
+  });
+  await f.auto.tick();
+  const job = await f.job();
+  assert.equal(job.state, "pr_ready");
+  assert.equal(job.stage, "manual_review");
+  assert.match(job.summary, /no owner Start of its current request/);
+  assert.equal((await inbox(f)).length, 0);
 });
 
-test("a conflicting PR is re-applied however many times main conflicted before", async (t) => {
+test("a conflicting PR is rebased however many times main conflicted before", async (t) => {
   const f = await fixture(t);
-  await f.db.query(
-    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'owner-approved',$2::jsonb,'suppressed')",
-    [
-      f.id,
-      JSON.stringify({
-        decision: "approved",
-        approvedScope: requirementScope(await f.job()),
-      }),
-    ],
-  );
   for (const n of [1, 2, 3])
     await f.db.query(
-      "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,$2,$3,'Earlier re-apply','implement')",
+      "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,$2,$3,'Earlier rebase','implement')",
       [f.id, 10 + n, `rebase:earlier-${n}`],
     );
   f.setInspection({
@@ -889,7 +800,7 @@ test("unknown mergeability waits without dropping the card or the owner's tap, a
   assert.equal(cards.length, 1);
 });
 
-test("a conflict reading with main unmoved is stale: it waits and nothing is re-applied", async (t) => {
+test("a conflict reading with main unmoved is stale: it waits and nothing is rebased", async (t) => {
   const f = await fixture(t);
   f.setInspection({ checks: "passed", draft: false, mergeable: false });
   await f.auto.tick();
@@ -976,22 +887,6 @@ test("unknown mergeability never keeps a tap alive past a real change to the PR"
   await e.auto.tick();
   assert.equal((await e.job()).stage, "awaiting_ci");
   assert.equal(e.counts().merges, 0);
-});
-
-test("a re-apply never carries over a scope the owner did not approve", async (t) => {
-  const f = await fixture(t);
-  f.setInspection({
-    checks: "passed",
-    draft: false,
-    main: "f".repeat(40),
-    mergeable: false,
-  });
-  await f.auto.tick();
-  // The fixture job has no recorded approval for its scope.
-  const job = await f.job();
-  assert.equal(job.state, "pr_ready");
-  assert.equal(job.stage, "manual_review");
-  assert.match(job.summary, /no recorded owner approval/);
 });
 
 /** The owner's "continue" as Chief's coding_resume call, through the real controller. */

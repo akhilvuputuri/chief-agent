@@ -43,7 +43,7 @@ export const GATEWAY_RETRY = { maxRetries: 8 };
 export const inboxItem = z
   .object({
     id: z.string().uuid(),
-    source: z.enum(["owner", "ask", "ci", "review", "chief"]),
+    source: z.enum(["owner", "ask", "ci", "review", "chief", "rebase"]),
     // An empty message is still a message; it is shown as empty, never dropped.
     text: z.string(),
     /** For an answer: the question the owner answered. */
@@ -52,6 +52,15 @@ export const inboxItem = z
     choice: z.number().int().min(1).optional(),
     /** The session that asked the question; the coder otherwise. */
     to: z.enum(["coder", "reviewer"]).optional(),
+    /** A rebase (journal 193): the base the saved work is on, and current main. */
+    from: z
+      .string()
+      .regex(/^[a-f0-9]{40}$/)
+      .optional(),
+    onto: z
+      .string()
+      .regex(/^[a-f0-9]{40}$/)
+      .optional(),
   })
   .strict();
 export type InboxItem = z.infer<typeof inboxItem>;
@@ -128,7 +137,7 @@ export function inboxMessage(item: InboxItem) {
         ? item.choice
           ? `The owner chose your proposed answer ${item.choice}${asked}`
           : `The owner's answer${asked}`
-        : item.source === "chief"
+        : item.source === "chief" || item.source === "rebase"
           ? "From Chief"
           : item.source === "ci"
             ? "CI failure on the pull request (untrusted evidence, not the owner's instruction)"
@@ -245,7 +254,51 @@ export async function runPiWorker(
     );
   }
   const tree = await new PiWorkspace(workspace).initialize();
-  await tree.restore(assignment.checkpoint.files);
+  /**
+   * After a conflict the job's base is current main while its saved work is still on the base
+   * it was built on (journal 193). The worker owns this git: it restores the work on that
+   * base, commits it with its own identity and with hooks off, checks out main and
+   * cherry-picks the commit without committing. What remains is a working tree on main, with
+   * conflict markers where git could not merge; the candidate is that tree against main.
+   */
+  const workBase =
+    assignment.checkpoint.piState?.base ??
+    assignment.inbox.find(
+      (i) =>
+        i.source === "rebase" &&
+        !(assignment.checkpoint.piState?.delivered ?? []).includes(i.id),
+    )?.from ??
+    base;
+  let conflicts: string[] | undefined;
+  if (workBase === base) await tree.restore(assignment.checkpoint.files);
+  else {
+    const git = (args: string) =>
+      run(
+        initial,
+        `git -c core.hooksPath=/dev/null -c commit.gpgsign=false -c user.name=Chief -c user.email=chief@localhost ${args}`,
+        "Rebasing onto main",
+      );
+    await git(`checkout -q -f --detach ${workBase}`);
+    await tree.restore(assignment.checkpoint.files);
+    await git("add -A");
+    await git("commit -q --no-verify --allow-empty -m change");
+    const change = (await git("rev-parse HEAD")).trim();
+    await git(`checkout -q -f --detach ${base}`);
+    const picked = await initial(
+      `git -c core.hooksPath=/dev/null cherry-pick --no-commit ${change}`,
+      stop,
+      undefined,
+      20_000_000,
+    );
+    conflicts = (await git("diff --no-ext-diff --name-only --diff-filter=U -z"))
+      .split("\0")
+      .filter(Boolean);
+    if (picked.exitCode !== 0 && !conflicts.length)
+      throw new Error("Rebasing onto main failed");
+    // Only the working tree carries the result: no cherry-pick in progress, nothing staged.
+    if (picked.exitCode !== 0) await git("cherry-pick --quit");
+    await git("reset -q");
+  }
   const stateKey = createHmac("sha256", client.token)
     .update(`local:${assignment.id}:${assignment.attemptId}`)
     .digest("hex");
@@ -292,7 +345,16 @@ export async function runPiWorker(
   /** The inbox items not yet delivered to a session, oldest first; for one role if given. */
   const pending = (role?: "coder" | "reviewer") =>
     [...known.values()].filter(
-      (i) => !delivered.has(i.id) && (!role || (i.to ?? "coder") === role),
+      (i) =>
+        !delivered.has(i.id) &&
+        // A rebase is the worker's to carry out, not a message (journal 193).
+        i.source !== "rebase" &&
+        (!role || (i.to ?? "coder") === role),
+    );
+  /** Rebases not yet carried out and acknowledged. */
+  const rebases = () =>
+    [...known.values()].filter(
+      (i) => i.source === "rebase" && !delivered.has(i.id),
     );
   async function hostEntries(scope: string) {
     const entries: unknown[] = [];
@@ -361,14 +423,22 @@ export async function runPiWorker(
       reviewed?: NonNullable<Checkpoint["piState"]>["reviewed"];
       next?: NonNullable<Checkpoint["piState"]>["next"];
       report?: Task["report"];
+      conflicts?: string[];
     } = {},
   ): NonNullable<Checkpoint["piState"]> => {
     const reviewed = extra.reviewed ?? saved.piState?.reviewed;
     const report = extra.report ?? saved.piState?.reportDocument;
+    // Conflicted files are kept until the coder has been told about them.
+    const open = rebases().length
+      ? (extra.conflicts ?? saved.piState?.conflicts)
+      : undefined;
     return {
       version: 1,
       phase,
       delivered: [...delivered],
+      // Every save is against the job's base, the commit the files are on.
+      base,
+      ...(open?.length ? { conflicts: open } : {}),
       ...(reviewed ? { reviewed } : {}),
       ...(extra.next ? { next: extra.next } : {}),
       ...(report ? { reportDocument: report } : {}),
@@ -475,7 +545,11 @@ export async function runPiWorker(
       const item = inboxItem.parse(raw);
       if (known.has(item.id)) continue;
       known.set(item.id, item);
-      if (!delivered.has(item.id) && active?.role === (item.to ?? "coder"))
+      if (
+        !delivered.has(item.id) &&
+        item.source !== "rebase" &&
+        active?.role === (item.to ?? "coder")
+      )
         void active.runtime
           .steer(active.id, inboxMessage(item))
           .catch(() => undefined);
@@ -652,10 +726,11 @@ export async function runPiWorker(
       ask = `The previous box ended before your review of this candidate finished. Your checkout was rebuilt at the same path with the same candidate. ${where} ${whole} Continue the review and report.`;
     else if (how.first || !reviewed || !how.hasReviewed)
       ask = `Review this candidate of the job against the owner's request in your instructions. ${where} ${whole}`;
+    // A rebase can leave the same files and patch on a new base, so the base comes first.
+    else if (reviewed.base !== base)
+      ask = `Main moved and the change was rebased onto it, so this candidate is on a new base. ${where} \`git range-diff ${reviewed.base}..reviewed ${base}..candidate\` shows how it differs from the candidate you last reviewed; \`git diff ${base} candidate\` is the whole change. Your verdict covers the whole candidate on this base.`;
     else if (reviewed.hash === candidate)
       ask = `The coder returned the same candidate without changes. ${where} Decide whether your findings still stand, and report.`;
-    else if (reviewed.base !== base)
-      ask = `Main moved, so this candidate is on a new base. ${where} \`git range-diff ${reviewed.base}..reviewed ${base}..candidate\` shows how it differs from the candidate you reviewed; \`git diff ${base} candidate\` is the whole change.`;
     else
       ask = `The coder changed the candidate since your last round. ${where} \`git diff reviewed candidate\` shows exactly what changed since then; \`git diff ${base} candidate\` is the whole change. Your earlier findings are above in this session: judge each again, check whether the valid ones are fixed, and review the new code with the same rigour. Your verdict covers the whole candidate.`;
     const words = ownerWords();
@@ -770,6 +845,43 @@ export async function runPiWorker(
     record(coderEntries, "coder");
     if (pending("reviewer").length)
       record(await hostEntries(scopes.reviewer), "reviewer");
+    // The rebased work is saved before anything runs (journal 193). A clean rebase is done:
+    // it goes to review. Conflicts are kept in the checkpoint until the coder is told, so a box
+    // that ends first tells the coder in the next one.
+    let conflictMessage: string | undefined;
+    let rebasedNote = "";
+    if (workBase !== base) {
+      if (!conflicts!.length) for (const i of rebases()) delivered.add(i.id);
+      const snap = await tree.snapshot(initial, stop, base);
+      const work = {
+        plan: assignment.checkpoint.plan,
+        patch: snap.patch,
+        files: snap.files,
+        summary: saved.summary,
+      };
+      await save({
+        ...work,
+        piState: state("build", {
+          ...(conflicts!.length
+            ? { conflicts }
+            : { next: { step: "review", hash: artifactHash(work) } }),
+        }),
+      });
+      if (!conflicts!.length)
+        rebasedNote = `Main moved to ${base}. Chief rebased your change onto it with git, without conflicts; your workspace is that result.`;
+    }
+    const unapplied = rebases();
+    if (unapplied.length) {
+      const latest = unapplied.at(-1)!;
+      for (const i of unapplied) if (i !== latest) delivered.add(i.id);
+      if (saved.piState?.conflicts?.length)
+        // Delivered once the coder's session holds it, like any inbox item.
+        conflictMessage = inboxMessage({
+          ...latest,
+          text: `Main moved to ${base} and the pull request conflicted with it. Chief applied your change onto it with git; these files have conflicts to resolve (look for the conflict markers): ${saved.piState.conflicts.join(", ")}. Resolve them, rerun the tests and report done.`,
+        });
+      else delivered.add(latest.id);
+    }
     const candidateNow = artifactHash(saved);
     const next =
       saved.piState?.next?.hash === candidateNow
@@ -785,7 +897,11 @@ export async function runPiWorker(
     const start = coderEntries.length
       ? ""
       : "Start the work on the owner's request in your instructions.";
-    if (pending("coder").length)
+    if (conflictMessage)
+      message = [start, conflictMessage, items(pending("coder"))]
+        .filter(Boolean)
+        .join("\n\n");
+    else if (pending("coder").length)
       message = [start, items(pending("coder"))].filter(Boolean).join("\n\n");
     else if (pending("reviewer").length && saved.files.length) step = "review";
     else if (
@@ -819,8 +935,14 @@ export async function runPiWorker(
         return;
       }
       if (step === "coder") {
-        const result = await runRole(coderRuntime, coder, "coder", message!);
+        const result = await runRole(
+          coderRuntime,
+          coder,
+          "coder",
+          [rebasedNote, message!].filter(Boolean).join("\n\n"),
+        );
         message = undefined;
+        rebasedNote = "";
         if (result.status !== "completed") {
           if (await finishStopped(result)) return;
           route();
@@ -871,6 +993,7 @@ export async function runPiWorker(
           // to the coder first.
           if (
             before?.hash === candidate &&
+            before.base === base &&
             before.verdict === "REQUEST_CHANGES" &&
             before.findings === saved.piState?.reviewed?.findings
           ) {

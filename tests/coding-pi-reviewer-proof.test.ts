@@ -140,3 +140,36 @@ test("an approval older than the owner's latest message is not proof until a new
   );
   assert.equal(await proof(one), true);
 });
+
+test("an approval older than the job's latest rebase is not proof, even for the same files and patch (journal 193)", async (t) => {
+  const { f, job, record, proof } = await proofFixture(t);
+  const one = checkpoint("one\n");
+  const approve = {
+    kind: "review",
+    verdict: "APPROVE",
+    summary: "Yes",
+    detail,
+  };
+  await record(approve, artifactHash(one));
+  assert.equal(await proof(one), true);
+  // The PR conflicted and the job's base moved: the rebased change can hash the same.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'inbox:rebase:f',$2::jsonb,'suppressed')",
+    [
+      job.id,
+      JSON.stringify({
+        kind: "inbox",
+        source: "rebase",
+        from: "a".repeat(40),
+        onto: "f".repeat(40),
+        text: "Main moved",
+      }),
+    ],
+  );
+  assert.equal(await proof(one), false);
+  // The reviewer's round on the rebased candidate is the proof.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await record(approve, artifactHash(one));
+  assert.equal(await proof(one), true);
+});

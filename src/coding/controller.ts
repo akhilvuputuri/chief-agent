@@ -292,6 +292,7 @@ export class CodingController {
         allowed,
         (job) => this.hasReviewerProof(job),
         clock,
+        (job) => this.requirements.approved(job),
       );
     if (!/^[a-f0-9]{64}$/i.test(authKey))
       throw new Error(
@@ -311,7 +312,9 @@ export class CodingController {
    * candidate, from a reviewer request whose round named the candidate's artifact hash, is an
    * APPROVE whose findings match the acknowledged review document, recorded after the owner's
    * latest message. An approval of an earlier candidate, one a later REQUEST_CHANGES of the
-   * same candidate overrides, or one older than the owner's last word, is not proof.
+   * same candidate overrides, or one older than the owner's last word, is not proof. Nor is
+   * one older than the job's latest rebase (journal 193): a rebase can leave the files and
+   * patch, and so the artifact hash, as they were, on a new base the reviewer has not read.
    */
   private async hasPiReviewerProof(
     job: CodingJob,
@@ -327,7 +330,7 @@ export class CodingController {
       return false;
     const calls = (
       await db.query(
-        "SELECT id,attempt_id,result_box,created_at > COALESCE((SELECT max(created_at) FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' AND payload->>'source' IN ('owner','ask') AND COALESCE(payload->>'heldBy','')<>$3::text),'-infinity'::timestamptz) AS after_owner FROM coding_model_calls WHERE job_id=$1 AND role='reviewer' AND state='complete' AND result_box IS NOT NULL AND input->>'candidate'=$2 AND COALESCE(input->>'purpose','agent')='agent' ORDER BY created_at DESC,id DESC",
+        "SELECT id,attempt_id,result_box,created_at > COALESCE((SELECT max(created_at) FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' AND payload->>'source' IN ('owner','ask','rebase') AND COALESCE(payload->>'heldBy','')<>$3::text),'-infinity'::timestamptz) AS after_owner FROM coding_model_calls WHERE job_id=$1 AND role='reviewer' AND state='complete' AND result_box IS NOT NULL AND input->>'candidate'=$2 AND COALESCE(input->>'purpose','agent')='agent' ORDER BY created_at DESC,id DESC",
         // The publication commit fixes which owner messages the approval covered: one kept
         // while this attempt was publishing (held by it) goes to the PR's feedback round
         // instead; every other owner message must be older than the approval (journal 192).
@@ -1490,6 +1493,10 @@ export class CodingController {
           ? { choice: r.payload.choice }
           : {}),
         ...(r.payload.to === "reviewer" ? { to: "reviewer" } : {}),
+        // A rebase: the base the job's saved work is on, and current main (journal 193).
+        ...(r.payload.source === "rebase"
+          ? { from: r.payload.from, onto: r.payload.onto }
+          : {}),
       }));
   }
   piSessionAppend(job: CodingJob, raw: unknown) {
@@ -1574,9 +1581,19 @@ export class CodingController {
     )
       throw new Error("A review needs the started Pi candidate");
   }
-  /** Delivery only grows, and names this job's own inbox (journal 192). */
+  /**
+   * Delivery only grows, and names this job's own inbox (journal 192). Work the box saves is
+   * against the job's base: after a conflict, the box rebases the kept work before it saves
+   * or publishes anything (journal 193).
+   */
   private async assertDelivery(job: CodingJob, c: Checkpoint) {
     if (job.settings.runtime !== "pi") return;
+    if (
+      c.piState?.base &&
+      c.piState.base !== job.base_sha &&
+      canonicalJson(c) !== canonicalJson(job.checkpoint)
+    )
+      throw new Error("The saved work must be on the job's base commit");
     const before = job.checkpoint.piState?.delivered ?? [];
     const now = c.piState?.delivered ?? [];
     const inbox = new Set((await this.inbox(job)).map((i) => i.id));
@@ -1629,49 +1646,7 @@ export class CodingController {
       ],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");
-    // The candidate is about to be reviewed: measure whether a rebase reproduced the
-    // reviewed artifact. Measurement only; it never changes the save.
-    if (c.piState?.phase === "review")
-      await this.noteRebasedCandidate(job, artifactHash(c)).catch(() => {});
     return { saved: true };
-  }
-  /**
-   * Detection only (journal 115): records, once per rebased revision, whether the first
-   * candidate sent to review is byte-identical to the artifact the previous revision's
-   * review approved (same artifact hash: identical whole-file contents and identical diff).
-   * Review still runs; reusing the earlier approval needs a worker change and an owner
-   * decision on the review exception, because the reviewer saw the change against the old
-   * base.
-   */
-  private async noteRebasedCandidate(job: CodingJob, candidate: string) {
-    const carried = (
-      await this.db.query(
-        "SELECT payload->>'carriedArtifact' AS artifact FROM coding_events WHERE job_id=$1 AND event_key=$2",
-        [job.id, `rebase-approval:${job.revision}`],
-      )
-    ).rows[0]?.artifact;
-    if (typeof carried !== "string" || !/^[a-f0-9]{64}$/.test(carried)) return;
-    const identical = carried === candidate;
-    const recorded = await this.db.query(
-      "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,$2,$3::jsonb,'suppressed') ON CONFLICT DO NOTHING RETURNING id",
-      [
-        job.id,
-        `rebase-candidate:${job.revision}`,
-        JSON.stringify({
-          kind: "rebase_candidate",
-          identical,
-          candidate,
-          carriedArtifact: carried,
-        }),
-      ],
-    );
-    if (recorded.rows.length)
-      // `matched`: the rebased candidate is byte-identical to the reviewed artifact.
-      opsLog("coding.rebase_candidate", "info", {
-        taskId: job.id,
-        revision: job.revision,
-        matched: identical,
-      });
   }
   /**
    * The commit point for publishing a Pi candidate (journal 192), before the worker pushes

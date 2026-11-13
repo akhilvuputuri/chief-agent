@@ -102,6 +102,17 @@ export const checkpoint = z
         phase: z.enum(["build", "review"]).optional(),
         /** Inbox events already in the coder's session. */
         delivered: z.array(z.string().uuid()).default([]),
+        /**
+         * The commit the saved files are against (journal 193). After a conflict the job's
+         * base moves to main while its saved work is still on the old base, until the worker
+         * rebases it.
+         */
+        base: z
+          .string()
+          .regex(/^[a-f0-9]{40}$/)
+          .optional(),
+        /** Files a rebase left conflicted, until the coder is told about them. */
+        conflicts: z.array(z.string().min(1).max(240)).max(500).optional(),
         /** The candidate the reviewer last judged, so the next round reads what changed since. */
         reviewed: z
           .object({

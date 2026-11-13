@@ -186,6 +186,8 @@ async function piJob(
     f,
     id: started.id as string,
     base,
+    /** Git in the repository the box clones: a test moves main with it. */
+    git,
     run,
     reply,
     inbox,
@@ -1359,6 +1361,7 @@ test("a message kept while publishing does not break the publication, even stamp
     () => true,
     (row) => (j.f.c as any).hasReviewerProof(row),
     () => new Date(),
+    (row) => j.f.c.requirements.approved(row),
   );
   await auto.tick();
   await auto.tick();
@@ -1491,4 +1494,271 @@ test("a box reaching its lifetime stops by itself with its session and work save
   const resumed = text(j.inputs.coder[2]);
   assert.match(resumed, /a \+ b/);
   assert.match(resumed, /The previous box ended/);
+});
+
+/**
+ * Publishes the job's approved candidate as an owner-merge PR, then reports a conflict with
+ * main at `main` through the real automation, which queues the job for an in-box rebase.
+ */
+async function conflictWithMain(
+  j: Awaited<ReturnType<typeof piJob>>,
+  main: string,
+) {
+  (j.f.publisher as any).publish = async () => ({
+    url: "https://github.com/example/repo/pull/7",
+    head: "b".repeat(40),
+    tree: "c".repeat(40),
+  });
+  for (let i = 0; i < 3; i++) await j.f.c.tick();
+  const published = await j.row();
+  assert.equal(published.state, "pr_ready", published.summary);
+  const { CodingAutomation } = await import("../src/coding/automation.js");
+  const auto = new CodingAutomation(
+    j.f.db,
+    {
+      outcome: async () => ({}) as any,
+      inspect: async () =>
+        ({
+          head: "b".repeat(40),
+          tree: "c".repeat(40),
+          base: published.base_sha,
+          main,
+          merged: false,
+          closed: false,
+          draft: false,
+          mergeable: false,
+          checks: "passed",
+          feedback: [],
+          unresolvedThreads: 0,
+        }) as any,
+      ready: async () => {},
+      attest: async () => {},
+      merge: async () => ({ sha: "d".repeat(40) }),
+      release: async () => "pending",
+    } as any,
+    () => true,
+    (row) => (j.f.c as any).hasReviewerProof(row),
+    () => new Date(),
+    (row) => j.f.c.requirements.approved(row),
+  );
+  await auto.tick();
+  await auto.tick();
+  const queued = await j.row();
+  assert.equal(queued.state, "queued", queued.summary);
+  assert.equal(queued.base_sha, main);
+  // The work is kept as it was, on the old base, for the box to rebase.
+  assert.deepEqual(queued.checkpoint.files, published.checkpoint.files);
+  return published;
+}
+/** Commits a change to the repository's main and returns the new commit. */
+async function moveMain(
+  j: Awaited<ReturnType<typeof piJob>>,
+  path: string,
+  content: string,
+) {
+  const { writeFile: write } = await import("node:fs/promises");
+  const source = j.git("rev-parse", "--show-toplevel");
+  await write(join(source, path), content);
+  j.git("add", path);
+  j.git("commit", "-qm", `Main changes ${path}`);
+  return j.git("rev-parse", "HEAD");
+}
+const owner = { prWorkflow: "owner_merge" };
+
+test("a clean conflict is rebased by git in the box, reviewed with range-diff and published on the new base without the coder (journal 193)", async (t) => {
+  let roundTwo = "";
+  const j = await piJob(
+    t,
+    {
+      coder: (_i, turn) =>
+        [edit("a - b", "a + b"), report("done", "Added.")][turn]!,
+      reviewer: (input, turn) => {
+        if (turn === 1) roundTwo = text(input);
+        return report("review", "Correct.", { verdict: "APPROVE" });
+      },
+    },
+    owner,
+  );
+  await j.run();
+  const old = j.base;
+  const main = await moveMain(j, "other.js", "export const other = 1;\n");
+  await conflictWithMain(j, main);
+  await j.run();
+  const job = await j.row();
+  assert.equal(job.state, "publishing", job.summary);
+  // The coder was not needed: git applied the change cleanly.
+  assert.equal(j.turns.coder, 2);
+  assert.equal(job.base_sha, main);
+  assert.equal(job.checkpoint.piState.base, main);
+  // The candidate is the working tree against the new base: main's own file is no change.
+  assert.deepEqual(
+    job.checkpoint.files.map((f: any) => [f.path, f.content]),
+    [["sum.js", "export const sum = (a, b) => a + b;\n"]],
+  );
+  assert.doesNotMatch(job.checkpoint.patch, /other\.js/);
+  const [rebase] = await j.inbox();
+  assert.equal(rebase.payload.source, "rebase");
+  assert(job.checkpoint.piState.delivered.includes(rebase.id));
+  // The reviewer read how the rebased candidate differs from the one it approved.
+  assert.match(
+    roundTwo,
+    new RegExp(`git range-diff ${old}\\.\\.reviewed ${main}\\.\\.candidate`),
+  );
+  // The host's proof binds the approval to this exact rebased candidate.
+  const { artifactHash } = await import("../src/coding/github.js");
+  const approval = (
+    await j.f.db.query(
+      "SELECT input->>'candidate' AS candidate FROM coding_model_calls WHERE job_id=$1 AND role='reviewer' ORDER BY created_at DESC LIMIT 1",
+      [j.id],
+    )
+  ).rows[0];
+  assert.equal(approval.candidate, artifactHash(job.checkpoint));
+});
+
+test("conflicts go to the coder with the files named; a coder that commits and branches does not change the candidate (journal 193)", async (t) => {
+  let told = "";
+  const j = await piJob(
+    t,
+    {
+      coder: (input, turn) => {
+        if (turn === 2) told = text(input);
+        return [
+          edit("a - b", "a + b"),
+          report("done", "Added."),
+          {
+            name: "write",
+            arguments: {
+              path: "sum.js",
+              content: "export const sum = (x, y) => x + y;\n",
+            },
+          },
+          bash(
+            "git -c user.name=c -c user.email=c@x commit -qam resolved && git branch mine && echo dirty > scratch.txt",
+          ),
+          report("done", "Resolved the conflict and kept addition."),
+        ][turn]!;
+      },
+      reviewer: () => report("review", "Correct.", { verdict: "APPROVE" }),
+    },
+    owner,
+  );
+  await j.run();
+  const main = await moveMain(
+    j,
+    "sum.js",
+    "export const sum = (x, y) => x - y;\n",
+  );
+  await conflictWithMain(j, main);
+  await j.run();
+  const job = await j.row();
+  assert.equal(job.state, "publishing", job.summary);
+  assert.match(told, /conflicts to resolve/);
+  assert.match(told, /sum\.js/);
+  const [rebase] = await j.inbox();
+  assert.match(told, new RegExp(`\\[inbox:${rebase.id} From Chief;`));
+  assert(job.checkpoint.piState.delivered.includes(rebase.id));
+  assert.equal(job.checkpoint.piState.conflicts, undefined);
+  // The working tree against the new base, whatever the coder did with git.
+  assert.deepEqual(
+    job.checkpoint.files.map((f: any) => [f.path, f.content]),
+    [
+      ["scratch.txt", "dirty\n"],
+      ["sum.js", "export const sum = (x, y) => x + y;\n"],
+    ],
+  );
+});
+
+test("a box that ends right after the rebase tells the coder about the conflicts in the next box (journal 193)", async (t) => {
+  let told = "";
+  const j = await piJob(
+    t,
+    {
+      coder: (input, turn) => {
+        if (turn === 2) told = text(input);
+        return [
+          edit("a - b", "a + b"),
+          report("done", "Added."),
+          {
+            name: "write",
+            arguments: {
+              path: "sum.js",
+              content: "export const sum = (x, y) => x + y;\n",
+            },
+          },
+          report("done", "Resolved."),
+        ][turn]!;
+      },
+      reviewer: () => report("review", "Correct.", { verdict: "APPROVE" }),
+    },
+    owner,
+  );
+  await j.run();
+  const main = await moveMain(
+    j,
+    "sum.js",
+    "export const sum = (x, y) => x - y;\n",
+  );
+  await conflictWithMain(j, main);
+  // The box's lifetime ends as soon as it starts: it rebases, saves and stops.
+  await machineTime(j, 8 * 3_600_000 - BOX_SAVE_MS);
+  await j.run();
+  const ended = await j.row();
+  assert.equal(ended.state, "paused", ended.summary);
+  assert.equal(ended.checkpoint.piState.base, main);
+  assert.deepEqual(ended.checkpoint.piState.conflicts, ["sum.js"]);
+  assert.match(ended.checkpoint.files[0].content, /<<<<<<< /);
+  const [rebase] = await j.inbox();
+  assert(!ended.checkpoint.piState.delivered.includes(rebase.id));
+  assert.equal(j.turns.coder, 2);
+  // The next box restores the conflicted files on main and tells the coder.
+  await j.f.c.tick();
+  await j.f.c.tick();
+  await machineTime(j, 0);
+  await j.run();
+  const job = await j.row();
+  assert.equal(job.state, "publishing", job.summary);
+  assert.match(told, /conflicts to resolve[^"]*sum\.js/);
+  assert.deepEqual(
+    job.checkpoint.files.map((f: any) => f.content),
+    ["export const sum = (x, y) => x + y;\n"],
+  );
+});
+
+test("main moving again during the rebase gets another rebase from the base the work is on (journal 193)", async (t) => {
+  const j = await piJob(
+    t,
+    {
+      coder: (_i, turn) =>
+        [edit("a - b", "a + b"), report("done", "Added.")][turn]!,
+      reviewer: () => report("review", "Correct.", { verdict: "APPROVE" }),
+    },
+    owner,
+  );
+  await j.run();
+  const first = await moveMain(j, "one.js", "export const one = 1;\n");
+  await conflictWithMain(j, first);
+  // Main moves again while the box rebases onto the first commit.
+  const second = await moveMain(j, "two.js", "export const two = 2;\n");
+  await j.run();
+  assert.equal((await j.row()).checkpoint.piState.base, first);
+  await conflictWithMain(j, second);
+  await j.run();
+  const job = await j.row();
+  assert.equal(job.state, "publishing", job.summary);
+  assert.equal(job.base_sha, second);
+  assert.equal(job.checkpoint.piState.base, second);
+  const items = await j.inbox();
+  assert.deepEqual(
+    items.map((i: any) => [i.payload.from, i.payload.onto]),
+    [
+      [j.base, first],
+      [first, second],
+    ],
+  );
+  for (const item of items)
+    assert(job.checkpoint.piState.delivered.includes(item.id));
+  assert.deepEqual(
+    job.checkpoint.files.map((f: any) => f.path),
+    ["sum.js"],
+  );
 });
