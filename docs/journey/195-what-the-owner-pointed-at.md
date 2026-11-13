@@ -77,6 +77,8 @@ Tested only. A scripted model shows the plumbing and the host's checks, not what
 
 Not released. Pending: independent review, merge, the automatic release, and the first nights.
 
+> **Update, 13 November 2026:** [PR 491](https://github.com/akhilvuputuri/chief-agent/pull/491) merged at the approved head `3abbb607` as `b8fe585`, after CI passed. Release run 43424149266 finished at 20:20 SGT on 13 November; the gateway reported `RELEASE_SHA` `b8fe585`, healthy, with no error lines in its first minute. Read-only on production the same evening: no learned fact holds square brackets, so the turn's sentence about them cannot yet be wrong about an older fact. Still pending: the first nights, listed above.
+
 ## Follow-up and next iteration
 
 - The gate decision above.
