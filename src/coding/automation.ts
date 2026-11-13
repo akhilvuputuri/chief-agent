@@ -33,6 +33,8 @@ const record = z
       .regex(/^[a-f0-9]{40}$/)
       .optional(),
     waitingSince: z.string(),
+    /** When a Pi PR began waiting for CI, mergeability or threads (one notice per revision). */
+    waitingFor: z.string().optional(),
   })
   .strict();
 type Record = z.infer<typeof record>;
@@ -76,7 +78,19 @@ export class CodingAutomation {
     private now: () => Date,
     /** The owner's Start of the job's current request (`CodingRequirements.approved`). */
     private approved: (job: CodingJob) => Promise<boolean>,
+    /** Whether a Pi job's eight hours of machine time are spent (`machineSpent`). */
+    private spent: (job: CodingJob) => Promise<boolean>,
   ) {}
+  /** No box is started for a job whose machine time is spent; it waits for the owner. */
+  private async outOfTime(j: CodingJob, d: Record) {
+    if (!(await this.spent(j))) return false;
+    await this.manual(
+      j,
+      d,
+      "This job has used its eight hours of machine time; resume it to continue.",
+    );
+    return true;
+  }
   /**
    * Finishes a parked job whose PR was merged or closed on GitHub. Only GitHub's own answer
    * changes the job; a failed read leaves it as it was. This corrects the record and asks
@@ -232,6 +246,7 @@ export class CodingAutomation {
       );
       return;
     }
+    if (await this.outOfTime(j, d)) return;
     const changed = await this.db.query(
       `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',base_sha=$5,summary='The PR conflicts with main; rebasing the change onto it before review, CI and the Merge card',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$6 AND lease_until>now() AND state='pr_ready' AND revision=$4 AND base_sha=$3 RETURNING id,revision),
       budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$7::jsonb),'suppressed' FROM changed RETURNING job_id),
@@ -570,6 +585,7 @@ export class CodingAutomation {
           );
           return;
         }
+        if (pi && (await this.outOfTime(j, d))) return;
         // The legacy squad keeps its allowances; a Pi job delivers every item, however many
         // rounds the PR has had, and its machine time is the only bound (journal 193).
         if (
@@ -705,7 +721,27 @@ export class CodingAutomation {
           );
           return;
         }
-        if (ownerMerge) d.waitingSince = this.now().toISOString();
+        if (ownerMerge) {
+          // The owner hears once that the PR is still waiting, an hour into the wait; the PR
+          // is not parked and nothing else changes (journal 193).
+          d.waitingFor ??= this.now().toISOString();
+          if (this.now().getTime() - Date.parse(d.waitingFor) > 3600000)
+            await this.db.query(
+              "INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,$2,$3::jsonb) ON CONFLICT DO NOTHING",
+              [
+                j.id,
+                `ci-wait:${j.revision}`,
+                JSON.stringify({
+                  summary:
+                    (i.unresolvedThreads ?? 0) > 0
+                      ? "This PR has waited an hour for review threads to be resolved; Chief keeps waiting."
+                      : "This PR has waited an hour for CI, Devin or mergeability; Chief keeps waiting.",
+                  url: (j as any).pr_url,
+                }),
+              ],
+            );
+          d.waitingSince = this.now().toISOString();
+        }
         await this.phase(
           j,
           d,

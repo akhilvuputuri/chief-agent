@@ -126,6 +126,9 @@ const hash = (v: unknown) =>
 const BOX_LIFETIME_MS = 10_800_000;
 /** Machine time a Pi job may use from the owner's latest Start or resume (journal 193). */
 const JOB_MACHINE_MS = 28_800_000;
+/** What the owner is told, once, when a job stops at its eight hours of machine time. */
+export const MACHINE_TIME_SPENT =
+  "This job has used its eight hours of machine time; resume it to continue.";
 /**
  * Revisions the host makes by itself. Every other revision of a started job is the owner's
  * (Start, resume, a reply to a stopped job), and restarts the job's machine time.
@@ -222,17 +225,33 @@ export class CodingController {
       : job.settings.limits!.ms;
   }
   /**
-   * The machine time a Pi job used since the owner's latest Start or resume: the running time
-   * of every box started for it since then, from the boxes' own records (journal 193).
+   * The machine time a Pi job used since the owner last asked it to work: the running time
+   * of every box started for it since then, from the boxes' own records (journal 193). The
+   * owner asks by a Start, a resume (of a stopped job or a stopped PR), a reply that restarts
+   * a stopped job, a fix request on its PR, or a message kept while it published; GitHub
+   * feedback from Devin or CI does not.
    */
   private async machineMs(job: CodingJob) {
     const used = await this.db.query(
       `SELECT COALESCE(sum(b.running_ms + CASE WHEN b.running_since IS NULL THEN 0 ELSE GREATEST(0,(EXTRACT(EPOCH FROM ($2::timestamptz-b.running_since))*1000)::bigint) END),0)::bigint AS ms
        FROM boxes b WHERE b.subject='coding:'||$1::text
-         AND b.created_at >= COALESCE((SELECT max(v.created_at) FROM coding_revisions v WHERE v.job_id::text=$1::text AND NOT (v.request_key LIKE ANY($3::text[]))),'-infinity'::timestamptz)`,
+         AND b.created_at >= GREATEST(
+           COALESCE((SELECT max(v.created_at) FROM coding_revisions v WHERE v.job_id::text=$1::text AND NOT (v.request_key LIKE ANY($3::text[]))),'-infinity'::timestamptz),
+           COALESCE((SELECT max(e.created_at) FROM coding_events e WHERE e.job_id::text=$1::text AND (e.event_key LIKE 'owner-feedback:%' OR e.event_key LIKE 'continue:%' OR (e.event_key LIKE 'inbox:%' AND e.payload ? 'heldBy'))),'-infinity'::timestamptz))`,
       [job.id, this.clock(), AUTOMATIC_REVISIONS],
     );
     return Number(used.rows[0].ms);
+  }
+  /**
+   * Whether a Pi job's machine time is spent: what is left is no more than the worker's save
+   * margin, too little for a box to do anything and save it (journal 193). A box is not
+   * started then; the job waits for the owner.
+   */
+  async machineSpent(job: CodingJob) {
+    return (
+      job.settings.runtime === "pi" &&
+      JOB_MACHINE_MS - (await this.machineMs(job)) <= BOX_SAVE_MS
+    );
   }
   /**
    * The host's own reading of a Pi attempt's end: its deadline is less than the worker's save
@@ -295,6 +314,7 @@ export class CodingController {
         (job) => this.hasReviewerProof(job),
         clock,
         (job) => this.requirements.approved(job),
+        (job) => this.machineSpent(job),
       );
     if (!/^[a-f0-9]{64}$/i.test(authKey))
       throw new Error(
@@ -388,7 +408,9 @@ export class CodingController {
       this.settings.image
     ) {
       settings.image = this.settings.image;
+      // That worker refuses both on a Pi job (journal 193).
       delete settings.limits;
+      delete settings.leaderModel;
     }
     return { base, settings };
   }
@@ -1048,7 +1070,10 @@ export class CodingController {
       ...(a.upgradeWorker ? { image: this.settings.image } : {}),
     };
     // That image's worker refuses the limits a Pi job carried before journal 193.
-    if (a.upgradeWorker) delete next.limits;
+    if (a.upgradeWorker) {
+      delete next.limits;
+      delete next.leaderModel;
+    }
     const changes = [
       ["Coder", job.settings.model, next.model],
       ["Reviewer", job.settings.reviewerModel, next.reviewerModel],
@@ -2789,6 +2814,8 @@ export class CodingController {
            -- The owner changed this job while it was stopped, and was told it stays stopped.
            AND NOT EXISTS(SELECT 1 FROM coding_events s WHERE s.job_id=j.id
              AND s.event_key LIKE 'settings:%' AND s.created_at>=j.updated_at)
+           AND NOT EXISTS(SELECT 1 FROM coding_events m WHERE m.job_id=j.id
+             AND m.event_key='machine-time:'||j.attempt_id::text)
            -- A box that reached its lifetime is continued, not retried (journal 193).
            AND NOT EXISTS(SELECT 1 FROM coding_events l WHERE l.job_id=j.id
              AND l.event_key IN (j.attempt_id::text||':paused', j.attempt_id::text||':finished')
@@ -2816,6 +2843,11 @@ export class CodingController {
     // Unbounded on purpose (pauses from the last day): revoked owners must not crowd out others.
     const j = candidates.find((c) => this.allowed(c.user_id));
     if (!j) return;
+    // No box is started for a job whose machine time is spent (journal 193).
+    if (await this.machineSpent(j)) {
+      await this.holdForOwner(j, MACHINE_TIME_SPENT);
+      return;
+    }
     const key = `auto-retry:${j.attempt_id}`;
     const message =
       "Automatic retry after a transient fault (the sandbox stopped, its heartbeat was lost, or the model provider failed temporarily)";
@@ -2863,17 +2895,15 @@ export class CodingController {
     ).rows as CodingJob[];
     for (const j of candidates) {
       if (!this.allowed(j.user_id)) continue;
-      // Never past eight hours of machine time without the owner, and never without the
-      // owner's Start of the current request.
-      const spent = (await this.machineMs(j)) >= JOB_MACHINE_MS;
+      // Never past eight hours of machine time without the owner (nor with too little left
+      // to do anything and save it), and never without the owner's Start of the request.
+      const spent = await this.machineSpent(j);
       if (spent || !(await this.requirements.approved(j))) {
-        const summary = spent
-          ? "This job has used its eight hours of machine time; resume it to continue."
-          : "This job's coding box reached its time limit; resume it to continue.";
-        await this.db.query(
-          `WITH changed AS (UPDATE coding_jobs SET summary=$4,updated_at=now() WHERE id=$1 AND revision=$2 AND attempt_id=$3 AND state='paused' RETURNING id)
-          INSERT INTO coding_events(job_id,event_key,payload) SELECT id,'machine-time:'||$3::text,jsonb_build_object('summary',$4::text) FROM changed ON CONFLICT DO NOTHING`,
-          [j.id, j.revision, j.attempt_id, summary],
+        await this.holdForOwner(
+          j,
+          spent
+            ? MACHINE_TIME_SPENT
+            : "This job's coding box reached its time limit, but the job has no Start from you for its current request, so it cannot continue by itself.",
         );
         continue;
       }
@@ -2891,6 +2921,37 @@ export class CodingController {
       if (continued.rows.length)
         opsLog("coding.box_continued", "info", { ref: j.id });
     }
+    // A box that reached its lifetime but never shut down holds the job; the owner is told
+    // once, with that cause (journal 193). The tick normally ends a box within seconds.
+    const stuck = (
+      await this.db.query(
+        `SELECT j.* FROM coding_jobs j
+         WHERE j.state='paused' AND j.cleanup='pending' AND j.attempt_id IS NOT NULL
+           AND j.updated_at < now() - interval '30 minutes'
+           AND EXISTS(SELECT 1 FROM coding_events l WHERE l.job_id=j.id
+             AND l.event_key IN (j.attempt_id::text||':paused', j.attempt_id::text||':finished')
+             AND l.payload->>'cause'='lifetime')
+           AND NOT EXISTS(SELECT 1 FROM coding_events m WHERE m.job_id=j.id
+             AND m.event_key='machine-time:'||j.attempt_id::text)`,
+      )
+    ).rows as CodingJob[];
+    for (const j of stuck)
+      if (this.allowed(j.user_id))
+        await this.holdForOwner(
+          j,
+          "This job's coding box reached its time limit but has not shut down, so the job cannot continue; the box needs an operator.",
+        );
+  }
+  /**
+   * A stopped Pi job the host will not continue by itself: its summary and one owner notice
+   * say why (keyed `machine-time:<attempt>`, so it is sent once per attempt).
+   */
+  private async holdForOwner(j: CodingJob, summary: string) {
+    await this.db.query(
+      `WITH changed AS (UPDATE coding_jobs SET summary=$4 WHERE id=$1 AND revision=$2 AND attempt_id=$3 AND state='paused' RETURNING id)
+      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,'machine-time:'||$3::text,jsonb_build_object('summary',$4::text) FROM changed ON CONFLICT DO NOTHING`,
+      [j.id, j.revision, j.attempt_id, summary],
+    );
   }
   async tick() {
     if (this.ticking) return;
@@ -2948,6 +3009,11 @@ export class CodingController {
               "The owner must tap Start on the current request before any work",
               false,
             );
+            return;
+          }
+          // Too little machine time left to do anything and save it: no box (journal 193).
+          if (await this.machineSpent(j)) {
+            await this.stopped(j, MACHINE_TIME_SPENT, false);
             return;
           }
           const request: SandboxRequest = {

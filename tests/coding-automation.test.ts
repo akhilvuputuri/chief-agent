@@ -133,6 +133,7 @@ async function fixture(t: TestContext) {
     async () => proof,
     () => now,
     async () => true,
+    async () => false,
   );
   const job = async () =>
     (await db.query("SELECT * FROM coding_jobs WHERE id=$1", [id]))

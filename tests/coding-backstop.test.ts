@@ -239,7 +239,9 @@ test("a continuation never starts a job without the owner's Start of its request
   for (let i = 0; i < 4; i++) await f.c.tick();
   const stopped = await row();
   assert.equal(stopped.state, "paused");
-  assert.match(stopped.summary, /resume it to continue/);
+  assert.match(stopped.summary, /no Start from you for its current request/);
+  const [notice] = await events(f, id, "machine-time:%");
+  assert.equal(notice.payload.summary, stopped.summary);
   assert.equal(f.creates(), 1);
 });
 
@@ -267,4 +269,91 @@ test("an old row of any shape passes through the continuation without throwing",
   await f.c.continueAfterLifetime();
   await f.c.tick();
   assert.equal((await f.row(job.id)).state, "pr_ready");
+});
+
+test("with less machine time left than the save margin, no box starts and the owner is told once", async (t) => {
+  const f = await fixture(t);
+  const job = await f.start("almost-spent");
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    job.id,
+    JSON.stringify(pi),
+  ]);
+  await box(f, job.id, 8 * HOUR - BOX_SAVE_MS + 1000);
+  await f.c.tick();
+  const stopped = await f.row(job.id);
+  assert.equal(stopped.state, "paused");
+  assert.equal(
+    stopped.summary,
+    "This job has used its eight hours of machine time; resume it to continue.",
+  );
+  assert.equal(f.creates(), 0);
+  const [pause] = await events(f, job.id, `${stopped.attempt_id}:paused`);
+  assert.equal(pause.delivery, "pending");
+  assert.equal(pause.payload.summary, stopped.summary);
+});
+
+test("a crash with the machine time spent is not retried: the owner is told instead", async (t) => {
+  const { f, id, row } = await running(t);
+  const attempt = (await row()).attempt_id;
+  await box(f, id, 8 * HOUR);
+  await f.provider.terminate(`fixture:${attempt}`);
+  await f.c.tick();
+  await f.c.tick();
+  await f.db.query(
+    "UPDATE coding_jobs SET updated_at=now()-interval '5 minutes' WHERE id=$1",
+    [id],
+  );
+  await f.c.autoRetryOnce();
+  await f.c.autoRetryOnce();
+  const stopped = await row();
+  assert.equal(stopped.state, "paused");
+  assert.equal(
+    stopped.summary,
+    "This job has used its eight hours of machine time; resume it to continue.",
+  );
+  assert.equal((await events(f, id, "machine-time:%")).length, 1);
+  assert.equal(f.creates(), 1);
+});
+
+test("the owner asking for more work restarts the eight hours; Devin and CI feedback do not", async (t) => {
+  const { f, id } = await running(t);
+  await box(f, id, 8 * HOUR);
+  const job = await f.row(id);
+  assert.equal(await f.c.machineSpent(job), true);
+  // A GitHub feedback round is the host's own revision.
+  await f.db.query(
+    "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,99,'mr-feedback:x','Feedback','implement')",
+    [id],
+  );
+  assert.equal(await f.c.machineSpent(job), true);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  // The owner's fix request on the PR.
+  await f.db.query(
+    'INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,\'owner-feedback:fix\',\'{"kind":"owner_feedback","text":"More"}\'::jsonb,\'suppressed\')',
+    [id],
+  );
+  assert.equal(await f.c.machineSpent(job), false);
+});
+
+test("a lifetime pause whose box never shuts down is told to the owner once, with that cause", async (t) => {
+  const { f, id, row } = await running(t);
+  const first = await row();
+  f.advance(3 * HOUR - 1000);
+  await f.c.finish(first, paused());
+  // The box does not go away.
+  (f.provider as any).terminate = async () => {};
+  await f.c.tick();
+  await f.db.query(
+    "UPDATE coding_jobs SET updated_at=now()-interval '31 minutes' WHERE id=$1",
+    [id],
+  );
+  await f.c.continueAfterLifetime();
+  await f.c.continueAfterLifetime();
+  const stuck = await row();
+  assert.equal(stuck.state, "paused");
+  assert.equal(stuck.cleanup, "pending");
+  assert.match(stuck.summary, /has not shut down/);
+  const notices = await events(f, id, "machine-time:%");
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].delivery, "pending");
 });

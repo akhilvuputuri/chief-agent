@@ -1369,6 +1369,7 @@ test("a message kept while publishing does not break the publication, even stamp
     (row) => (j.f.c as any).hasReviewerProof(row),
     () => new Date(),
     (row) => j.f.c.requirements.approved(row),
+    (row) => j.f.c.machineSpent(row),
   );
   await auto.tick();
   await auto.tick();
@@ -1547,6 +1548,7 @@ async function conflictWithMain(
     (row) => (j.f.c as any).hasReviewerProof(row),
     () => new Date(),
     (row) => j.f.c.requirements.approved(row),
+    (row) => j.f.c.machineSpent(row),
   );
   await auto.tick();
   await auto.tick();

@@ -305,6 +305,7 @@ test("a job stored with the limits of stage D2 changes models, and moving it to 
       ...before.settings,
       image: old,
       limits: { ms: 10_800_000, models: 1500, tools: 4000 },
+      leaderModel: "synthetic/planner",
     }),
   ]);
   await update({ coderModel: opus });
@@ -319,6 +320,7 @@ test("a job stored with the limits of stage D2 changes models, and moving it to 
   const after = await row();
   assert.equal(after.settings.image, settings.image);
   assert.equal(after.settings.limits, undefined);
+  assert.equal(after.settings.leaderModel, undefined);
 });
 
 test("a job update has no limits or planner to change (journal 193)", async (t) => {

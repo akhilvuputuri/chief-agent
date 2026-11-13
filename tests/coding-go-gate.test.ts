@@ -452,6 +452,7 @@ test("Start builds on main as it is at the tap and runs on this host's worker; a
       ...created.settings,
       image: `ghcr.io/example/worker@sha256:${"9".repeat(64)}`,
       limits: { ms: 10_800_000, models: 1500, tools: 4000 },
+      leaderModel: "anthropic/claude-opus-5.5",
     }),
   ]);
   // Main moved during the day the card waited.
@@ -463,6 +464,7 @@ test("Start builds on main as it is at the tap and runs on this host's worker; a
   assert.equal(queued.base_sha, main);
   assert.equal(queued.settings.image, image);
   assert.equal(queued.settings.limits, undefined);
+  assert.equal(queued.settings.leaderModel, undefined);
   assert.equal(await f.c.requirements.approved(queued), true);
 });
 

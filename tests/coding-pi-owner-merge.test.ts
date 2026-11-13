@@ -135,6 +135,7 @@ async function fixture(
     release: async () => release,
   };
   let started = true;
+  let spent = false;
   const auto = new CodingAutomation(
     db,
     repository,
@@ -142,6 +143,7 @@ async function fixture(
     async () => true,
     () => now,
     async () => started,
+    async () => spent,
   );
   const approvals = new CodingMergeApprovals(
     db,
@@ -194,6 +196,8 @@ async function fixture(
     advance: (ms: number) => (now = new Date(now.getTime() + ms)),
     /** The job no longer has the owner's Start of its current request. */
     withoutStart: () => (started = false),
+    /** The job's eight hours of machine time are spent. */
+    outOfTime: () => (spent = true),
     counts: () => ({ merges, readies }),
   };
 }
@@ -1299,4 +1303,62 @@ test("an owner message kept while the job was publishing starts a feedback round
     )
   ).rows[0].payload.handled;
   assert.deepEqual(handled, []);
+});
+
+test("with its machine time spent, feedback and a conflict stop for the owner instead of starting a box (journal 193)", async (t) => {
+  const f = await fixture(t);
+  f.outOfTime();
+  f.setInspection({
+    draft: false,
+    feedback: [{ id: "ci:1:1:1", text: "CI failed" }],
+  });
+  await f.auto.tick();
+  let job = await f.job();
+  assert.equal(job.state, "pr_ready");
+  assert.equal(job.stage, "manual_review");
+  assert.equal(
+    job.summary,
+    "This job has used its eight hours of machine time; resume it to continue.",
+  );
+  assert.equal((await inbox(f)).length, 0);
+  const g = await fixture(t);
+  g.outOfTime();
+  g.setInspection({
+    checks: "passed",
+    draft: false,
+    main: "f".repeat(40),
+    mergeable: false,
+  });
+  await g.auto.tick();
+  job = await g.job();
+  assert.equal(job.stage, "manual_review");
+  assert.equal(job.base_sha, base);
+  assert.match(job.summary, /eight hours of machine time/);
+});
+
+test("an hour into a wait for CI the owner hears once, and the PR keeps waiting (journal 193)", async (t) => {
+  const f = await fixture(t);
+  await f.auto.tick();
+  await f.auto.tick();
+  const notices = async () =>
+    (
+      await f.db.query(
+        "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND event_key LIKE 'ci-wait:%'",
+        [f.id],
+      )
+    ).rows;
+  assert.equal((await notices()).length, 0);
+  f.advance(3_600_001);
+  await f.auto.tick();
+  f.advance(3 * 3_600_000);
+  await f.auto.tick();
+  const sent = await notices();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].delivery, "pending");
+  assert.match(sent[0].payload.summary, /waited an hour for CI/);
+  assert.equal(
+    sent[0].payload.url,
+    "https://github.com/akhilvuputuri/chief-agent/pull/7",
+  );
+  assert.equal((await f.job()).stage, "awaiting_ci");
 });
