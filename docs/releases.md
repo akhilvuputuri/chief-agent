@@ -1,9 +1,16 @@
+## Worker image for the rebuilt coding loop (14 November 2026)
+
+- **Configuration.** New coding jobs pin worker image `sha256:8e23a9ab…`, built from `6bf095e` (run 43359937805). It carries the worker side of [journal 193](journey/193-rebase-backstop-limits.md) and completes the loop in [the design](coding-simple-loop.md). `previousImages` stays empty: the previous image refuses rebase items and its saves do not record a base, and no coding job is open on it. No code, migration or Compose change.
+- **Deployment.** Not yet recorded as live; a dated note follows on release.
+
 ## Coding jobs rebase with git, continue across boxes and lose their count caps (13 November 2026)
 
 - **Code.** When GitHub reports a coding job's PR as conflicting with main, the box rebases the change with git; the rebased change gets a reviewer round before it is published, and if git cannot resolve it the coder fixes the named files in its own session. Re-implementing on conflict is deleted. A box that reaches its fixed lifetime stops five minutes early, saves, and the host continues the job in a new box with the same sessions, up to eight hours of machine time since the owner last started or resumed it; then it pauses and tells the owner. Removed for Pi jobs: the 1,500 model-call and 4,000 tool-call caps, the three-round and size caps on PR feedback, the one-hour park while waiting for CI, the per-attempt time settings, and the leftover planner role. The base commit and worker image are taken when the owner taps Start. The worker's snapshot runs outside the coder's git configuration. No migration or Compose change.
 - **Kept.** Review before every publication, the publish commit and push-credential gate, the Start approval, protected paths, and one automatic retry after a crash.
 - **Why.** Job `9600af57` was rebuilt twice on conflicts with main and stopped twice at its time limit. See [journal 193](journey/193-rebase-backstop-limits.md) and [the design](coding-simple-loop.md).
 - **Deployment.** Host and worker change together; a worker image built from this merge is pinned right after. Not yet released.
+
+> **Update, 14 November 2026:** merged as `6bf095e` (PR 487) at the head the independent reviewers approved, after three review rounds. Added in review: a candidate must record the job's current base at save, publish and finish; PR feedback drives rounds only from the owner, collaborators with write access, the review bot and the repository's own CI; the owner's own requests for more work restart the eight hours, and no box starts with five minutes or less left; one notice after an hour waiting for CI; the worker always builds its own snapshot index (a seed taken from the coder's index in the second round could drop a real edit and was removed). Release run 43360526744 succeeded and the gateway was healthy at `6bf095e`. The worker image built from it is pinned by the entry above.
 
 ## An alert leads to the trace: agentwatch `b11b4a3` live (13 November 2026)
 
