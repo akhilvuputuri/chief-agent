@@ -1,6 +1,7 @@
 import { activeInlineComments } from "./mr-feedback.js";
 import { createHash } from "node:crypto";
 import { MergeRefused } from "./merge-policy.js";
+import { opsLog } from "../ops-log.js";
 import type {
   MergeTarget,
   PrAutomationRepository,
@@ -191,8 +192,25 @@ export class GitHubAutomation implements PrAutomationRepository {
       )
         return false;
       if (!writers.has(login)) {
-        const access = await api(`collaborators/${login}/permission`);
-        writers.set(login, ["admin", "write"].includes(access?.permission));
+        // A failed lookup leaves this login untrusted for this inspection only; it never
+        // stops the reading, so the owner's and Devin's comments still count (journal 193).
+        let permission: unknown;
+        try {
+          permission = (await api(`collaborators/${login}/permission`))
+            ?.permission;
+        } catch (error) {
+          const status = (error as { httpStatus?: number })?.httpStatus;
+          // The status alone: no token, no response body, no login.
+          opsLog("coding.pr_permission_unreadable", "warn", {
+            ref: t.id,
+            ...(status ? { httpStatus: status } : {}),
+          });
+        }
+        writers.set(
+          login,
+          typeof permission === "string" &&
+            ["admin", "write"].includes(permission),
+        );
       }
       return writers.get(login)!;
     };

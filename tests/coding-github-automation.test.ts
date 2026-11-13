@@ -58,6 +58,7 @@ function fixture() {
     reader: "read",
   };
   const permissionReads: string[] = [];
+  let lookupFailure: number | "network" | undefined;
   const api = async (path: string, method?: string, body?: any) => {
     if (method === "POST" || method === "PUT") {
       writes.push({ path, body });
@@ -74,6 +75,13 @@ function fixture() {
     if (path === "pulls/9/reviews?per_page=100") return reviews;
     if (path.startsWith("collaborators/")) {
       permissionReads.push(path);
+      const failure = lookupFailure;
+      if (failure === "network") throw new TypeError("fetch failed");
+      if (failure)
+        throw Object.assign(
+          new Error(`GitHub repository request failed (${failure})`),
+          { httpStatus: failure },
+        );
       return { permission: permissions[path.split("/")[1]!] ?? "none" };
     }
     if (path.includes("/jobs?"))
@@ -103,6 +111,7 @@ function fixture() {
   };
   const gh = new GitHubAutomation(repo, api, graph);
   return {
+    failLookup: (failure: number | "network") => (lookupFailure = failure),
     permissionReads,
     t,
     pr,
@@ -362,4 +371,61 @@ test("Devin's all-clear summary review is not feedback, while its inline finding
   assert.equal(i.feedback.length, 2);
   assert.match(JSON.stringify(i.feedback), /Heading level is wrong/);
   assert.match(JSON.stringify(i.feedback), /keep the older entries/);
+});
+
+test("a permission lookup that fails ignores only that commenter; the owner's and Devin's comments still count (journal 193)", async () => {
+  const { setOpsSink } = await import("../src/ops-log.js");
+  for (const failure of [403, 404, "network"] as const) {
+    const f = fixture();
+    f.failLookup(failure);
+    const logs: any[] = [];
+    const previous = setOpsSink((line) => logs.push(JSON.parse(line)));
+    try {
+      f.comments.push(
+        {
+          id: 1,
+          body: "Collaborator: change it",
+          updated_at: "a",
+          author_association: "COLLABORATOR",
+          user: { login: "helper", type: "User" },
+        },
+        {
+          id: 2,
+          body: "Owner: rename it",
+          updated_at: "a",
+          author_association: "OWNER",
+          user: { login: "akhilvuputuri", type: "User" },
+        },
+        {
+          id: 3,
+          body: "Devin: the heading level is wrong",
+          updated_at: "a",
+          author_association: "NONE",
+          user: { login: "devin-ai-integration[bot]", type: "Bot" },
+        },
+      );
+      const { feedback } = await f.gh.inspect({
+        ...f.t,
+        trustedFeedback: true,
+      });
+      assert.deepEqual(
+        feedback
+          .map((i: any) => JSON.parse(i.text).comment.split(":")[0])
+          .sort(),
+        ["Devin", "Owner"],
+        String(failure),
+      );
+      const logged = logs.filter(
+        (l) => l.event === "coding.pr_permission_unreadable",
+      );
+      assert.equal(logged.length, 1);
+      assert.equal(
+        logged[0].httpStatus,
+        failure === "network" ? undefined : failure,
+      );
+      assert(!JSON.stringify(logged).includes("helper"));
+    } finally {
+      setOpsSink(previous);
+    }
+  }
 });
