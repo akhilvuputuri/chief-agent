@@ -3,14 +3,17 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   mkdir,
+  mkdtemp,
   readFile,
+  rm,
   writeFile,
   realpath,
   lstat,
   readdir,
   chmod,
 } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import type { Artifact, FileChange } from "./types.js";
 
 export type Execution = {
@@ -213,8 +216,13 @@ export class Workspace {
     }
   }
   /**
-   * Diffs the staged tree against the job's base commit, never against HEAD, so commits the
-   * model makes never hide or change the candidate.
+   * The working tree against the job's base commit, never against HEAD, so commits, branches
+   * and staging the model does never hide or change the candidate.
+   *
+   * It runs in a git directory of its own, made for each snapshot, that shares the
+   * repository's objects: none of the coder's repository configuration (filters, hooks,
+   * external diff, fsmonitor, its index flags) or home-directory ignore and attribute files
+   * applies, so nothing the coder configured can run or hang here (journal 193).
    */
   async snapshot(
     execute: Executor,
@@ -223,6 +231,31 @@ export class Workspace {
   ): Promise<Artifact> {
     if (!/^[a-f0-9]{40}$/.test(base))
       throw new Error("Artifact base must be a full commit SHA");
+    if (!this.root) await this.initialize();
+    const own = await mkdtemp(join(tmpdir(), "chief-snapshot-"));
+    try {
+      await mkdir(join(own, "objects", "info"), { recursive: true });
+      await mkdir(join(own, "refs"), { recursive: true });
+      await writeFile(join(own, "HEAD"), "ref: refs/heads/main\n");
+      await writeFile(
+        join(own, "config"),
+        "[core]\n\trepositoryformatversion = 0\n\tbare = true\n",
+      );
+      await writeFile(
+        join(own, "objects", "info", "alternates"),
+        `${join(this.root, ".git", "objects")}\n`,
+      );
+      return await this.snapshotIn(own, execute, signal, base);
+    } finally {
+      await rm(own, { recursive: true, force: true });
+    }
+  }
+  private async snapshotIn(
+    own: string,
+    execute: Executor,
+    signal: AbortSignal,
+    base: string,
+  ): Promise<Artifact> {
     const quote = (value: string) =>
       "'" + value.replaceAll("'", "'\"'\"'") + "'";
     const run = async (args: string[], max = 20_000_000) => {
@@ -231,10 +264,16 @@ export class Workspace {
       const result = await execute(
         [
           "git",
+          `--git-dir=${own}`,
+          "--work-tree=.",
           "-c",
           "core.hooksPath=/dev/null",
           "-c",
           "core.fsmonitor=false",
+          "-c",
+          "core.excludesFile=/dev/null",
+          "-c",
+          "core.attributesFile=/dev/null",
           ...args,
         ]
           .map(quote)
@@ -247,6 +286,8 @@ export class Workspace {
         throw new Error("Git artifact operation failed or exceeded its bound");
       return result.output;
     };
+    // The base's tree first, so a tracked file an ignore rule matches stays tracked.
+    await run(["read-tree", base]);
     await run(["add", "-A"]);
     // `.gitignore`'s `node_modules/` does not match a link, and a dependency link is never
     // an artifact. Matching the base drops an added one and keeps one the repository tracks.

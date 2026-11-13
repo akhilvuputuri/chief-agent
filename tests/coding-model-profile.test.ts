@@ -324,6 +324,8 @@ for (const {
         [settings.model, settings.reviewerModel].map((id) => [id, 128000]),
       ),
     };
+    // The owner's Start builds on main as it is then (journal 193).
+    (f.publisher as any).resolve = async () => commit;
     await f.db.query(
       "UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3 WHERE id=$1",
       [started.id, JSON.stringify(profile), commit],

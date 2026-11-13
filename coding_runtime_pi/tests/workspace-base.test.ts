@@ -175,3 +175,55 @@ test("a node_modules link the repository tracks is left as it is", async () => {
     true,
   );
 });
+
+test("the coder's own git configuration never runs in or shapes a snapshot (journal 193)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-config-"));
+  const repo = join(root, "repo");
+  const home = join(root, "home");
+  await mkdir(repo);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.name", "Synthetic");
+  git("config", "user.email", "synthetic@example.invalid");
+  await writeFile(join(repo, "a.txt"), "base\n");
+  await writeFile(join(repo, ".gitignore"), "ignored.txt\n");
+  await writeFile(join(repo, "ignored.txt"), "tracked although ignored\n");
+  git("add", "-f", ".");
+  git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD");
+  // What a coder could configure: a clean filter that would hang or rewrite every file, an
+  // fsmonitor hook, a file hidden from git by an index flag, and ignore and attribute files
+  // in its home directory.
+  await writeFile(join(repo, "a.txt"), "changed\n");
+  git("update-index", "--skip-worktree", "a.txt");
+  await writeFile(join(repo, ".gitattributes"), "* filter=hang\n");
+  git("config", "filter.hang.clean", "sleep 600");
+  git("config", "filter.hang.required", "true");
+  git("config", "core.fsmonitor", "sleep 600");
+  await mkdir(join(home, ".config", "git"), { recursive: true });
+  await writeFile(join(home, ".config", "git", "ignore"), "hidden.txt\n");
+  await writeFile(
+    join(home, ".config", "git", "attributes"),
+    "* filter=hang\n",
+  );
+  await writeFile(join(repo, "hidden.txt"), "new file\n");
+  await writeFile(join(repo, "ignored.txt"), "tracked and changed\n");
+  const execute = localExecutor(repo, home, () => {});
+  const signal = new AbortController().signal;
+  const workspace = await new Workspace(repo).initialize();
+  const started = Date.now();
+  const snapshot = await workspace.snapshot(execute, signal, base);
+  assert(Date.now() - started < 30_000);
+  assert.deepEqual(snapshot.files.map((f) => [f.path, f.content]).sort(), [
+    [".gitattributes", "* filter=hang\n"],
+    ["a.txt", "changed\n"],
+    ["hidden.txt", "new file\n"],
+    ["ignored.txt", "tracked and changed\n"],
+  ]);
+  // The coder's own index and staging are untouched.
+  assert.equal(
+    git("-c", "core.fsmonitor=false", "diff", "--cached", "--name-only"),
+    "",
+  );
+});

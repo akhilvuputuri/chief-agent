@@ -99,6 +99,9 @@ async function setup(
     f.db,
     () => true,
     () => new Date(),
+    async () => {
+      throw new Error("This test never starts a job");
+    },
   );
   return { f, c, row, update, requirements, id: started.id as string };
 }
@@ -420,6 +423,8 @@ test("after a reviewer switch the review continues in the same reviewer session 
   git("commit", "-qm", "Fixture");
   const commit = git("rev-parse", "HEAD").toString().trim();
   const started = await f.start("pi-switch", true);
+  // The owner's Start builds on main as it is then (journal 193).
+  (f.publisher as any).resolve = async () => commit;
   await f.db.query(
     "UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3 WHERE id=$1",
     [

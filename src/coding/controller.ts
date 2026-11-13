@@ -280,7 +280,9 @@ export class CodingController {
     /** Pi jobs call Claude only through this direct Anthropic route (journal 190). */
     private anthropic?: CodingAnthropic,
   ) {
-    this.requirements = new CodingRequirements(db, allowed, clock);
+    this.requirements = new CodingRequirements(db, allowed, clock, (job) =>
+      this.begin(job),
+    );
     this.merges = new CodingMergeApprovals(db, allowed, clock);
     if (
       (settings.autoMerge || settings.prWorkflow || legacyAutomationEnabled) &&
@@ -368,6 +370,27 @@ export class CodingController {
       );
     }
     return false;
+  }
+  /**
+   * At the owner's Start (journal 193): the base is main as it is now, so a Start a day after
+   * the request still builds on current main. A Pi job runs on the worker image this host was
+   * released with (it has not run yet), and that worker refuses the limits a job of stage D2
+   * carried. If main cannot be read the Start is refused and the card still works.
+   */
+  private async begin(job: CodingJob) {
+    const base = await this.publisher.resolve();
+    if (!/^[a-f0-9]{40}$/.test(base))
+      throw new Error("Repository base identity unavailable");
+    const settings = { ...job.settings };
+    if (
+      settings.runtime === "pi" &&
+      this.settings.runtime === "pi" &&
+      this.settings.image
+    ) {
+      settings.image = this.settings.image;
+      delete settings.limits;
+    }
+    return { base, settings };
   }
   async logs(job: CodingJob, raw: unknown) {
     if (!this.allowed(job.user_id)) throw new Error("Owner unavailable");

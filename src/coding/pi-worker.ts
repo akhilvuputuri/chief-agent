@@ -372,7 +372,13 @@ export async function runPiWorker(
     const dir = join(store.path(task.id), "session");
     // The host's stored copy is the session; a local file is never trusted between runs.
     await rm(dir, { recursive: true, force: true });
-    const entries = await hostEntries(scope);
+    // Once this attempt has uploaded the whole session, the entries it holds in memory are
+    // exactly the host's copy, so they are written back without downloading it (journal 193).
+    const held = sessions.get(scope);
+    const entries =
+      held && uploaded.get(scope) === held.length
+        ? held
+        : await hostEntries(scope);
     uploaded.set(scope, entries.length);
     if (entries.length) {
       await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -393,17 +399,25 @@ export async function runPiWorker(
   async function uploadSession(scope: string, entries = sessions.get(scope)) {
     if (!entries) return [];
     sessions.set(scope, entries);
-    for (
-      let index = uploaded.get(scope) ?? 0;
-      index < entries.length;
-      index++
-    ) {
+    // In batches: up to the host's 32 entries a request, within its 8 MB request bound (an
+    // entry is at most 4.1 MB, so one always fits) (journal 193).
+    for (let index = uploaded.get(scope) ?? 0; index < entries.length;) {
+      const batch: unknown[] = [];
+      let bytes = 0;
+      while (index + batch.length < entries.length && batch.length < 32) {
+        const next = entries[index + batch.length];
+        const size = Buffer.byteLength(JSON.stringify(next));
+        if (batch.length && bytes + size > 6_000_000) break;
+        batch.push(next);
+        bytes += size;
+      }
       await client.request("pi-session", {
         scope,
         after: index,
-        entries: [entries[index]],
+        entries: batch,
       });
-      uploaded.set(scope, index + 1);
+      index += batch.length;
+      uploaded.set(scope, index);
     }
     return entries;
   }
