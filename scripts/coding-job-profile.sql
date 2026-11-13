@@ -129,7 +129,8 @@ SELECT coalesce(jsonb_agg(k), '[]')::text AS profile_calls, coalesce(bool_or(NOT
 \if :profile_calls_read
 \else
 \echo 'The model calls could not be read (see the error above). Not available below: sections 3, 3d, 4 to 4d, 5 and 5b; in section 1 the run, round,'
-\echo 'findings, approval and conflicting-rebase counts; in 1c the call counts; in 2 write_1h; in 3c first_seen. Whether every call has the one-session shape was not checked.'
+\echo 'findings, approval and conflicting-rebase counts and the last activity; in 1c the call counts and wall time; in 2 write_1h; in 3c first_seen.'
+\echo 'Attempts, their numbers and start times come from box and event rows only. Whether every call has the one-session shape was not checked.'
 \endif
 \if :profile_shapeless
 \echo 'This job was recorded by the old coding loop (planner, OpenAI-shaped calls or host checks); this script reads only the one-session loop. Use the journal 172 draft for it.'
@@ -214,7 +215,7 @@ SELECT left(j.id::text, 8) AS job, j.state, j.stage, j.revision,
   round(extract(epoch FROM (SELECT min(created_at) FROM starts) - j.created_at) / 60, 1) AS start_at_min,
   (SELECT at FROM ended) IS NOT NULL AS ended,
   round(extract(epoch FROM coalesce((SELECT at FROM ended), now()) - j.created_at) / 60, 1) AS wall_min,
-  round(extract(epoch FROM (SELECT max(created_at) FROM act) - j.created_at) / 60, 1) AS last_activity_min,
+  CASE WHEN :'profile_calls_read'::boolean THEN round(extract(epoch FROM (SELECT max(created_at) FROM act) - j.created_at) / 60, 1) END AS last_activity_min,
   round(extract(epoch FROM coalesce((SELECT min(created_at) FROM starts), CASE WHEN j.mode = 'plan' THEN now() END) - j.created_at) / 60, 1) AS waiting_before_start_min,
   round(extract(epoch FROM coalesce((SELECT sum(waited) FROM owner_waits), interval '0')) / 60, 1) AS waiting_at_asks_and_pauses_min,
   round(coalesce((SELECT sum(ms) FROM boxes_used), 0) / 60000.0, 1) AS machine_min,
@@ -296,7 +297,7 @@ v AS (SELECT request_key FROM coding_revisions WHERE job_id = :'profile_job'::uu
 n AS (SELECT attempt, count(*) FILTER (WHERE role = 'coder') AS coder, count(*) FILTER (WHERE role = 'reviewer') AS reviewer FROM calls GROUP BY attempt)
 SELECT a.n || ' ' || left(a.attempt, 8) AS attempt, coalesce(box.state, '(no box row)') AS box,
   round(extract(epoch FROM a.started - j.created_at) / 60, 1) AS start_min,
-  round(extract(epoch FROM a.last_activity - a.started) / 60, 1) AS wall_min,
+  CASE WHEN :'profile_calls_read'::boolean THEN round(extract(epoch FROM a.last_activity - a.started) / 60, 1) END AS wall_min,
   round(box.ms / 60000.0, 1) AS machine_min,
   CASE WHEN :'profile_calls_read'::boolean THEN coalesce(n.coder, 0) END AS coder_calls, CASE WHEN :'profile_calls_read'::boolean THEN coalesce(n.reviewer, 0) END AS reviewer_calls,
   CASE WHEN EXISTS(SELECT 1 FROM e WHERE event_key = a.attempt || ':pr') THEN 'done (PR opened)'

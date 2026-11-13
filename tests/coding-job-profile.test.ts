@@ -1500,6 +1500,7 @@ test("when the model calls cannot be read, no figure that needs them is printed,
   // Mixed sections keep what the events, revisions and boxes give, with the call columns empty.
   const [s] = sections["1"]!;
   for (const k of [
+    "last_activity_min",
     "coder_runs",
     "review_rounds",
     "findings_reports",
@@ -1510,6 +1511,29 @@ test("when the model calls cannot be read, no figure that needs them is printed,
   assert.equal(s!.start_at_min, "10.0");
   assert.equal(s!.machine_min, "40.0");
   assert.equal(s!.rebases, "2");
+  // Attempts, their numbers and start times come from box and event rows, as when read.
+  assert.equal(s!.attempts, "4");
+  assert.match(
+    text,
+    /^Attempts, their numbers and start times come from box and event rows only/m,
+  );
+  assert.deepEqual(
+    sections["1c"]!.map((r) => [
+      r.attempt!.split(" ")[0],
+      r.start_min,
+      r.wall_min,
+    ]),
+    [
+      ["1", "11.0", "-"],
+      ["2", "26.0", "-"],
+      ["3", minutes(2560), "-"],
+      ["4", "46.0", "-"],
+    ],
+  );
+  assert.deepEqual(
+    sections["3b"]!.filter((r) => r.attempt !== "-").map((r) => r.attempt),
+    ["1", "2", "2", "2", "3", "3", "3", "4", "4", "4"],
+  );
   assert.deepEqual(
     sections["1c"]!.map((r) => [r.coder_calls, r.reviewer_calls, r.ended]),
     [
