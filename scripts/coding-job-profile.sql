@@ -51,6 +51,11 @@ ROLLBACK;
 \endif
 
 \echo
+\echo 'Approximate (what the host does not record exactly): a run''s duration and cost (usage records carry no call id, so they are matched to runs by time);'
+\echo 'write_1h (from stored responses, so a billed call that did not finish is missing); thinking share (only where Anthropic reported thinking tokens);'
+\echo 'an inbox item''s first_seen (the first request carrying it, not a recorded delivery); "no change" for an earlier attempt (from the worker''s summary).'
+\echo 'Exact: tokens, cost, machine time, owner waits, and the end causes the host records (lifetime, eight hours, crash and retry, ask, PR).'
+\echo
 \echo '1. Summary: wall time to the end (or now), owner waits, machine time from boxes, loop counts'
 \x on
 WITH j AS (SELECT * FROM coding_jobs WHERE id = :'profile_job'::uuid),
@@ -93,6 +98,14 @@ calls AS (
 segs AS (
   SELECT role, attempt_id, lag(role) OVER w AS prev_role, lag(attempt_id) OVER w AS prev_attempt
   FROM coding_model_calls WHERE job_id = :'profile_job'::uuid WINDOW w AS (ORDER BY created_at, id)),
+-- A rebase item reaches the coder only when git left conflicts (journal 193); a clean rebase
+-- goes straight to review.
+rebase_items AS (
+  SELECT EXISTS(SELECT 1 FROM coding_model_calls c WHERE c.job_id = e.job_id AND c.role = 'coder' AND c.created_at >= e.created_at
+    AND strpos(coalesce((c.input->'request'->'messages'->-1)::text, '') || coalesce((c.input->'request'->'messages'->-2)::text, '')
+      || coalesce((c.input->'request'->'messages'->-3)::text, '') || coalesce((c.input->'request'->'messages'->-4)::text, ''),
+      '[inbox:' || e.id::text || ' ') > 0) AS coder_saw
+  FROM coding_events e WHERE e.job_id = :'profile_job'::uuid AND e.event_key LIKE 'inbox:rebase:%'),
 verdicts AS (
   SELECT b->'input'->>'verdict' AS verdict FROM calls c,
     jsonb_array_elements(CASE WHEN jsonb_typeof(c.result->'content') = 'array' THEN c.result->'content' ELSE '[]' END) b
@@ -108,6 +121,9 @@ SELECT left(j.id::text, 8) AS job, j.state, j.stage, j.revision,
   round(extract(epoch FROM coalesce((SELECT sum(waited) FROM owner_waits), interval '0')) / 60, 1) AS waiting_at_asks_and_pauses_min,
   round(coalesce((SELECT sum(ms) FROM boxes_used), 0) / 60000.0, 1) AS machine_min,
   round(coalesce((SELECT sum(ms) FROM boxes_used, since_owner WHERE boxes_used.created_at >= since_owner.at), 0) / 60000.0, 1) AS machine_since_owner_min,
+  -- JOB_MACHINE_MS in src/coding/controller.ts: eight hours from the owner's latest Start or resume.
+  round(GREATEST(0, 28800000 - coalesce((SELECT sum(ms) FROM boxes_used, since_owner WHERE boxes_used.created_at >= since_owner.at), 0)) / 60000.0, 1) AS machine_left_of_eight_hours_min,
+  (SELECT count(*) FROM coding_events WHERE job_id = j.id AND event_key LIKE 'machine-time:%') AS eight_hour_pauses,
   (SELECT count(*) FROM boxes_used) AS boxes,
   (SELECT count(DISTINCT a) FROM (SELECT attempt_id::text AS a FROM coding_model_calls WHERE job_id = j.id
     UNION ALL SELECT split_part(event_key, ':', 1) FROM coding_events WHERE job_id = j.id AND event_key ~ '^[0-9a-f-]{36}:') x) AS attempts,
@@ -116,6 +132,7 @@ SELECT left(j.id::text, 8) AS job, j.state, j.stage, j.revision,
   (SELECT count(*) FROM verdicts WHERE verdict = 'REQUEST_CHANGES') AS findings_reports,
   (SELECT count(*) FROM verdicts WHERE verdict = 'APPROVE') AS approvals,
   (SELECT count(*) FROM coding_revisions WHERE job_id = j.id AND request_key LIKE 'rebase:%') AS rebases,
+  (SELECT count(*) FROM rebase_items r WHERE r.coder_saw) AS conflicting_rebases,
   (SELECT count(*) FROM coding_revisions WHERE job_id = j.id AND request_key LIKE 'mr-feedback:%') AS pr_feedback_rounds,
   j.pr_url IS NOT NULL AS has_pr,
   substring(j.pr_url FROM '/pull/([0-9]{1,9})$') AS pr_number
@@ -133,9 +150,11 @@ stops AS (
       WHEN e.payload->>'cause' = 'lifetime' THEN 'box lifetime'
       WHEN e.payload->>'cause' IN ('sandbox_stopped', 'heartbeat_lost') THEN 'crash'
       WHEN coalesce(e.payload->>'question', '') <> '' THEN 'ask'
-      WHEN e.payload->>'summary' LIKE 'Nothing needed changing.%' THEN 'no change'
+      WHEN e.payload->>'summary' LIKE 'Nothing needed changing.%' OR e.payload->>'summary' LIKE 'Main already contains this change%'
+        OR (j0.attempt_id::text = split_part(e.event_key, ':', 1) AND j0.result->>'kind' = 'no_change') THEN 'no change'
       ELSE 'pause' END AS kind
-  FROM coding_events e WHERE e.job_id = :'profile_job'::uuid AND e.event_key ~ '^[0-9a-f-]{36}:(paused|finished)$'
+  FROM coding_events e JOIN coding_jobs j0 ON j0.id = e.job_id
+  WHERE e.job_id = :'profile_job'::uuid AND e.event_key ~ '^[0-9a-f-]{36}:(paused|finished)$'
     AND NOT EXISTS(SELECT 1 FROM coding_events p WHERE p.job_id = e.job_id AND p.event_key = split_part(e.event_key, ':', 1) || ':publish-approved')
   ORDER BY split_part(e.event_key, ':', 1), e.created_at),
 rows AS (
@@ -180,11 +199,15 @@ SELECT a.n || ' ' || left(a.attempt, 8) AS attempt, coalesce(box.state, '(no box
     WHEN EXISTS(SELECT 1 FROM e WHERE event_key = a.attempt || ':publish-approved') THEN 'publishing'
     WHEN EXISTS(SELECT 1 FROM e WHERE event_key = 'machine-time:' || a.attempt) THEN 'eight-hour pause'
     WHEN EXISTS(SELECT 1 FROM e WHERE event_key IN (a.attempt || ':paused', a.attempt || ':finished') AND payload->>'cause' = 'lifetime')
-      THEN CASE WHEN EXISTS(SELECT 1 FROM v WHERE request_key = 'continue-box:' || a.attempt) THEN 'box lifetime, continued' ELSE 'box lifetime' END
+      THEN CASE WHEN EXISTS(SELECT 1 FROM v WHERE request_key = 'continue-box:' || a.attempt) THEN 'box lifetime, continued'
+        WHEN EXISTS(SELECT 1 FROM e WHERE event_key = 'box-stuck:' || a.attempt) THEN 'box lifetime, box did not shut down'
+        ELSE 'box lifetime' END
     WHEN EXISTS(SELECT 1 FROM v WHERE request_key = 'auto-retry:' || a.attempt) THEN 'crash, retried once'
     WHEN EXISTS(SELECT 1 FROM e WHERE event_key = a.attempt || ':paused' AND payload->>'cause' IN ('sandbox_stopped', 'heartbeat_lost')) THEN 'crash'
     WHEN EXISTS(SELECT 1 FROM e WHERE event_key = a.attempt || ':finished' AND coalesce(payload->>'question', '') <> '') THEN 'ask'
-    WHEN EXISTS(SELECT 1 FROM e WHERE event_key = a.attempt || ':finished' AND payload->>'summary' LIKE 'Nothing needed changing.%') THEN 'no change'
+    WHEN j.attempt_id::text = a.attempt AND j.result->>'kind' = 'no_change' THEN 'no change'
+    WHEN EXISTS(SELECT 1 FROM e WHERE event_key = a.attempt || ':finished' AND (payload->>'summary' LIKE 'Nothing needed changing.%'
+      OR payload->>'summary' LIKE 'Main already contains this change%')) THEN 'no change (from its summary)'
     WHEN EXISTS(SELECT 1 FROM e WHERE event_key IN (a.attempt || ':paused', a.attempt || ':finished')) THEN 'paused'
     WHEN j.attempt_id::text = a.attempt AND j.state IN ('provisioning', 'running', 'publishing') THEN '(running)'
     WHEN j.state = 'cancelled' AND j.attempt_id::text = a.attempt THEN 'cancelled'
@@ -306,7 +329,9 @@ m AS (
         WHEN EXISTS(SELECT 1 FROM coding_events p WHERE p.job_id = e.job_id AND p.event_key = split_part(e.event_key, ':', 1) || ':publish-approved') THEN 'candidate'
         WHEN e.payload->>'cause' = 'lifetime' THEN 'lifetime'
         WHEN coalesce(e.payload->>'question', '') <> '' THEN 'ask'
-        WHEN e.payload->>'summary' LIKE 'Nothing needed changing.%' THEN 'no change' ELSE 'pause' END END
+        WHEN (SELECT j1.attempt_id::text = split_part(e.event_key, ':', 1) AND j1.result->>'kind' = 'no_change' FROM coding_jobs j1 WHERE j1.id = e.job_id)
+          OR e.payload->>'summary' LIKE 'Nothing needed changing.%' OR e.payload->>'summary' LIKE 'Main already contains this change%' THEN 'no change'
+        ELSE 'pause' END END
   FROM coding_events e WHERE e.job_id = :'profile_job'::uuid
     AND (e.event_key LIKE '%:publish-approved' OR e.event_key ~ '^[0-9a-f-]{36}:(pr|paused|finished)$'
       OR e.event_key LIKE 'machine-time:%' OR e.event_key LIKE 'box-stuck:%' OR e.event_key LIKE 'ci-wait:%' OR e.event_key = 'cancelled'))
@@ -317,6 +342,7 @@ FROM m CROSS JOIN j LEFT JOIN att ON att.attempt = m.attempt ORDER BY m.at, m.wh
 WITH j AS (SELECT * FROM coding_jobs WHERE id = :'profile_job'::uuid),
 i AS (
   SELECT e.id, e.created_at, e.payload ? 'heldBy' AS held,
+    CASE WHEN jsonb_typeof(e.payload->'seq') = 'number' THEN (e.payload->>'seq')::numeric ELSE 0 END AS seq,
     CASE WHEN e.payload->>'source' IN ('owner', 'ask', 'ci', 'review', 'chief', 'rebase') THEN e.payload->>'source' ELSE '(other)' END AS source
   FROM coding_events e WHERE e.job_id = :'profile_job'::uuid AND e.event_key LIKE 'inbox:%'),
 -- Pi delivers an item as the newest user message of a request; a request repeats the whole
@@ -334,7 +360,38 @@ SELECT i.source, round(extract(epoch FROM i.created_at - j.created_at) / 60, 1) 
   round(extract(epoch FROM f.created_at - j.created_at) / 60, 1) AS first_seen_min, f.role AS seen_by
 FROM i CROSS JOIN j
 LEFT JOIN LATERAL (SELECT seen.created_at, seen.role FROM seen WHERE seen.id = i.id ORDER BY seen.created_at LIMIT 1) f ON true
-ORDER BY i.created_at, i.id;
+-- The host's own inbox order (CodingController.inbox).
+ORDER BY i.created_at, i.seq, i.id;
+
+\echo '3d. Rebases onto main: clean (straight to review) or conflicting (the coder resolved them), and the review round that followed'
+WITH j AS (SELECT * FROM coding_jobs WHERE id = :'profile_job'::uuid),
+c AS (
+  SELECT id, attempt_id::text AS attempt, role, coalesce(input->>'purpose', 'agent') AS purpose, result, created_at,
+    lag(role) OVER w AS prev_role, lag(attempt_id::text) OVER w AS prev_attempt
+  FROM coding_model_calls WHERE job_id = :'profile_job'::uuid WINDOW w AS (ORDER BY created_at, id)),
+s AS (SELECT *, sum(CASE WHEN role IS DISTINCT FROM prev_role OR attempt IS DISTINCT FROM prev_attempt THEN 1 ELSE 0 END) OVER (ORDER BY created_at, id) AS seg FROM c),
+rounds AS (
+  SELECT seg, min(created_at) AS started, row_number() OVER (ORDER BY min(created_at)) AS n,
+    (SELECT CASE WHEN b->'input'->>'verdict' IN ('APPROVE', 'REQUEST_CHANGES') THEN b->'input'->>'verdict' END
+     FROM s x, jsonb_array_elements(CASE WHEN jsonb_typeof(x.result->'content') = 'array' THEN x.result->'content' ELSE '[]' END) b
+     WHERE x.seg = s.seg AND x.purpose = 'agent' AND b->>'type' = 'tool_use' AND b->>'name' = 'report' AND b->'input'->>'kind' = 'review'
+     ORDER BY x.created_at DESC, x.id DESC LIMIT 1) AS verdict
+  FROM s WHERE role = 'reviewer' GROUP BY seg),
+r AS (
+  SELECT e.id, e.created_at, CASE WHEN e.payload->>'onto' ~ '^[0-9a-f]{40}$' THEN left(e.payload->>'onto', 12) END AS onto,
+    (SELECT min(c.created_at) FROM coding_model_calls c WHERE c.job_id = e.job_id AND c.role = 'coder' AND c.created_at >= e.created_at
+      AND strpos(coalesce((c.input->'request'->'messages'->-1)::text, '') || coalesce((c.input->'request'->'messages'->-2)::text, '')
+        || coalesce((c.input->'request'->'messages'->-3)::text, '') || coalesce((c.input->'request'->'messages'->-4)::text, ''),
+        '[inbox:' || e.id::text || ' ') > 0) AS coder_saw
+  FROM coding_events e WHERE e.job_id = :'profile_job'::uuid AND e.event_key LIKE 'inbox:rebase:%')
+SELECT round(extract(epoch FROM r.created_at - j.created_at) / 60, 1) AS at_min, r.onto,
+  CASE WHEN r.coder_saw IS NOT NULL THEN 'conflicting' WHEN f.n IS NOT NULL THEN 'clean' ELSE '(not yet rebased)' END AS kind,
+  round(extract(epoch FROM r.coder_saw - j.created_at) / 60, 1) AS coder_told_min,
+  f.n AS review_round, round(extract(epoch FROM f.started - j.created_at) / 60, 1) AS review_start_min, f.verdict
+FROM r CROSS JOIN j
+LEFT JOIN LATERAL (SELECT rounds.n, rounds.started, rounds.verdict FROM rounds WHERE rounds.started > coalesce(r.coder_saw, r.created_at)
+  ORDER BY rounds.started LIMIT 1) f ON true
+ORDER BY r.created_at, r.id;
 
 \echo '4. Tool use per assistant turn (completed agent calls; Anthropic tool_use blocks)'
 WITH t AS (

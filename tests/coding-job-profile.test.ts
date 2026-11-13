@@ -2,8 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { test, type TestContext } from "node:test";
-import { fixture, settings, startCard } from "./helpers/coding-fixture.js";
-import { codingSettings } from "../src/coding/schema.js";
+import {
+  base,
+  fixture,
+  settings,
+  startCard,
+} from "./helpers/coding-fixture.js";
+import { BOX_SAVE_MS, codingSettings } from "../src/coding/schema.js";
+import { CodingAutomation } from "../src/coding/automation.js";
+import type { PrInspection } from "../src/coding/merge-policy.js";
 import { artifactHash } from "../src/coding/github.js";
 import { inboxMessage } from "../src/coding/pi-worker.js";
 import { reportDocument } from "@chief-agent/pi-runtime/report";
@@ -247,26 +254,70 @@ const cost = (u: Usage) =>
     u.output * PRICES.output) /
   1e6;
 
+const HOUR = 3_600_000;
+
 /**
- * A synthetic job on the one-session loop, built through the host's own code wherever it
- * exists on this branch: coding_start and the owner's Start, the tick, every model call through
- * piMessages (Anthropic streams recorded by the host), an owner follow-up through coding_reply,
- * checkpoints, the publication commit, finish and the PR. The box rows, the box-lifetime
- * continuation (stage D3, journal 193, not merged here) and the CI inbox item with its
- * feedback round are written with the statements and shapes those stages use.
+ * A synthetic job on the one-session loop, built through the host's own code: coding_start
+ * and the owner's Start, the tick and heartbeat, every model call through piMessages
+ * (Anthropic streams recorded by the host), an owner follow-up through coding_reply,
+ * checkpoints, the box reaching its lifetime (finish with the host's lifetime cause and the
+ * continuation in a new box), the publication commit, finish and the PR, and the PR's own
+ * automation: an hour waiting for CI, a clean and a conflicting rebase onto main, and a CI
+ * failure with a review comment as a feedback round. The test writes only what a box and
+ * GitHub would supply: the boxes controller's rows (the fixture has no boxes), the worker's
+ * checkpoints and model requests, and the PR readings.
  */
 async function syntheticJob(t: TestContext) {
   const piSettings = codingSettings.parse({
     ...settings,
+    limits: undefined,
     runtime: "pi",
     squad: false,
     autoMerge: false,
+    prWorkflow: "owner_merge",
     effort: "medium",
     maxOutputTokens: 32000,
     reviewerMaxOutputTokens: 16000,
   });
   const f = await fixture(t, { settings: piSettings });
   const db = f.db;
+  // GitHub's publisher also returns the PR's tree, which starts the PR's automation; the
+  // controller builds its automation exactly as when its publisher has one.
+  const tree = "c".repeat(40);
+  const publish = f.publisher.publish;
+  (f.publisher as any).publish = async () => ({ ...(await publish()), tree });
+  let inspection: PrInspection = {
+    head: "b".repeat(40),
+    tree,
+    base,
+    main: base,
+    merged: false,
+    closed: false,
+    draft: true,
+    mergeable: true,
+    checks: "pending",
+    feedback: [],
+    unresolvedThreads: 0,
+  };
+  const reading = (i: Partial<PrInspection>) =>
+    (inspection = { ...inspection, ...i });
+  const controller = f.c as any;
+  controller.automation = new CodingAutomation(
+    db,
+    {
+      outcome: async () => inspection,
+      inspect: async () => inspection,
+      ready: async () => reading({ draft: false }),
+      attest: async () => {},
+      merge: async () => ({ sha: "d".repeat(40) }),
+      release: async () => "pending",
+    } as any,
+    () => true,
+    (job) => controller.hasReviewerProof(job),
+    controller.clock,
+    (job) => f.c.requirements.approved(job),
+    (job) => f.c.machineSpent(job),
+  );
   const stamp = async (seconds: number) => {
     for (const table of [
       "coding_events",
@@ -281,17 +332,29 @@ async function syntheticJob(t: TestContext) {
   };
   const card = await startCard(f, "profile", `Fix the bug. ${MARKER}`);
   const jobId = card.jobId;
+  const job = () => f.row(jobId);
   await stamp(0);
   await f.c.requirements.confirm("a", card.approvalId, "a", card.messageId);
   await stamp(600);
-  const box = async (seconds: number, runningMs: number) => {
-    const job = await f.row(jobId);
+  /** A new attempt: the tick provisions it and the worker's first heartbeat arrives. */
+  const attempt = async (seconds: number, runningMs: number) => {
+    const before = (await job()).attempt_id;
+    for (let i = 0; i < 6; i++) {
+      const now = await job();
+      if (now.attempt_id && now.attempt_id !== before) break;
+      await f.c.tick();
+    }
+    const now = await job();
+    assert(now.attempt_id && now.attempt_id !== before, "a new attempt");
+    await f.c.heartbeat(now);
+    await stamp(seconds);
+    // What the boxes controller records for the attempt's box (src/boxes/controller.ts).
     await db.query(
       `INSERT INTO boxes(id,user_id,request_key,profile,provider,environment,subject,image,state,credential_hash,running_ms,absolute_deadline,created_at)
-       VALUES($1,'a',$2,'coding','docker','test',$3,'image','terminated','hash',$4,$5,$6)`,
+       VALUES($1,'a',$2,'coding','ec2','test',$3,'image','terminated','hash',$4,$5,$6)`,
       [
         randomUUID(),
-        `coding:${job.attempt_id}`,
+        `coding:${now.attempt_id}`,
         `coding:${jobId}`,
         runningMs,
         at(seconds + 14400),
@@ -299,11 +362,7 @@ async function syntheticJob(t: TestContext) {
       ],
     );
   };
-  await f.c.tick();
-  await stamp(660);
-  await box(660, 1_140_000);
-
-  const usages: { role: string; purpose: string; u: Usage }[] = [];
+  const usages: { run: string; role: string; purpose: string; u: Usage }[] = [];
   const recorded = async () =>
     (
       await db.query(
@@ -312,7 +371,7 @@ async function syntheticJob(t: TestContext) {
       )
     ).rows[0].n;
   const call = async (
-    role: "coder" | "reviewer",
+    run: string,
     seconds: number,
     took: number,
     content: FakeBlock[],
@@ -324,11 +383,12 @@ async function syntheticJob(t: TestContext) {
       maxTokens?: number;
     } = {},
   ) => {
+    const role = run.startsWith("coder") ? "coder" : "reviewer";
     const purpose = options.purpose ?? "agent";
     const before = await recorded();
     f.setMessages(async () => anthropicTurn(content, u));
     const reply = await f.c.piMessages(
-      await f.row(jobId),
+      await job(),
       role,
       // The fixture's Anthropic route gives each role's model its own catalogue id.
       request(
@@ -355,13 +415,86 @@ async function syntheticJob(t: TestContext) {
       "UPDATE coding_events SET created_at=$1 WHERE created_at > $2",
       [at(seconds + took), CUT],
     );
-    usages.push({ role, purpose, u });
+    usages.push({ run, role, purpose, u });
   };
+  const save = async (checkpoint: unknown, seconds: number) => {
+    await f.c.save(await job(), checkpoint);
+    await stamp(seconds);
+  };
+  const report = (input: Record<string, unknown>) =>
+    toolUse(`report-${randomUUID()}`, "report", input);
+  const approve = (run: string, seconds: number, hash: string) =>
+    call(
+      run,
+      seconds,
+      60,
+      [
+        report({
+          kind: "review",
+          verdict: "APPROVE",
+          summary: "Fine",
+          detail: "Fine.",
+        }),
+      ],
+      { input: 50, read: 8000, write: 50, output: 100, thinking: 60 },
+      { candidate: hash },
+    );
+  /** The worker's approved checkpoint, the publication commit, finish and the PR. */
+  const publishApproved = async (cp: any, hash: string, seconds: number) => {
+    const approved = {
+      ...cp,
+      piState: {
+        ...cp.piState,
+        phase: "review",
+        reportDocument: reportDocument({
+          kind: "review",
+          summary: "Fine",
+          detail: "Fine.",
+          verdict: "APPROVE",
+        }),
+      },
+    };
+    await save(approved, seconds);
+    const candidate = {
+      kind: "candidate",
+      summary: "Done",
+      question: "",
+      checkpoint: approved,
+      review: {
+        verdict: "APPROVE",
+        findings: "Fine.",
+        model: piSettings.reviewerModel,
+        patchHash: hash,
+      },
+    };
+    assert.deepEqual(await f.c.approvePublication(await job(), candidate), {
+      accepted: true,
+    });
+    await stamp(seconds + 10);
+    await f.c.finish(await job(), candidate);
+    await stamp(seconds + 20);
+    // Published, and the box cleaned up, before the PR's automation reads it.
+    const settled = async () => {
+      const now = await job();
+      return now.state === "pr_ready" && now.cleanup !== "pending";
+    };
+    for (let i = 0; i < 6 && !(await settled()); i++) await f.c.tick();
+    assert(await settled(), "published with its box cleaned up");
+    await stamp(seconds + 30);
+  };
+  const inboxItem = async (like: string) =>
+    (
+      await db.query(
+        "SELECT id,event_key,payload FROM coding_events WHERE job_id=$1 AND event_key LIKE $2 ORDER BY created_at DESC LIMIT 1",
+        [jobId, like],
+      )
+    ).rows[0];
 
+  await attempt(660, 19 * 60_000);
   // Coder run 1, attempt 1: three tools in parallel, then a test run, a cache-warming replay,
   // an owner message, an edit and a write in parallel, Pi's compaction and the report.
   await call(
-    "coder",
+    "coder run 1",
     700,
     60,
     [
@@ -380,43 +513,33 @@ async function syntheticJob(t: TestContext) {
     },
   );
   await call(
-    "coder",
+    "coder run 1",
     800,
     30,
     [bash("t4", `cd /work && CI=1 kite run check -- ${MARKER}`)],
     { input: 200, read: 6000, write: 500, output: 100, thinking: 40 },
   );
   await call(
-    "coder",
+    "coder run 1",
     1100,
     1,
     [{ type: "text", text: "" }],
-    {
-      input: 10,
-      read: 6700,
-      write: 0,
-      output: 1,
-    },
+    { input: 10, read: 6700, write: 0, output: 1 },
     { purpose: "cache_warm", maxTokens: 1 },
   );
   const replied: any = await f.c.call("a", f.run, {
     operation: "coding_reply",
     id: jobId,
-    baseRevision: (await f.row(jobId)).revision,
+    baseRevision: (await job()).revision,
     requestKey: "owner-1",
     message: `Also handle the empty case. ${MARKER}`,
   });
-  assert.equal(replied.state, "provisioning");
+  assert.equal(replied.state, "running");
   await stamp(1150);
-  const ownerItem = (
-    await db.query(
-      "SELECT id,payload FROM coding_events WHERE job_id=$1 AND event_key='inbox:reply:owner-1'",
-      [jobId],
-    )
-  ).rows[0];
-  assert.equal(ownerItem.payload.source, "owner");
+  const owner = await inboxItem("inbox:reply:owner-1");
+  assert.equal(owner.payload.source, "owner");
   await call(
-    "coder",
+    "coder run 1",
     1200,
     60,
     [
@@ -434,16 +557,16 @@ async function syntheticJob(t: TestContext) {
         {
           role: "user",
           content: inboxMessage({
-            id: ownerItem.id,
+            id: owner.id,
             source: "owner",
-            text: ownerItem.payload.text,
+            text: owner.payload.text,
           }),
         },
       ],
     },
   );
   await call(
-    "coder",
+    "coder run 1",
     1300,
     60,
     [{ type: "text", text: `Summary of the session ${MARKER}` }],
@@ -451,16 +574,10 @@ async function syntheticJob(t: TestContext) {
     { purpose: "compaction" },
   );
   await call(
-    "coder",
+    "coder run 1",
     1400,
     30,
-    [
-      toolUse("t7", "report", {
-        kind: "done",
-        summary: MARKER,
-        detail: MARKER,
-      }),
-    ],
+    [report({ kind: "done", summary: MARKER, detail: MARKER })],
     { input: 2000, read: 0, write: 0, output: 150, thinking: 50 },
   );
   const checkpoint1 = {
@@ -468,15 +585,14 @@ async function syntheticJob(t: TestContext) {
     patch: "p1",
     summary: "s1",
     files: [{ path: "sum.js", content: "v1\n" }],
-    piState: { version: 1, phase: "build", delivered: [ownerItem.id] },
+    piState: { version: 1, phase: "build", base, delivered: [owner.id] },
   };
-  await f.c.save(await f.row(jobId), checkpoint1);
-  await stamp(1440);
+  await save(checkpoint1, 1440);
   const first = artifactHash(checkpoint1 as any);
 
   // Review round 1: three tools in parallel, then findings.
   await call(
-    "reviewer",
+    "review round 1",
     1500,
     60,
     [
@@ -495,11 +611,11 @@ async function syntheticJob(t: TestContext) {
     { candidate: first },
   );
   await call(
-    "reviewer",
+    "review round 1",
     1600,
     60,
     [
-      toolUse("r4", "report", {
+      report({
         kind: "review",
         verdict: "REQUEST_CHANGES",
         summary: MARKER,
@@ -510,48 +626,44 @@ async function syntheticJob(t: TestContext) {
     { candidate: first },
   );
 
-  // The box reaches its lifetime and the job continues in a new box (journal 193's
-  // CodingController.stopped with cause lifetime, then continueAfterLifetime).
-  const one = await f.row(jobId);
-  await db.query(
-    `WITH changed AS (UPDATE coding_jobs SET state='paused',stage='paused',summary=$3,cleanup='none',model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 RETURNING id)
-     INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,$4,jsonb_build_object('summary',$3::text,'cause','lifetime'),'suppressed' FROM changed`,
-    [
-      one.id,
-      one.attempt_id,
-      "The coding box reached its time limit",
-      `${one.attempt_id}:paused`,
-    ],
+  // The box reaches its lifetime: the worker stops a save margin before the host's deadline
+  // and finishes paused; the host records the cause and continues in a new box (journal 193).
+  const one = await job();
+  f.advance(3 * HOUR - BOX_SAVE_MS + 1000);
+  assert.deepEqual(
+    await f.c.finish(one, {
+      kind: "paused",
+      summary: "The coding box reached its time limit",
+      question: "",
+      checkpoint: one.checkpoint,
+    }),
+    { accepted: true },
   );
   await stamp(1700);
-  await db.query(
-    `WITH changed AS (
-      UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,summary='Continuing in a new coding box',updated_at=now()
-      WHERE id=$1 AND revision=$2 AND attempt_id=$3 AND state='paused' RETURNING id,revision,mode
-    ), revised AS (
-      INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$4,'The coding box reached its lifetime; continued in a new box',mode FROM changed RETURNING job_id
-    ) INSERT INTO coding_events(job_id,event_key,payload) SELECT job_id,$4,jsonb_build_object('summary','The coding box reached its time limit; the job continues in a new box.') FROM revised`,
-    [one.id, one.revision, one.attempt_id, `continue-box:${one.attempt_id}`],
+  await attempt(1800, 10 * 60_000);
+  assert.equal(
+    (
+      await db.query(
+        "SELECT payload->>'cause' AS cause FROM coding_events WHERE job_id=$1 AND event_key=$2",
+        [jobId, `${one.attempt_id}:finished`],
+      )
+    ).rows[0].cause,
+    "lifetime",
   );
-  await stamp(1800);
-  await f.c.tick();
-  await stamp(1860);
-  await box(1860, 600_000);
-  assert.notEqual((await f.row(jobId)).attempt_id, one.attempt_id);
 
-  // Coder run 2, attempt 2, then review round 2 approves.
+  // Coder run 2, attempt 2, then review round 2 approves and the PR opens.
   await call(
-    "coder",
+    "coder run 2",
     1900,
     30,
     [toolUse("t8", "edit", { path: "sum.js", edits: [] })],
     { input: 2500, read: 0, write: 0, output: 300, thinking: 100 },
   );
   await call(
-    "coder",
+    "coder run 2",
     2000,
     30,
-    [toolUse("t9", "report", { kind: "done", summary: MARKER, detail: "" })],
+    [report({ kind: "done", summary: MARKER, detail: "" })],
     { input: 100, read: 2500, write: 100, output: 80, thinking: 20 },
   );
   const checkpoint2 = {
@@ -559,86 +671,129 @@ async function syntheticJob(t: TestContext) {
     patch: "p2",
     files: [{ path: "sum.js", content: "v2\n" }],
   };
-  await f.c.save(await f.row(jobId), checkpoint2);
-  await stamp(2040);
+  await save(checkpoint2, 2040);
   const second = artifactHash(checkpoint2 as any);
   await call(
-    "reviewer",
+    "review round 2",
     2100,
     60,
     [bash("r5", "git diff reviewed candidate")],
     { input: 400, read: 7300, write: 300, output: 200, thinking: 120 },
     { candidate: second },
   );
-  await call(
-    "reviewer",
-    2200,
-    60,
-    [
-      toolUse("r6", "report", {
-        kind: "review",
-        verdict: "APPROVE",
-        summary: "Fine",
-        detail: "Fine.",
-      }),
-    ],
-    { input: 50, read: 8000, write: 50, output: 100, thinking: 60 },
-    { candidate: second },
-  );
-  const approved = {
+  await approve("review round 2", 2200, second);
+  await publishApproved(checkpoint2, second, 2270);
+
+  // The PR waits an hour for CI: the owner hears once.
+  await f.c.automationTick();
+  await f.c.automationTick();
+  await stamp(2310);
+  f.advance(HOUR + 1000);
+  await f.c.automationTick();
+  await stamp(2400);
+  assert(await inboxItem("ci-wait:%"), "the CI-wait notice");
+
+  // Main moves and the PR conflicts: the job goes back to a box to be rebased. Git rebases it
+  // cleanly there, so it goes straight to review.
+  const moved1 = "e".repeat(40);
+  reading({ checks: "passed", draft: false, main: moved1, mergeable: false });
+  await f.c.automationTick();
+  await stamp(2500);
+  const rebase1 = await inboxItem("inbox:rebase:%");
+  assert.equal(rebase1.payload.onto, moved1);
+  await attempt(2560, 5 * 60_000);
+  const rebased = {
     ...checkpoint2,
     piState: {
       version: 1,
-      phase: "review",
-      delivered: [ownerItem.id],
-      reportDocument: reportDocument({
-        kind: "review",
-        summary: "Fine",
-        detail: "Fine.",
-        verdict: "APPROVE",
-      }),
+      phase: "build",
+      base: moved1,
+      delivered: [owner.id, rebase1.id],
+      next: { step: "review", hash: second },
     },
   };
-  await f.c.save(await f.row(jobId), approved);
-  await stamp(2270);
-  const candidate = {
-    kind: "candidate",
-    summary: "Done",
-    question: "",
-    checkpoint: approved,
-    review: {
-      verdict: "APPROVE",
-      findings: "Fine.",
-      model: piSettings.reviewerModel,
-      patchHash: second,
-    },
-  };
-  assert.deepEqual(
-    await f.c.approvePublication(await f.row(jobId), candidate),
-    { accepted: true },
-  );
-  await stamp(2280);
-  await f.c.finish(await f.row(jobId), candidate);
-  await stamp(2290);
-  for (let i = 0; i < 5 && !(await f.row(jobId)).pr_url; i++) await f.c.tick();
-  assert.equal((await f.row(jobId)).state, "pr_ready");
-  await stamp(2300);
+  await save(rebased, 2580);
+  await approve("review round 3", 2600, second);
+  await publishApproved(rebased, second, 2650);
 
-  // CI fails on the PR: the automation's inbox item and feedback round (src/coding/automation.ts).
-  const pr = await f.row(jobId);
-  await db.query(
-    `INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'inbox:gh:ci:run-7',$2::jsonb,'suppressed')`,
-    [
-      jobId,
-      JSON.stringify({ kind: "inbox", seq: 0, source: "ci", text: MARKER }),
+  // Main moves again; this time git leaves conflicts and the coder resolves them.
+  const moved2 = "f".repeat(40);
+  reading({ main: moved2, mergeable: false });
+  await f.c.automationTick();
+  await stamp(2700);
+  const rebase2 = await inboxItem("inbox:rebase:%");
+  assert.equal(rebase2.payload.onto, moved2);
+  await attempt(2760, 6 * 60_000);
+  await save(
+    {
+      ...checkpoint2,
+      files: [{ path: "sum.js", content: "<<<<<<< conflict\n" }],
+      piState: {
+        version: 1,
+        phase: "build",
+        base: moved2,
+        delivered: [owner.id, rebase1.id],
+        conflicts: [{ path: "sum.js", status: "UU", markers: true }],
+      },
+    },
+    2780,
+  );
+  await call(
+    "coder run 3",
+    2800,
+    30,
+    [toolUse("t10", "edit", { path: "sum.js", edits: [] })],
+    { input: 3000, read: 0, write: 0, output: 200, thinking: 90 },
+    {
+      extra: [
+        {
+          role: "user",
+          content: inboxMessage({
+            id: rebase2.id,
+            source: "rebase",
+            text: `Main moved and the pull request conflicted with it: sum.js ${MARKER}`,
+          }),
+        },
+      ],
+    },
+  );
+  await call(
+    "coder run 3",
+    2850,
+    20,
+    [report({ kind: "done", summary: MARKER, detail: "" })],
+    { input: 100, read: 3000, write: 50, output: 60, thinking: 10 },
+  );
+  const checkpoint3 = {
+    plan: "",
+    patch: "p3",
+    summary: "s3",
+    files: [{ path: "sum.js", content: "v3\n" }],
+    piState: {
+      version: 1,
+      phase: "build",
+      base: moved2,
+      delivered: [owner.id, rebase1.id, rebase2.id],
+    },
+  };
+  await save(checkpoint3, 2880);
+  const third = artifactHash(checkpoint3 as any);
+  await approve("review round 4", 2900, third);
+  await publishApproved(checkpoint3, third, 2950);
+
+  // CI fails and a trusted reviewer comments: one feedback round with two inbox items.
+  reading({
+    checks: "failed",
+    mergeable: true,
+    feedback: [
+      { id: "ci:1:1:9", text: `{"job":"test","log":"${MARKER}"}` },
+      { id: "devin-1", text: `Devin: ${MARKER}` },
     ],
-  );
-  await db.query(
-    "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,$2,$3,$4,'implement')",
-    [jobId, pr.revision + 1, `mr-feedback:${"e".repeat(64)}`, MARKER],
-  );
-  await stamp(2400);
-  return { f, db, jobId, usages, first, second };
+  });
+  await f.c.automationTick();
+  assert.equal((await job()).state, "queued");
+  await stamp(3000);
+  return { db, jobId, usages, first, second, third, moved1, moved2 };
 }
 
 const row = (rows: Row[] | undefined, match: Record<string, string>) => {
@@ -652,37 +807,76 @@ const row = (rows: Row[] | undefined, match: Record<string, string>) => {
   return found;
 };
 
-test("the coding-job profile reports a one-session job's time, cost, loop, tools and context without printing contents", async (t) => {
-  const { db, jobId, usages, first, second } = await syntheticJob(t);
+test("the coding-job profile reports a one-session job's time, cost, loop, rebases, tools and context without printing contents", async (t) => {
+  const { db, jobId, usages, first, second, third, moved1, moved2 } =
+    await syntheticJob(t);
   const { text, sections } = await profile(db, jobId.slice(0, 8));
-  // Nothing private is printed: no message, thinking, tool argument, owner message, report or
-  // revision text.
+  if (process.env.SHOW_PROFILE) console.log(text);
+  // Nothing private is printed: no message, thinking, tool argument, owner message, report,
+  // CI log, review comment or revision text.
   assert(!text.includes(MARKER), text);
   assert(!text.includes("Private reasoning"));
   assert(!text.includes("empty case"));
+  // What is approximate is said before the figures.
+  assert.match(
+    text,
+    /^\nApproximate \(what the host does not record exactly\)/,
+  );
 
   // 1. Summary.
   const [s] = sections["1"]!;
-  assert.equal(s!.job, jobId.slice(0, 8));
-  assert.equal(s!.state, "pr_ready");
-  assert.equal(s!.start_at_min, "10.0");
-  assert.equal(s!.waiting_before_start_min, "10.0");
-  // The box lifetime was continued by the host, so it is not owner time.
-  assert.equal(s!.waiting_at_asks_and_pauses_min, "0.0");
-  assert.equal(s!.ended, "false");
-  assert.equal(s!.last_activity_min, "40.0");
-  assert.equal(s!.machine_min, "29.0");
-  assert.equal(s!.machine_since_owner_min, "29.0");
-  assert.equal(s!.boxes, "2");
-  assert.equal(s!.attempts, "2");
-  assert.equal(s!.coder_runs, "2");
-  assert.equal(s!.review_rounds, "2");
-  assert.equal(s!.findings_reports, "1");
-  assert.equal(s!.approvals, "1");
-  assert.equal(s!.rebases, "0");
-  assert.equal(s!.pr_feedback_rounds, "1");
-  assert.equal(s!.has_pr, "true");
-  assert.equal(s!.pr_number, "1");
+  assert.deepEqual(
+    {
+      job: s!.job,
+      state: s!.state,
+      start_at_min: s!.start_at_min,
+      ended: s!.ended,
+      last_activity_min: s!.last_activity_min,
+      waiting_before_start_min: s!.waiting_before_start_min,
+      waiting_at_asks_and_pauses_min: s!.waiting_at_asks_and_pauses_min,
+      machine_min: s!.machine_min,
+      machine_since_owner_min: s!.machine_since_owner_min,
+      machine_left_of_eight_hours_min: s!.machine_left_of_eight_hours_min,
+      eight_hour_pauses: s!.eight_hour_pauses,
+      boxes: s!.boxes,
+      attempts: s!.attempts,
+      coder_runs: s!.coder_runs,
+      review_rounds: s!.review_rounds,
+      findings_reports: s!.findings_reports,
+      approvals: s!.approvals,
+      rebases: s!.rebases,
+      conflicting_rebases: s!.conflicting_rebases,
+      pr_feedback_rounds: s!.pr_feedback_rounds,
+      has_pr: s!.has_pr,
+      pr_number: s!.pr_number,
+    },
+    {
+      job: jobId.slice(0, 8),
+      state: "queued",
+      start_at_min: "10.0",
+      ended: "false",
+      last_activity_min: "50.0",
+      waiting_before_start_min: "10.0",
+      // The box lifetime was continued by the host, so it is not owner time.
+      waiting_at_asks_and_pauses_min: "0.0",
+      machine_min: "40.0",
+      // No owner revision after Start: every box counts toward the eight hours.
+      machine_since_owner_min: "40.0",
+      machine_left_of_eight_hours_min: "440.0",
+      eight_hour_pauses: "0",
+      boxes: "4",
+      attempts: "4",
+      coder_runs: "3",
+      review_rounds: "4",
+      findings_reports: "1",
+      approvals: "3",
+      rebases: "2",
+      conflicting_rebases: "1",
+      pr_feedback_rounds: "1",
+      has_pr: "true",
+      pr_number: "1",
+    },
+  );
 
   // 1b. Owner waits.
   assert.deepEqual(sections["1b"], [
@@ -702,41 +896,28 @@ test("the coding-job profile reports a one-session job's time, cost, loop, tools
     },
   ]);
 
-  // 1c. Attempts and why each ended.
-  const [a1, a2] = sections["1c"]!;
-  assert.match(a1!.attempt!, /^1 [0-9a-f]{8}$/);
+  // 1c. Attempts and the recorded reason each ended.
   assert.deepEqual(
-    { ...a1, attempt: undefined },
-    {
-      attempt: undefined,
-      box: "terminated",
-      start_min: "11.0",
-      wall_min: minutes(1700 - 660),
-      machine_min: "19.0",
-      coder_calls: "6",
-      reviewer_calls: "2",
-      ended: "box lifetime, continued",
-    },
-  );
-  assert.deepEqual(
-    { ...a2, attempt: undefined },
-    {
-      attempt: undefined,
-      box: "terminated",
-      start_min: "31.0",
-      wall_min: minutes(2300 - 1860),
-      machine_min: "10.0",
-      coder_calls: "2",
-      reviewer_calls: "2",
-      ended: "done (PR opened)",
-    },
+    sections["1c"]!.map((r) => [
+      r.attempt!.split(" ")[0],
+      r.start_min,
+      r.machine_min,
+      r.coder_calls,
+      r.reviewer_calls,
+      r.ended,
+    ]),
+    [
+      ["1", "11.0", "19.0", "6", "2", "box lifetime, continued"],
+      ["2", "30.0", "10.0", "2", "2", "done (PR opened)"],
+      ["3", minutes(2560), "5.0", "0", "1", "done (PR opened)"],
+      ["4", "46.0", "6.0", "2", "1", "done (PR opened)"],
+    ],
   );
 
   // 2. Cost and tokens by role and purpose; the total is the sum of the rows.
   const expected = (filter: (x: (typeof usages)[number]) => boolean) => {
     const xs = usages.filter(filter);
     const sum = (k: (u: Usage) => number) => xs.reduce((n, x) => n + k(x.u), 0);
-    const output = sum((u) => u.output);
     const withThinking = xs.filter((x) => x.u.thinking !== undefined);
     const thinkingTokens = withThinking.reduce((n, x) => n + x.u.thinking!, 0);
     const thinkingOutput = withThinking.reduce((n, x) => n + x.u.output, 0);
@@ -747,7 +928,7 @@ test("the coding-job profile reports a one-session job's time, cost, loop, tools
       cache_read: String(sum((u) => u.read)),
       cache_write: String(sum((u) => u.write)),
       write_1h: String(sum((u) => u.write1h ?? 0)),
-      output: String(output),
+      output: String(sum((u) => u.output)),
       thinking: withThinking.length ? String(thinkingTokens) : "-",
       thinking_pct: withThinking.length
         ? (Math.round((1000 * thinkingTokens) / thinkingOutput) / 10).toFixed(1)
@@ -776,79 +957,113 @@ test("the coding-job profile reports a one-session job's time, cost, loop, tools
     expected(() => true),
   );
   assert.equal(sections["2"]!.length, 5);
-  // Spot-check one row by hand: the first coder call's 1-hour write costs twice the input price.
   assert.equal(
     row(sections["2"], { role: "coder", purpose: "agent" }).write_1h,
     "2000",
   );
-  assert.equal(
-    row(sections["2"], { role: "coder", purpose: "agent" }).thinking_pct,
-    "34.4",
-  );
 
-  // 3. The loop in order.
-  const runCost = (seconds: number[]) =>
+  // 3. The loop in order, each run's cost from its own calls.
+  const runCost = (run: string) =>
     (
       Math.round(
-        usages
-          .filter((_, i) => seconds.includes(i))
-          .reduce((n, x) => n + cost(x.u), 0) * 1e4,
+        usages.filter((x) => x.run === run).reduce((n, x) => n + cost(x.u), 0) *
+          1e4,
       ) / 1e4
     ).toFixed(4);
-  assert.deepEqual(sections["3"], [
-    {
-      run: "coder run 1",
-      attempt: "1",
-      start_min: minutes(700),
-      minutes: minutes(1430 - 700),
-      agent_calls: "4",
-      cache_warm: "1",
-      compaction: "1",
-      unfinished: "0",
-      cost_usd: runCost([0, 1, 2, 3, 4, 5]),
-      report: "done",
-      candidate: "-",
-    },
-    {
-      run: "review round 1",
-      attempt: "1",
-      start_min: "25.0",
-      minutes: minutes(160),
-      agent_calls: "2",
-      cache_warm: "0",
-      compaction: "0",
-      unfinished: "0",
-      cost_usd: runCost([6, 7]),
-      report: "REQUEST_CHANGES",
-      candidate: first.slice(0, 12),
-    },
-    {
-      run: "coder run 2",
-      attempt: "2",
-      start_min: minutes(1900),
-      minutes: minutes(130),
-      agent_calls: "2",
-      cache_warm: "0",
-      compaction: "0",
-      unfinished: "0",
-      cost_usd: runCost([8, 9]),
-      report: "done",
-      candidate: "-",
-    },
-    {
-      run: "review round 2",
-      attempt: "2",
-      start_min: "35.0",
-      minutes: minutes(160),
-      agent_calls: "2",
-      cache_warm: "0",
-      compaction: "0",
-      unfinished: "0",
-      cost_usd: runCost([10, 11]),
-      report: "APPROVE",
-      candidate: second.slice(0, 12),
-    },
-  ]);
+  const runs = sections["3"]!;
+  assert.deepEqual(
+    runs.map((r) => [
+      r.run,
+      r.attempt,
+      r.start_min,
+      r.minutes,
+      r.agent_calls,
+      r.cache_warm,
+      r.compaction,
+      r.report,
+      r.candidate,
+    ]),
+    [
+      [
+        "coder run 1",
+        "1",
+        minutes(700),
+        minutes(730),
+        "4",
+        "1",
+        "1",
+        "done",
+        "-",
+      ],
+      [
+        "review round 1",
+        "1",
+        "25.0",
+        minutes(160),
+        "2",
+        "0",
+        "0",
+        "REQUEST_CHANGES",
+        first.slice(0, 12),
+      ],
+      [
+        "coder run 2",
+        "2",
+        minutes(1900),
+        minutes(130),
+        "2",
+        "0",
+        "0",
+        "done",
+        "-",
+      ],
+      [
+        "review round 2",
+        "2",
+        "35.0",
+        minutes(160),
+        "2",
+        "0",
+        "0",
+        "APPROVE",
+        second.slice(0, 12),
+      ],
+      [
+        "review round 3",
+        "3",
+        minutes(2600),
+        "1.0",
+        "1",
+        "0",
+        "0",
+        "APPROVE",
+        second.slice(0, 12),
+      ],
+      [
+        "coder run 3",
+        "4",
+        minutes(2800),
+        minutes(70),
+        "2",
+        "0",
+        "0",
+        "done",
+        "-",
+      ],
+      [
+        "review round 4",
+        "4",
+        minutes(2900),
+        "1.0",
+        "1",
+        "0",
+        "0",
+        "APPROVE",
+        third.slice(0, 12),
+      ],
+    ],
+  );
+  for (const r of runs) assert.equal(r.cost_usd, runCost(r.run!), r.run);
 
   // 3b. Milestones.
   assert.deepEqual(
@@ -856,32 +1071,63 @@ test("the coding-job profile reports a one-session job's time, cost, loop, tools
     [
       ["0.0", "-", "coding_start", "-"],
       ["10.0", "-", "Start", "-"],
-      [minutes(1700), "1", "paused", "lifetime"],
+      [minutes(1700), "1", "finished", "lifetime"],
       ["30.0", "-", "continued in a new box", "-"],
       ["38.0", "2", "publication committed", second.slice(0, 12)],
       [minutes(2290), "2", "finished", "candidate"],
       [minutes(2300), "2", "PR opened", "#1"],
-      ["40.0", "-", "PR feedback round", "-"],
+      ["40.0", "-", "an hour waiting for CI or review", "-"],
+      [minutes(2500), "-", "rebase onto main", `onto ${moved1.slice(0, 12)}`],
+      [minutes(2660), "3", "publication committed", second.slice(0, 12)],
+      [minutes(2670), "3", "finished", "candidate"],
+      [minutes(2680), "3", "PR opened", "#1"],
+      ["45.0", "-", "rebase onto main", `onto ${moved2.slice(0, 12)}`],
+      [minutes(2960), "4", "publication committed", third.slice(0, 12)],
+      [minutes(2970), "4", "finished", "candidate"],
+      [minutes(2980), "4", "PR opened", "#1"],
+      ["50.0", "-", "PR feedback round", "-"],
     ],
   );
 
-  // 3c. Inbox items: the owner's message reached the coder at its next call; CI's is waiting.
-  assert.deepEqual(sections["3c"], [
+  // 3c. Inbox items: the owner's message reached the coder at its next call; a clean rebase
+  // never reaches the coder, a conflicting one does; the feedback round's items wait.
+  assert.deepEqual(
+    sections["3c"]!.map((r) => [
+      r.source,
+      r.at_min,
+      r.held,
+      r.delivered,
+      r.first_seen_min,
+      r.seen_by,
+    ]),
+    [
+      ["owner", minutes(1150), "false", "true", "20.0", "coder"],
+      ["rebase", minutes(2500), "false", "true", "-", "-"],
+      ["rebase", "45.0", "false", "true", minutes(2800), "coder"],
+      ["ci", "50.0", "false", "false", "-", "-"],
+      ["review", "50.0", "false", "false", "-", "-"],
+    ],
+  );
+
+  // 3d. Rebases and the review round that followed each.
+  assert.deepEqual(sections["3d"], [
     {
-      source: "owner",
-      at_min: minutes(1150),
-      held: "false",
-      delivered: "true",
-      first_seen_min: "20.0",
-      seen_by: "coder",
+      at_min: minutes(2500),
+      onto: moved1.slice(0, 12),
+      kind: "clean",
+      coder_told_min: "-",
+      review_round: "3",
+      review_start_min: minutes(2600),
+      verdict: "APPROVE",
     },
     {
-      source: "ci",
-      at_min: "40.0",
-      held: "false",
-      delivered: "false",
-      first_seen_min: "-",
-      seen_by: "-",
+      at_min: "45.0",
+      onto: moved2.slice(0, 12),
+      kind: "conflicting",
+      coder_told_min: minutes(2800),
+      review_round: "4",
+      review_start_min: minutes(2900),
+      verdict: "APPROVE",
     },
   ]);
 
@@ -889,36 +1135,36 @@ test("the coding-job profile reports a one-session job's time, cost, loop, tools
   assert.deepEqual(sections["4"], [
     {
       role: "coder",
-      turns: "6",
+      turns: "8",
       no_tool: "0",
-      one: "4",
+      one: "6",
       two: "1",
       three_or_more: "1",
-      tool_calls: "9",
+      tool_calls: "11",
       most_in_one_turn: "3",
     },
     {
       role: "reviewer",
-      turns: "4",
+      turns: "6",
       no_tool: "0",
-      one: "3",
+      one: "5",
       two: "0",
       three_or_more: "1",
-      tool_calls: "6",
+      tool_calls: "8",
       most_in_one_turn: "3",
     },
   ]);
   assert.deepEqual(
     sections["4b"]!.map((r) => `${r.role} ${r.tool} ${r.calls}`),
     [
+      "coder edit 3",
+      "coder report 3",
       "coder bash 2",
-      "coder edit 2",
-      "coder report 2",
       "coder grep 1",
       "coder read 1",
       "coder write 1",
+      "reviewer report 4",
       "reviewer bash 3",
-      "reviewer report 2",
       "reviewer read 1",
     ],
   );
@@ -934,7 +1180,7 @@ test("the coding-job profile reports a one-session job's time, cost, loop, tools
   assert.deepEqual(sections["4d"], [
     {
       role: "coder",
-      agent_calls: "6",
+      agent_calls: "8",
       calls_before_first_edit: "2",
       min_to_first_edit: minutes(500),
       largest_context: "7800",
@@ -942,7 +1188,7 @@ test("the coding-job profile reports a one-session job's time, cost, loop, tools
     },
     {
       role: "reviewer",
-      agent_calls: "4",
+      agent_calls: "6",
       calls_before_first_edit: "-",
       min_to_first_edit: "-",
       largest_context: "8100",
@@ -965,10 +1211,13 @@ test("the coding-job profile reports a one-session job's time, cost, loop, tools
     [
       ["coder", "1", "4", "7000", "6700", "7800", "2000", "1"],
       ["coder", "2", "2", "2500", "2500", "2700", "2700", "0"],
-      ["coder", "all", "6", "7000", "2700", "7800", "2700", "1"],
+      ["coder", "3", "2", "3000", "3000", "3150", "3150", "0"],
+      ["coder", "all", "8", "7000", "3000", "7800", "3150", "1"],
       ["reviewer", "1", "2", "7000", "7000", "7300", "7300", "0"],
       ["reviewer", "2", "2", "8000", "8000", "8100", "8100", "0"],
-      ["reviewer", "all", "4", "7000", "7300", "8100", "8100", "0"],
+      ["reviewer", "3", "1", "8100", "8100", "8100", "8100", "0"],
+      ["reviewer", "4", "1", "8100", "8100", "8100", "8100", "0"],
+      ["reviewer", "all", "6", "7000", "8000", "8100", "8100", "0"],
     ],
   );
   assert.deepEqual(sections["5b"], [
@@ -980,6 +1229,119 @@ test("the coding-job profile reports a one-session job's time, cost, loop, tools
       next_context: "2000",
     },
   ]);
+});
+
+/** A started Pi job in its first box after the worker's first heartbeat (as coding-backstop.test.ts). */
+async function running(t: TestContext) {
+  const f = await fixture(t);
+  const job = await f.start(`ends-${randomUUID()}`);
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    job.id,
+    JSON.stringify({
+      ...settings,
+      limits: undefined,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+    }),
+  ]);
+  await f.c.tick();
+  await f.c.heartbeat(await f.row(job.id));
+  return { f, id: job.id as string, row: () => f.row(job.id) };
+}
+const emptyWork = {
+  plan: "",
+  patch: "",
+  summary: "",
+  files: [],
+  piState: { version: 1, base, delivered: [] },
+};
+
+test("the attempt list shows the end cause the host records: eight hours, crash and retry, ask and nothing to change", async (t) => {
+  const ended = async (j: Awaited<ReturnType<typeof running>>) => {
+    const { text, sections } = await profile(j.f.db, j.id);
+    return { text, sections, ends: sections["1c"]!.map((r) => r.ended) };
+  };
+
+  // Eight hours of machine time: the lifetime pause is held for the owner with one notice.
+  const eight = await running(t);
+  await eight.f.db.query(
+    `INSERT INTO boxes(id,user_id,request_key,profile,provider,environment,subject,image,credential_hash,absolute_deadline,running_ms)
+     VALUES($1,'a',$2,'coding','ec2','test',$3,'image','hash',now()+interval '1 day',$4)`,
+    [
+      randomUUID(),
+      `coding:${(await eight.row()).attempt_id}`,
+      `coding:${eight.id}`,
+      8 * HOUR,
+    ],
+  );
+  eight.f.advance(3 * HOUR - 1000);
+  await eight.f.c.finish(await eight.row(), {
+    kind: "paused",
+    summary: "The coding box reached its time limit",
+    checkpoint: emptyWork,
+  });
+  for (let i = 0; i < 4; i++) await eight.f.c.tick();
+  const held = await ended(eight);
+  assert.deepEqual(held.ends, ["eight-hour pause"]);
+  assert.equal(held.sections["1"]![0]!.eight_hour_pauses, "1");
+  assert.equal(held.sections["1"]![0]!.machine_left_of_eight_hours_min, "0.0");
+  assert.deepEqual(
+    held.sections["1b"]!.map((r) => [r.wait, r.resumed_by]),
+    [
+      ["before Start", "(still waiting)"],
+      ["eight-hour pause", "(still waiting)"],
+    ],
+  );
+
+  // A box that stops without a reason is a crash, retried once automatically.
+  const crash = await running(t);
+  const crashed = (await crash.row()).attempt_id;
+  await crash.f.provider.terminate(`fixture:${crashed}`);
+  await crash.f.c.tick();
+  await crash.f.c.tick();
+  await crash.f.db.query(
+    "UPDATE coding_jobs SET updated_at=now()-interval '5 minutes' WHERE id=$1",
+    [crash.id],
+  );
+  await crash.f.c.autoRetryOnce();
+  assert.equal((await crash.row()).state, "queued");
+  const retried = await ended(crash);
+  assert.deepEqual(retried.ends, ["crash, retried once"]);
+  assert.deepEqual(
+    retried.sections["1b"]!.map((r) => [r.wait, r.resumed_by]).slice(1),
+    [["crash", "automatic"]],
+  );
+
+  // A question to the owner.
+  const ask = await running(t);
+  await ask.f.c.finish(await ask.row(), {
+    kind: "awaiting_input",
+    summary: "Needs a decision",
+    question: `Which way? ${MARKER}`,
+    options: ["Keep it", "Change it"],
+    askedBy: "coder",
+    checkpoint: emptyWork,
+  });
+  const asked = await ended(ask);
+  assert.deepEqual(asked.ends, ["ask"]);
+  assert(!asked.text.includes(MARKER));
+  assert.deepEqual(
+    asked.sections["1b"]!.map((r) => [r.wait, r.resumed_by]).slice(1),
+    [["ask", "(still waiting)"]],
+  );
+
+  // Nothing to change: the host records the outcome's kind on the job.
+  const none = await running(t);
+  await none.f.c.finish(await none.row(), {
+    kind: "no_change",
+    summary: `The code already does this. ${MARKER}`,
+    checkpoint: emptyWork,
+  });
+  assert.equal((await none.row()).stage, "no_change");
+  const nothing = await ended(none);
+  assert.deepEqual(nothing.ends, ["no change"]);
+  assert(!nothing.text.includes(MARKER));
 });
 
 test("the profile stops with one line for an old-loop job, a prefix that matches nothing, or no prefix", async (t) => {
