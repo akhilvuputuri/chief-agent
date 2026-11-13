@@ -7,7 +7,7 @@ import type { CodingJob } from "./controller.js";
 const batch = z
   .object({
     scope: z.string().regex(/^[a-f0-9]{64}$/),
-    after: z.number().int().min(0).max(10000),
+    after: z.number().int().min(0),
     entries: z.array(z.record(z.unknown())).min(1).max(32),
   })
   .strict();
@@ -45,8 +45,9 @@ export class PiSessions {
       ).rows[0].bytes,
     );
     let newlyStored = 0;
-    if (input.after > count || input.after + input.entries.length > 10000)
-      throw new Error("Session append has a gap or exceeds the bound");
+    // One session per role per job (journal 192): no entry count bound; the byte allowance
+    // below keeps a box from filling the host database.
+    if (input.after > count) throw new Error("Session append has a gap");
     for (const [offset, entry] of input.entries.entries()) {
       const index = input.after + offset;
       const body = JSON.stringify(entry);

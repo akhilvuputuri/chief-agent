@@ -1,8 +1,9 @@
 import { ToolValidationError } from "../tool-errors.js";
+import { transaction } from "../db-transaction.js";
 import { PiSessions } from "./pi-sessions.js";
 import { z } from "zod";
 import { reviewMetadata, completePlanDelivered } from "./review-proof.js";
-import { CodingAutomation } from "./automation.js";
+import { CodingAutomation, feedbackRounds } from "./automation.js";
 import { codingDiagnostics } from "./diagnostics.js";
 import {
   modelPreferences,
@@ -99,7 +100,7 @@ function storableCheckpoint<T extends Checkpoint>(c: T, findings?: string): T {
     findings: findings ?? null,
     // Text the host compares with the document must not lose characters either.
     ...(document
-      ? { document, plan: c.plan, reviewFindings: c.piState?.findings ?? null }
+      ? { document, plan: c.plan, reviewed: c.piState?.reviewed?.patch ?? null }
       : {}),
   };
   if (canonicalJson(storable(exact)) !== canonicalJson(exact))
@@ -114,21 +115,8 @@ const hash = (v: unknown) =>
   createHash("sha256").update(canonicalJson(v)).digest("hex");
 /** The longest one Pi attempt runs, inside the box task's four-hour deadline. */
 const PI_ATTEMPT_MS = 10_800_000;
-/** The identity a Pi worker derives for a phase or session of this job's approved work. */
-const piIdentity = (
-  job: CodingJob,
-  plan: string,
-  intent: string,
-  value: string,
-) =>
-  hash({
-    objective: job.objective,
-    context: job.context,
-    plan,
-    base: job.base_sha,
-    intent,
-    hash: value,
-  });
+/** Pi model requests one job may have in flight or waiting (see `piMessages`). */
+const PI_QUEUE = 4;
 /**
  * Progress-only coding notices (`e` a coding_events row, `j` its job), folded into the
  * status message: worker progress, automatic retry/rebase/feedback re-queues, the approved
@@ -216,7 +204,10 @@ export class CodingController {
   }
   private automation?: CodingAutomation;
   /** Resolves when a job's current Pi model call frees its slot. */
+  /** The tail of each job's queue of Pi model calls: one call at a time, in arrival order. */
   private piSlots = new Map<string, Promise<void>>();
+  /** How many requests each job has in flight or waiting for its slot. */
+  private piQueued = new Map<string, number>();
   private inFlightModels = new Map<
     string,
     { jobId: string; controller: AbortController }
@@ -271,45 +262,63 @@ export class CodingController {
     )
       throw new Error("Coding origin must be an HTTPS origin");
   }
-  /** Pi approval: the acknowledged review document must match a sealed reviewer response in this attempt. */
-  private async hasPiReviewerProof(job: CodingJob) {
-    const document = job.result?.checkpoint?.piState?.reportDocument;
+  /**
+   * Pi approval (journal 192): the newest sealed review the host recorded for this exact
+   * candidate, from a reviewer request whose round named the candidate's artifact hash, is an
+   * APPROVE whose findings match the acknowledged review document, recorded after the owner's
+   * latest message. An approval of an earlier candidate, one a later REQUEST_CHANGES of the
+   * same candidate overrides, or one older than the owner's last word, is not proof.
+   */
+  private async hasPiReviewerProof(
+    job: CodingJob,
+    result: Outcome = job.result,
+    db = this.db,
+  ) {
+    const document = result?.checkpoint?.piState?.reportDocument;
     if (
       document?.kind !== "review" ||
       document.verdict !== "APPROVE" ||
-      document.detail !== job.result?.review?.findings
+      document.detail !== result?.review?.findings
     )
       return false;
     const calls = (
-      await this.db.query(
-        "SELECT id,result_box FROM coding_model_calls WHERE job_id=$1 AND attempt_id=$2 AND role='reviewer' AND state='complete' AND result_box IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT $3",
-        [job.id, job.attempt_id, job.settings.limits.models],
+      await db.query(
+        "SELECT id,attempt_id,result_box,created_at > COALESCE((SELECT max(created_at) FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' AND payload->>'source' IN ('owner','ask') AND COALESCE(payload->>'heldBy','')<>$3::text),'-infinity'::timestamptz) AS after_owner FROM coding_model_calls WHERE job_id=$1 AND role='reviewer' AND state='complete' AND result_box IS NOT NULL AND input->>'candidate'=$2 AND COALESCE(input->>'purpose','agent')='agent' ORDER BY created_at DESC,id DESC",
+        // The publication commit fixes which owner messages the approval covered: one kept
+        // while this attempt was publishing (held by it) goes to the PR's feedback round
+        // instead; every other owner message must be older than the approval (journal 192).
+        [job.id, artifactHash(result.checkpoint), String(job.attempt_id)],
       )
     ).rows;
     for (const call of calls) {
+      let report: any;
       try {
+        // The sealed result is the message Anthropic returned (journal 190).
         const response = JSON.parse(
           open(
             this.resultKey(),
             call.result_box,
-            this.resultScope(job, call.id),
+            // Sealed to the attempt that recorded it.
+            this.resultScope({ ...job, attempt_id: call.attempt_id }, call.id),
           ),
         );
-        // The sealed result is the message Anthropic returned (journal 190).
-        if (
-          response.content?.some(
-            (b: any) =>
-              b?.type === "tool_use" &&
-              b.name === "report" &&
-              b.input?.kind === "review" &&
-              b.input.verdict === "APPROVE" &&
-              b.input.detail === document.detail,
-          )
-        )
-          return true;
+        report = response.content?.find(
+          (b: any) =>
+            b?.type === "tool_use" &&
+            b.name === "report" &&
+            b.input?.kind === "review",
+        )?.input;
       } catch {
         /* An unreadable journal entry is not approval. */
+        continue;
       }
+      if (!report) continue;
+      // An approval given before the owner's latest message did not see it (journal 192).
+      return (
+        call.after_owner === true &&
+        report.verdict === "APPROVE" &&
+        report.detail === document.detail
+      );
     }
     return false;
   }
@@ -469,9 +478,6 @@ export class CodingController {
                 stored.checkpoint.piState.reportDocument.detail.length,
             },
           }
-        : {}),
-      ...(stored.checkpoint.piState?.reportFailure
-        ? { reportFailure: stored.checkpoint.piState.reportFailure }
         : {}),
       ...(modelProgress
         ? {
@@ -774,6 +780,20 @@ export class CodingController {
       job.settings.prWorkflow === "owner_merge"
     )
       return this.requestPrChanges(user, job, a);
+    // After Start a Pi job's messages go into its inbox (journal 192); the request and its
+    // approval stay as they are.
+    if (
+      a.operation === "coding_reply" &&
+      job.mode === "implement" &&
+      job.settings.runtime === "pi" &&
+      job.state !== "pr_ready"
+    )
+      return this.followUp(user, job, a);
+    // Nothing to change means nothing to resume; a message continues the job (journal 192).
+    if (a.operation === "coding_resume" && job.stage === "no_change")
+      throw new ToolValidationError(
+        "This job ended because the coder found nothing to change, so there is nothing to resume. Relay its summary; if the owner wants more, send their message with coding_reply and the job continues with it.",
+      );
     if (
       a.operation === "coding_resume" &&
       job.state === "plan_ready" &&
@@ -855,33 +875,22 @@ export class CodingController {
     await this.assertFreshOrConfirmed(job, a, RESTARTABLE);
     // A message from the owner is appended to the request, and the job waits for a new Start
     // card: the old card's scope no longer matches, so it cannot start the changed request.
-    // After Start this is interim (journal 191): a stopped job returns to a Start card.
-    // The worker's session and review identities hash the request, so a changed request starts
-    // its build phase afresh: the files, patch and tool count are kept, the review and session
-    // state is not (otherwise review recovery would refuse the changed identity).
-    const pi = job.checkpoint.piState;
+    // Before Start for a Pi job (after Start it goes to the inbox above, journal 192); the
+    // legacy runtimes still return a stopped job to a Start card (journal 191).
+    // A started Pi job never comes back here, so no session or review state needs dropping:
+    // the job has no piState before Start, and after Start the request never changes.
     const followUp =
       a.operation === "coding_reply"
         ? ({
             ...job,
             revision: job.revision + 1,
             context: `${job.context}\nOwner follow-up: ${message}`,
-            checkpoint: pi
-              ? {
-                  ...job.checkpoint,
-                  piState: {
-                    version: 1,
-                    toolsUsed: pi.toolsUsed,
-                    ...(pi.mrFeedback ? { mrFeedback: pi.mrFeedback } : {}),
-                  },
-                }
-              : job.checkpoint,
           } as CodingJob)
         : undefined;
     const changed = followUp
       ? await this.db.query(
           `WITH changed AS (
-      UPDATE coding_jobs SET revision=revision+1,mode='plan',context=$5,checkpoint=$10::jsonb,state='plan_ready',stage='awaiting_start',summary='Waiting for the owner to tap Start',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
+      UPDATE coding_jobs SET revision=revision+1,mode='plan',context=$5,state='plan_ready',stage='awaiting_start',summary='Waiting for the owner to tap Start',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
       WHERE id=$1 AND user_id=$2 AND revision=$3 AND context=$8 AND checkpoint=$9::jsonb AND ${RESTARTABLE} RETURNING id,revision,mode
     ), revised AS (
       INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$6,$4,mode FROM changed RETURNING job_id
@@ -896,7 +905,6 @@ export class CodingController {
             JSON.stringify(startCard(followUp)),
             job.context,
             JSON.stringify(job.checkpoint),
-            JSON.stringify(followUp.checkpoint),
           ],
         )
       : await this.db.query(
@@ -920,60 +928,17 @@ export class CodingController {
               : job.stage === "manual_review" || job.stage === "merge_declined"
                 ? `This job's PR stopped for owner attention (${job.summary}). It will not continue automatically and Chief cannot merge it in this state; explain the reason, then the owner can act on GitHub or start a new job.`
                 : job.settings.prWorkflow === "owner_merge"
-                  ? "This job already has a PR and continues on its own: Chief handles Devin and MR feedback, re-runs checks and review, then sends the owner a Merge / Keep open card. Main moving does not change it; only a merge conflict sends the change back to the coder. Nothing to resume or revise; report its stage from coding_status."
+                  ? "This job already has a PR and continues on its own: Chief handles Devin and MR feedback, runs review and CI again, then sends the owner a Merge / Keep open card. Main moving does not change it; only a merge conflict sends the change back to the coder. Nothing to resume or revise; report its stage from coding_status."
                   : job.settings.autoMerge
                     ? "This job already has a PR and continues through its automatic merge workflow; report its stage from coding_status."
                     : "This job already has a draft PR; it predates the owner-merge workflow, so it can only be merged on GitHub or replaced by a new job.",
       );
     return this.status(user, a.id);
   }
-  /** The checkpoint state that restarts the current step, when that step's model changed. */
-  private freshSession(
-    job: CodingJob,
-    next: CodingSettings,
-    requestKey: string,
-  ) {
-    const pi = job.checkpoint.piState;
-    if (!pi?.sessionScope) return undefined;
-    // An earlier report failure would hold the new model to finishing a session it never saw.
-    const { reportFailure: _earlier, ...kept } = pi;
-    if (pi.phase === "review") {
-      const candidate = pi.reviewCandidate;
-      const round = pi.reviewRound;
-      if (
-        job.settings.reviewerModel === next.reviewerModel ||
-        // A rejected candidate goes to the coder's repair session next, not to a review.
-        (pi.reportDocument?.kind === "review" &&
-          pi.reportDocument.verdict === "REQUEST_CHANGES") ||
-        !candidate ||
-        !round ||
-        round >= 1000
-      )
-        return undefined;
-      // The host binds a review session to its candidate and round, so a fresh one is a new round.
-      return {
-        ...kept,
-        reviewRound: round + 1,
-        sessionScope: piIdentity(
-          job,
-          job.checkpoint.plan,
-          "review-session",
-          `${candidate.hash}:${round + 1}`,
-        ),
-      };
-    }
-    const changed =
-      pi.phase === "build" &&
-      job.mode === "implement" &&
-      job.settings.model !== next.model;
-    return changed
-      ? { ...kept, sessionScope: hash([pi.sessionScope, requestKey]) }
-      : undefined;
-  }
   /**
    * The owner changes who carries out a stopped job, or how long it may run. The requirements
-   * are untouched, so their approval stands. A session under a changed model starts fresh on
-   * the same files, because continuing another model's session is untested.
+   * are untouched, so their approval stands. A Pi session continues under the new model: Pi
+   * switches models inside a session as shipped (journal 192).
    */
   private async updateJob(
     user: string,
@@ -1044,12 +1009,7 @@ export class CodingController {
     ].filter(([, from, to]) => from !== to);
     if (!changes.length)
       throw new ToolValidationError("The job already has these settings");
-    if (
-      Math.max(
-        job.checkpoint.piState?.toolsUsed ?? 0,
-        job.checkpoint.squadState?.toolsUsed ?? 0,
-      ) > next.limits.tools
-    )
+    if ((job.checkpoint.squadState?.toolsUsed ?? 0) > next.limits.tools)
       throw new ToolValidationError(
         "The tool-call limit is below what this job has already used",
       );
@@ -1066,11 +1026,7 @@ export class CodingController {
     this.assertDirectPiModels(next, "The job was not changed.");
     // Pi's own catalogue gives each Claude model's window (journal 190); none is snapshotted.
     delete (next as { contextWindows?: unknown }).contextWindows;
-    const piState = this.freshSession(job, next, a.requestKey);
-    const restarted = !!piState;
-    const checkpoint = piState
-      ? { ...job.checkpoint, piState }
-      : job.checkpoint;
+    const checkpoint = job.checkpoint;
     const approved =
       job.mode === "implement" && (await this.requirements.approved(job));
     // A job waiting for Start shows its models on the Start card, so a model change replaces
@@ -1105,12 +1061,11 @@ export class CodingController {
           kind: "settings_change",
           request,
           changes: changes.map(([field, from, to]) => ({ field, from, to })),
-          sessionRestarted: restarted,
           summary: `Job settings changed at your request. ${changes
             .map(([field, from, to]) => `${field}: ${from} → ${to}`)
             .join(
               "; ",
-            )}.${restarted ? " That step restarts in a fresh session; finished work is kept." : ""}${approved ? " Your Start of the request still stands." : ""}${
+            )}.${approved ? " Your Start of the request still stands." : ""}${
             waiting
               ? recard
                 ? " A new Start card follows; tap Start on it to begin."
@@ -1132,9 +1087,116 @@ export class CodingController {
     return this.status(user, a.id);
   }
   /**
+   * An owner message after Start (journal 192) becomes one inbox item for the coder. It never
+   * changes the approved request, so the Start stands and no new card is needed. A running
+   * job gets it at the coder's next turn boundary; a stopped one (a question, a pause, a
+   * failure) is queued again with its work and sessions, and the message is the first thing
+   * its coder reads. An answer to the job's question is labelled as that answer.
+   */
+  private async followUp(
+    user: string,
+    job: CodingJob & { question?: string },
+    a: Extract<CodingAction, { operation: "coding_reply" }>,
+  ) {
+    const key = `inbox:reply:${a.requestKey}`;
+    const prior = (
+      await this.db.query(
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
+        [job.id, key],
+      )
+    ).rows[0];
+    if (prior) {
+      if (prior.payload.text !== a.message)
+        throw new ToolValidationError("Coding revision request key conflict");
+      return this.status(user, job.id);
+    }
+    if (job.revision !== a.baseRevision)
+      throw new ToolValidationError(
+        "Coding revision changed; read coding_status and retry with the current revision",
+      );
+    const asked = job.state === "awaiting_input" && !!job.question;
+    const payload = JSON.stringify({
+      kind: "inbox",
+      source: asked ? "ask" : "owner",
+      text: a.message,
+      ...(asked ? { question: job.question } : {}),
+      // An answer goes to the session that asked.
+      ...(asked && job.result?.askedBy === "reviewer"
+        ? { to: "reviewer" }
+        : {}),
+    });
+    if (
+      ["queued", "provisioning", "running", "publishing"].includes(job.state)
+    ) {
+      // Under the job's row lock, which `finish` also takes: the message lands before the
+      // candidate check and holds it back, or the job is already publishing (journal 192).
+      const added = await transaction(this.db, async (db) => {
+        const now = (
+          await db.query(
+            "SELECT state,stage,revision,attempt_id FROM coding_jobs WHERE id=$1 AND user_id=$2 FOR UPDATE",
+            [job.id, user],
+          )
+        ).rows[0];
+        // Once publication is committed, the change being pushed is final; the message is kept
+        // for after it: the next attempt gets it if the push fails, and the PR's feedback
+        // round once the PR is open (journal 192).
+        if (now?.stage === "publishing" || now?.state === "publishing") {
+          // Marked as held by the attempt whose publication was committed: that approval does
+          // not cover it, a later attempt's must (journal 192). Not a timestamp comparison.
+          await db.query(
+            "INSERT INTO coding_events(job_id,event_key,payload,delivery,created_at) VALUES($1,$2,$3::jsonb || jsonb_build_object('heldBy',$4::text),'suppressed',clock_timestamp()) ON CONFLICT DO NOTHING",
+            [job.id, key, payload, now.attempt_id],
+          );
+          return "held";
+        }
+        if (
+          !now ||
+          now.revision !== job.revision ||
+          !["queued", "provisioning", "running"].includes(now.state)
+        )
+          return now?.state as string | undefined;
+        // Stamped when written under the row lock, not when the transaction began, so its
+        // order against a reviewer call (claimed under the same lock) is the real one.
+        await db.query(
+          "INSERT INTO coding_events(job_id,event_key,payload,delivery,created_at) VALUES($1,$2,$3::jsonb,'suppressed',clock_timestamp()) ON CONFLICT DO NOTHING",
+          [job.id, key, payload],
+        );
+        return "added";
+      });
+      if (added === "added") return this.status(user, job.id);
+      if (added === "held")
+        return {
+          ...(await this.status(user, job.id)),
+          note:
+            job.settings.prWorkflow === "owner_merge"
+              ? "The job's change is being published right now, so this message was kept and is applied after publication: in a follow-up round on the PR once it is open, or when the job continues if publishing does not complete."
+              : "The job's change is being published right now, so this message was kept; it is applied when the job continues.",
+        };
+    } else if (["awaiting_input", "paused", "failed"].includes(job.state)) {
+      await this.assertFreshOrConfirmed(job, a, RESTARTABLE);
+      const continued = await this.db.query(
+        `WITH changed AS (
+        UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='The owner replied; the job continues',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
+        WHERE id=$1 AND user_id=$2 AND revision=$3 AND mode='implement' AND state IN ('awaiting_input','paused','failed') AND ${RESTARTABLE} RETURNING id,revision,mode
+      ), revised AS (
+        INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$4,$5,mode FROM changed RETURNING job_id
+      ) INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT job_id,$6,$7::jsonb,'suppressed' FROM revised RETURNING job_id`,
+        [job.id, user, job.revision, a.requestKey, a.message, key, payload],
+      );
+      if (continued.rows.length) return this.status(user, job.id);
+    }
+    throw new ToolValidationError(
+      job.state === "publishing"
+        ? "The job's change is being published right now; send the message again once its PR is open, and it reaches the coder on that PR."
+        : job.state === "cancelled"
+          ? "This job was cancelled; start a new coding job."
+          : "The job changed or is being processed right now, or its sandbox cleanup is pending; read coding_status and retry.",
+    );
+  }
+  /**
    * The owner asks for changes to an open owner-merge PR. The request joins the PR's next
    * review-feedback round, so the coder fixes it on the same PR within the approved scope,
-   * and the PR returns to checks, review and the Merge card. A merged or finished PR
+   * and the PR returns to review, CI and the Merge card. A merged or finished PR
    * cannot change.
    */
   private async requestPrChanges(
@@ -1190,12 +1252,10 @@ export class CodingController {
         ? "The request is too long for one feedback round; shorten it to under 7,000 characters"
         : queuedLength + a.message.length > 7000
           ? "Earlier requests already fill the next round of fixes; send this after that round, or shorten it"
-          : (job.checkpoint.piState?.mrFeedback?.round ?? 0) >= 3
+          : (await feedbackRounds(this.db, job.id)) >= 3
             ? "This PR has already had three rounds of fixes, so it cannot take another; start a new coding job for further changes"
-            : job.used_models >= job.settings.limits.models ||
-                (job.checkpoint.piState?.toolsUsed ?? 0) >=
-                  job.settings.limits.tools
-              ? "This job has used its model or tool allowance, so it cannot take another round of fixes; start a new coding job"
+            : job.used_models >= job.settings.limits.models
+              ? "This job has used its model allowance, so it cannot take another round of fixes; start a new coding job"
               : handled + waiting.length >= 200
                 ? "This PR has handled too much feedback to take more; start a new coding job"
                 : undefined;
@@ -1219,7 +1279,7 @@ export class CodingController {
     const recorded = await this.db.query(
       `WITH changed AS (
         UPDATE coding_jobs SET stage=CASE WHEN stage=ANY($5::text[]) THEN 'awaiting_ci' ELSE stage END,
-          summary=CASE WHEN stage=ANY($5::text[]) THEN 'The owner asked for changes; the coder will fix them on this PR, then checks and review run again' ELSE summary END,
+          summary=CASE WHEN stage=ANY($5::text[]) THEN 'The owner asked for changes; the coder will fix them on this PR, then review and CI run again' ELSE summary END,
           updated_at=now()
         WHERE id=$1 AND user_id=$2 AND state='pr_ready' AND revision=$3 AND stage=$4 AND (lease IS NULL OR lease_until<now()) RETURNING id
       ), waits AS (
@@ -1324,7 +1384,17 @@ export class CodingController {
       job.state !== "running" ||
       !this.allowed(job.user_id) ||
       !(await this.requirements.approved(job)) ||
-      new Date(job.attempt_deadline).getTime() <= this.clock().getTime()
+      new Date(job.attempt_deadline).getTime() <= this.clock().getTime() ||
+      // The box uses the token only to push and open the PR, so it gets one only after the
+      // host committed this attempt's publication (journal 192); cloning and fetching the
+      // base need no credential.
+      job.stage !== "publishing" ||
+      !(
+        await this.db.query(
+          "SELECT 1 FROM coding_events WHERE job_id=$1 AND event_key=$2",
+          [job.id, `${job.attempt_id}:publish-approved`],
+        )
+      ).rows.length
     )
       throw new Error("Agent GitHub access unavailable for this attempt");
     const cached = this.agentTokens.get(job.attempt_id);
@@ -1389,7 +1459,36 @@ export class CodingController {
       checkpoint: job.checkpoint,
       deadline: new Date(job.attempt_deadline).toISOString(),
       usedModels: job.used_models,
+      ...(job.settings.runtime === "pi"
+        ? { inbox: await this.inbox(job) }
+        : {}),
     };
+  }
+  /**
+   * The job's inbox (journal 192): every message for the coder after Start, oldest first, or
+   * only those the checkpoint does not list as delivered.
+   */
+  async inbox(job: CodingJob, undeliveredIn?: Checkpoint, db = this.db) {
+    const delivered = new Set(undeliveredIn?.piState?.delivered ?? []);
+    return (
+      await db.query(
+        "SELECT id,payload FROM coding_events WHERE job_id=$1 AND event_key LIKE 'inbox:%' ORDER BY created_at,COALESCE((payload->>'seq')::int,0),id",
+        [job.id],
+      )
+    ).rows
+      .filter((r: { id: string }) => !undeliveredIn || !delivered.has(r.id))
+      .map((r: { id: string; payload: any }) => ({
+        id: r.id,
+        source: r.payload.source,
+        text: r.payload.text,
+        ...(typeof r.payload.question === "string"
+          ? { question: r.payload.question }
+          : {}),
+        ...(Number.isSafeInteger(r.payload.choice)
+          ? { choice: r.payload.choice }
+          : {}),
+        ...(r.payload.to === "reviewer" ? { to: "reviewer" } : {}),
+      }));
   }
   piSessionAppend(job: CodingJob, raw: unknown) {
     return new PiSessions(this.db, this.resultKey()).append(job, raw);
@@ -1413,7 +1512,10 @@ export class CodingController {
       [job.id, job.attempt_id, this.clock(), activeMs],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");
-    return { accepted: true };
+    // New messages for the coder ride on the heartbeat (journal 192).
+    return job.settings.runtime === "pi"
+      ? { accepted: true, inbox: await this.inbox(job, job.checkpoint) }
+      : { accepted: true };
   }
   async progress(job: CodingJob, raw: unknown) {
     const reported = storable(workerEvent.parse(raw));
@@ -1435,7 +1537,7 @@ export class CodingController {
       return { accepted: true };
     }
     const update = await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET stage=$3,summary=$4 WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id)
+      `WITH changed AS (UPDATE coding_jobs SET stage=CASE WHEN stage='publishing' THEN stage ELSE $3 END,summary=CASE WHEN stage='publishing' THEN summary ELSE $4 END WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id)
       INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$5,$6::jsonb FROM changed ON CONFLICT DO NOTHING RETURNING id`,
       [
         job.id,
@@ -1449,55 +1551,30 @@ export class CodingController {
     return { accepted: !!update.rows.length };
   }
   private validateReportCheckpoint(job: CodingJob, c: Checkpoint) {
-    const document = c.piState?.reportDocument;
-    if (
-      job.settings.runtime !== "pi" &&
-      (document ||
-        c.piState?.reportFailure ||
-        (c.piState?.findings?.length ?? 0) > 6000)
-    )
+    if (job.settings.runtime !== "pi" && c.piState)
       throw new Error("Pi report state requires the Pi runtime");
-    if (c.piState?.phase === "review") {
-      const candidate = c.piState.reviewCandidate;
-      if (
-        job.settings.runtime !== "pi" ||
-        job.mode !== "implement" ||
-        !c.files.length ||
-        !c.piState.reviewRound ||
-        !candidate ||
-        candidate.hash !== artifactHash(c) ||
-        ["kite run check", "kite run build", "kite run format:check"].some(
-          (command) =>
-            !candidate.checks.some(
-              (check) => check.command === command && check.exitCode === 0,
-            ),
-        )
-      )
-        throw new Error(
-          "Review recovery requires the exact checked Pi candidate",
-        );
-      const identity = (intent: string, value: string) =>
-        piIdentity(job, c.plan, intent, value);
-      if (
-        c.piState.scopeIdentity !== identity("review", candidate.hash) ||
-        c.piState.sessionScope !==
-          identity(
-            "review-session",
-            `${candidate.hash}:${c.piState.reviewRound}`,
-          )
-      )
-        throw new Error(
-          "Review session must match the candidate, scope and round",
-        );
-    }
     if (
-      document?.kind === "review" &&
-      document.verdict === "REQUEST_CHANGES" &&
-      document.detail !== c.piState?.findings
+      c.piState?.phase === "review" &&
+      (job.mode !== "implement" || !c.files.length)
     )
-      throw new Error("Review document must match the saved findings");
+      throw new Error("A review needs the started Pi candidate");
+  }
+  /** Delivery only grows, and names this job's own inbox (journal 192). */
+  private async assertDelivery(job: CodingJob, c: Checkpoint) {
+    if (job.settings.runtime !== "pi") return;
+    const before = job.checkpoint.piState?.delivered ?? [];
+    const now = c.piState?.delivered ?? [];
+    const inbox = new Set((await this.inbox(job)).map((i) => i.id));
+    if (
+      before.some((id) => !now.includes(id)) ||
+      now.some((id) => !inbox.has(id))
+    )
+      throw new Error("Inbox delivery must name this job's own messages");
   }
   async save(job: CodingJob, raw: unknown) {
+    // After the publication commit the checkpoint is final (journal 192).
+    if (job.stage === "publishing")
+      throw new Error("The candidate is committed for publication");
     const c = storableCheckpoint(checkpoint.parse(raw));
     this.validateReportCheckpoint(job, c);
     if (
@@ -1511,13 +1588,10 @@ export class CodingController {
     validateFiles(c.files);
     if (
       job.settings.runtime === "pi" &&
-      (!c.piState ||
-        c.piState.toolsUsed < (job.checkpoint.piState?.toolsUsed ?? 0) ||
-        c.piState.toolsUsed > job.settings.limits.tools ||
-        c.squadState ||
-        c.runtimeMemory)
+      (!c.piState || c.squadState || c.runtimeMemory)
     )
-      throw new Error("Pi checkpoint allocation/state is invalid");
+      throw new Error("Pi checkpoint state is invalid");
+    await this.assertDelivery(job, c);
     assertSquadCheckpoint(job, c);
     if (canonicalJson(c) === canonicalJson(job.checkpoint))
       return { saved: true };
@@ -1540,13 +1614,10 @@ export class CodingController {
       ],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");
-    // The checked candidate is about to be reviewed: measure whether a rebase reproduced the
+    // The candidate is about to be reviewed: measure whether a rebase reproduced the
     // reviewed artifact. Measurement only; it never changes the save.
-    if (c.piState?.phase === "review" && c.piState.reviewCandidate)
-      await this.noteRebasedCandidate(
-        job,
-        c.piState.reviewCandidate.hash,
-      ).catch(() => {});
+    if (c.piState?.phase === "review")
+      await this.noteRebasedCandidate(job, artifactHash(c)).catch(() => {});
     return { saved: true };
   }
   /**
@@ -1586,6 +1657,76 @@ export class CodingController {
         revision: job.revision,
         matched: identical,
       });
+  }
+  /**
+   * The commit point for publishing a Pi candidate (journal 192), before the worker pushes
+   * anything: under the job's row lock, every inbox item has reached its session and the
+   * host's record shows an approval of this exact candidate newer than the owner's last
+   * message. The job's stage becomes `publishing`, so a later follow-up is told the change is
+   * being published; `finish` then records the result.
+   */
+  async approvePublication(job: CodingJob, raw: unknown) {
+    const r = outcome.parse(raw);
+    if (job.settings.runtime !== "pi" || r.kind !== "candidate")
+      throw new Error("Only a Pi candidate is approved for publication");
+    const c = storableCheckpoint(r.checkpoint, r.review?.findings);
+    const hashNow = artifactHash(c);
+    const reported = c.piState?.reportDocument;
+    if (
+      r.review?.verdict !== "APPROVE" ||
+      r.review.model !== job.settings.reviewerModel ||
+      r.review.patchHash !== hashNow ||
+      !c.files.length ||
+      reported?.kind !== "review" ||
+      reported.verdict !== "APPROVE" ||
+      reported.detail !== r.review.findings ||
+      c.plan !== job.checkpoint.plan ||
+      !(await this.requirements.approved(job))
+    )
+      throw new Error(
+        "Candidate needs an independent review of the exact artifact",
+      );
+    validateFiles(c.files);
+    await this.assertDelivery(job, c);
+    if (new Date(job.attempt_deadline).getTime() <= this.clock().getTime())
+      throw new Error("Worker allocation expired");
+    const key = `${job.attempt_id}:publish-approved`;
+    return transaction(this.db, async (db) => {
+      await db.query("SELECT 1 FROM coding_jobs WHERE id=$1 FOR UPDATE", [
+        job.id,
+      ]);
+      const prior = (
+        await db.query(
+          "SELECT payload->>'hash' AS hash FROM coding_events WHERE job_id=$1 AND event_key=$2",
+          [job.id, key],
+        )
+      ).rows[0]?.hash;
+      if (prior) {
+        if (prior !== hashNow)
+          throw new Error(
+            "Another candidate was already approved for publication",
+          );
+        return { accepted: true };
+      }
+      const waiting = await this.inbox(job, c, db);
+      if (waiting.length) return { accepted: false, inbox: waiting };
+      if (!(await this.hasPiReviewerProof(job, { ...r, checkpoint: c }, db)))
+        throw new Error("No sealed reviewer approval of this exact candidate");
+      const committed = await db.query(
+        `WITH changed AS (UPDATE coding_jobs SET stage='publishing',summary='Publishing the reviewed change',checkpoint=$3::jsonb,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND checkpoint=$4::jsonb RETURNING id)
+        INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,$5,$6::jsonb,'suppressed' FROM changed RETURNING id`,
+        [
+          job.id,
+          job.attempt_id,
+          JSON.stringify(c),
+          JSON.stringify(job.checkpoint),
+          key,
+          JSON.stringify({ kind: "publish_approved", hash: hashNow }),
+        ],
+      );
+      if (!committed.rows.length) throw new Error("Worker attempt superseded");
+      return { accepted: true };
+    });
   }
   async finish(job: CodingJob, raw: unknown) {
     const parsed = outcome.parse(raw);
@@ -1639,6 +1780,8 @@ export class CodingController {
     }
     if (new Date(job.attempt_deadline).getTime() <= this.clock().getTime())
       throw new Error("Worker allocation expired");
+    // A Pi coder runs the tests itself and GitHub CI checks the PR (journal 192); the legacy
+    // runtimes still hand over the sandbox's check receipts.
     if (
       r.kind === "candidate" &&
       (r.review?.verdict !== "APPROVE" ||
@@ -1646,30 +1789,94 @@ export class CodingController {
         r.review.patchHash !== artifactHash(r.checkpoint) ||
         !r.checkpoint.files.length ||
         !!r.published !== !!(job.settings.agentGit && this.agentGit) ||
-        ["kite run check", "kite run build", "kite run format:check"].some(
-          (cmd) => !r.checks.some((c) => c.command === cmd && c.exitCode === 0),
-        ))
+        (job.settings.runtime !== "pi" &&
+          ["kite run check", "kite run build", "kite run format:check"].some(
+            (cmd) =>
+              !r.checks.some((c) => c.command === cmd && c.exitCode === 0),
+          )))
     )
       throw new Error(
-        "Candidate needs passing checks and review of the exact artifact",
+        job.settings.runtime === "pi"
+          ? "Candidate needs an independent review of the exact artifact"
+          : "Candidate needs passing checks and review of the exact artifact",
       );
-    const state = r.kind === "candidate" ? "publishing" : r.kind;
-    const update = await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET state=$3,stage=$3,summary=$4,question=$5,checkpoint=$6::jsonb,result=$7::jsonb,cleanup='pending',model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND checkpoint=$10::jsonb RETURNING id)
-      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$8,jsonb_build_object('summary',$4::text,'question',$5::text) || $9::jsonb FROM changed ON CONFLICT DO NOTHING RETURNING id`,
-      [
+    const pi = job.settings.runtime === "pi";
+    if (pi) await this.assertDelivery(job, r.checkpoint);
+    if (r.kind === "no_change" && (!pi || r.checkpoint.files.length))
+      throw new Error("Only a Pi job with no change can finish without one");
+    // `no_change`: the coder found nothing to change. The job stops with its summary and can
+    // continue on another owner message.
+    const state =
+      r.kind === "candidate"
+        ? "publishing"
+        : r.kind === "no_change"
+          ? "paused"
+          : r.kind;
+    const stage = r.kind === "no_change" ? "no_change" : state;
+    // A job that already has a PR keeps it as it was.
+    if (r.kind === "no_change" && (job as { pr_url?: string }).pr_url)
+      r.summary =
+        `${r.summary} The pull request is still open and unchanged.`.slice(
+          0,
+          4000,
+        );
+    // One transaction that locks the job: a follow-up either lands before this check and
+    // holds the candidate back, or finds the job publishing and is told so (journal 192).
+    const written = await transaction(this.db, async (db) => {
+      await db.query("SELECT 1 FROM coding_jobs WHERE id=$1 FOR UPDATE", [
         job.id,
-        job.attempt_id,
-        state,
-        r.summary,
-        r.question,
-        JSON.stringify(r.checkpoint),
-        JSON.stringify(r),
-        `${job.attempt_id}:finished`,
-        "{}",
-        JSON.stringify(job.checkpoint),
-      ],
-    );
+      ]);
+      // A Pi candidate was committed for publication by `approvePublication`, under this lock,
+      // before anything was pushed; a follow-up since then was told so (journal 192).
+      if (r.kind === "candidate" && pi) {
+        const approved = (
+          await db.query(
+            "SELECT payload->>'hash' AS hash FROM coding_events WHERE job_id=$1 AND event_key=$2",
+            [job.id, `${job.attempt_id}:publish-approved`],
+          )
+        ).rows[0]?.hash;
+        // The checkpoint stored at the commit, exactly: its delivered list included.
+        if (
+          approved !== artifactHash(r.checkpoint) ||
+          canonicalJson(r.checkpoint) !== canonicalJson(job.checkpoint)
+        )
+          throw new Error(
+            "Publication of this candidate was not approved first",
+          );
+      }
+      // A question to the owner or "nothing to change" waits until the session has every
+      // message, so an owner's "also do X" is read before the job stops (journal 192).
+      if (pi && (r.kind === "no_change" || r.kind === "awaiting_input")) {
+        const waiting = await this.inbox(job, r.checkpoint, db);
+        if (waiting.length) return { accepted: false, inbox: waiting };
+      }
+      // The host's own record must show an approval of this exact candidate (journal 192).
+      if (
+        r.kind === "candidate" &&
+        pi &&
+        !(await this.hasPiReviewerProof(job, r, db))
+      )
+        throw new Error("No sealed reviewer approval of this exact candidate");
+      return db.query(
+        `WITH changed AS (UPDATE coding_jobs SET state=$3,stage=$11,summary=$4,question=$5,checkpoint=$6::jsonb,result=$7::jsonb,cleanup='pending',model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND checkpoint=$10::jsonb RETURNING id)
+      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$8,jsonb_build_object('summary',$4::text,'question',$5::text) || $9::jsonb FROM changed ON CONFLICT DO NOTHING RETURNING id`,
+        [
+          job.id,
+          job.attempt_id,
+          state,
+          r.summary,
+          r.question,
+          JSON.stringify(r.checkpoint),
+          JSON.stringify(r),
+          `${job.attempt_id}:finished`,
+          JSON.stringify(r.options?.length ? { options: r.options } : {}),
+          JSON.stringify(job.checkpoint),
+          stage,
+        ],
+      );
+    });
+    if ("accepted" in written) return written;
+    const update = written;
     if (!update.rows.length) throw new Error("Worker attempt superseded");
     // The attempt is over: its agent token no longer has a purpose.
     await this.revokeAgentToken(job.attempt_id);
@@ -1688,6 +1895,8 @@ export class CodingController {
       betas?: string | string[];
       version?: string | string[];
       purpose?: string | string[];
+      /** A reviewer request: the artifact hash its round is about, carried out of band. */
+      candidate?: string | string[];
       /** Aborts when the worker's connection closes. */
       signal: AbortSignal;
     },
@@ -1710,7 +1919,7 @@ export class CodingController {
     let body: Record<string, unknown>;
     let betas: string[];
     let route: ReturnType<CodingAnthropic["route"]>;
-    let purpose: "agent" | "compaction" | undefined;
+    let purpose: "agent" | "compaction" | "cache_warm" | undefined;
     try {
       if (job.settings.runtime !== "pi")
         throw new Error("Native Pi endpoint requires a Pi job");
@@ -1720,7 +1929,8 @@ export class CodingController {
       if (
         request.purpose !== undefined &&
         request.purpose !== "agent" &&
-        request.purpose !== "compaction"
+        request.purpose !== "compaction" &&
+        request.purpose !== "cache_warm"
       )
         throw new Error("Invalid model request purpose");
       purpose = request.purpose;
@@ -1733,38 +1943,112 @@ export class CodingController {
     } catch (error) {
       return refuse(error);
     }
-    // One call at a time per job: a request that arrives while the previous call is still
-    // finishing waits for its slot instead of being refused.
-    await this.piSlots.get(job.id);
-    // A worker that hung up while waiting gets nothing, and costs no allowance or call record.
-    if (request.signal.aborted)
+    // The request apart from its output cap: Pi's cache warmer replays the previous request
+    // exactly with a one-token cap, so a warm call must have the shape of the role's previous
+    // recorded call in this attempt, and nothing else can pass as one (journal 192).
+    const { max_tokens: _cap, ...uncapped } = body;
+    const shape = createHash("sha256")
+      .update(canonicalJson(uncapped))
+      .digest("hex");
+    // Pi's cache warming replays a request with a one-token output cap. A refused warm call
+    // is no failure of the job, so it is not recorded as a rejection (journal 192).
+    if (
+      purpose === "cache_warm" &&
+      (raw as { max_tokens?: unknown })?.max_tokens !== 1
+    )
+      return refusal("A cache-warming request has a one-token output cap");
+    if (purpose === "cache_warm") {
+      const previous = (
+        await this.db.query(
+          "SELECT input->>'shape' AS shape FROM coding_model_calls WHERE job_id=$1 AND attempt_id=$2 AND role=$3 AND COALESCE(input->>'purpose','agent')<>'cache_warm' ORDER BY created_at DESC,id DESC LIMIT 1",
+          [job.id, job.attempt_id, role],
+        )
+      ).rows[0]?.shape;
+      if (previous !== shape)
+        return refusal(
+          "A cache-warming request must replay the role's previous request",
+        );
+    }
+    // One call at a time per job: each request queues behind the ones before it (a real
+    // call and Pi's cache warming can arrive together) instead of being refused (journal 192).
+    // A job has at most PI_QUEUE requests in flight or waiting. Pi sends one turn at a time,
+    // so legitimately there are: the call the host is still recording after its stream ended,
+    // Pi's next turn, one cache-warming replay, and one retry of a call whose first connection
+    // the host is still closing. More come from a box that should not hold gateway
+    // connections; they get a retryable refusal.
+    const holding = this.piQueued.get(job.id) ?? 0;
+    if (holding >= PI_QUEUE)
+      return refusal("Too many model requests are waiting for this job", 503);
+    this.piQueued.set(job.id, holding + 1);
+    const previous = this.piSlots.get(job.id) ?? Promise.resolve();
+    let freeSlot!: () => void;
+    const slot = new Promise<void>((resolve) => (freeSlot = resolve));
+    const turn = previous.then(() => slot);
+    this.piSlots.set(job.id, turn);
+    let passed = false;
+    const passOn = () => {
+      if (passed) return;
+      passed = true;
+      freeSlot();
+      if (this.piSlots.get(job.id) === turn) this.piSlots.delete(job.id);
+      const left = (this.piQueued.get(job.id) ?? 1) - 1;
+      if (left > 0) this.piQueued.set(job.id, left);
+      else this.piQueued.delete(job.id);
+    };
+    await new Promise<void>((resolve) => {
+      if (request.signal.aborted) return resolve();
+      request.signal.addEventListener("abort", () => resolve(), { once: true });
+      void previous.then(() => resolve());
+    });
+    // A worker that hung up while waiting gets nothing, and costs no allowance or call record;
+    // its place passes on once the call before it is done.
+    if (request.signal.aborted) {
+      void previous.then(passOn);
       return refuse(
         new Error("Coding request cancelled before model dispatch"),
       );
+    }
     const callId = randomUUID();
-    const claimed = await this.db.query(
-      `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+1,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4 RETURNING id)
-      INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input) SELECT $5,id,$2,$6,$7,$8::jsonb FROM claimed RETURNING id`,
-      [
-        job.id,
-        job.attempt_id,
-        job.settings.limits.models,
-        this.clock(),
-        callId,
-        role,
-        // The exact request, serialised once for its hash (no key-sorted copy).
-        createHash("sha256").update(JSON.stringify(body)).digest("hex"),
-        // The readable copy; the request itself goes to Anthropic exactly.
-        JSON.stringify(
-          storable({
-            ...(purpose ? { purpose } : {}),
-            requestedModel: selected,
-            request: scrubTrace(body),
-          }),
-        ),
-      ],
-    );
+    let claimed: { rows: unknown[] };
+    try {
+      claimed = await this.db.query(
+        `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+CASE WHEN $9 THEN 0 ELSE 1 END,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4 RETURNING id)
+      INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input,created_at) SELECT $5,id,$2,$6,$7,$8::jsonb,clock_timestamp() FROM claimed RETURNING id`,
+        [
+          job.id,
+          job.attempt_id,
+          job.settings.limits.models,
+          this.clock(),
+          callId,
+          role,
+          // The exact request, serialised once for its hash (no key-sorted copy).
+          createHash("sha256").update(JSON.stringify(body)).digest("hex"),
+          // The readable copy; the request itself goes to Anthropic exactly.
+          JSON.stringify(
+            storable({
+              ...(purpose ? { purpose } : {}),
+              requestedModel: selected,
+              shape,
+              // The candidate the reviewer's round names; an approval binds to it.
+              ...(role === "reviewer" &&
+              typeof request.candidate === "string" &&
+              /^[a-f0-9]{64}$/.test(request.candidate)
+                ? { candidate: request.candidate }
+                : {}),
+              request: scrubTrace(body),
+            }),
+          ),
+          // Pi's cache warming is recorded with its purpose and is not an agent call.
+          purpose === "cache_warm",
+        ],
+      );
+    } catch (error) {
+      // A failed claim must not hold the job's place: every later call would wait behind it.
+      passOn();
+      throw error;
+    }
     if (!claimed.rows.length) {
+      passOn();
       // Say which condition refused the slot, so a pause can be diagnosed.
       const now = (
         await this.db.query(
@@ -1792,9 +2076,6 @@ export class CodingController {
       jobId: job.id,
       controller: cancellation,
     });
-    let freeSlot!: () => void;
-    const slot = new Promise<void>((resolve) => (freeSlot = resolve));
-    this.piSlots.set(job.id, slot);
     const deadline = AbortSignal.timeout(
       Math.max(
         1,
@@ -1817,8 +2098,7 @@ export class CodingController {
           [job.id, job.attempt_id],
         );
       } finally {
-        if (this.piSlots.get(job.id) === slot) this.piSlots.delete(job.id);
-        freeSlot();
+        passOn();
       }
     };
     const fail = async (
@@ -1950,7 +2230,7 @@ export class CodingController {
     call: {
       callId: string;
       role: "leader" | "coder" | "reviewer";
-      purpose?: "agent" | "compaction";
+      purpose?: "agent" | "compaction" | "cache_warm";
       selected: string;
       prices: AnthropicPrices;
       started: number;
@@ -2430,7 +2710,7 @@ export class CodingController {
   ) {
     this.abortModels(j.id);
     await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET state=CASE WHEN state IN ('provisioning','running') THEN 'paused' ELSE state END,summary=CASE WHEN state IN ('provisioning','running') THEN $3 ELSE summary END,sandbox_id=COALESCE($6::text,sandbox_id),cleanup=CASE WHEN state IN ('provisioning','running') THEN CASE WHEN $5 THEN 'pending' ELSE 'none' END ELSE cleanup END,model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND (state IN ('provisioning','running') OR ($6::text IS NOT NULL AND state IN ('paused','cancelled') AND cleanup='pending')) RETURNING id,state)
+      `WITH changed AS (UPDATE coding_jobs SET state=CASE WHEN state IN ('provisioning','running') THEN 'paused' ELSE state END,stage=CASE WHEN state IN ('provisioning','running') THEN 'paused' ELSE stage END,summary=CASE WHEN state IN ('provisioning','running') THEN $3 ELSE summary END,sandbox_id=COALESCE($6::text,sandbox_id),cleanup=CASE WHEN state IN ('provisioning','running') THEN CASE WHEN $5 THEN 'pending' ELSE 'none' END ELSE cleanup END,model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND (state IN ('provisioning','running') OR ($6::text IS NOT NULL AND state IN ('paused','cancelled') AND cleanup='pending')) RETURNING id,state)
       INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$3::text) || CASE WHEN $7::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('cause',$7::text) END FROM changed WHERE state='paused' ON CONFLICT DO NOTHING`,
       [
         j.id,
@@ -2785,6 +3065,92 @@ export class CodingController {
       }
     }
   }
+  /**
+   * The owner tapped an answer on a job's question (journal 192). The tap counts only on the
+   * delivered message, while the job still waits at the attempt that asked; it becomes one
+   * inbox item and queues the job again with its work and sessions. A second tap on the same
+   * answer is answered from the record; any other later tap is refused.
+   */
+  async answerAsk(
+    user: string,
+    eventId: string,
+    index: number,
+    chat: string,
+    messageId: number,
+  ) {
+    if (
+      !this.allowed(user) ||
+      chat !== user ||
+      !Number.isSafeInteger(messageId) ||
+      messageId <= 0 ||
+      !Number.isSafeInteger(index)
+    )
+      throw new Error("Answer unavailable");
+    const event = (
+      await this.db.query(
+        "SELECT e.event_key,e.delivery,e.payload,j.id AS job_id,j.attempt_id,j.revision,j.question AS asked,j.result->>'askedBy' AS asked_by FROM coding_events e JOIN coding_jobs j ON j.id=e.job_id WHERE e.id=$1 AND j.user_id=$2",
+        [eventId, user],
+      )
+    ).rows[0];
+    const option = event?.payload?.options?.[index];
+    if (
+      !event ||
+      event.delivery !== "sent" ||
+      Number(event.payload.telegramMessageId) !== messageId ||
+      typeof option !== "string"
+    )
+      throw new Error("Answer unavailable");
+    if (event.payload.answer !== undefined) {
+      if (event.payload.answer !== index)
+        throw new Error("This question was already answered");
+      return { status: "answered", duplicate: true, jobId: event.job_id };
+    }
+    const key = `inbox:ask:${eventId}`;
+    const answered = await this.db.query(
+      `WITH changed AS (
+        UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='The owner answered; the job continues',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
+        WHERE id=$1 AND user_id=$2 AND revision=$3 AND state='awaiting_input' AND mode='implement' AND attempt_id::text||':finished'=$4 AND ${RESTARTABLE}
+          AND EXISTS(SELECT 1 FROM coding_events WHERE id=$5 AND job_id=$1 AND delivery='sent' AND NOT payload ? 'answer')
+        RETURNING id,revision,mode
+      ), marked AS (
+        UPDATE coding_events SET payload=payload || jsonb_build_object('answer',$6::int) WHERE id=$5 AND job_id IN (SELECT id FROM changed) RETURNING job_id
+      ), revised AS (
+        INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$7,$8,mode FROM changed RETURNING job_id
+      ) INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT job_id,$7,$9::jsonb,'suppressed' FROM revised RETURNING job_id`,
+      [
+        event.job_id,
+        user,
+        event.revision,
+        event.event_key,
+        eventId,
+        index,
+        key,
+        option,
+        JSON.stringify({
+          kind: "inbox",
+          source: "ask",
+          text: option,
+          choice: index + 1,
+          question: event.payload.question,
+          ...(event.asked_by === "reviewer" ? { to: "reviewer" } : {}),
+        }),
+      ],
+    );
+    if (!answered.rows.length) {
+      const closing = (
+        await this.db.query(
+          "SELECT 1 FROM coding_jobs WHERE id=$1 AND state='awaiting_input' AND attempt_id::text||':finished'=$2 AND cleanup NOT IN ('none','complete')",
+          [event.job_id, event.event_key],
+        )
+      ).rows.length;
+      throw new Error(
+        closing
+          ? "The job is still closing its last box; tap again in a moment"
+          : "This question is no longer open",
+      );
+    }
+    return { status: "answered", duplicate: false, jobId: event.job_id };
+  }
   async recoverDelivery() {
     await this.db.query(
       "UPDATE coding_events SET delivery='uncertain' WHERE delivery='sending'",
@@ -2864,6 +3230,12 @@ export class CodingController {
         ).rows[0];
         const req = e.payload.requirements;
         const merge = e.payload.merge;
+        // A job's question with answers the owner can tap (journal 192).
+        const ask =
+          typeof e.payload.question === "string" &&
+          e.payload.question &&
+          Array.isArray(e.payload.options) &&
+          e.payload.options.length > 0;
         const status =
           (
             await this.db.query(
@@ -2952,6 +3324,12 @@ export class CodingController {
               typeof e.payload.question === "string"
                 ? e.payload.question.slice(0, 2000)
                 : undefined,
+              // The answers are listed in full too: a button may shorten its label.
+              ask
+                ? (e.payload.options as string[])
+                    .map((option, i) => `${i + 1}. ${option}`)
+                    .join("\n")
+                : undefined,
               e.payload.url,
               typeof coderSummary === "string" && coderSummary
                 ? `Coder's own summary (not verified by Chief): ${Array.from(coderSummary).slice(0, 800).join("")}`
@@ -2963,10 +3341,12 @@ export class CodingController {
             ? { kind: "requirements", id: e.id }
             : merge
               ? { kind: "merge", id: e.id }
-              : undefined,
+              : ask
+                ? { kind: "ask", id: e.id, options: e.payload.options }
+                : undefined,
           plain,
         );
-        if (req || merge) {
+        if (req || merge || ask) {
           const receipt = sent as { message_id?: number } | undefined;
           if (
             !Number.isSafeInteger(receipt?.message_id) ||

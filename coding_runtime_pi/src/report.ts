@@ -1,71 +1,100 @@
 import { createHash } from "node:crypto";
 import type { Report } from "./types.js";
 
-/** One transport/storage contract, independent of UI presentation limits. */
+/**
+ * One transport and storage contract: the host stores reports in fixed-size fields. An ask is
+ * one short message to the owner with at most three buttons (the coding-loop specification).
+ */
 export const reportLimits = Object.freeze({
   document: 32000,
   summary: 4000,
-  question: 2000,
+  ask: 300,
+  options: 3,
+  /**
+   * One button label. Telegram's Bot API names no maximum for a button's text, but clients cut
+   * a label that does not fit its button; 40 characters on one line fit a full-width button
+   * on a phone, so the owner taps what they read (journal 192).
+   */
+  option: 40,
 });
-// Immutable evidence is paged separately from model-written report documents.
-// This admits the complete existing host patch bound without larger wire pages.
-export const referenceLimits = Object.freeze({ document: 500000 });
-/**
- * Characters in one read_document page. Every model call re-reads the whole conversation, so
- * a 300,000-character diff in 4,000-character pages cost about 75 calls to load (journal 167).
- */
-export const documentPageChars = 32000;
-export type ReportDocument = Report & { version: 1; hash: string };
+export type ReportDocument = Omit<Report, "detail"> & {
+  detail: string;
+  version: 1;
+  hash: string;
+};
+/** Validates a report; each refusal names the field and its bound so the model can fix it. */
 export function reportDocument(report: Report): ReportDocument {
   if (
-    !["learned", "plan", "question", "done", "review"].includes(report.kind) ||
-    typeof report.detail !== "string" ||
+    !["done", "review", "ask"].includes(report.kind) ||
     typeof report.summary !== "string" ||
+    (report.detail !== undefined && typeof report.detail !== "string") ||
     (report.kind === "review" &&
-      !["APPROVE", "REQUEST_CHANGES"].includes(report.verdict ?? ""))
+      !["APPROVE", "REQUEST_CHANGES"].includes(report.verdict ?? "")) ||
+    (report.kind !== "review" && report.verdict !== undefined)
   )
-    throw new Error("Invalid report kind, text or review verdict");
+    throw new Error(
+      "Use kind done (coder) or review with verdict APPROVE or REQUEST_CHANGES (reviewer), or kind ask to ask the owner",
+    );
+  const detail = report.detail ?? "";
+  const texts = [
+    report.summary,
+    detail,
+    report.ask ?? "",
+    ...(report.options ?? []),
+  ];
   // The host stores reports in Postgres, which refuses NUL and lone surrogates (journal 155).
   if (
-    Buffer.from(report.detail).toString() !== report.detail ||
-    Buffer.from(report.summary).toString() !== report.summary ||
-    /\u0000/.test(report.detail + report.summary)
+    texts.some((t) => Buffer.from(t).toString() !== t || t.includes("\u0000"))
   )
     throw new Error(
       "Report text must contain well-formed Unicode and no NUL characters; write \\u0000 as text, not as the character",
     );
-  if (!report.detail.trim() || report.detail.length > reportLimits.document)
+  if (!report.summary.trim()) throw new Error("summary must not be empty");
+  if (report.summary.length > reportLimits.summary)
     throw new Error(
-      `Report document must contain 1–${reportLimits.document} characters; preserve the complete scope.`,
+      `summary has ${report.summary.length} characters; shorten it to at most ${reportLimits.summary} and put the rest in detail`,
     );
-  if (!report.summary.trim() || report.summary.length > reportLimits.summary)
+  if (detail.length > reportLimits.document)
     throw new Error(
-      `Report status must contain 1–${reportLimits.summary} characters; full content belongs in detail.`,
+      `detail has ${detail.length} characters; shorten it to at most ${reportLimits.document}`,
     );
-  if (
-    report.kind === "question" &&
-    report.detail.length > reportLimits.question
-  )
-    throw new Error(`Question must fit ${reportLimits.question} characters.`);
+  if (report.kind === "ask") {
+    if (typeof report.ask !== "string" || !report.ask.trim())
+      throw new Error("An ask needs the question in ask");
+    if (report.ask.length > reportLimits.ask)
+      throw new Error(
+        `ask has ${report.ask.length} characters; shorten it to at most ${reportLimits.ask} and keep the detail in detail`,
+      );
+    if (
+      report.options !== undefined &&
+      (!Array.isArray(report.options) ||
+        report.options.length > reportLimits.options ||
+        report.options.some((o) => typeof o !== "string" || !o.trim()))
+    )
+      throw new Error(
+        `options must be at most ${reportLimits.options} non-empty answers the owner can tap`,
+      );
+    for (const [index, option] of (report.options ?? []).entries())
+      if (option.length > reportLimits.option || /\n/.test(option))
+        throw new Error(
+          `option ${index + 1} has ${option.length} characters; each option is one line of at most ${reportLimits.option} characters, as a button shows it in full; put the detail in ask or detail`,
+        );
+  } else {
+    if (report.ask !== undefined || report.options !== undefined)
+      throw new Error("ask and options belong to kind ask");
+    if (!detail.trim()) throw new Error("detail must not be empty");
+  }
   const body = {
     kind: report.kind,
     summary: report.summary,
-    detail: report.detail,
+    detail,
     ...(report.verdict ? { verdict: report.verdict } : {}),
+    ...(report.kind === "ask" ? { ask: report.ask } : {}),
+    ...(report.options?.length ? { options: report.options } : {}),
   };
   return {
     ...body,
     version: 1,
     hash: createHash("sha256").update(JSON.stringify(body)).digest("hex"),
   };
-}
-export type ReferenceDocument = {
-  id: string;
-  title: string;
-  text: string;
-  /** Available to consult, but not required reading before work or a verdict. */
-  optional?: boolean;
-};
-export function documentHash(text: string) {
-  return createHash("sha256").update(text).digest("hex");
 }

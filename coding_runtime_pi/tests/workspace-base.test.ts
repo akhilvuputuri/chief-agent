@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Workspace, localExecutor } from "../src/workspace.js";
 
-test("snapshots against the pinned base include changes the agent already committed", async () => {
+test("snapshots against the job's base include changes the agent already committed", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-base-"));
   const repo = join(root, "repo");
   await mkdir(repo);
@@ -32,12 +32,7 @@ test("snapshots against the pinned base include changes the agent already commit
     ["a.txt", "committed change\n"],
     ["b.txt", "uncommitted\n"],
   ]);
-  // Without the pin, the committed edit disappears into HEAD.
-  const head = await workspace.snapshot(execute, signal);
-  assert.deepEqual(
-    head.files.map((f) => f.path),
-    ["b.txt"],
-  );
+  // The base is always the job's commit: there is no snapshot against HEAD.
   await assert.rejects(
     workspace.snapshot(execute, signal, "HEAD"),
     /full commit SHA/,
@@ -96,7 +91,7 @@ test("a node_modules link never becomes part of the artifact", async () => {
   const execute = localExecutor(repo, join(root, "home"), () => {});
   const signal = new AbortController().signal;
   const workspace = await new Workspace(repo).initialize();
-  const artifact = await workspace.snapshot(execute, signal);
+  const artifact = await workspace.snapshot(execute, signal, base);
   assert.deepEqual(
     artifact.files.map((f) => f.path),
     ["a.txt"],
@@ -104,7 +99,7 @@ test("a node_modules link never becomes part of the artifact", async () => {
   assert.doesNotMatch(artifact.patch, /node_modules/);
   git("add", "-f", "node_modules");
   assert.deepEqual(
-    (await workspace.snapshot(execute, signal)).files.map((f) => f.path),
+    (await workspace.snapshot(execute, signal, base)).files.map((f) => f.path),
     ["a.txt"],
   );
   git("add", "-f", "pkg/node_modules");
@@ -117,7 +112,7 @@ test("a node_modules link never becomes part of the artifact", async () => {
   assert.doesNotMatch(committed.patch, /node_modules/);
   await symlink(root, join(repo, "other-link"));
   await assert.rejects(
-    workspace.snapshot(execute, signal),
+    workspace.snapshot(execute, signal, base),
     /Symlink|regular files/,
   );
 });
@@ -134,12 +129,14 @@ test("a real tracked node_modules file stays part of the artifact", async () => 
   await writeFile(join(repo, "fixture", "node_modules", "f.js"), "one\n");
   git("add", ".");
   git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD");
   await writeFile(join(repo, "fixture", "node_modules", "f.js"), "two\n");
   git("add", ".");
   const workspace = await new Workspace(repo).initialize();
   const artifact = await workspace.snapshot(
     localExecutor(repo, join(root, "home"), () => {}),
     new AbortController().signal,
+    base,
   );
   assert.deepEqual(
     artifact.files.map((f) => f.path),
@@ -171,15 +168,10 @@ test("a node_modules link the repository tracks is left as it is", async () => {
     artifact.files.map((f) => f.path),
     ["a.txt"],
   );
-  await workspace.removeDependencyLinks(execute, signal, base);
-  assert.throws(() => lstatSync(join(repo, "node_modules")));
+  // The snapshot leaves the links in place: the artifact simply never contains them.
+  assert.equal(lstatSync(join(repo, "node_modules")).isSymbolicLink(), true);
   assert.equal(
     lstatSync(join(repo, "fx", "node_modules")).isSymbolicLink(),
     true,
-  );
-  const again = await workspace.snapshot(execute, signal, base);
-  assert.deepEqual(
-    again.files.map((f) => f.path),
-    ["a.txt"],
   );
 });

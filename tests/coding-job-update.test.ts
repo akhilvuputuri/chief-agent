@@ -7,7 +7,6 @@ import { join } from "node:path";
 import { codingApi } from "../src/coding/api.js";
 import { runPiWorker, NativePiWorkerClient } from "../src/coding/pi-worker.js";
 import { server } from "../src/server.js";
-import { reviewDocumentReader } from "./helpers/pi-review-documents.js";
 import { CodingController } from "../src/coding/controller.js";
 import {
   CodingRequirements,
@@ -76,14 +75,7 @@ async function setup(
     patch: "",
     summary: "",
     files: [{ path: "src/a.ts", content: "kept\n" }],
-    piState: {
-      version: 1,
-      toolsUsed: 3,
-      phase,
-      reviewRound: 1,
-      sessionScope: session,
-      reviewCandidate: { hash: "b".repeat(64), checks: [] },
-    },
+    piState: { version: 1, phase, delivered: [] },
   };
   if (!options.waiting)
     await f.db.query(
@@ -198,7 +190,7 @@ test("a changed job with no approval stays unapproved", async (t) => {
   assert.equal(await requirements.approved(await row()), false);
 });
 
-test("changing the reviewer during review restarts its session and keeps the work", async (t) => {
+test("changing the reviewer during review keeps the work, the checkpoint and the job's sessions", async (t) => {
   const { f, row, update, id } = await setup(t);
   const before = await row();
   await approve(f.db, id, requirementScope(before));
@@ -206,9 +198,8 @@ test("changing the reviewer during review restarts its session and keeps the wor
   const after = await row();
   assert.equal(after.state, "paused");
   assert.equal(after.revision, before.revision);
-  assert.notEqual(after.checkpoint.piState.sessionScope, session);
-  assert.equal(after.checkpoint.piState.reviewRound, 2);
-  assert.deepEqual(after.checkpoint.files, before.checkpoint.files);
+  // Pi switches models inside a session as shipped; nothing restarts (journal 192).
+  assert.deepEqual(after.checkpoint, before.checkpoint);
   assert.equal(after.checkpoint.plan, before.checkpoint.plan);
   // Pi's own catalogue supplies each Claude model's window (journal 190).
   assert.equal(after.settings.contextWindows, undefined);
@@ -239,8 +230,7 @@ test("a stopped job moves to the current worker image and keeps its work and ses
   const after = await row();
   assert.equal(after.settings.image, settings.image);
   assert.equal(after.state, "paused");
-  assert.equal(after.checkpoint.piState.sessionScope, session);
-  assert.deepEqual(after.checkpoint.files, before.checkpoint.files);
+  assert.deepEqual(after.checkpoint, before.checkpoint);
   const notice = (
     await f.db.query(
       "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='settings:change'",
@@ -267,20 +257,6 @@ test("only a Pi job can change worker", async (t) => {
   );
   await assert.rejects(update({ upgradeWorker: true }), /Only a Pi coding job/);
   assert.equal((await row()).settings.image, before.settings.image);
-});
-
-test("the session restarts only when the model of the current step changes", async (t) => {
-  const building = await setup(t, "build");
-  await building.update({ reviewerModel: opus, limits: { ms: 60000 } });
-  const kept = await building.row();
-  assert.equal(kept.checkpoint.piState.sessionScope, session);
-  assert.equal(kept.settings.limits.ms, 60000);
-  assert.equal(kept.settings.limits.models, settings.limits.models);
-  await building.update({ coderModel: opus }, "coder");
-  assert.notEqual(
-    (await building.row()).checkpoint.piState.sessionScope,
-    session,
-  );
 });
 
 test("an identical retry is answered from its record and a reused key is refused", async (t) => {
@@ -315,46 +291,6 @@ test("a transiently paused job the owner changed is not retried automatically", 
   assert.equal((await row()).state, "paused");
 });
 
-test("a switched coder or reviewer does not inherit a report failure", async (t) => {
-  for (const [phase, field] of [
-    ["build", "coderModel"],
-    ["review", "reviewerModel"],
-  ] as const) {
-    const { f, row, update, id } = await setup(t, phase);
-    const before = await row();
-    await f.db.query(
-      "UPDATE coding_jobs SET checkpoint=$2::jsonb WHERE id=$1",
-      [
-        id,
-        JSON.stringify({
-          ...before.checkpoint,
-          piState: { ...before.checkpoint.piState, reportFailure: "Too long" },
-        }),
-      ],
-    );
-    await update({ [field]: opus });
-    const { piState } = (await row()).checkpoint;
-    assert.equal(piState.reportFailure, undefined);
-    assert.notEqual(piState.sessionScope, session);
-  }
-});
-
-test("a report failure stays when the current step's model is unchanged", async (t) => {
-  const { f, row, update, id } = await setup(t, "build");
-  const before = await row();
-  await f.db.query("UPDATE coding_jobs SET checkpoint=$2::jsonb WHERE id=$1", [
-    id,
-    JSON.stringify({
-      ...before.checkpoint,
-      piState: { ...before.checkpoint.piState, reportFailure: "Too long" },
-    }),
-  ]);
-  await update({ reviewerModel: opus });
-  const { piState } = (await row()).checkpoint;
-  assert.equal(piState.reportFailure, "Too long");
-  assert.equal(piState.sessionScope, session);
-});
-
 test("an inherited time limit does not block a model change", async (t) => {
   const { f, row, update, id } = await setup(t);
   const before = await row();
@@ -387,7 +323,7 @@ test("squad tool use counts toward the tool-call limit", async (t) => {
 
 test("a limit is refused when it cannot take effect", async (t) => {
   const { update } = await setup(t);
-  await assert.rejects(update({ limits: { tools: 2 } }), /already used/);
+  // A Pi worker no longer counts tool calls (journal 192); the squad's count is checked above.
   await assert.rejects(
     update({ limits: { ms: 14_400_000 } }),
     /most one attempt/,
@@ -441,7 +377,7 @@ test("a job update refuses active jobs, stale revisions, ineligible models and o
   assert.deepEqual((await row()).settings, before);
 });
 
-test("a worker reviews with the new reviewer in a fresh round after a switch", async (t) => {
+test("after a reviewer switch the review continues in the same reviewer session under the new model", async (t) => {
   const f = await fixture(t);
   (f.c as any).catalog = async () => [
     { id: opus, inputPrice: 0.1, outputPrice: 0.5, tools: true },
@@ -505,8 +441,6 @@ test("a worker reviews with the new reviewer in a fresh round after a switch", a
   );
   const plan =
     "Change sum.js subtraction to addition; preserve exported API; run checks.";
-  const oversized = "x".repeat(32001);
-  const readEvidence = reviewDocumentReader();
   const turns = new Map<string, number>();
   const reviewers: string[] = [];
   let switched = false;
@@ -516,18 +450,17 @@ test("a worker reviews with the new reviewer in a fresh round after a switch", a
     const phase =
       selected === settings.reviewerModel || selected === opus
         ? "review"
-        : system.includes("Current intent: build")
+        : system.includes("You are the coder")
           ? "build"
           : "plan";
     if (phase === "review") {
       reviewers.push(selected);
+      // Pi switches the model inside the reviewer's one session as shipped.
       if (switched)
         assert(
-          !JSON.stringify(input.messages).includes("x".repeat(1000)),
-          "the new reviewer must not continue the earlier session",
+          JSON.stringify(input.messages).includes("Still reading."),
+          "the new reviewer continues the reviewer session",
         );
-      const evidence = readEvidence(input, `review-${switched}`);
-      if (evidence) return evidence;
     }
     const count = turns.get(phase) ?? 0;
     turns.set(phase, count + 1);
@@ -560,17 +493,20 @@ test("a worker reviews with the new reviewer in a fresh round after a switch", a
                   detail: "Implemented; actual checks follow.",
                 },
               }
-          : count === 0
-            ? { name: "read", arguments: { path: "sum.js" } }
+          : !switched
+            ? undefined
             : {
                 name: "report",
                 arguments: {
                   kind: "review",
                   summary: "Reviewed",
-                  detail: switched ? "Addition is correct." : oversized,
+                  detail: "Addition is correct.",
                   verdict: "APPROVE",
                 },
               };
+    // The first reviewer ends in prose twice, so the job asks the owner.
+    if (!tool)
+      return { message: { role: "assistant", content: "Still reading." } };
     return {
       message: {
         role: "assistant",
@@ -635,9 +571,8 @@ test("a worker reviews with the new reviewer in a fresh round after a switch", a
   await f.c.tick();
   await f.c.tick();
   let paused = await f.row(started.id);
-  assert.equal(paused.state, "paused");
+  assert.equal(paused.state, "awaiting_input");
   assert.equal(paused.checkpoint.piState.phase, "review");
-  const round = paused.checkpoint.piState.reviewRound;
   const coderCalls = turns.get("build");
   await f.c.call("a", f.run, {
     operation: "coding_job_update",
@@ -648,7 +583,6 @@ test("a worker reviews with the new reviewer in a fresh round after a switch", a
     reviewerModel: opus,
   });
   paused = await f.row(started.id);
-  assert.equal(paused.checkpoint.piState.reviewRound, round + 1);
   await f.c.call("a", f.run, {
     operation: "coding_resume",
     id: paused.id,

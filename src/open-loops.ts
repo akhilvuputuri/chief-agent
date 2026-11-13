@@ -107,17 +107,19 @@ export async function openLoops(
                 : "waiting for Start but its card is not delivered yet; read coding_status before offering one"
             : j.state === "awaiting_input"
               ? "owner to answer the job's question"
-              : j.state === "paused"
-                ? "paused; offer to resume or start fresh"
-                : j.state === "failed"
-                  ? "failed; offer to retry or start fresh"
-                  : j.stage === "awaiting_merge_approval"
-                    ? j.merge_card === "open"
-                      ? "owner to choose Merge or Keep open on the merge card"
-                      : j.merge_card === "expired"
-                        ? "merge card expired; read coding_status before offering the owner anything"
-                        : "merge card not delivered yet; read coding_status before telling the owner to act"
-                    : "PR stopped for owner attention",
+              : j.state === "paused" && j.stage === "no_change"
+                ? "the coder found nothing to change; relay its summary; a message continues the job"
+                : j.state === "paused"
+                  ? "paused; offer to resume or start fresh"
+                  : j.state === "failed"
+                    ? "failed; offer to retry or start fresh"
+                    : j.stage === "awaiting_merge_approval"
+                      ? j.merge_card === "open"
+                        ? "owner to choose Merge or Keep open on the merge card"
+                        : j.merge_card === "expired"
+                          ? "merge card expired; read coding_status before offering the owner anything"
+                          : "merge card not delivered yet; read coding_status before telling the owner to act"
+                      : "PR stopped for owner attention",
         workerText:
           j.state === "awaiting_input" && j.question ? j.question : j.summary,
       }))

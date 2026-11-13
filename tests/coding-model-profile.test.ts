@@ -1,4 +1,3 @@
-import { reviewDocumentReader } from "./helpers/pi-review-documents.js";
 import { reportDocument } from "@chief-agent/pi-runtime/report";
 import { execFileSync } from "node:child_process";
 import {
@@ -181,7 +180,7 @@ test("Pi report documents bind checkpoint content and support the full escaped t
     patch: "\u0001".repeat(400000),
     summary: doc.summary,
     files: [],
-    piState: { version: 1, toolsUsed: 0, reportDocument: doc },
+    piState: { version: 1, delivered: [], reportDocument: doc },
   };
   assert(Buffer.byteLength(JSON.stringify(body)) > 800000);
   const app = server();
@@ -247,14 +246,14 @@ for (const {
   ownerReply = false,
 } of [
   { documentLength: 0, firstCallFailure: false },
-  // A reply to a job stopped in review returns it to a Start card; after Start the build
-  // runs afresh and reaches review (journal 191).
+  // A reply to a job stopped in review goes to its inbox; the coder gets it, then a review
+  // follows (journal 192; the Start card return of journal 191 no longer applies after Start).
   { documentLength: 0, firstCallFailure: false, ownerReply: true },
   { documentLength: 9357, firstCallFailure: false },
   { documentLength: 9357, firstCallFailure: true },
   { documentLength: 9357, firstCallFailure: false, reviewerQuestion: true },
 ])
-  test(`independent reviewer recovery preserves ${documentLength || "short"}-character documents (${ownerReply ? "owner reply, then Start" : reviewerQuestion ? "question" : firstCallFailure ? "before first tool" : "format"})`, async (t) => {
+  test(`independent reviewer recovery preserves ${documentLength || "short"}-character documents (${ownerReply ? "owner reply into the inbox, to the session that asked" : reviewerQuestion ? "question" : firstCallFailure ? "before first tool" : "format"})`, async (t) => {
     const f = await fixture(t);
     const root = await mkdtemp(join(tmpdir(), "pi-bridge-fixture-"));
     const source = join(root, "source");
@@ -322,7 +321,8 @@ for (const {
         )
         .slice(0, Math.abs(documentLength) || 62);
     let recovered = false;
-    const readEvidence = reviewDocumentReader();
+    let lastCoderInput: unknown;
+    let lastReviewerInput: unknown;
     const turns = new Map<string, number>();
     f.setGeneration((selected, input) => {
       const system =
@@ -340,16 +340,15 @@ for (const {
           },
         };
       const phase = selected === settings.reviewerModel ? "review" : "build";
+      if (phase === "build") lastCoderInput = input.messages;
+      else lastReviewerInput = input.messages;
       const rawCount = turns.get(phase) ?? 0;
       turns.set(phase, rawCount + 1);
       if (phase === "build")
         assert(
-          system.includes(
-            "host has verified that the owner started this exact request",
-          ),
+          String(input.messages[0].content).includes("Synthetic evidence"),
         );
-      let count = rawCount;
-      if (recovered && phase === "review" && !firstCallFailure) count++;
+      const count = rawCount;
       if (
         firstCallFailure &&
         !recovered &&
@@ -359,13 +358,6 @@ for (const {
         throw new ModelError("Synthetic provider failure before tools", true, {
           httpStatus: 503,
         });
-      if (phase === "review") {
-        const evidence = readEvidence(input, `review-${recovered}`);
-        if (evidence) {
-          turns.set(phase, rawCount);
-          return evidence;
-        }
-      }
       let tool: { name: string; arguments: any } | undefined;
       if (phase === "build" && count === 0)
         tool = {
@@ -384,28 +376,50 @@ for (const {
             detail: "Implemented approved behavior; actual checks follow.",
           },
         };
-      if (phase === "review" && count === 0) {
-        assert(system.includes("The approved scope is the owner's request"));
-        assert(!system.includes("No implementation approved"));
-        assert(system.includes("host validated the owner's Start"));
-        assert(system.includes(commit));
-        assert(system.includes("Synthetic evidence"));
+      const approve = {
+        name: "report",
+        arguments: {
+          kind: "review",
+          summary: "Reviewed",
+          detail: fullReview,
+          verdict: "APPROVE",
+        },
+      };
+      if (phase === "review" && recovered) {
+        // The same reviewer session, told that the previous box ended mid-review.
+        if (!ownerReply)
+          assert.match(
+            JSON.stringify(input.messages),
+            /The previous box ended before your review/,
+          );
+        tool = approve;
+      } else if (phase === "review" && count === 0) {
+        const first = String(input.messages.at(-1)?.content);
+        assert(
+          first.includes("against the owner's request in your instructions"),
+        );
+        assert(first.includes(commit));
+        assert(
+          String(input.messages[0].content).includes("Synthetic evidence"),
+        );
         tool = { name: "read", arguments: { path: "sum.js" } };
-      }
-      if (phase === "review" && count === 1)
-        tool = {
-          name: "report",
-          arguments: {
-            kind: reviewerQuestion ? "question" : "review",
-            summary: reviewerQuestion ? "Clarification required" : "Reviewed",
-            detail: reviewerQuestion
-              ? "Should zero inputs return zero?"
-              : recovered
-                ? fullReview
-                : "x".repeat(32001),
-            ...(reviewerQuestion ? {} : { verdict: "APPROVE" }),
-          },
-        };
+      } else if (phase === "review" && count === 1)
+        tool = reviewerQuestion
+          ? {
+              name: "report",
+              arguments: {
+                kind: "ask",
+                summary: "Clarification required",
+                ask: "Should zero inputs return zero?",
+              },
+            }
+          : firstCallFailure
+            ? approve
+            : // Over the storage bound: the tool says what to shorten, and Pi hands that back.
+              {
+                name: "report",
+                arguments: { ...approve.arguments, detail: "x".repeat(32001) },
+              };
       return {
         message: {
           role: "assistant",
@@ -473,13 +487,15 @@ for (const {
     await f.c.tick();
     await run();
     let paused = await f.row(started.id);
+    if (firstCallFailure) {
+      // Pi's own retry resent the failed call; the job went on to publication in one attempt.
+      assert.equal(paused.state, "publishing", paused.summary);
+      assert.equal(paused.result.review.findings, fullReview);
+      return;
+    }
     assert.equal(paused.checkpoint.piState.phase, "review");
-    assert.equal(
-      paused.checkpoint.piState.reviewCandidate.hash,
-      artifactHash(paused.checkpoint),
-    );
+    assert.equal(paused.state, "awaiting_input");
     if (reviewerQuestion) {
-      assert.equal(paused.state, "awaiting_input");
       assert.equal(paused.result.question, "Should zero inputs return zero?");
       await f.c.tick();
       const delivered: string[] = [];
@@ -496,11 +512,15 @@ for (const {
       return;
     }
     const coderCallsBeforeRecovery = turns.get("build");
-    assert.equal(paused.state, "paused");
+    // The bounded report was refused with its reason, then the reviewer ended in prose twice,
+    // so the job asked the owner instead of guessing a verdict.
+    assert.match(paused.question, /reviewer stopped without a result/);
     await f.c.tick();
     await f.c.tick();
     paused = await f.row(started.id);
     if (ownerReply) {
+      // After Start an owner message goes to the job's inbox (journal 192): the request and its
+      // Start stand, so no new card is needed, and the job continues with its files and sessions.
       const replied: any = await f.c.call("a", f.run, {
         operation: "coding_reply",
         id: paused.id,
@@ -508,40 +528,26 @@ for (const {
         requestKey: "owner-reply-in-review",
         message: "Also keep the export name",
       });
-      assert.equal(replied.state, "plan_ready");
-      const waiting = await f.row(paused.id);
-      // Files are kept; the review and session state is not.
-      assert.deepEqual(waiting.checkpoint.files, paused.checkpoint.files);
-      assert.equal(waiting.checkpoint.piState.phase, undefined);
-      assert.equal(waiting.checkpoint.piState.reviewCandidate, undefined);
-      assert.equal(waiting.checkpoint.piState.sessionScope, undefined);
-      let card = "";
-      let cardMessage = 0;
-      for (let i = 0; i < 10 && !card; i++)
-        await f.c.deliver(async (_owner, _target, _text, id) => {
-          const message_id = ++receipt;
-          if (id) {
-            card = id.id;
-            cardMessage = message_id;
-          }
-          return { message_id };
-        });
-      assert(card);
-      await f.c.requirements.confirm("a", card, "a", cardMessage);
+      assert.equal(replied.state, "queued");
+      const queued = await f.row(paused.id);
+      assert.deepEqual(queued.checkpoint, paused.checkpoint);
+      assert.equal(queued.context, paused.context);
       recovered = true;
       turns.set("build", 0);
       turns.set("review", 0);
       await f.c.tick();
       await run();
-      // The build ran again in a fresh session, then review approved it.
-      assert.equal(turns.get("build"), 2);
+      // The reviewer asked (it stopped without a result), so its own session gets the answer,
+      // and its approval follows; the coder is not run again.
+      const reviewerSaw = JSON.stringify(lastReviewerInput);
+      assert(reviewerSaw.includes("The owner's answer to your question"));
+      assert(reviewerSaw.includes("Also keep the export name"));
+      assert.equal(turns.get("build"), 0);
+      void lastCoderInput;
       const rebuilt = await f.row(started.id);
       assert.equal(rebuilt.state, "publishing", rebuilt.summary);
       assert.equal(rebuilt.result.review.verdict, "APPROVE");
-      assert.match(
-        rebuilt.context,
-        /Owner follow-up: Also keep the export name/,
-      );
+      assert.doesNotMatch(rebuilt.context, /export name/);
       return;
     }
     await f.c.call("a", f.run, {
@@ -554,26 +560,10 @@ for (const {
     turns.set("review", 0);
     await f.c.tick();
     const resuming = await f.row(paused.id);
-    const retained = resuming.checkpoint;
+    // A review state needs the started candidate.
     await assert.rejects(
-      f.c.save(resuming, {
-        ...retained,
-        piState: { ...retained.piState, sessionScope: "f".repeat(64) },
-      }),
-      /session/,
-    );
-    await assert.rejects(
-      f.c.save(resuming, {
-        ...retained,
-        piState: {
-          ...retained.piState,
-          reviewCandidate: {
-            ...retained.piState.reviewCandidate,
-            hash: "f".repeat(64),
-          },
-        },
-      }),
-      /candidate/,
+      f.c.save(resuming, { ...resuming.checkpoint, files: [] }),
+      /started Pi candidate/,
     );
     await run();
     assert.equal(turns.get("build"), coderCallsBeforeRecovery);
@@ -584,7 +574,7 @@ for (const {
     assert.equal(result.result.review.findings, fullReview);
     assert.equal(result.checkpoint.piState.reportDocument.detail, fullReview);
     assert.equal(result.checkpoint.piState.reportDocument.version, 1);
-    assert(result.result.checks.every((c: any) => c.exitCode === 0));
+    assert.deepEqual(result.result.checks, []);
     assert(
       result.checkpoint.files.some(
         (c: any) => c.path === "sum.js" && c.content.includes("a + b"),

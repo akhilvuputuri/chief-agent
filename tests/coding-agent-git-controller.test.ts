@@ -1,3 +1,5 @@
+import { seal } from "../src/secret-box.js";
+import { reportDocument } from "@chief-agent/pi-runtime/report";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -132,35 +134,37 @@ test("agent tokens are issued only to a running, approved implementation attempt
   const f = await fixture(t);
   const { c, tokens } = controller(f);
   const job = await runningJob(f, c, "agent-token");
-  const first = await c.githubToken(job);
-  const again = await c.githubToken(job);
-  assert.equal(first.token, again.token);
-  assert.equal(tokens.issued, 1);
-  for (const blocked of [
-    { ...job, mode: "plan" },
-    { ...job, state: "pr_ready" },
-    { ...job, settings: { ...job.settings, agentGit: undefined } },
-  ])
-    await assert.rejects(c.githubToken(blocked), /unavailable/);
+  // Before the host commits the publication there is no credential at all: the box needs
+  // none to clone or fetch the base (journal 192).
+  await assert.rejects(c.githubToken(job), /unavailable/);
+  await assert.rejects(
+    c.githubToken({ ...job, stage: "publishing" }),
+    /unavailable/,
+  );
+  assert.equal(tokens.issued, 0);
   const files = [{ path: "docs/a.md", content: "Agent change\n" }];
   const checkpoint = {
     plan: "Approved plan",
     patch: "fixture",
     summary: "Done",
     files,
-    piState: { version: 1, toolsUsed: 2 },
+    piState: {
+      version: 1,
+      delivered: [],
+      reportDocument: reportDocument({
+        kind: "review",
+        summary: "Approved",
+        detail: "Approved",
+        verdict: "APPROVE",
+      }),
+    },
   };
   const candidate = {
     kind: "candidate",
     summary: "Done",
     question: "",
     checkpoint,
-    checks: [
-      "kite ci",
-      "kite run check",
-      "kite run build",
-      "kite run format:check",
-    ].map((command) => ({ command, exitCode: 0, output: "ok" })),
+    // A Pi coder runs the tests itself; the host needs no check receipts (journal 192).
     review: {
       verdict: "APPROVE",
       findings: "Approved",
@@ -168,10 +172,55 @@ test("agent tokens are issued only to a running, approved implementation attempt
       patchHash: artifactHash(checkpoint as any),
     },
   };
+  // The host's own sealed record of the reviewer approving this exact candidate (journal 192).
+  const callId = randomUUID();
+  await f.db.query(
+    "INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,state,input,result_box) VALUES($1,$2,$3,'reviewer','fixture','complete',$4::jsonb,$5)",
+    [
+      callId,
+      job.id,
+      job.attempt_id,
+      JSON.stringify({ candidate: artifactHash(checkpoint as any) }),
+      seal(
+        (c as any).resultKey(),
+        JSON.stringify({
+          content: [
+            {
+              type: "tool_use",
+              name: "report",
+              input: { kind: "review", verdict: "APPROVE", detail: "Approved" },
+            },
+          ],
+        }),
+        (c as any).resultScope(job, callId),
+      ),
+    ],
+  );
   // An agent-git job must report the PR it published.
-  await assert.rejects(c.finish(job, candidate), /passing checks and review/);
+  await assert.rejects(
+    c.finish(job, candidate),
+    /independent review of the exact artifact/,
+  );
+  // The host commits the publication before the worker pushes (journal 192).
+  assert.deepEqual(await c.approvePublication(job, candidate), {
+    accepted: true,
+  });
+  const fresh = (
+    await f.db.query("SELECT * FROM coding_jobs WHERE id=$1", [job.id])
+  ).rows[0];
+  // After the commit the push credential is issued, once per attempt.
+  const first = await c.githubToken(fresh);
+  const again = await c.githubToken(fresh);
+  assert.equal(first.token, again.token);
+  assert.equal(tokens.issued, 1);
+  for (const blocked of [
+    { ...fresh, mode: "plan" },
+    { ...fresh, state: "pr_ready" },
+    { ...fresh, settings: { ...fresh.settings, agentGit: undefined } },
+  ])
+    await assert.rejects(c.githubToken(blocked), /unavailable/);
   const accepted = await c.finish(
-    job,
+    fresh,
     outcome.parse({
       ...candidate,
       published: {
@@ -182,13 +231,31 @@ test("agent tokens are issued only to a running, approved implementation attempt
   );
   assert.deepEqual(accepted, { accepted: true });
   assert.deepEqual(tokens.revoked, [first.token]);
+  // After finish, and in a new attempt, the old approval issues nothing.
+  const after = (
+    await f.db.query("SELECT * FROM coding_jobs WHERE id=$1", [job.id])
+  ).rows[0];
+  await assert.rejects(c.githubToken(after), /unavailable/);
+  await assert.rejects(
+    c.githubToken({ ...after, state: "running", attempt_id: randomUUID() }),
+    /unavailable/,
+  );
+  assert.equal(tokens.issued, 1);
 });
 
 test("tokens for attempts that stopped without finishing are revoked by the sweep", async (t) => {
   const f = await fixture(t);
   const { c, tokens } = controller(f);
   const job = await runningJob(f, c, "agent-sweep");
-  const issued = await c.githubToken(job);
+  // As after the host committed this attempt's publication.
+  await f.db.query("UPDATE coding_jobs SET stage='publishing' WHERE id=$1", [
+    job.id,
+  ]);
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,$2,'{}'::jsonb,'suppressed')",
+    [job.id, `${job.attempt_id}:publish-approved`],
+  );
+  const issued = await c.githubToken({ ...job, stage: "publishing" });
   await (c as any).sweepAgentTokens();
   assert.deepEqual(tokens.revoked, []);
   await f.db.query("UPDATE coding_jobs SET state='paused' WHERE id=$1", [

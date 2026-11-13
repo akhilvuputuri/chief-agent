@@ -250,10 +250,20 @@ test("questions, pauses, merge cards and stopped PRs say what the owner needs; w
     summary: "main moved",
     age: "1 hour",
   });
+  await f.job({
+    state: "paused",
+    stage: "no_change",
+    summary: "Nothing needed changing. It already adds.",
+    age: "30 minutes",
+  });
   const loops = await openLoops(f.db, "123", { coding: true });
   assert.deepEqual(
     loops!.coding!.map((j) => [j.awaiting, j.workerText]),
     [
+      [
+        "the coder found nothing to change; relay its summary; a message continues the job",
+        "Nothing needed changing. It already adds.",
+      ],
       ["PR stopped for owner attention", "main moved"],
       ["owner to choose Merge or Keep open on the merge card", "summary"],
       ["paused; offer to resume or start fresh", "sandbox restarted"],

@@ -7,7 +7,6 @@ import { join } from "node:path";
 import { codingApi } from "../src/coding/api.js";
 import { runPiWorker, NativePiWorkerClient } from "../src/coding/pi-worker.js";
 import { server } from "../src/server.js";
-import { reviewDocumentReader } from "./helpers/pi-review-documents.js";
 import { fixture, settings } from "./helpers/coding-fixture.js";
 
 async function reviewWith(t: any, command: string) {
@@ -71,7 +70,6 @@ async function reviewWith(t: any, command: string) {
   );
   const plan =
     "Change sum.js subtraction to addition; preserve exported API; run checks.";
-  const readEvidence = reviewDocumentReader();
   const turns = new Map<string, number>();
   f.setGeneration((selected, input) => {
     const system =
@@ -79,12 +77,10 @@ async function reviewWith(t: any, command: string) {
     const phase =
       selected === settings.reviewerModel
         ? "review"
-        : system.includes("Current intent: build")
+        : system.includes("You are the coder")
           ? "build"
           : "plan";
     if (phase === "review") {
-      const evidence = readEvidence(input, "review");
-      if (evidence) return evidence;
     }
     const count = turns.get(phase) ?? 0;
     turns.set(phase, count + 1);
@@ -191,10 +187,18 @@ async function reviewWith(t: any, command: string) {
   return { f, id: started.id as string, run };
 }
 
-test("a reviewer may run commands in its own checkout", async (t) => {
-  const { f, id, run } = await reviewWith(t, "node --version && ls");
+test("a reviewer may run commands and change files in its own copy, which never reach the candidate", async (t) => {
+  const { f, id, run } = await reviewWith(
+    t,
+    "node --version && ls && printf tampered > sum.js && git -c user.name=r -c user.email=r@x commit -qam reviewer",
+  );
   await run();
-  assert.equal((await f.row(id)).state, "publishing");
+  const job = await f.row(id);
+  assert.equal(job.state, "publishing");
+  assert.deepEqual(
+    job.result.checkpoint.files.map((file: any) => file.content),
+    ["export const sum = (a, b) => a + b;\n"],
+  );
 });
 
 test("a reviewer that changes the coder's checkout stops the attempt", async (t) => {

@@ -8,7 +8,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { TaskStore, planHash } from "../coding_runtime_pi/dist/index.js";
+import { TaskStore } from "../coding_runtime_pi/dist/index.js";
 const root = await mkdtemp(join(tmpdir(), "pi-cli-container-"));
 const work = join(root, "work");
 await mkdir(work);
@@ -28,30 +28,13 @@ const check =
 const task = {
   version: 1,
   id: randomUUID(),
-  revision: 1,
-  intent: "build",
+  role: "coder",
   status: "ready",
   workspace: "/fixture/work",
   base: git("rev-parse", "HEAD").toString().trim(),
-  objective: "Verify guarded standalone execution",
-  instructions: "Synthetic fixture only.",
-  ownerInstructions: "Synthetic fixture only.",
-  limits: { ms: 30000, models: 10, tools: 10 },
-  used: { models: 0, tools: 0, ms: 0 },
-  checkCommands: [check],
   summary: "Ready",
-  checks: [],
   events: [],
 };
-task.plan = {
-  revision: 1,
-  text: "Start a synthetic detached process; verify it is reaped before checks.",
-  hash: planHash(
-    task,
-    "Start a synthetic detached process; verify it is reaped before checks.",
-  ),
-};
-task.approved = { revision: 1, hash: task.plan.hash };
 await new TaskStore(join(root, "tasks"), key).save(task);
 /** Server-sent events as the Anthropic Messages API streams one response. */
 const event = (type, data) =>
@@ -104,27 +87,42 @@ function messagesStream(tool) {
   return out + event("message_stop", {});
 }
 let calls = 0;
+/** The tool result Pi sent back for one call, from the next request's messages. */
+const resultFor = (messages, id) =>
+  messages
+    .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
+    .find((b) => b.type === "tool_result" && b.tool_use_id === id);
 const server = createServer(async (req, res) => {
   // Pi's own Anthropic client: the Messages route, with the configured key as its API key.
   assert.equal(req.url, "/v1/messages?beta=true");
   assert.equal(req.headers["x-api-key"], "synthetic-api-key");
   let body = "";
   for await (const chunk of req) body += chunk;
-  assert.equal(JSON.parse(body).model, "claude-opus-5-5");
+  const request = JSON.parse(body);
+  assert.equal(request.model, "claude-opus-5-5");
   const current = calls++;
+  // The check runs as the session's own command after the daemon's command returned: the
+  // guard must already have reaped the daemon, so the check exits 0 (no error result).
+  if (current === 2) {
+    const checked = resultFor(request.messages, "toolu_synthetic_2");
+    assert(checked, "The check command's result is missing");
+    assert.notEqual(checked.is_error, true, JSON.stringify(checked.content));
+  }
   const tool =
     current === 0
       ? { name: "bash", arguments: { command } }
       : current === 1
-        ? {
-            name: "report",
-            arguments: {
-              kind: "done",
-              summary: "Synthetic command complete",
-              detail: "The configured actual check verifies daemon cleanup.",
-            },
-          }
-        : undefined;
+        ? { name: "bash", arguments: { command: check } }
+        : current === 2
+          ? {
+              name: "report",
+              arguments: {
+                kind: "done",
+                summary: "Synthetic command complete",
+                detail: "The session's own check verified daemon cleanup.",
+              },
+            }
+          : undefined;
   res.writeHead(200, { "content-type": "text/event-stream" });
   res.end(messagesStream(tool));
 });
@@ -148,6 +146,7 @@ try {
     "pi-runtime-standalone:test",
     "run",
     task.id,
+    "Verify guarded standalone execution",
     "--state",
     "/fixture",
     "--local-execution",
@@ -163,13 +162,12 @@ try {
   });
   const completed = JSON.parse(result.stdout);
   assert.equal(completed.status, "completed", completed.summary);
-  assert.equal(completed.checks[0].exitCode, 0);
   assert.equal(completed.report.kind, "done");
   assert.equal(completed.report.version, 1);
-  // A settled valid report completes without an extra model continuation.
-  assert.equal(calls, 2);
+  // A valid report ends the run through Pi's early termination: no extra model call.
+  assert.equal(calls, 3);
   console.log(
-    "Actual standalone guarded CLI: detached process reaped before real check; zero external model calls.",
+    "Actual standalone guarded CLI: detached process reaped before the next command; zero external model calls.",
   );
 } finally {
   await new Promise((resolve) => server.close(resolve));

@@ -35,18 +35,27 @@ export function protectedMergePath(path: string) {
     )
   );
 }
-export function approvedArtifact(result: Outcome, reviewerModel: string) {
+/**
+ * The recorded candidate is the reviewed artifact. A Pi coder runs the tests itself and
+ * GitHub CI checks the PR, so only the legacy runtimes also need sandbox check receipts
+ * (journal 192); the host's reviewer proof is checked beside this in every case.
+ */
+export function approvedArtifact(
+  result: Outcome,
+  settings: { reviewerModel: string; runtime?: string },
+) {
   const hash = artifactHash(result.checkpoint);
   return (
     result.kind === "candidate" &&
     result.review?.verdict === "APPROVE" &&
-    result.review.model === reviewerModel &&
+    result.review.model === settings.reviewerModel &&
     result.review.patchHash === hash &&
-    ["check", "build", "format:check"].every((script) =>
-      result.checks.some(
-        (c) => c.command === `kite run ${script}` && c.exitCode === 0,
-      ),
-    )
+    (settings.runtime === "pi" ||
+      ["check", "build", "format:check"].every((script) =>
+        result.checks.some(
+          (c) => c.command === `kite run ${script}` && c.exitCode === 0,
+        ),
+      ))
   );
 }
 export type PrInspection = {

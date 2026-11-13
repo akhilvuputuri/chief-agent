@@ -4,6 +4,8 @@ import { z } from "zod";
 import { MAX_OUTPUT_TOKENS } from "../model.js";
 import { reportLimits, reportDocument } from "@chief-agent/pi-runtime/report";
 
+/** The header a reviewer request names its round's candidate in (journal 192). */
+export const candidateHeader = "x-chief-candidate";
 const id = z.string().uuid();
 export const codingStart = z
   .object({
@@ -95,59 +97,59 @@ export const checkpoint = z
     summary: z.string().max(4000).default(""),
     squadState: squadState.optional(),
     runtimeMemory: runtimeMemory.optional(),
+    /** A Pi job's state between attempts (journal 192); the sessions themselves are stored apart. */
     piState: z
       .object({
         version: z.literal(1),
-        toolsUsed: z.number().int().min(0).max(5000),
         phase: z.enum(["build", "review"]).optional(),
-        reviewRound: z.number().int().min(1).max(1000).optional(),
-        rejectedCandidate: z
-          .string()
-          .regex(/^[a-f0-9]{64}$/)
-          .optional(),
-        reviewCandidate: z
+        /** Inbox events already in the coder's session. */
+        delivered: z.array(z.string().uuid()).default([]),
+        /** The candidate the reviewer last judged, so the next round reads what changed since. */
+        reviewed: z
           .object({
             hash: z.string().regex(/^[a-f0-9]{64}$/),
-            checks: z
-              .array(
-                z
-                  .object({
-                    command: z.string().max(100),
-                    exitCode: z.literal(0),
-                    output: z.string().max(8000),
-                  })
-                  .strict(),
-              )
-              .max(4),
+            base: z.string().regex(/^[a-f0-9]{40}$/),
+            patch: z.string().max(10_000_000),
+            verdict: z.enum(["APPROVE", "REQUEST_CHANGES"]).optional(),
+            /** A hash of that round's findings: the owner decides only when they repeat. */
+            findings: z
+              .string()
+              .regex(/^[a-f0-9]{64}$/)
+              .optional(),
           })
           .strict()
           .optional(),
-        sessionScope: z
-          .string()
-          .regex(/^[a-f0-9]{64}$/)
-          .optional(),
-        scopeIdentity: z
-          .string()
-          .regex(/^[a-f0-9]{64}$/)
-          .optional(),
-        findings: z.string().max(reportLimits.document).optional(),
-        /** Untrusted merge-request feedback for one owner-merge repair round. */
-        mrFeedback: z
+        /**
+         * Where a new box continues (journal 192): the coder finished this candidate and it
+         * waits for review, or the reviewer approved it and it waits to be finished.
+         */
+        next: z
           .object({
-            round: z.number().int().min(1).max(3),
-            text: z.string().min(1).max(reportLimits.document),
+            step: z.enum(["review", "finish"]),
+            hash: z.string().regex(/^[a-f0-9]{64}$/),
           })
           .strict()
           .optional(),
-        reportFailure: z.string().max(500).optional(),
         reportDocument: z
           .object({
             version: z.literal(1),
             hash: z.string().regex(/^[a-f0-9]{64}$/),
-            kind: z.enum(["learned", "plan", "question", "done", "review"]),
+            kind: z.enum(["done", "review", "ask"]),
             summary: z.string().max(reportLimits.summary),
             detail: z.string().max(reportLimits.document),
             verdict: z.enum(["APPROVE", "REQUEST_CHANGES"]).optional(),
+            ask: z.string().max(reportLimits.ask).optional(),
+            options: z
+              .array(
+                z
+                  .string()
+                  .min(1)
+                  .max(reportLimits.option)
+                  // One line, as a button shows it.
+                  .regex(/^[^\n\r]*$/),
+              )
+              .max(reportLimits.options)
+              .optional(),
           })
           .strict()
           .refine((d) => {
@@ -177,10 +179,32 @@ export const checkpoint = z
   .strict();
 export const outcome = z
   .object({
-    kind: z.enum(["awaiting_input", "candidate", "paused", "failed"]),
+    /** `no_change`: the coder found nothing to change; the job stops with its summary. */
+    kind: z.enum([
+      "awaiting_input",
+      "candidate",
+      "paused",
+      "failed",
+      "no_change",
+    ]),
     summary: z.string().min(1).max(4000),
     question: z.string().max(2000).default(""),
+    /** Answers the owner can tap for a Pi ask (journal 192). */
+    options: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(reportLimits.option)
+          // One line, as a button shows it.
+          .regex(/^[^\n\r]*$/),
+      )
+      .max(reportLimits.options)
+      .optional(),
+    /** Which session asked the question, so the owner's answer goes back to it. */
+    askedBy: z.enum(["coder", "reviewer"]).optional(),
     checkpoint,
+    /** Receipts from the legacy runtimes; a Pi coder runs the tests itself (journal 192). */
     checks: z
       .array(
         z

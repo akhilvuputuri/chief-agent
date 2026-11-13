@@ -1,12 +1,6 @@
-import { reviewDocumentReader } from "./helpers/pi-review-documents.js";
-import { documentPageChars } from "@chief-agent/pi-runtime";
 import { reportDocument } from "@chief-agent/pi-runtime/report";
 import { execFileSync } from "node:child_process";
-import {
-  runPiWorker,
-  NativePiWorkerClient,
-  piReviewInstructions,
-} from "../src/coding/pi-worker.js";
+import { runPiWorker, NativePiWorkerClient } from "../src/coding/pi-worker.js";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, generateKeyPairSync } from "node:crypto";
@@ -143,27 +137,6 @@ test("a Pi default retains legacy automation support without granting it to Pi j
   assert.equal(initialized, 1);
   assert.equal(pi.autoMerge, false);
 });
-test("Pi review prompt keeps the owner's whole request as the scope, with no plan", () => {
-  // No cap on the owner's request (journal 191): a long context reaches the reviewer whole.
-  const context = "c".repeat(40000);
-  const instructions = piReviewInstructions({
-    candidateHash: "a".repeat(64),
-    baseSha: base,
-    fileCount: 100,
-    context,
-    checks: [
-      "kite ci",
-      "kite run check",
-      "kite run build",
-      "kite run format:check",
-    ].map((command) => ({ command, exitCode: 0, output: "r".repeat(32000) })),
-  });
-  assert(instructions.includes(context));
-  assert(instructions.includes("there is no separate plan"));
-  assert(!/approved plan/i.test(instructions));
-  assert(instructions.includes("Changed artifact file count: 100"));
-  assert(instructions.includes(base));
-});
 for (const { documentLength, terminalRecovery } of [
   ...[0, 9357, 32000, -32000].map((documentLength) => ({
     documentLength,
@@ -233,186 +206,147 @@ for (const { documentLength, terminalRecovery } of [
           documentLength < 0 ? "界\n" : " Evidence retained.",
         )
         .slice(0, Math.abs(documentLength) || 62);
-    // The repair reads the earlier findings first: one 9,357-character page.
-    const findingsPages = 1;
     const turns = new Map<string, number>();
-    const reviewed = new Map<string, number>();
-    const readEvidence = reviewDocumentReader();
     let laterRounds = 0;
     const recoveredPhases = new Set<string>();
+    // The second review round reads what changed (journal 192): one coder session, one
+    // reviewer session, findings into the coder's session.
+    let round = 0;
     f.setGeneration((selected, input) => {
-      const system =
-        input.messages.find((m: any) => m.role === "system")?.content ?? "";
-      const phase =
-        selected === settings.reviewerModel
-          ? "review"
-          : system.includes("review_findings:")
-            ? "repair"
-            : "build";
+      const all = JSON.stringify(input.messages);
+      const phase = selected === settings.reviewerModel ? "review" : "build";
       if (terminalRecovery && !recoveredPhases.has(phase)) {
         recoveredPhases.add(phase);
         throw new ModelError("Synthetic terminal provider failure", true, {
           httpStatus: 504,
         });
       }
-      const reviewKey =
-        phase === "review"
-          ? (system.match(/exact candidate: ([a-f0-9]{64})/)?.[1] ?? "review")
-          : phase;
-      if (phase === "review" && !reviewed.has(reviewKey))
-        reviewed.set(reviewKey, reviewed.size + 1);
-      if (phase === "review") {
-        const evidence = readEvidence(input, reviewKey);
-        if (evidence) return evidence;
-      }
-      const rawCount = turns.get(reviewKey) ?? 0;
-      turns.set(reviewKey, rawCount + 1);
-      const requiredPages = phase === "repair" ? findingsPages : 0;
-      const reading = rawCount < requiredPages;
-      if (phase === "build" || phase === "repair")
-        assert(
-          system.includes(
-            "host has verified that the owner started this exact request",
-          ),
-        );
-      // The review-repair scenario builds a larger change, so its repair is a small part of it.
-      const larger = documentLength === 9357 && phase === "build" ? 1 : 0;
-      const count = rawCount - requiredPages - larger;
+      const count = turns.get(phase) ?? 0;
+      turns.set(phase, count + 1);
+      const repairing = phase === "build" && all.includes("requested changes");
       let tool: { name: string; arguments: any } | undefined;
-      if (larger && count === -1 && !reading)
-        tool = {
-          name: "write",
-          arguments: {
-            path: "notes.txt",
-            // Large enough that the complete diff spans two pages, and small enough
-            // for this synthetic model's 32,000-token window.
-            content: Array.from(
-              { length: 1100 },
-              (_, i) => `Synthetic supporting text, line ${i}.\n`,
-            ).join(""),
-          },
-        };
-      if (phase === "build" && count === 0)
-        tool = {
-          name: "edit",
-          arguments: {
-            path: "sum.js",
-            edits: [
-              {
-                oldText: "a - b",
-                newText: documentLength === 9357 ? "(a + b) || 0" : "a + b",
-              },
-            ],
-          },
-        };
-      if (phase === "repair" && count === 0)
-        tool = {
-          name: "edit",
-          arguments: {
-            path: "sum.js",
-            edits: [{ oldText: "(a + b) || 0", newText: "a + b" }],
-          },
-        };
-      if ((phase === "build" || phase === "repair") && count === 1)
-        tool = {
+      if (phase === "build") {
+        // The owner's request is in the coder's system prompt, whole, so compaction keeps it.
+        assert(
+          String(input.messages[0].content).includes("Synthetic evidence"),
+        );
+        const steps =
+          documentLength === 9357
+            ? [
+                {
+                  name: "write",
+                  arguments: {
+                    path: "notes.txt",
+                    content: Array.from(
+                      { length: 1100 },
+                      (_, i) => `Synthetic supporting text, line ${i}.\n`,
+                    ).join(""),
+                  },
+                },
+                {
+                  name: "edit",
+                  arguments: {
+                    path: "sum.js",
+                    edits: [{ oldText: "a - b", newText: "(a + b) || 0" }],
+                  },
+                },
+              ]
+            : [
+                {
+                  name: "edit",
+                  arguments: {
+                    path: "sum.js",
+                    edits: [{ oldText: "a - b", newText: "a + b" }],
+                  },
+                },
+              ];
+        const done = {
           name: "report",
           arguments: {
             kind: "done",
             summary: "Addition fixed",
-            detail: "Implemented approved behavior; actual checks follow.",
+            detail: "Implemented the request and ran the tests.",
           },
         };
-      if (phase === "review" && count === 0) {
-        const delivered = (id: string) =>
-          input.messages
-            .filter((m: any) => m.role === "tool")
-            .map((m: any) => {
-              try {
-                return JSON.parse(m.content);
-              } catch {
-                return null;
+        if (repairing) {
+          assert(all.startsWith('[{"role":"system"'));
+          assert.match(all, /Remove the \|\| 0 fallback/);
+          tool = !all.includes('"newText\\":\\"a + b\\"')
+            ? {
+                name: "edit",
+                arguments: {
+                  path: "sum.js",
+                  edits: [{ oldText: "(a + b) || 0", newText: "a + b" }],
+                },
               }
-            })
-            .filter((m: any) => m?.id === id)
-            .map((m: any) => m.text)
-            .join("");
-        if (documentLength === 9357 && reviewed.get(reviewKey) === 2) {
-          // The second round reads what changed since the first, not the whole change again.
-          laterRounds++;
-          assert(system.includes("This is review round 2."));
-          assert.match(system, /candidate_diff: [^\n]*; optional reference/);
-          assert.match(
-            delivered("review_delta"),
-            /-export const sum = \(a, b\) => \(a \+ b\) \|\| 0;\n\+export const sum = \(a, b\) => a \+ b;/,
-          );
-          assert(!delivered("review_delta").includes("notes.txt"));
-          // The verdict follows without re-reading the complete diff.
-          assert.equal(delivered("candidate_diff"), "");
-          assert(system.includes("first judge it yourself"));
-          assert(
-            delivered("previous_findings").startsWith(
-              "Remove the || 0 fallback",
-            ),
-          );
-        } else {
-          assert(!system.includes("review_delta"));
-          assert(!system.includes("optional reference"));
-          assert(delivered("candidate_diff").includes("sum.js"));
-          if (documentLength === 9357) {
-            // Every page of a multi-page diff arrived, in 32,000-character pages.
-            assert(delivered("candidate_diff").length > documentPageChars);
-            assert(delivered("candidate_diff").includes("line 1099."));
+            : done;
+        } else tool = steps[count] ?? done;
+      } else {
+        const last = input.messages.at(-1);
+        if (last?.role === "user") {
+          round++;
+          if (round === 2) {
+            laterRounds++;
+            // The same reviewer session, told to read only what changed.
+            assert.match(all, /Remove the \|\| 0 fallback/);
+            assert.match(last.content, /git diff reviewed candidate/);
+          } else {
+            assert.match(last.content, /git diff [a-f0-9]{40} candidate/);
+            assert(last.content.includes(commit));
+            assert(
+              String(input.messages[0].content).includes("Synthetic evidence"),
+            );
+            assert.match(
+              last.content,
+              /^Candidate under review: [a-f0-9]{64}$/m,
+            );
           }
-        }
-        assert(system.includes("The approved scope is the owner's request"));
-        assert(!system.includes("No implementation approved"));
-        assert(system.includes("host validated the owner's Start"));
-        assert(system.includes(commit));
-        assert(system.includes("Synthetic evidence"));
-        tool = { name: "read", arguments: { path: "sum.js" } };
-      }
-      if (phase === "review" && count === 1)
-        tool = {
-          name: "report",
-          arguments: {
-            kind: "review",
-            summary: "Reviewed",
-            detail:
-              documentLength === 9357 && reviewed.get(reviewKey) === 1
+          tool = {
+            name: "bash",
+            arguments: {
+              command:
+                round === 2
+                  ? "git diff reviewed candidate"
+                  : `git diff ${commit} candidate -- sum.js`,
+            },
+          };
+        } else {
+          if (round === 2)
+            assert.match(
+              all,
+              /-export const sum = \(a, b\) => \(a \+ b\) \|\| 0;\\n\+export const sum = \(a, b\) => a \+ b;/,
+            );
+          const changes = documentLength === 9357 && round === 1;
+          tool = {
+            name: "report",
+            arguments: {
+              kind: "review",
+              summary: "Reviewed",
+              detail: changes
                 ? "Remove the || 0 fallback; preserve normal addition including NaN. ".padEnd(
                     9357,
                     "Keep complete approved scope. ",
                   )
                 : fullReview,
-            verdict:
-              documentLength === 9357 && reviewed.get(reviewKey) === 1
-                ? "REQUEST_CHANGES"
-                : "APPROVE",
-          },
-        };
-      if (reading)
-        tool = {
-          name: "read_document",
-          arguments: { id: "review_findings", page: rawCount },
-        };
+              verdict: changes ? "REQUEST_CHANGES" : "APPROVE",
+            },
+          };
+        }
+      }
       return {
         message: {
           role: "assistant",
-          content: tool ? null : "Finished.",
-          ...(tool
-            ? {
-                tool_calls: [
-                  {
-                    id: `${phase}-${count}`,
-                    type: "function",
-                    function: {
-                      name: tool.name,
-                      arguments: JSON.stringify(tool.arguments),
-                    },
-                  },
-                ],
-              }
-            : {}),
+          content: null,
+          tool_calls: [
+            {
+              id: `${phase}-${count}`,
+              type: "function",
+              function: {
+                name: tool.name,
+                arguments: JSON.stringify(tool.arguments),
+              },
+            },
+          ],
         },
       };
     });
@@ -469,13 +403,11 @@ for (const { documentLength, terminalRecovery } of [
     assert.equal(result.result.review.findings, fullReview);
     assert.equal(result.checkpoint.piState.reportDocument.detail, fullReview);
     assert.equal(result.checkpoint.piState.reportDocument.version, 1);
-    assert.equal(
-      result.checkpoint.piState.reviewRound,
-      documentLength === 9357 ? 2 : 1,
-    );
+    assert.equal(result.checkpoint.piState.phase, "review");
     if (documentLength === 9357)
       assert(!result.checkpoint.files[0].content.includes("|| 0"));
-    assert(result.result.checks.every((c: any) => c.exitCode === 0));
+    // The coder ran the tests itself; the host ran none and needs no receipts.
+    assert.deepEqual(result.result.checks, []);
     assert(
       result.checkpoint.files.some(
         (c: any) => c.path === "sum.js" && c.content.includes("a + b"),
@@ -511,7 +443,7 @@ for (const { documentLength, terminalRecovery } of [
       );
     }
   });
-test("replacement Pi worker retains acknowledged history across a new sandbox path", async (t) => {
+test("a replacement Pi worker continues the stored session at the same fixed path", async (t) => {
   const f = await fixture(t);
   const root = await mkdtemp(join(tmpdir(), "pi-worker-recovery-"));
   const source = join(root, "source");
@@ -623,9 +555,9 @@ test("replacement Pi worker retains acknowledged history across a new sandbox pa
                 function: {
                   name: "report",
                   arguments: JSON.stringify({
-                    kind: "question",
+                    kind: "ask",
                     summary: "Recovered inspection",
-                    detail: "Should the observed marker stay as it is?",
+                    ask: "Should the observed marker stay as it is?",
                   }),
                 },
               },
@@ -638,7 +570,8 @@ test("replacement Pi worker retains acknowledged history across a new sandbox pa
   await run();
   assert.equal((await f.row(started.id)).state, "awaiting_input");
   assert(recovered);
-  assert.notEqual(directories[0], directories[1]);
+  // The same path in every box, so the restored session's paths still hold (journal 192).
+  assert.equal(directories[0], directories[1]);
   const entries = await f.db.query(
     "SELECT payload->>'index' AS index FROM coding_events WHERE job_id=$1 AND payload->>'kind'='pi_session'",
     [started.id],

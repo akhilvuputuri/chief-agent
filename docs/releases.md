@@ -1,7 +1,16 @@
+## One Pi session per coding job (13 November 2026)
+
+- **Code.** A coding job keeps one Pi session for the coder and one for the reviewer, restored at a fixed working path when the job continues in a new box. The coder runs the tests itself; the host's check stage after each "done" and the check-repair path are deleted, and GitHub CI on the pull request is the independent check. The reviewer works in a clean clone of the coder's commits with the installed dependencies copied in, reads the diff with git, and continues its own session on later rounds. Review findings, owner follow-ups, answers, CI failures and PR feedback reach the coder as inbox messages labelled by source, at its next turn; a follow-up never needs a new Start and never changes the approved request. A question to the owner is a short ask with up to three buttons. Deleted from the worker: our compaction and stall detector (Pi's own compaction and cache warming run with Pi's defaults), the report-only final phase, the per-run time, model and tool allocations, the documents and `read_document`, the worker's git timeouts and the session-entry cap. The reviewer still cannot change the candidate, and the host still refuses to publish without a sealed reviewer approval of the exact change. No migration or Compose change.
+- **Interim.** Until the next stage, a real conflict with main keeps the coder's session but clears its files, so the change is redone.
+- **Why.** In job `9600af57` each repair spent 8 to 17 minutes re-reading before its first edit and each review round began cold. See [journal 192](journey/192-one-session-per-job.md) and [the design](coding-simple-loop.md).
+- **Deployment.** Host and worker change together; a worker image built from this merge is pinned right after. Not yet released.
+
 ## Worker image for the go gate (13 November 2026)
 
 - **Configuration.** New coding jobs pin worker image `sha256:dfbc5b19…`, built from `9e4f36f` (run 43306397865). It carries the worker side of [journal 191](journey/191-go-gate-no-planner.md): no planner, plan check or plan repair, and a plan-mode assignment is refused. `previousImages` stays empty: the previous image expects the planning flow this gateway no longer starts, and no coding job is open on it. No code, migration or Compose change.
 - **Deployment.** Not yet recorded as live; a dated note follows on release.
+
+> **Update, 13 November 2026:** merged as `dd43a7a` (PR 484); release run 43308306271 succeeded, the gateway was healthy at `dd43a7a` and the server's `config/coding-pi.json` carried `sha256:dfbc5b19…`. No coding job has run on it.
 
 ## Coding jobs start at a Start card, with no planner (13 November 2026)
 

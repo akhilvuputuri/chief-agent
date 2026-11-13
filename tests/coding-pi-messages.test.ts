@@ -13,6 +13,7 @@ import {
   TaskStore,
   anthropicModel,
   localExecutor,
+  reportReminder,
 } from "@chief-agent/pi-runtime";
 import { AnthropicMessagesGateway, anthropicUsage } from "../src/anthropic.js";
 import { GATEWAY_RETRY } from "../src/coding/pi-worker.js";
@@ -425,6 +426,74 @@ test("the host refuses anything Pi does not send, before any call", async (t) =>
           { role: "user", content: "x", container: { id: "container_1" } },
           "messages_field_refused",
         ],
+        // A key Pi never writes on a block of an allowed type.
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "x",
+                citations: [{ type: "web_search_result_location" }],
+              },
+            ],
+          },
+          "content_field_refused",
+        ],
+        [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_1",
+                name: "read",
+                input: {},
+                caller: { type: "code_execution_20260120" },
+              },
+            ],
+          },
+          "content_field_refused",
+        ],
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: "image/png",
+                  data: "AA==",
+                  url: "https://example.invalid/i.png",
+                },
+              },
+            ],
+          },
+          "content_field_refused",
+        ],
+        [
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_1",
+                content: [
+                  {
+                    type: "text",
+                    text: "x",
+                    cache_control: { type: "ephemeral" },
+                  },
+                ],
+              },
+            ],
+          },
+          "content_field_refused",
+        ],
+        // An inherited property name is not a role.
+        [{ role: "constructor", content: "x" }, "messages_request_invalid"],
+        [{ role: "__proto__", content: "x" }, "messages_request_invalid"],
       ] as [Record<string, unknown>, string][]
     ).map(
       ([message, reason]) =>
@@ -443,6 +512,10 @@ test("the host refuses anything Pi does not send, before any call", async (t) =>
         ],
       },
       "content_block_refused",
+    ],
+    [
+      { system: [{ type: "text", text: "x", citations: [] }] },
+      "content_field_refused",
     ],
     [
       {
@@ -670,8 +743,6 @@ async function throughHost(
     workspaceId?: string;
     /** A small window makes Pi compact. */
     contextWindow?: number;
-    /** After the plan, approve it and run the build phase too. */
-    build?: boolean;
   } = {},
 ) {
   const upstream: { headers: Record<string, unknown>; body: any }[] = [];
@@ -775,23 +846,17 @@ async function throughHost(
         ? { retry: { maxRetries: 8, baseDelayMs: 200 } }
         : {}),
     }),
-    ...(options.build
-      ? {
-          executor: (task: { workspace: string }) =>
-            localExecutor(task.workspace, join(root, "home")),
-        }
-      : {}),
+    executor: (task: { workspace: string }) =>
+      localExecutor(task.workspace, join(root, "home")),
   });
   const task = await runtime.start({
     workspace,
-    objective: "Plan the synthetic fix",
-    ...(options.build ? { checks: ["node --check sum.js"] } : {}),
+    role: "coder",
+    base: execFileSync("git", ["-C", workspace, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim(),
   });
-  let result = await runtime.run(task.id);
-  if (options.build && result.status === "waiting_approval") {
-    await runtime.approve(task.id, result.plan!.revision, result.plan!.hash);
-    result = await runtime.run(task.id);
-  }
+  const result = await runtime.run(task.id, "Fix the synthetic sum");
   for (let i = 0; i < 200; i++) {
     if (!(await f.row(job.id)).model_busy) break;
     await delay(10);
@@ -809,8 +874,8 @@ const sse = (res: ServerResponse, turn: FakeTurn) => {
   res.writeHead(200, { "content-type": "text/event-stream" });
   res.end(messagesStream(turn));
 };
-const planReport = toolUse("toolu_report", "report", {
-  kind: "plan",
+const doneReport = toolUse("toolu_report", "report", {
+  kind: "done",
   summary: "Fix café sum",
   detail: "Use addition in sum.js and check sum(2,3)=5.",
 });
@@ -829,7 +894,7 @@ test("through the host, Pi resends the first response's content blocks byte for 
       id: "msg_second",
       content: [
         { type: "thinking", thinking: "Summary", signature: "c2Vjb25k" },
-        planReport,
+        doneReport,
       ],
     },
   ];
@@ -837,7 +902,7 @@ test("through the host, Pi resends the first response's content blocks byte for 
     t,
     (n, _body, res) => sse(res, turns[n - 1]!),
   );
-  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(result.status, "completed", result.summary);
   assert.equal(upstream.length, 2);
   // The second request carries the first response's blocks exactly as Anthropic sent them.
   const replayed = upstream[1]!.body.messages.filter(
@@ -892,12 +957,12 @@ test("a 429 mid-session is retried by Pi's stock retry and the session carries o
         content: [
           n === 1
             ? toolUse("toolu_read", "read", { path: "sum.js" })
-            : planReport,
+            : doneReport,
         ],
       });
     },
   );
-  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(result.status, "completed", result.summary);
   assert.equal(upstream.length, 3);
   // The retry is the same request: the failed call never entered the session.
   assert.deepEqual(upstream[2]!.body.messages, upstream[1]!.body.messages);
@@ -929,12 +994,12 @@ test("an image the model reads reaches Anthropic as an image block", async (t) =
         content: [
           n === 1
             ? toolUse("toolu_img", "read", { path: "pixel.png" })
-            : planReport,
+            : doneReport,
         ],
       }),
     { "pixel.png": png },
   );
-  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(result.status, "completed", result.summary);
   const results = upstream[1]!.body.messages.flatMap((m: any) =>
     Array.isArray(m.content)
       ? m.content.filter((b: any) => b.type === "tool_result")
@@ -1006,13 +1071,13 @@ test("a body field the SDK would turn into a header never reaches Anthropic, and
         content: [
           n === 1
             ? toolUse("toolu_read", "read", { path: "sum.js" })
-            : planReport,
+            : doneReport,
         ],
       }),
     {},
     { workspaceId: "wrkspc_host" },
   );
-  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(result.status, "completed", result.summary);
   for (const { headers } of upstream)
     assert.equal(headers["anthropic-workspace-id"], "wrkspc_host");
   // A forged request with workspace_id in the body is refused before any call.
@@ -1085,6 +1150,144 @@ test("Pi's per-turn effort marker must match the job; a request with no marker r
   });
 });
 
+test("requests for one job queue for the slot, and Pi's cache warming is recorded apart", async (t) => {
+  const { f, job, app, headers, url, settled, calls } = await piJob(t);
+  // Recording each call is slow, so later requests arrive while one is in flight.
+  const query = f.db.query.bind(f.db);
+  (f.db as any).query = async (sql: string, params?: unknown[]) => {
+    if (sql.startsWith("UPDATE coding_jobs SET model_busy=false"))
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    return query(sql, params as any);
+  };
+  const send = (body: Record<string, unknown>, purpose?: string) =>
+    app.inject({
+      method: "POST",
+      url: url(),
+      payload: request(body),
+      headers: {
+        ...headers,
+        ...(purpose ? { "x-runtime-purpose": purpose } : {}),
+      },
+    });
+  const before = (await f.row(job.id)).used_models;
+  assert.equal((await send({})).statusCode, 200);
+  // A warm replay of that request and two real ones together: none is refused.
+  const replies = await Promise.all([
+    send({ max_tokens: 1 }, "cache_warm"),
+    send({}),
+    send({}),
+  ]);
+  assert.deepEqual(
+    replies.map((r) => r.statusCode),
+    [200, 200, 200],
+  );
+  await settled();
+  const recorded = await calls();
+  assert.deepEqual(
+    recorded.map((c) => c.state),
+    ["complete", "complete", "complete", "complete"],
+  );
+  assert.equal(
+    recorded.filter((c) => c.input.purpose === "cache_warm").length,
+    1,
+  );
+  // The warm request is not counted as an agent call.
+  assert.equal((await f.row(job.id)).used_models, before + 3);
+  // A refused warm request is no failure of the job: it is not recorded as a rejection.
+  const rejections = async () =>
+    (
+      await f.db.query(
+        "SELECT count(*)::int AS n FROM coding_events WHERE job_id=$1 AND payload->>'kind'='worker_request_rejected'",
+        [job.id],
+      )
+    ).rows[0].n;
+  const rejectedBefore = await rejections();
+  // A warm request must replay the role's previous request: a one-token cap is not enough.
+  const other = await send(
+    { max_tokens: 1, messages: [{ role: "user", content: "Something else" }] },
+    "cache_warm",
+  );
+  assert.equal(other.statusCode, 400);
+  assert.match(
+    other.json().error.message,
+    /replay the role's previous request/,
+  );
+  // Nor does a different cap pass as warming.
+  assert.equal((await send({ max_tokens: 100 }, "cache_warm")).statusCode, 400);
+  assert.equal(await rejections(), rejectedBefore);
+});
+
+test("a claim that fails once does not hold the job's place, and waiting is bounded", async (t) => {
+  const { f, app, headers, url, settled } = await piJob(t);
+  const query = f.db.query.bind(f.db);
+  let failOnce = true;
+  let hold: Promise<void> | undefined;
+  (f.db as any).query = async (sql: string, params?: unknown[]) => {
+    if (sql.includes("WITH claimed AS") && failOnce) {
+      failOnce = false;
+      throw new Error("Synthetic database failure");
+    }
+    if (sql.startsWith("UPDATE coding_jobs SET model_busy=false")) await hold;
+    return query(sql, params as any);
+  };
+  const send = () =>
+    app.inject({ method: "POST", url: url(), payload: request(), headers });
+  assert.notEqual((await send()).statusCode, 200);
+  // The next call proceeds instead of waiting behind the failed one forever.
+  assert.equal((await send()).statusCode, 200);
+  await settled();
+  // Four requests may hold or wait for the slot; a fifth gets a retryable refusal.
+  let open!: () => void;
+  hold = new Promise<void>((resolve) => (open = resolve));
+  const first = send();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const waiting = [send(), send(), send()];
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const fifth = await send();
+  assert.equal(fifth.statusCode, 503);
+  assert.notEqual(fifth.headers["x-should-retry"], "false");
+  open();
+  assert.deepEqual(
+    (await Promise.all([first, ...waiting])).map((r) => r.statusCode),
+    [200, 200, 200, 200],
+  );
+});
+
+test("a reviewer call records the candidate from its header, even when compaction removed the round message", async (t) => {
+  const { f, job, app, headers, url, settled, calls } = await piJob(t);
+  const candidate = "c".repeat(64);
+  const reply = await app.inject({
+    method: "POST",
+    url: url("reviewer"),
+    payload: request({
+      model: (f.c as any).anthropic.route(
+        (await f.row(job.id)).settings.reviewerModel,
+      ).nativeModel,
+      messages: [{ role: "user", content: "Summary of the review so far." }],
+    }),
+    headers: { ...headers, "x-chief-candidate": candidate },
+  });
+  assert.equal(reply.statusCode, 200);
+  await settled();
+  const role = async (r: string) =>
+    (await calls()).filter((c) => c.role === r).at(-1);
+  assert.equal((await role("reviewer")).input.candidate, candidate);
+  // The coder's calls carry no candidate.
+  const coder = await app.inject({
+    method: "POST",
+    url: url(),
+    payload: request({
+      model: (f.c as any).anthropic.route((await f.row(job.id)).settings.model)
+        .nativeModel,
+    }),
+    headers: { ...headers, "x-chief-candidate": candidate },
+  });
+  assert.equal(coder.statusCode, 200, coder.body);
+  await settled();
+  assert.equal((await role("coder")).input.candidate, undefined);
+  void f;
+});
+
 test("a request sent right after the previous stream ends waits for the slot instead of being refused", async (t) => {
   const { f, app, headers, url, settled, calls } = await piJob(t);
   // Recording the first call is slow; the next request arrives meanwhile.
@@ -1125,13 +1328,13 @@ test("a host that refuses connections for a while (a gateway restart) does not e
         content: [
           n === 1
             ? toolUse("toolu_read", "read", { path: "sum.js" })
-            : planReport,
+            : doneReport,
         ],
       }),
     {},
     { outageMs: 1500 },
   );
-  assert.equal(result.status, "waiting_approval", result.summary);
+  assert.equal(result.status, "completed", result.summary);
   assert.equal(upstream.length, 2);
 });
 
@@ -1183,7 +1386,7 @@ test("1-hour cache writes are priced at twice the input price", () => {
   );
 });
 
-test("a real Pi session's final-report phase and compaction call pass the host's allowlists", async (t) => {
+test("a real Pi session's report reminder and Pi's own compaction call pass the host's allowlists", async (t) => {
   const rejections = async (f: {
     db: { query: (sql: string) => Promise<any> };
   }) =>
@@ -1192,31 +1395,24 @@ test("a real Pi session's final-report phase and compaction call pass the host's
         "SELECT payload FROM coding_events WHERE payload->>'kind'='worker_request_rejected'",
       )
     ).rows;
-  // (a) A turn that ends in prose without a report: the runtime asks for the report with the
-  // final-report phase, which Pi sends as a mid-conversation system message.
-  let finalPhase = false;
-  const planned = await throughHost(t, (_n, body, res) => {
-    finalPhase ||= JSON.stringify(body.messages).includes(
-      "Host workflow phase: final report",
-    );
+  // (a) A turn that ends in prose without a report: the runtime sends one reminder in the
+  // same session, as an ordinary user message (journal 192).
+  let reminded = false;
+  const prose = await throughHost(t, (_n, body, res) => {
+    reminded ||= JSON.stringify(body.messages).includes(reportReminder);
     sse(res, {
       content: [
-        finalPhase
-          ? planReport
+        reminded
+          ? doneReport
           : { type: "text", text: "sum.js subtracts; it should add." },
       ],
     });
   });
-  assert(finalPhase, "Pi sent the final-report phase");
-  assert.equal(
-    planned.result.status,
-    "waiting_approval",
-    planned.result.summary,
-  );
-  assert.deepEqual(await rejections(planned.f), []);
+  assert(reminded, "Pi sent the reminder");
+  assert.equal(prose.result.status, "completed", prose.result.summary);
+  assert.deepEqual(await rejections(prose.f), []);
   // (b) A build whose reported context fills a small window: Pi makes a summary call.
   let compactions = 0;
-  let building = false;
   let turns = 0;
   const built = await throughHost(
     t,
@@ -1235,20 +1431,17 @@ test("a real Pi session's final-report phase and compaction call pass the host's
         return;
       }
       turns++;
-      building ||= turns > 1;
       sse(res, {
         content: [
-          !building
-            ? planReport
-            : compactions > 0
-              ? toolUse("toolu_done", "report", {
-                  kind: "done",
-                  summary: "Done",
-                  detail: "Synthetic build finished after compaction.",
-                })
-              : toolUse(`toolu_b${turns}`, "read", { path: "sum.js" }),
+          compactions > 0
+            ? toolUse("toolu_done", "report", {
+                kind: "done",
+                summary: "Done",
+                detail: "Synthetic build finished after compaction.",
+              })
+            : toolUse(`toolu_b${turns}`, "read", { path: "sum.js" }),
         ],
-        usage: { input_tokens: building ? 35000 : 100, output_tokens: 100 },
+        usage: { input_tokens: 35000, output_tokens: 100 },
       });
     },
     // A large file, so each read fills the small window.
@@ -1260,7 +1453,7 @@ test("a real Pi session's final-report phase and compaction call pass the host's
             `export const rule_${i} = ${JSON.stringify({ id: i, text: "Retain the documented validation behavior and source evidence across context maintenance." })};`,
         ).join("\n") + "\n",
     },
-    { contextWindow: 40000, build: true },
+    { contextWindow: 40000 },
   );
   assert(compactions > 0, "Pi made a compaction call");
   assert.deepEqual(await rejections(built.f), []);

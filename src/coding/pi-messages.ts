@@ -177,11 +177,55 @@ const MESSAGE_FIELDS: Record<string, Set<string>> = {
   system: new Set(["role", "content", "output_config"]),
 };
 
+/**
+ * The keys Pi's client writes on each block (`convertMessages`, `convertToolResult`,
+ * `convertContentBlocks` and the system prompt in `buildParams`, pi-ai 1.1.0): a block with
+ * any other key (`citations`, a `source` URL, `container`, server-tool fields) is refused, so
+ * the untrusted box cannot turn on a feature by adding a key to a block of an allowed type.
+ * `cache_control` is the breakpoint Pi puts on the last user or system block and on the
+ * system prompt.
+ */
+const BLOCK_FIELDS: Record<string, Set<string>> = {
+  text: new Set(["type", "text", "cache_control"]),
+  image: new Set(["type", "source", "cache_control"]),
+  tool_result: new Set([
+    "type",
+    "tool_use_id",
+    "content",
+    "is_error",
+    "cache_control",
+  ]),
+  thinking: new Set(["type", "thinking", "signature"]),
+  redacted_thinking: new Set(["type", "data"]),
+  tool_use: new Set(["type", "id", "name", "input"]),
+  tool_addition: new Set(["type", "tool", "cache_control"]),
+  tool_removal: new Set(["type", "tool", "cache_control"]),
+};
+/** Inside a tool result Pi writes plain text and base64 image blocks, never a breakpoint. */
+const RESULT_BLOCK_FIELDS: Record<string, Set<string>> = {
+  text: new Set(["type", "text"]),
+  image: new Set(["type", "source"]),
+};
+const IMAGE_SOURCE_FIELDS = new Set(["type", "media_type", "data"]);
+
 function refuseBlock(type: unknown, where: string): never {
   throw new MessagesRefusal(
     `Messages request content not allowed: ${typeof type === "string" ? type.slice(0, 60) : "unknown"} block in ${where}`,
     "content_block_refused",
   );
+}
+
+function assertFields(
+  value: Record<string, unknown>,
+  allowed: Set<string>,
+  where: string,
+) {
+  for (const key of Object.keys(value))
+    if (!allowed.has(key))
+      throw new MessagesRefusal(
+        `Messages request field not allowed: ${key.slice(0, 60)} in ${where}`,
+        "content_field_refused",
+      );
 }
 
 /** A Pi image: inline base64 only, never a URL or file the API would fetch. */
@@ -191,11 +235,17 @@ function assertImage(block: Record<string, unknown>, where: string) {
       `Messages request content not allowed: image source ${isObject(block.source) && typeof block.source.type === "string" ? block.source.type.slice(0, 40) : "unknown"} in ${where}`,
       "content_source_refused",
     );
+  assertFields(block.source, IMAGE_SOURCE_FIELDS, `${where} image source`);
 }
 
 function assertBlock(block: unknown, role: string, where: string) {
   if (!isObject(block) || !BLOCKS[role]!.has(String(block.type)))
     refuseBlock(isObject(block) ? block.type : undefined, where);
+  assertFields(
+    block,
+    BLOCK_FIELDS[String(block.type)]!,
+    `${where} ${block.type}`,
+  );
   if (block.type === "image") assertImage(block, where);
   else if (block.type === "tool_result") {
     // Pi's tool results hold a string or text and base64 image blocks.
@@ -209,6 +259,11 @@ function assertBlock(block: unknown, role: string, where: string) {
             isObject(inner) ? inner.type : undefined,
             `${where} tool_result`,
           );
+        assertFields(
+          inner,
+          RESULT_BLOCK_FIELDS[inner.type]!,
+          `${where} tool_result ${inner.type}`,
+        );
         if (inner.type === "image") assertImage(inner, `${where} tool_result`);
       }
     else if (block.content !== undefined && typeof block.content !== "string")
@@ -216,11 +271,21 @@ function assertBlock(block: unknown, role: string, where: string) {
   } else if (block.type === "tool_addition") {
     if (!isObject(block.tool) || block.tool.type !== "tool_definition")
       refuseBlock("tool_addition", where);
+    assertFields(
+      block.tool,
+      new Set(["type", "definition"]),
+      `${where} tool_addition`,
+    );
     // Tools added mid-conversation are definitions too, so they get the same check.
     assertClientTool(block.tool.definition);
   } else if (block.type === "tool_removal") {
     if (!isObject(block.tool) || block.tool.type !== "tool_reference")
       refuseBlock("tool_removal", where);
+    assertFields(
+      block.tool,
+      new Set(["type", "name"]),
+      `${where} tool_removal`,
+    );
   }
 }
 
@@ -309,12 +374,18 @@ export function messagesRequest(
         "Invalid Messages request",
         "messages_request_invalid",
       );
-    for (const block of body.system)
+    for (const block of body.system) {
       if (!isObject(block) || block.type !== "text")
         refuseBlock(isObject(block) ? block.type : undefined, "system");
+      assertFields(block, BLOCK_FIELDS.text!, "system text");
+    }
   }
   for (const message of body.messages) {
-    if (!isObject(message) || !MESSAGE_FIELDS[String(message.role)])
+    // An own-property lookup, so a role such as "constructor" or "__proto__" is refused cleanly.
+    if (
+      !isObject(message) ||
+      !Object.hasOwn(MESSAGE_FIELDS, String(message.role))
+    )
       throw new MessagesRefusal(
         "Invalid Messages request",
         "messages_request_invalid",

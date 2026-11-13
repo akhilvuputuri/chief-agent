@@ -302,7 +302,7 @@ test("the Pi worker refuses a plan assignment", async (t) => {
   t.diagnostic("refused before any heartbeat");
 });
 
-test("a reply to a stopped job after Start returns it to a new Start card (interim)", async (t) => {
+test("on a legacy runtime, a reply to a stopped job after Start returns it to a new Start card (a Pi job uses its inbox, journal 192)", async (t) => {
   const f = await fixture(t);
   const started: any = await f.start("interim");
   await f.c.tick();

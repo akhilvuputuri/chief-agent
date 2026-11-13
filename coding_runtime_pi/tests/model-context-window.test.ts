@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { anthropicModel } from "../src/model.js";
 
 const resolve = async (config: Parameters<typeof anthropicModel>[0]) =>
-  (await anthropicModel(config)(async () => {})).model;
+  (await anthropicModel(config)()).model;
 
 test("Pi's catalogue supplies the Claude model's window, output limit and Anthropic protocol", async () => {
   const model = await resolve({

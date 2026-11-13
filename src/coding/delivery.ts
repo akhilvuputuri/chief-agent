@@ -2,7 +2,10 @@ import { formatTelegram, type FormattedMessage } from "../telegram-format.js";
 import type { InlineKeyboardMarkup } from "grammy/types";
 import { StatusMessageGone } from "./notices.js";
 /** Which owner decision a delivered message's buttons answer. */
-export type CodingApproval = { kind: "requirements" | "merge"; id: string };
+export type CodingApproval =
+  | { kind: "requirements" | "merge"; id: string }
+  /** A coding job's question with up to three answers (journal 192). */
+  | { kind: "ask"; id: string; options: string[] };
 type Receipt = { message_id: number };
 /**
  * Sends a coding message; the buttons go on its last part, whose receipt binds the decision.
@@ -41,7 +44,13 @@ export async function sendCodingDelivery(
               ],
             ],
           }
-        : undefined;
+        : approval?.kind === "ask"
+          ? {
+              inline_keyboard: approval.options.map((option, index) => [
+                { text: option, callback_data: `cdq:${index}:${approval.id}` },
+              ]),
+            }
+          : undefined;
   const parts = formatTelegram(text);
   if (plain) {
     const end = parts.at(-1)!;
