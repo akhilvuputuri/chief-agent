@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { boundedArray } from "../bounded-array.js";
 import type { Database } from "../db.js";
 import { seal, open } from "../secret-box.js";
 import type { CodingJob } from "./controller.js";
@@ -8,7 +9,7 @@ const batch = z
   .object({
     scope: z.string().regex(/^[a-f0-9]{64}$/),
     after: z.number().int().min(0),
-    entries: z.array(z.record(z.unknown())).min(1).max(32),
+    entries: boundedArray(z.record(z.unknown()), { min: 1, max: 32 }),
   })
   .strict();
 /** Immutable encrypted session entries; no full transcript in job checkpoints. */

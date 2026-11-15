@@ -79,3 +79,5 @@ All versions were changed with Kite (`kite update …` in the root, `kite instal
 - Owner decisions: upgrade `pi-coding-agent` to 1.5.x (minimatch 11.0.3, and undici 8.12.3 in place of 8.10.2, still behind 8.12.4) or set the worker's default dispatcher from the 8.12.4 copy; and either move to zod 4 or add a length check ahead of zod on the worker routes.
 - A query of OSV by npm package and version misses advisories OSV records with a Git range only. Two turned up here by reading release notes (undici 8.12.4, fastify 5.12.8); other packages' release notes were not read.
 - Reported to Kite's owner: `overrides` is unsupported, and `kite ci` stopped with "Directory not empty" when it could not remove an existing `node_modules` (a `.DS_Store` had appeared in it; cause not established).
+
+> **Update, 16 November 2026 ([journal 196](196-worker-arrays-check-length-first.md)):** the owner chose the length check. The schemas a coding worker's request reaches now check an array's length before its elements; an 8 MB body of bad elements is refused in about 1 ms with no heap growth. zod 3.25.76 itself is unchanged and still flagged.

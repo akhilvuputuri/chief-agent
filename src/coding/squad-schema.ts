@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { boundedArray } from "../bounded-array.js";
 export const squadCheck = z
   .object({
     command: z.string().max(100),
@@ -50,7 +51,7 @@ export const squadState = z
       })
       .strict()
       .optional(),
-    checks: z.array(squadCheck).max(4),
+    checks: boundedArray(squadCheck, { max: 4 }),
     review: squadReview.optional(),
     findings: z.string().max(8000),
   })

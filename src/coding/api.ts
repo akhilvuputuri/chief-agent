@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { boundedArray } from "../bounded-array.js";
 import type { CodingController } from "./controller.js";
 import { ModelError } from "../model.js";
 import { CodingModelFailure } from "./model-failure.js";
@@ -15,46 +16,43 @@ const message = z
   .object({
     role: z.enum(["system", "user", "assistant", "tool"]),
     content: z.string().max(1_000_000).nullable(),
-    reasoning_details: z.array(z.record(z.unknown())).optional(),
+    reasoning_details: boundedArray(z.record(z.unknown())).optional(),
     tool_call_id: z.string().max(200).optional(),
-    tool_calls: z
-      .array(
-        z
-          .object({
-            id: z.string().max(200),
-            type: z.literal("function"),
-            // OpenRouter may return this ordering metadata in a complete response.
-            // The Python worker preserves it in the next assistant message.
-            index: z.number().int().nonnegative().optional(),
-            function: z
-              .object({
-                name: z.string().max(100),
-                arguments: z.string().max(1_000_000),
-              })
-              .strict(),
-          })
-          .strict(),
-      )
-      .max(20)
-      .optional(),
+    tool_calls: boundedArray(
+      z
+        .object({
+          id: z.string().max(200),
+          type: z.literal("function"),
+          // OpenRouter may return this ordering metadata in a complete response.
+          // The Python worker preserves it in the next assistant message.
+          index: z.number().int().nonnegative().optional(),
+          function: z
+            .object({
+              name: z.string().max(100),
+              arguments: z.string().max(1_000_000),
+            })
+            .strict(),
+        })
+        .strict(),
+      { max: 20 },
+    ).optional(),
   })
   .strict();
 const generation = z
   .object({
     callId: z.string().uuid(),
     role: z.enum(["leader", "coder", "reviewer"]),
-    messages: z.array(message).max(120),
-    tools: z
-      .array(
-        z
-          .object({
-            name: z.string().max(100),
-            description: z.string().max(2000),
-            parameters: z.record(z.unknown()),
-          })
-          .strict(),
-      )
-      .max(12),
+    messages: boundedArray(message, { max: 120 }),
+    tools: boundedArray(
+      z
+        .object({
+          name: z.string().max(100),
+          description: z.string().max(2000),
+          parameters: z.record(z.unknown()),
+        })
+        .strict(),
+      { max: 12 },
+    ),
   })
   .strict();
 
