@@ -43,7 +43,7 @@ A refused body now reports its length or its first bad element and nothing after
 - `src/coding/schema.ts`, `squad-schema.ts`, `memory-schema.ts`, `pi-sessions.ts` and the legacy model request in `api.ts`: every array uses it, including arrays nested inside other arrays' elements, which the outer bound does not protect.
 - `tests/bounded-array.test.ts`: equal results for valid arrays, an over-long array refused without reading an element, the first bad element ending the parse with its path, non-arrays refused as zod refuses them, one issue for an oversized array in each worker schema, a refinement on the enclosing object not running against a bad array, and a check that those five files contain no call spelled `array(`.
 
-**Independent review (Claude Opus 5.5), 16 November, on `44bb151`: approved, with five notes.** It ran 76 inputs through the old and new schemas side by side and found the same acceptance and the same parsed values, and reproduced the table within about 8%. Its notes, and what was done:
+**Independent review (Claude Opus 5.5), 16 November, on `44bb151`: approved, with five notes.** It ran 76 inputs through the old and new schemas side by side and found the same acceptance and the same parsed values, and reproduced the table with heap figures about 10% lower (1.03 to 1.06 GB). Its notes, and what was done:
 
 - A body is parsed as JSON before zod sees it. It measured a 64 MB checkpoint body of zeros at about 320 MB of heap in `JSON.parse`, with the process at 972 MB resident. Recorded below; not changed here.
 - The test that scans the five files missed `.array()` and other spellings. It now refuses any call spelled `array(`.
@@ -51,12 +51,14 @@ A refused body now reports its length or its first bad element and nothing after
 - The legacy model request, session batches, squad state and arrays nested in elements had no oversized case. `generation` and `batch` are exported and tested.
 - The note in `docs/coding.md` was out of date order. Moved.
 
+It approved `4e55174`, which holds those changes, after running the same 76 inputs again and checking that a fatal issue hides no issue on a neighbouring field.
+
 No database, Compose or worker-protocol change: a payload that was valid is still valid and parses to the same value, so the pinned worker image needs no rebuild.
 
 ## Verification and outcome
 
 - **Measured:** the table above.
-- **Tested, 16 November, a Mac on Node 22.23.4:** `kite run check` exited 0 in 6 min 0 s with no failing test, the seven new tests among them, and `kite run format:check` passed.
+- **Tested, 16 November, a Mac on Node 22.23.4:** `kite run check` exited 0 with no failing test on `44bb151` (6 min 0 s) and again on `4e55174` (6 min 24 s), the nine new tests among them. `kite run format:check` passed on `44bb151`, and the files changed since pass Prettier.
 - **Not verified:** a real worker request through the changed schemas in production.
 - **Still true after this change (reviewer's measurement):** reading a body costs memory before any schema runs. A 64 MB body of zeros took about 320 MB of heap in `JSON.parse` alone, against 777 MB available on the host. That is the price of the 64 MB allowance for checkpoint, finish and publish, which authenticate before they read.
 - **Not changed:** the other 104 `z.array` uses in `src`. The largest body any of them can receive is 400 kB (box events), which journal 162 measured at 62 MB of heap.
