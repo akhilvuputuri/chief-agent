@@ -28,8 +28,19 @@ function watchUpgrade(
   // A WebSocket handshake never finishes the HTTP response; a plain answer does.
   reply.raw.once("finish", () => socket.destroy());
 }
+/** What /healthz reports about Telegram intake (journal 196). */
+export interface IntakeHealth {
+  state: string;
+  lastPollAgeS?: number;
+  pollFailures: number;
+  handlersRunning: number;
+}
 /** No model-tool callback. Saved views are read-only; gathering account/browser controls require authenticated owner input. */
-export function server(db?: Database, config?: MiniConfig) {
+export function server(
+  db?: Database,
+  config?: MiniConfig,
+  intake?: () => IntakeHealth | undefined,
+) {
   const app: FastifyInstance = Fastify({
     logger: false,
     bodyLimit: 120000,
@@ -48,10 +59,18 @@ export function server(db?: Database, config?: MiniConfig) {
   app.addHook("onRequest", async (request, reply) =>
     watchUpgrade(app, request, reply),
   );
-  app.get("/healthz", async () => ({
-    status: "ok",
-    runtime: "personal-agent",
-  }));
+  // Liveness for Compose and releases. Intake is reported, not enforced: a Telegram-side
+  // outage must not fail releases, and nothing restarts an unhealthy container. Only a
+  // rejected bot token, which no restart or wait can fix, makes the check fail (journal 196).
+  app.get("/healthz", async (_request, reply) => {
+    const telegram = intake?.();
+    if (telegram?.state === "unauthorized") reply.code(503);
+    return {
+      status: telegram?.state === "unauthorized" ? "unhealthy" : "ok",
+      runtime: "personal-agent",
+      ...(telegram ? { telegram } : {}),
+    };
+  });
   app.setNotFoundHandler((_req, reply) =>
     reply.code(404).send({ error: "Not found" }),
   );
