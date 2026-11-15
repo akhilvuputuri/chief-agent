@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { boundedArray } from "../src/bounded-array.js";
+import { generation } from "../src/coding/api.js";
+import { batch } from "../src/coding/pi-sessions.js";
 import { checkpoint, outcome } from "../src/coding/schema.js";
+import { squadState } from "../src/coding/squad-schema.js";
 
 // zod 3 validates every element of an over-long array and keeps an issue for each
 // (GHSA-mrhx-c7xc-m3w5, journal 196). These tests count element visits and issues, not time.
@@ -99,6 +102,37 @@ test("a value that is not an array is refused as zod refuses it", () => {
   }
 });
 
+test("a bad array stops a refinement on the object around it", () => {
+  let ran = 0;
+  const parent = z
+    .object({ options: boundedArray(z.string(), { max: 2 }).optional() })
+    .refine(() => {
+      ran++;
+      return true;
+    });
+  for (const options of [null, ["a", "b", "c"], ["a", 1]])
+    assert.equal(parent.safeParse({ options }).error!.issues.length, 1);
+  assert.equal(ran, 0);
+  // The report document's own identity check is such a refinement.
+  const refused = checkpoint.safeParse({
+    piState: {
+      version: 1,
+      reportDocument: {
+        version: 1,
+        hash: "a".repeat(64),
+        kind: "ask",
+        summary: "s",
+        detail: "d",
+        options: null,
+      },
+    },
+  });
+  assert.deepEqual(
+    refused.error!.issues.map((issue) => issue.path.at(-1)),
+    ["options"],
+  );
+});
+
 test("worker checkpoints and outcomes refuse oversized arrays with one issue each", () => {
   const zeros = new Array(200_000).fill(0);
   const bodies: [string, z.ZodTypeAny, unknown][] = [
@@ -145,6 +179,59 @@ test("worker checkpoints and outcomes refuse oversized arrays with one issue eac
   assert.equal(saved.piState!.conflicts![0].status, "UU");
 });
 
+test("the legacy model request, session batches and squad state refuse them too", () => {
+  const zeros = new Array(200_000).fill(0);
+  const call = {
+    callId: "0b0e2a52-6a0b-4d1c-9a3e-0d6b2f6d7c11",
+    role: "coder",
+    messages: [{ role: "user", content: "hello" }],
+    tools: [],
+  };
+  assert.equal(generation.safeParse(call).success, true);
+  const scope = "a".repeat(64);
+  const bodies: [string, z.ZodTypeAny, unknown][] = [
+    ["messages", generation, { ...call, messages: zeros }],
+    ["tools", generation, { ...call, tools: zeros }],
+    // An array inside an element is not protected by the bound on the array around it.
+    [
+      "tool_calls",
+      generation,
+      {
+        ...call,
+        messages: [{ role: "assistant", content: null, tool_calls: zeros }],
+      },
+    ],
+    // No maximum is declared: the first bad element ends it.
+    [
+      "reasoning_details",
+      generation,
+      {
+        ...call,
+        messages: [
+          { role: "assistant", content: "x", reasoning_details: zeros },
+        ],
+      },
+    ],
+    ["entries", batch, { scope, after: 0, entries: zeros }],
+  ];
+  for (const [name, schema, body] of bodies) {
+    const result = schema.safeParse(body);
+    assert.equal(result.success, false, name);
+    assert.equal(result.error!.issues.length, 1, name);
+  }
+  assert.equal(
+    batch.safeParse({ scope, after: 0, entries: [{ type: "message" }] })
+      .success,
+    true,
+  );
+  // Squad state has other required fields; only the array's own issue is counted.
+  const squad = squadState.safeParse({ checks: zeros });
+  assert.equal(
+    squad.error!.issues.filter((issue) => issue.path[0] === "checks").length,
+    1,
+  );
+});
+
 test("no schema a coding worker's request reaches uses zod's own array", () => {
   for (const file of [
     "api.ts",
@@ -157,6 +244,7 @@ test("no schema a coding worker's request reaches uses zod's own array", () => {
       new URL(`../src/coding/${file}`, import.meta.url),
       "utf8",
     );
-    assert.doesNotMatch(source, /\bz\s*\.\s*array\(|\.array\(\s*$/m, file);
+    // Any call spelled `array(`: `z.array(`, a schema's `.array()`, or a destructured one.
+    assert.doesNotMatch(source, /(^|[^A-Za-z])array\s*\(/m, file);
   }
 });

@@ -15,7 +15,8 @@ import { z } from "zod";
  * walks, even one of `z.unknown()`, before a length check can refuse it.
  *
  * A valid array parses to the same value as `z.array(item)`. An invalid one reports its
- * length, or its first bad element, and nothing after it.
+ * length, or its first bad element, and nothing after it. Its issues are fatal, so a
+ * refinement on an enclosing object does not run against a value that was never parsed.
  */
 export function boundedArray<T extends z.ZodTypeAny>(
   item: T,
@@ -27,6 +28,7 @@ export function boundedArray<T extends z.ZodTypeAny>(
         code: z.ZodIssueCode.invalid_type,
         expected: "array",
         received: z.getParsedType(value),
+        fatal: true,
       });
       return z.NEVER;
     }
@@ -36,6 +38,7 @@ export function boundedArray<T extends z.ZodTypeAny>(
         type: "array",
         minimum: bounds.min,
         inclusive: true,
+        fatal: true,
       });
       return z.NEVER;
     }
@@ -45,6 +48,7 @@ export function boundedArray<T extends z.ZodTypeAny>(
         type: "array",
         maximum: bounds.max,
         inclusive: true,
+        fatal: true,
       });
       return z.NEVER;
     }
@@ -53,7 +57,11 @@ export function boundedArray<T extends z.ZodTypeAny>(
       const result = item.safeParse(value[index]);
       if (!result.success) {
         for (const issue of result.error.issues)
-          ctx.addIssue({ ...issue, path: [index, ...issue.path] });
+          ctx.addIssue({
+            ...issue,
+            path: [index, ...issue.path],
+            fatal: true,
+          });
         return z.NEVER;
       }
       parsed.push(result.data);

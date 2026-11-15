@@ -5,7 +5,7 @@ import type { Database } from "../db.js";
 import { seal, open } from "../secret-box.js";
 import type { CodingJob } from "./controller.js";
 
-const batch = z
+export const batch = z
   .object({
     scope: z.string().regex(/^[a-f0-9]{64}$/),
     after: z.number().int().min(0),

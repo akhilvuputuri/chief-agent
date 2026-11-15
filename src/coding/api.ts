@@ -38,7 +38,8 @@ const message = z
     ).optional(),
   })
   .strict();
-const generation = z
+/** The legacy runtimes' model request; a Pi job uses the Messages route. */
+export const generation = z
   .object({
     callId: z.string().uuid(),
     role: z.enum(["leader", "coder", "reviewer"]),
