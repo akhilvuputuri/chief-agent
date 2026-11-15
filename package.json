@@ -12,7 +12,7 @@
     "start": "node dist/main.js",
     "build": "kite build --project coding_runtime_pi --skip-declarations && kite build",
     "typecheck": "kite run build:pi && tsc --noEmit && tsc -p tsconfig.evals.json",
-    "test": "kite run build && kite run test:ts && kite run test:other",
+    "test": "node scripts/test.mjs",
     "test:ts": "node scripts/test-shard.mjs",
     "test:other": "node --test scripts/*.test.mjs && python3 -m unittest discover -s evals/picker -p 'test_*.py' && python3 -m unittest discover -s evals/context -p 'test_*.py' && python3 -m unittest discover -s evals/decisions -p 'test_*.py' && python3 -m unittest discover -s evals/mail-recall -p 'test_*.py' && python3 -m unittest discover -s evals/coding -p 'test_*.py' && for f in scripts/test-*.py; do python3 \"$f\" || exit 1; done",
     "migrate": "tsx src/migrate.ts",

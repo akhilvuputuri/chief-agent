@@ -15,10 +15,12 @@ import {
   allTestFiles,
   assignShards,
   isolationMode,
+  namedTestFiles,
   parseShard,
   rerunPlan,
   undecidedFiles,
 } from "./test-shard.mjs";
+import { testSteps } from "./test.mjs";
 import {
   assertComplete,
   testTitles,
@@ -145,6 +147,57 @@ test("a serial run shares one process, and parallel files keep their own", () =>
     () => isolationMode({ TEST_ISOLATION: "shared", TEST_CONCURRENCY: "4" }),
     /one file at a time/,
   );
+});
+
+test("named test files run alone, and a name that is not a test file is refused", () => {
+  const all = ["tests/a.test.ts", "tests/b.test.ts", "tests/c.test.ts"];
+  assert.deepEqual(
+    namedTestFiles(
+      ["./tests/c.test.ts", "tests/a.test.ts", "/repo/tests/a.test.ts"],
+      all,
+      "/repo",
+    ),
+    ["tests/a.test.ts", "tests/c.test.ts"],
+  );
+  // A mistyped name must not pass by running nothing.
+  assert.throws(
+    () => namedTestFiles(["tests/a.test.ts", "tests/nope.test.ts"], all),
+    /Not a TypeScript test file in tests\/: tests\/nope\.test\.ts/,
+  );
+  assert.throws(
+    () => namedTestFiles(["scripts/test-shard.test.mjs"], all),
+    /node --test scripts/,
+  );
+  assert.throws(() => namedTestFiles(["tests/helpers/db.ts"], all), /Not a/);
+});
+
+test("the test script runs named files alone, without a shard", () => {
+  const run = (args, env = {}) =>
+    spawnSync(process.execPath, ["scripts/test-shard.mjs", ...args], {
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    });
+  const unknown = run(["tests/nope.test.ts"]);
+  assert.equal(unknown.status, 2);
+  assert.match(unknown.stderr, /Not a TypeScript test file in tests\//);
+  const sharded = run(["tests/core.test.ts"], { TEST_SHARD: "1/4" });
+  assert.equal(sharded.status, 2);
+  assert.match(sharded.stderr, /TEST_SHARD does not apply/);
+});
+
+test("kite test with file names builds and runs those files, and nothing else", () => {
+  assert.deepEqual(testSteps([]), [
+    ["run", "build"],
+    ["run", "test:ts"],
+    ["run", "test:other"],
+  ]);
+  assert.deepEqual(testSteps(["tests/a.test.ts", "tests/b.test.ts"]), [
+    ["run", "build"],
+    ["run", "test:ts", "--", "tests/a.test.ts", "tests/b.test.ts"],
+  ]);
+  const scripts = JSON.parse(readFileSync("package.json", "utf8")).scripts;
+  assert.equal(scripts.test, "node scripts/test.mjs");
+  assert.equal(scripts["test:ts"], "node scripts/test-shard.mjs");
 });
 
 test("files that failed or never reported are left undecided", () => {
