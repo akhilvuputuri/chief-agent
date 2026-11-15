@@ -73,6 +73,8 @@ export type Incoming = {
   quotedReplyText?: string;
   anchor?: import("./telegram-feeds.js").FeedAnchor | null;
   receivedAt?: string;
+  /** When Telegram says the message was sent (message.date); with receivedAt it measures intake delay (journal 196). */
+  sentAt?: string;
   preparing?: boolean;
   voiceReply?: boolean;
   /** The Chief topic the message was typed in (Telegram topics, phase 2). */

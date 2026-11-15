@@ -103,6 +103,16 @@ const fields: Record<string, Shape> = {
   intendedThreadId: "count",
   messageId: "count",
   uptimeS: "count",
+  /** Telegram polling (journal 196): seconds since the last answered getUpdates. */
+  lastPollAgeS: "count",
+  /** getUpdates calls failed since the last answered one. */
+  pollFailures: "count",
+  /** telegram.poll_recovered: seconds between two answered getUpdates calls. */
+  outageS: "count",
+  /** Updates still being handled; they hold the runner's intake slots. */
+  handlersRunning: "count",
+  /** telegram.input_received: seconds from Telegram's send time to intake. */
+  delayS: "count",
   /** gateway.started: process.version, e.g. v22.23.4. */
   nodeVersion: "code",
   rssMb: "count",
@@ -669,7 +679,10 @@ const projections: Record<string, Projection> = {
     "info",
     { runId: run, lane: d.lane, taskId: d.taskId, inputId: d.inputId },
   ],
-  "telegram.input_received": (run) => ["info", { inputId: run }],
+  "telegram.input_received": (run, d) => [
+    "info",
+    { inputId: run, delayS: d.delayS ?? undefined },
+  ],
   "telegram.delivered": (run, d) => [
     "info",
     { runId: run, kind: d.kind, messages: d.messages },
