@@ -36,4 +36,8 @@ In synthetic probes, Anthropic cached nothing unmarked, and Gemini's implicit ca
 
 For application releases, verify `/healthz`, Compose health, runtime traces and a small bounded model smoke. Do not drop schemas or delete volumes. The automatic release tags the previous gateway image for application rollback; database rollback is separate and not automatic.
 
+> **Update, 15 November 2026 ([journal 196](journey/196-chief-stopped-listening.md)):** `/healthz` now also reports Telegram intake under `telegram` (`state`, `lastPollAgeS`, `pollFailures`, `handlersRunning`). It stays 200 while Telegram cannot be reached or polling is stale, so a Telegram-side outage cannot fail a release; it answers 503 only when Telegram rejects the bot token (401), which no wait or restart fixes. Read `telegram.state` after a release: `polling` within about a minute of start is the intake check that health alone did not give before.
+
 Run only one Telegram poller for the token. Keep Postgres and health ports bound to loopback. Never run an unfiltered command that prints rendered Compose secrets into logs.
+
+> **Update, 15 November 2026 ([journal 196](journey/196-chief-stopped-listening.md)):** a second poller no longer stops the gateway's polling for good. The gateway retries every 5 seconds through a 409, logs `telegram.polling_stopped` with `kind: conflict`, and after 10 minutes tells the owner that another program is using the token. Any `getUpdates` call made by hand, including a diagnostic one, is such a poller while it runs, and one made with an `offset` confirms (removes) the updates before it.
