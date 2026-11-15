@@ -439,3 +439,44 @@ test("across a polling restart the inbound_updates claim still handles a redeliv
     await pg.close();
   }
 });
+
+test("failing for more than 15 hours never ends the loop and keeps the 5 s pace", async (t) => {
+  fakeClock(t);
+  const logs = captureLogs(t);
+  const bot = new Bot(TOKEN, { botInfo });
+  const { calls } = fakeTelegram(bot, () => ({ error: networkError() }));
+  const polling = startPolling(bot, {
+    notifyOwner: async () => {},
+    allowedUpdates: ["message"],
+    concurrency: 8,
+  });
+  // The library's default gave up after 15 hours; the restart path would hide that,
+  // so the loop must never have ended at all.
+  await advance(t, 16 * 3_600_000, 5_000);
+  assert.deepEqual(logs.events("telegram.polling_stopped"), []);
+  assert.deepEqual(logs.events("telegram.polling_restarted"), []);
+  const [before, last] = calls.slice(-2);
+  assert.equal(last!.at - before!.at, 5_000);
+  assert.ok(calls.length >= (16 * 3_600_000) / 5_000 - 2, `${calls.length}`);
+  await stop(t, polling);
+});
+
+test("stop() during a pending restart sends no further getUpdates", async (t) => {
+  fakeClock(t);
+  const logs = captureLogs(t);
+  const bot = new Bot(TOKEN, { botInfo });
+  const { calls } = fakeTelegram(bot, () => ({ code: 409 }));
+  const polling = startPolling(bot, {
+    notifyOwner: async () => {},
+    allowedUpdates: ["message"],
+    concurrency: 8,
+  });
+  await advance(t, 1_000);
+  assert.equal(logs.events("telegram.polling_stopped").length, 1);
+  const sent = calls.length;
+  await polling.stop();
+  await advance(t, 60_000);
+  assert.equal(calls.length, sent);
+  assert.deepEqual(logs.events("telegram.polling_restarted"), []);
+  assert.equal(polling.status().state, "stopped");
+});
