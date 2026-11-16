@@ -1,7 +1,7 @@
 ## Two shell commands in one turn no longer hang a coding box (16 November 2026)
 
 - **Code.** The coding worker's process guard no longer kills and reaps every child of the worker after each command. The sweep for leftover processes waits until no command is running and touches only processes outside the worker's own session, so a command that finishes cannot kill a sibling command, the `grep` tool's search or the worker's own git; each command still kills its own process group when it exits, and nothing a command starts outlives the moment no command is running. The coder's role text says the owner's Start is the approval, so it does not ask the owner to approve a plan. Worker only; no host, migration or Compose change.
-- **Why.** Job `46463771`, the first real job on the rebuilt loop, spent 5.3 of its 6.2 hours idle: twice the reviewer ran two commands in one turn and the box waited for a result that could never arrive until its three-hour lifetime ended. See [journal 197](journey/197-two-commands-at-once.md).
+- **Why.** Job `46463771`, the first real job on the rebuilt loop, spent 5.3 of its 6.2 hours idle: twice the reviewer ran two commands in one turn and the box waited for a result that could never arrive until its three-hour lifetime ended. See [journal 199](journey/199-two-commands-at-once.md).
 - **Deployment.** Worker source only. It reaches coding jobs when a worker image built from it is pinned; not yet built or pinned.
 
 ## Worker request arrays check their length first: live (16 November 2026)

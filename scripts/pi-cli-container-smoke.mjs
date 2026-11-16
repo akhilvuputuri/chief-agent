@@ -131,7 +131,7 @@ const server = createServer(async (req, res) => {
     const checked = result(0);
     assert.equal(checked.error, false, checked.text);
   }
-  // Two commands in one message (journal 197): each returns its own output and exit code.
+  // Two commands in one message (journal 199): each returns its own output and exit code.
   if (current === 3) {
     const [first, second] = [result(0), result(1)];
     assert.equal(first.error, true, first.text);

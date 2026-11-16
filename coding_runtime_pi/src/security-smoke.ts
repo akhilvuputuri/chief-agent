@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { linuxProcessBoundary } from "./process-boundary.js";
 import { Workspace, localExecutor, type Execution } from "./workspace.js";
 const cleanup = linuxProcessBoundary("/opt/pi-runtime/process-boundary.node");
-// The guard lists the worker's children here; it must be able to (journal 197).
+// The guard lists the worker's children here; it must be able to (journal 199).
 await readFile(`/proc/${process.pid}/task/${process.pid}/children`, "utf8");
 const root = await mkdtemp(join(tmpdir(), "pi-isolation-"));
 const execute = localExecutor(root, join(root, "home"));
@@ -33,7 +33,7 @@ assert.equal(daemon.exitCode, 0);
 const pid = Number(await readFile(join(root, "daemon.pid"), "utf8"));
 assert.throws(() => process.kill(pid, 0));
 
-// Commands at once through the real guard (journal 197). Pi runs the tool calls of one message
+// Commands at once through the real guard (journal 199). Pi runs the tool calls of one message
 // together, and the worker's own git runs through executors of its own.
 const settles = <T>(promise: Promise<T>, what: string) => {
   let timer: NodeJS.Timeout | undefined;
@@ -118,7 +118,7 @@ assert.deepEqual(result(await execute("echo quick", signal)), ["quick", 0]);
 assert.equal(await settles(ownExit, "The worker's own child"), 7);
 // A repository model-run code configured: a partial clone missing its AGENTS.md blob, whose
 // `core.sshCommand` starts a daemon outside every process group. Reading the base file must not
-// run it; if anything did run, nothing may survive once no command runs (journal 197).
+// run it; if anything did run, nothing may survive once no command runs (journal 199).
 const repo = join(root, "configured");
 await mkdir(repo);
 const repoGit = (...args: string[]) =>

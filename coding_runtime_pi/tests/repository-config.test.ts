@@ -24,7 +24,7 @@ const exists = (path: string) =>
   );
 
 /**
- * A repository that model-run code could have configured (journal 197): a partial clone whose
+ * A repository that model-run code could have configured (journal 199): a partial clone whose
  * `AGENTS.md` blob is missing, with `core.sshCommand` and other configured programs that write
  * `marker` when git runs them. Reading the base's `AGENTS.md` with the repository's own
  * configuration makes git lazy-fetch the blob through the configured ssh command.
@@ -63,7 +63,7 @@ async function hostile() {
 
 test("the fixture runs its configured program when git reads with the repository's configuration", async () => {
   const f = await hostile();
-  // How the runtime read the reviewer's base AGENTS.md before journal 197.
+  // How the runtime read the reviewer's base AGENTS.md before journal 199.
   assert.throws(() =>
     execFileSync(
       "git",

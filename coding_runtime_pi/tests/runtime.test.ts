@@ -646,7 +646,7 @@ test("a coder session runs Pi's own prompt, execution mode and bash as shipped",
 
 test("the coder's prompt says the owner started the job and no plan approval exists", async () => {
   // Job 46463771 opened by asking "Approve this plan?" after the owner's Start, following the
-  // repository's AGENTS.md workflow for development agents (journal 197).
+  // repository's AGENTS.md workflow for development agents (journal 199).
   const f = await fixture();
   const seen: Context[] = [];
   const r = f.runtime(

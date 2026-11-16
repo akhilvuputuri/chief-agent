@@ -15,7 +15,7 @@ static napi_value lockdown(napi_env env, napi_callback_info info) {
   napi_value result;napi_get_boolean(env,true,&result);return result;
 }
 /*
- * Kills and reaps the worker's children that descend from commands (journal 197). Every
+ * Kills and reaps the worker's children that descend from commands (journal 199). Every
  * command starts in a session of its own (Node's detached spawn calls setsid) and no process
  * can join another session, so a child of the worker whose session differs from the worker's
  * descends from a command: a daemon adopted by this subreaper. The worker's own children

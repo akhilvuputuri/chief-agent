@@ -45,7 +45,7 @@ export function artifactHash(patch: string, files: FileChange[]) {
 }
 /**
  * Commands running in this process, across every executor: Pi runs the tool calls of one
- * message at once, and the worker's own git runs through executors of its own (journal 197).
+ * message at once, and the worker's own git runs through executors of its own (journal 199).
  * Kept on `globalThis` so a second copy of this module still shares the one count.
  */
 const running: { count: number } = ((
@@ -56,7 +56,7 @@ const running: { count: number } = ((
  * kills its own process group. `cleanup` (the Linux guard's sweep of descendants that escaped
  * their group and were adopted by the subreaper worker) runs only once no command is running in
  * this process, so it can never kill a running command or take the exit status of a shell Node
- * still waits for (journal 197).
+ * still waits for (journal 199).
  *
  * Why every promise settles: once `spawn` returns, libuv emits either `error` (the process did
  * not start) or `exit` (it started and libuv reaped it); both call `finish`, which settles exactly
@@ -134,7 +134,7 @@ export function localExecutor(
         kill();
         try {
           // While another command runs, its own descendants may legitimately have been adopted
-          // by the worker; the sweep waits until none runs (journal 197).
+          // by the worker; the sweep waits until none runs (journal 199).
           if (running.count === 0) cleanup?.();
         } catch {
           child.stdout.destroy();
@@ -300,7 +300,7 @@ export class Workspace {
   }
   /**
    * Whether the repository has `commit`, read through the private git directory and run by
-   * `execute`, so it is a counted, swept command like any other (journal 197).
+   * `execute`, so it is a counted, swept command like any other (journal 199).
    */
   async hasCommit(execute: Executor, signal: AbortSignal, commit: string) {
     if (!/^[a-f0-9]{40}$/.test(commit))
@@ -315,7 +315,7 @@ export class Workspace {
   /**
    * A file's exact bytes as `commit` has it, or undefined when the commit has none. Read
    * through the private git directory with `cat-file`, which applies no filter or text
-   * conversion, and run by `execute` (journal 197).
+   * conversion, and run by `execute` (journal 199).
    */
   async committedFile(
     execute: Executor,

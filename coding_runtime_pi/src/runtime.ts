@@ -92,7 +92,7 @@ export class CodingRuntime {
       events: [],
     };
     // Through the task's own executor and the workspace's private git directory, so nothing
-    // the repository's configuration names can run, and anything run is swept (journal 197).
+    // the repository's configuration names can run, and anything run is swept (journal 199).
     const present = await new Workspace(workspace).hasCommit(
       this.options.executor(task),
       new AbortController().signal,

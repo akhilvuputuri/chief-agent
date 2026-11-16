@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { localExecutor, type Execution } from "../src/workspace.js";
 
 /**
- * A stand-in for the Linux guard's old `cleanup` (journal 197): it kills every child of this
+ * A stand-in for the Linux guard's old `cleanup` (journal 199): it kills every child of this
  * process and reaps it in native code, so Node never emits `exit` for a child it was waiting
  * for. Modelled here by killing each live child's process group and dropping its `exit`.
  */
