@@ -15,10 +15,13 @@ import {
   allTestFiles,
   assignShards,
   isolationMode,
+  namedTestFiles,
   parseShard,
   rerunPlan,
+  selectFiles,
   undecidedFiles,
 } from "./test-shard.mjs";
+import { testSteps } from "./test.mjs";
 import {
   assertComplete,
   testTitles,
@@ -145,6 +148,96 @@ test("a serial run shares one process, and parallel files keep their own", () =>
     () => isolationMode({ TEST_ISOLATION: "shared", TEST_CONCURRENCY: "4" }),
     /one file at a time/,
   );
+});
+
+test("named test files run alone, and a name that is not a test file is refused", () => {
+  const all = ["tests/a.test.ts", "tests/b.test.ts", "tests/c.test.ts"];
+  assert.deepEqual(
+    namedTestFiles(
+      ["./tests/c.test.ts", "tests/a.test.ts", "/repo/tests/a.test.ts"],
+      all,
+      "/repo",
+    ),
+    ["tests/a.test.ts", "tests/c.test.ts"],
+  );
+  // A mistyped name must not pass by running nothing.
+  assert.throws(
+    () => namedTestFiles(["tests/a.test.ts", "tests/nope.test.ts"], all),
+    /Not a TypeScript test file in tests\/: tests\/nope\.test\.ts/,
+  );
+  assert.throws(
+    () => namedTestFiles(["scripts/test-shard.test.mjs"], all),
+    /node --test scripts/,
+  );
+  assert.throws(() => namedTestFiles(["tests/helpers/db.ts"], all), /Not a/);
+});
+
+test("a run covers the named files, or one shard, or every file", () => {
+  const all = ["tests/a.test.ts", "tests/b.test.ts", "tests/c.test.ts"];
+  const weights = () => ({
+    "tests/a.test.ts": 9,
+    "tests/b.test.ts": 1,
+    "tests/c.test.ts": 5,
+  });
+  const never = () => assert.fail("weights are read for a shard only");
+  // Names limit the run to those files: every other file is left out.
+  assert.deepEqual(selectFiles(["tests/b.test.ts"], {}, all, never), [
+    "tests/b.test.ts",
+  ]);
+  assert.deepEqual(selectFiles([], {}, all, never), all);
+  const shards = [1, 2].map((i) =>
+    selectFiles([], { TEST_SHARD: `${i}/2` }, all, weights),
+  );
+  assert.deepEqual(shards.flat().sort(), all);
+  assert.deepEqual(shards[0], ["tests/a.test.ts"]);
+  assert.throws(
+    () => selectFiles(["tests/b.test.ts"], { TEST_SHARD: "1/2" }, all, never),
+    /TEST_SHARD does not apply/,
+  );
+  assert.throws(
+    () => selectFiles([], { TEST_SHARD: "3/2" }, all, weights),
+    /Invalid/,
+  );
+});
+
+test("the test script refuses a mistyped name, and a name with a shard", () => {
+  // The caller's own TEST_SHARD must not decide which refusal is seen.
+  const { TEST_SHARD: _, ...clean } = process.env;
+  const run = (args, env = {}) =>
+    spawnSync(process.execPath, ["scripts/test-shard.mjs", ...args], {
+      encoding: "utf8",
+      env: { ...clean, ...env },
+    });
+  const unknown = run(["tests/nope.test.ts"]);
+  assert.equal(unknown.status, 2);
+  assert.match(unknown.stderr, /Not a TypeScript test file in tests\//);
+  const sharded = run(["tests/core.test.ts"], { TEST_SHARD: "1/4" });
+  assert.equal(sharded.status, 2);
+  assert.match(sharded.stderr, /TEST_SHARD does not apply/);
+});
+
+test("kite test with file names builds and runs those files, and nothing else", () => {
+  assert.deepEqual(testSteps([]), [
+    ["run", "build"],
+    ["run", "test:ts"],
+    ["run", "test:other"],
+  ]);
+  assert.deepEqual(testSteps(["tests/a.test.ts", "tests/b.test.ts"]), [
+    ["run", "build"],
+    ["run", "test:ts", "--", "tests/a.test.ts", "tests/b.test.ts"],
+  ]);
+  // A mistyped name is refused before anything is built.
+  const { TEST_SHARD: _, ...clean } = process.env;
+  const unknown = spawnSync(
+    process.execPath,
+    ["scripts/test.mjs", "tests/nope.test.ts"],
+    { encoding: "utf8", env: { ...clean, PATH: "" } },
+  );
+  assert.equal(unknown.status, 2);
+  assert.match(unknown.stderr, /Not a TypeScript test file in tests\//);
+  const scripts = JSON.parse(readFileSync("package.json", "utf8")).scripts;
+  assert.equal(scripts.test, "node scripts/test.mjs");
+  assert.equal(scripts["test:ts"], "node scripts/test-shard.mjs");
 });
 
 test("files that failed or never reported are left undecided", () => {

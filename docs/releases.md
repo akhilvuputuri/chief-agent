@@ -1,3 +1,9 @@
+## `kite test FILE` runs named test files alone (16 November 2026)
+
+- **Code.** Tests and instructions only. `scripts/test-shard.mjs` runs only the test files named on its command line and refuses a name that is not a test file. `kite test` now runs `scripts/test.mjs`: the same three steps as before without names, and the build plus the named files with them. `AGENTS.md` says that `kite run check` includes every test, and to run named files while working and the whole check once. No runtime code, migration or Compose change, and no worker image.
+- **Why.** The first job on the rebuilt coding loop spent 39.7 of its coder's 40.1 minutes in four test commands. It ran the whole suite seven times for a two-file change: `kite run check` and `kite run test` back to back, and a reviewer's `kite test tests/links.test.ts` that ran all 1,806 tests in 310.7 s. See [journal 197](journey/197-one-test-file.md).
+- **Not measured.** No coding job has run with it. A full TypeScript run in a box still takes about 310 s on one of its three CPUs.
+
 ## Chief keeps listening to Telegram and says when it could not (15 November 2026)
 
 - **Code.** Telegram polling retries a failed fetch every five seconds for as long as the gateway runs, instead of the library's doubling waits and fifteen-hour give-up, and each fetch has a sixty-second limit. If the polling loop ends it is logged and restarted without skipping or repeating an update. Failures, recovery and a ten-minute stale state are logged without message content; the heartbeat and `/healthz` carry the time of the last successful poll, the failure count and the number of busy intake slots. After an outage the owner gets one short line saying how long Chief was not receiving and that messages older than 24 hours must be resent. Each input records when the message was sent as well as received. No migration or Compose change.

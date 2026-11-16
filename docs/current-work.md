@@ -1,3 +1,9 @@
+# One test file at a time in coding jobs — tested, not yet released, 16 November 2026
+
+The first job on the rebuilt coding loop spent nearly all of its coder's 40 minutes running the whole test suite, seven times for a two-file change. `kite test tests/NAME.test.ts` now builds and runs the named files alone, and `AGENTS.md` says that `kite run check` already includes every test ([journal 197](journey/197-one-test-file.md)).
+
+Next: read the next coding job's profile for how often the suite ran. Then measure several shared test processes at once on a machine like a box: a full TypeScript run there takes about 310 s on one of three CPUs.
+
 # A fact names what the owner pointed at — live, no night measured, 13 November 2026
 
 Issue #326, step 1 of the plan from the 13 November research into other memory systems. A learned fact may name, in square brackets, what the owner only pointed at, backed by exact words of the exchange; only a note may take such a detail from Chief's words. The judge (`judge-v4`) and the repair (`repair-v2`) read Chief's side of each cited exchange and run at high reasoning effort, and the learner (`learner-v7`) is told one request is no trait. Live in `b8fe585` (PR 491) from 20:20 SGT on 13 November ([journal 195](journey/195-what-the-owner-pointed-at.md), [learning](learning.md#host-checks)).
