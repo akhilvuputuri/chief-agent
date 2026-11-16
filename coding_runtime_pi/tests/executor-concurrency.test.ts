@@ -146,3 +146,30 @@ test("a command that cannot start settles and is not counted as running", async 
   // Both settled with nothing running, so both swept.
   assert.deepEqual(guard.calls, [0, 0]);
 });
+
+test("a failed sweep keeps the model's message and carries the guard's own as its cause", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-concurrent-"));
+  // The Linux guard names what survived (journal 200); this stands in for it.
+  const named = new Error("Command descendants remain: 4242 (node) D");
+  const execute = localExecutor(root, join(root, "home"), () => {
+    throw named;
+  });
+  const failure = await settles(
+    execute("echo lost", signal()).then(
+      () => undefined,
+      (error: unknown) => error,
+    ),
+    "the command whose sweep failed",
+  );
+  assert.ok(failure instanceof Error);
+  assert.equal(
+    failure.message,
+    "Command descendant cleanup failed; inspect before continuing",
+  );
+  assert.equal(failure.cause, named);
+  // The count of running commands was released: the next command runs and sweeps.
+  const guard = killEverything();
+  const after = localExecutor(root, join(root, "home"), guard.cleanup);
+  assert.equal(output(await after("echo after", signal())), "after");
+  assert.deepEqual(guard.calls, [0]);
+});

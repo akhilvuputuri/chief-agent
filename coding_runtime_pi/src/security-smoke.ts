@@ -166,13 +166,14 @@ if (ran)
   );
 assert.equal(ran, false, "The repository's configured program ran");
 
-// Command descendants still running, possibly large, when the command's shell exits. A coding box
-// lost the result of `kite run check 2>&1 | grep -iE "error" | head; git status --short` to
-// "Command descendant cleanup failed". head exits after ten lines, the writers upstream die of
-// EPIPE, and a test process they started keeps running, re-parented to this subreaper (seen on
-// macOS in four of four runs). `finish` SIGKILLs it and the sweep must reap it within its window.
-// SIGKILL is certain but not instant: the kernel frees the address space before the process can
-// be reaped. These cases reproduce that on Linux and print how long the kill takes.
+// Command descendants still running, possibly large, when the command's shell exits (journal
+// 200). A coding box lost the result of `kite run check 2>&1 | grep -iE "error" | head; git status
+// --short` to "Command descendant cleanup failed". head exits after ten lines, the writers upstream
+// die of EPIPE, and a test process they started keeps running, re-parented to this subreaper (seen
+// on macOS in four of four runs). `finish` SIGKILLs it and the sweep must reap it. SIGKILL is
+// certain but not instant: the kernel frees the address space before the process can be reaped,
+// so the sweep waits for each reap instead of a fixed window. Each case below runs through the
+// real guard and names itself if it fails.
 await writeFile(
   join(root, "big.js"),
   "const b = Buffer.alloc(Number(process.argv[2]) * 1048576, 1);\n" +
@@ -207,33 +208,53 @@ for (const mib of [256, 1024, 2048]) {
   for (let i = 0; i < 3; i++)
     measured[`${mib} MiB`]!.push(Math.round(await killToExit(mib)));
 }
-console.log(
-  `SIGKILL to exit, ms (the old and current sweep wait about 100 x 1 ms): ${JSON.stringify(measured)}`,
-);
+console.log(`SIGKILL to exit, ms: ${JSON.stringify(measured)}`);
 /** Asserts each pid recorded in `files` (one pid per file, under root) is gone. */
-const gone = async (...files: string[]) => {
-  for (const file of files)
-    assert.throws(() =>
-      process.kill(Number(readFileSync(join(root, file), "utf8")), 0),
+const gone = (...files: string[]) => {
+  for (const file of files) {
+    const recorded = Number(readFileSync(join(root, file), "utf8"));
+    assert.throws(
+      () => process.kill(recorded, 0),
+      `process ${recorded} (${file}) still exists`,
     );
+  }
 };
 const waitFor = (file: string) => `while [ ! -e ${file} ]; do sleep 0.05; done`;
+/** The guard's own message travels as the executor error's cause (journal 200). */
+const explain = (error: unknown): string =>
+  error instanceof Error
+    ? error.message +
+      (error.cause === undefined ? "" : ` (cause: ${explain(error.cause)})`)
+    : String(error);
+const failed: string[] = [];
+/** Runs one leftover case through the real guard; a failure is recorded under its name. */
+async function leftover(name: string, command: string, ...pids: string[]) {
+  try {
+    const started = process.hrtime.bigint();
+    const run = await settles(execute(command, signal), name);
+    const ms = Number(process.hrtime.bigint() - started) / 1e6;
+    assert.deepEqual(result(run), ["done", 0], "the command's own result");
+    gone(...pids);
+    console.log(`Leftover case passed: ${name} (${Math.round(ms)} ms)`);
+  } catch (error) {
+    console.log(`Leftover case FAILED: ${name}: ${explain(error)}`);
+    failed.push(name);
+  }
+}
 for (const mib of [1024, 2048]) {
   // In the command's process group, orphaned before its shell exits: killed by `finish`, reaped
   // by the sweep.
-  const grouped = await execute(
+  await leftover(
+    `${mib} MiB process left in the command's group`,
     `sh -c 'node big.js ${mib} grouped-${mib}.ready & echo $! > grouped-${mib}.pid'; ${waitFor(`grouped-${mib}.ready`)}; echo done`,
-    signal,
+    `grouped-${mib}.pid`,
   );
-  assert.deepEqual(result(grouped), ["done", 0]);
-  await gone(`grouped-${mib}.pid`);
   // A detached daemon of the same size in a session of its own: killed and reaped by the sweep.
-  const detached = await execute(
+  await leftover(
+    `${mib} MiB detached daemon in its own session`,
     `setsid sh -c 'echo $$ > detached-${mib}.pid; exec node big.js ${mib} detached-${mib}.ready' & ${waitFor(`detached-${mib}.ready`)}; echo done`,
-    signal,
+    `detached-${mib}.pid`,
   );
-  assert.deepEqual(result(detached), ["done", 0]);
-  await gone(`detached-${mib}.pid`);
 }
 // A chain of daemons, each in a session of its own and a child of the one before: each
 // generation becomes the worker's child only after its parent has died.
@@ -248,12 +269,12 @@ await writeFile(
   ].join("\n"),
 );
 const depth = 30;
-const chain = await execute(
+await leftover(
+  `chain of ${depth + 1} daemons, each in its own session`,
   `setsid sh ./chain.sh ${depth} & ${waitFor("chain.ready")}; echo done`,
-  signal,
+  ...Array.from({ length: depth + 1 }, (_, n) => `chain-${n}.pid`),
 );
-assert.deepEqual(result(chain), ["done", 0]);
-await gone(...Array.from({ length: depth + 1 }, (_, n) => `chain-${n}.pid`));
+assert.deepEqual(failed, [], "Leftover cases failed");
 console.log(
-  "Synthetic process privacy, detached-descendant cleanup, concurrent commands and repository-configured programs passed.",
+  "Synthetic process privacy, detached-descendant cleanup, concurrent commands, repository-configured programs and large or multi-generation leftovers passed.",
 );

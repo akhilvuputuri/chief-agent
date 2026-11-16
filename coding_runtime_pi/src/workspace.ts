@@ -136,12 +136,16 @@ export function localExecutor(
           // While another command runs, its own descendants may legitimately have been adopted
           // by the worker; the sweep waits until none runs (journal 199).
           if (running.count === 0) cleanup?.();
-        } catch {
+        } catch (failure) {
           child.stdout.destroy();
           child.stderr.destroy();
+          // The model gets the same short message as before. The guard's own message, which
+          // names each surviving process by pid, program name and state, goes with it as the
+          // cause (journal 200).
           reject(
             new Error(
               "Command descendant cleanup failed; inspect before continuing",
+              { cause: failure },
             ),
           );
           return;
