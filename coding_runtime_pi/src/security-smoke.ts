@@ -256,8 +256,8 @@ async function leftover(name: string, command: string, ...pids: string[]) {
     failed.push(name);
   }
 }
-// 6 GiB takes several times the old window of about 100 x 1 ms to be reaped on any runner, so
-// this size fails against the old guard by a clear margin.
+// 6 GiB took 170 to 472 ms to be reaped on the CI runners seen, against the old window of about
+// 100 x 1 ms (about 110 ms), so this size fails against the old guard on each of them.
 for (const mib of [1024, 2048, 6144]) {
   // In the command's process group, orphaned before its shell exits: killed by `finish`, reaped
   // by the sweep.
@@ -338,6 +338,12 @@ await leftover(
 );
 const traced = readFileSync(join(root, "traced.status"), "utf8");
 console.log(`Tracer case ptrace attach: ${traced}`);
+// Without the attach the case above passes without ever making a traced zombie.
+assert.equal(
+  traced.trim(),
+  "attached",
+  "The tracer could not attach, so the traced-process case tested nothing",
+);
 assert.deepEqual(failed, [], "Leftover cases failed");
 watchdog.kill();
 console.log(
