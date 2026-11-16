@@ -2,11 +2,11 @@
 #include <node_api.h>
 #include <sys/prctl.h>
 #include <sys/wait.h>
-#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 static napi_value lockdown(napi_env env, napi_callback_info info) {
@@ -26,19 +26,22 @@ static napi_value lockdown(napi_env env, napi_callback_info info) {
  * command shell has already been reaped by Node: nothing reaped here is a child Node waits for.
  * A pid stays ours until we reap it, so it cannot be reused between getsid and kill.
  *
- * Each pass kills every command descendant now listed as the worker's child and then waits until
- * each one is reaped (journal 200). SIGKILL cannot be caught or ignored, so each will die; the
- * kernel frees its memory before it can be reaped, about 63 ms per GiB measured, which is why a
- * fixed window of a few milliseconds was not enough. A dying process's own children are
- * re-parented to this subreaper before it can be reaped, so the next pass, which reads the list
- * again, sees them: a pass is a generation of descendants, not a unit of time. The wait blocks
- * the worker's event loop for that long (about one second for a box's whole memory); a process
- * that cannot die (stuck in uninterruptible I/O) blocks it until the host declares the worker's
- * heartbeat lost and ends the box (journal 200).
+ * Each pass reads the list, SIGKILLs every command descendant on it and reaps whichever have
+ * already exited, without blocking on any one of them; it ends when a pass lists none (journal
+ * 200). A killed process's children are re-parented here before it can be reaped, so a later
+ * pass lists and kills them while earlier ones are still dying. Blocking on one pid instead would
+ * leave those later generations running for as long as that pid takes, and a traced zombie can
+ * only be reaped once its tracer, possibly one of those later generations, has died.
+ *
+ * There is no time limit. SIGKILL cannot be caught or ignored, so every killed process dies; the
+ * kernel frees its memory before it can be reaped, about 63 ms per GiB measured, and a process
+ * stuck in uninterruptible I/O takes as long as that I/O. Meanwhile the worker's event loop is
+ * blocked; if that lasts, the host declares the worker's heartbeat lost and ends the box
+ * (journal 200). The only bound is on generations: a pass that lists a pid the previous pass did
+ * not list counts as one, and passes that only wait for pids already killed do not. A tree that
+ * keeps making new processes faster than they are killed fails loudly, naming what survives.
  */
 static int foreign(pid_t pid,pid_t own) {pid_t sid=getsid(pid);return sid>=0&&sid!=own;}
-/* ECHILD means it is no longer our child to wait for: nothing of it remains to reap here. */
-static void reap(pid_t pid) {while(waitpid(pid,NULL,0)<0&&errno==EINTR) {}}
 /* "pid (comm) state", from /proc/<pid>/stat; comm lies between the first '(' and the last ')'.
  * Never the command line: it can carry what the command was given. */
 static void describe(pid_t pid,char *out,size_t size) {
@@ -50,49 +53,57 @@ static void describe(pid_t pid,char *out,size_t size) {
   for(char *c=open+1;*c;c++) if(*c<0x20||*c>0x7e) *c='?';
   snprintf(out,size,"%d (%s) %c",pid,open+1,close[2]);
 }
-/* Bounds only a tree that forks new generations faster than they are killed: it then fails
- * loudly below instead of looping. No real command's descendants are this many generations deep. */
+typedef struct {pid_t *pids;size_t count,capacity;} pids_t;
+static int add(pids_t *list,pid_t pid) {
+  if(list->count==list->capacity) {
+    size_t next=list->capacity?list->capacity*2:64;pid_t *grown=realloc(list->pids,next*sizeof(pid_t));
+    if(!grown) return 0;
+    list->pids=grown;list->capacity=next;
+  }
+  list->pids[list->count++]=pid;return 1;
+}
+static int order(const void *a,const void *b) {pid_t x=*(const pid_t *)a,y=*(const pid_t *)b;return (x>y)-(x<y);}
+/* Generations of new processes, not passes or time: no real command's descendants come close. */
 #define GENERATIONS 100
 #define NAMED 4
+static napi_value refuse(napi_env env,pids_t *a,pids_t *b,const char *message) {
+  free(a->pids);free(b->pids);napi_throw_error(env,"CLEANUP_FAILED",message);return NULL;
+}
 static napi_value cleanup(napi_env env,napi_callback_info info) {
   (void)info;
   pid_t own=getsid(0);
   char path[128];snprintf(path,sizeof(path),"/proc/%d/task/%d/children",getpid(),getpid());
-  pid_t *killed=NULL;size_t capacity=0;
-  for(int pass=0;pass<GENERATIONS;pass++) {
-    FILE *f=fopen(path,"r");int pid;size_t count=0;
+  pids_t seen={0},now={0};int generations=0;
+  for(;;) {
+    FILE *f=fopen(path,"r");int pid,fresh=0;
     /* A guard that could not look must not report that nothing remains. */
-    if(!f) {free(killed);napi_throw_error(env,"CLEANUP_FAILED","Cannot list the worker's children");return NULL;}
-    /* Kill them all first, so the kernel frees their memory at once, then wait for each. */
+    if(!f) return refuse(env,&seen,&now,"Cannot list the worker's children");
+    now.count=0;
     while(fscanf(f,"%d",&pid)==1) {
       if(!foreign(pid,own)) continue;
-      if(count==capacity) {
-        size_t next=capacity?capacity*2:64;pid_t *grown=realloc(killed,next*sizeof(pid_t));
-        if(!grown) {kill(pid,SIGKILL);reap(pid);continue;}
-        killed=grown;capacity=next;
-      }
-      kill(pid,SIGKILL);killed[count++]=pid;
+      kill(pid,SIGKILL);waitpid(pid,NULL,WNOHANG);
+      /* Losing track would hide a new generation: fail loudly instead. */
+      if(!add(&now,pid)) {fclose(f);return refuse(env,&seen,&now,"Cannot track the worker's children");}
+      if(!seen.count||!bsearch(&pid,seen.pids,seen.count,sizeof(pid_t),order)) fresh=1;
     }
     fclose(f);
-    for(size_t i=0;i<count;i++) reap(killed[i]);
-    if(!count) break;
-  }
-  free(killed);
-  FILE *remaining=fopen(path,"r");int pid,survivors=0;
-  if(!remaining) {napi_throw_error(env,"CLEANUP_FAILED","Cannot list the worker's children");return NULL;}
-  char message[512]="Command descendants remain:";size_t used=strlen(message);
-  while(fscanf(remaining,"%d",&pid)==1) {
-    if(!foreign(pid,own)) continue;
-    if(survivors++<NAMED) {
-      char one[64];describe(pid,one,sizeof(one));
-      /* At most 4 x 64 characters: the message cannot fill; clamped all the same. */
-      used+=snprintf(message+used,sizeof(message)-used,"%s %s",survivors>1?",":"",one);
-      if(used>=sizeof(message)) used=sizeof(message)-1;
+    if(!now.count) break;
+    if(fresh&&++generations>GENERATIONS) {
+      char message[512]="Command descendants remain:";size_t used=strlen(message);
+      for(size_t i=0;i<now.count&&i<NAMED;i++) {
+        char one[64];describe(now.pids[i],one,sizeof(one));
+        /* At most 4 x 64 characters: the message cannot fill; clamped all the same. */
+        used+=snprintf(message+used,sizeof(message)-used,"%s %s",i?",":"",one);
+        if(used>=sizeof(message)) used=sizeof(message)-1;
+      }
+      if(now.count>NAMED) snprintf(message+used,sizeof(message)-used,", and %zu more",now.count-NAMED);
+      return refuse(env,&seen,&now,message);
     }
+    qsort(now.pids,now.count,sizeof(pid_t),order);
+    pids_t swap=seen;seen=now;now=swap;
+    struct timespec delay={0,1000000};nanosleep(&delay,NULL);
   }
-  fclose(remaining);
-  if(survivors>NAMED) snprintf(message+used,sizeof(message)-used,", and %d more",survivors-NAMED);
-  if(survivors) {napi_throw_error(env,"CLEANUP_FAILED",message);return NULL;}
+  free(seen.pids);free(now.pids);
   napi_value result;napi_get_boolean(env,true,&result);return result;
 }
 static napi_value init(napi_env env,napi_value exports) {
