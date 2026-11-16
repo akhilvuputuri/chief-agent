@@ -165,6 +165,95 @@ if (ran)
     process.kill(Number(readFileSync(configured, "utf8")), 0),
   );
 assert.equal(ran, false, "The repository's configured program ran");
+
+// Command descendants still running, possibly large, when the command's shell exits. A coding box
+// lost the result of `kite run check 2>&1 | grep -iE "error" | head; git status --short` to
+// "Command descendant cleanup failed". head exits after ten lines, the writers upstream die of
+// EPIPE, and a test process they started keeps running, re-parented to this subreaper (seen on
+// macOS in four of four runs). `finish` SIGKILLs it and the sweep must reap it within its window.
+// SIGKILL is certain but not instant: the kernel frees the address space before the process can
+// be reaped. These cases reproduce that on Linux and print how long the kill takes.
+await writeFile(
+  join(root, "big.js"),
+  "const b = Buffer.alloc(Number(process.argv[2]) * 1048576, 1);\n" +
+    'require("node:fs").writeFileSync(process.argv[3], "1");\n' +
+    "setInterval(() => b[0]++, 1000);\n",
+);
+/** Milliseconds from SIGKILL until Node sees the exit of a child holding `mib` MiB, measured here. */
+async function killToExit(mib: number) {
+  const ready = join(root, `measure-${mib}.ready`);
+  await rm(ready, { force: true });
+  const child = spawn("node", [join(root, "big.js"), String(mib), ready], {
+    stdio: "ignore",
+  });
+  const exited = new Promise<void>((accept) =>
+    child.on("exit", () => accept()),
+  );
+  while (
+    !(await access(ready).then(
+      () => true,
+      () => false,
+    ))
+  )
+    await new Promise((accept) => setTimeout(accept, 20));
+  const start = process.hrtime.bigint();
+  child.kill("SIGKILL");
+  await exited;
+  return Number(process.hrtime.bigint() - start) / 1e6;
+}
+const measured: Record<string, number[]> = {};
+for (const mib of [256, 1024, 2048]) {
+  measured[`${mib} MiB`] = [];
+  for (let i = 0; i < 3; i++)
+    measured[`${mib} MiB`]!.push(Math.round(await killToExit(mib)));
+}
+console.log(
+  `SIGKILL to exit, ms (the old and current sweep wait about 100 x 1 ms): ${JSON.stringify(measured)}`,
+);
+/** Asserts each pid recorded in `files` (one pid per file, under root) is gone. */
+const gone = async (...files: string[]) => {
+  for (const file of files)
+    assert.throws(() =>
+      process.kill(Number(readFileSync(join(root, file), "utf8")), 0),
+    );
+};
+const waitFor = (file: string) => `while [ ! -e ${file} ]; do sleep 0.05; done`;
+for (const mib of [1024, 2048]) {
+  // In the command's process group, orphaned before its shell exits: killed by `finish`, reaped
+  // by the sweep.
+  const grouped = await execute(
+    `sh -c 'node big.js ${mib} grouped-${mib}.ready & echo $! > grouped-${mib}.pid'; ${waitFor(`grouped-${mib}.ready`)}; echo done`,
+    signal,
+  );
+  assert.deepEqual(result(grouped), ["done", 0]);
+  await gone(`grouped-${mib}.pid`);
+  // A detached daemon of the same size in a session of its own: killed and reaped by the sweep.
+  const detached = await execute(
+    `setsid sh -c 'echo $$ > detached-${mib}.pid; exec node big.js ${mib} detached-${mib}.ready' & ${waitFor(`detached-${mib}.ready`)}; echo done`,
+    signal,
+  );
+  assert.deepEqual(result(detached), ["done", 0]);
+  await gone(`detached-${mib}.pid`);
+}
+// A chain of daemons, each in a session of its own and a child of the one before: each
+// generation becomes the worker's child only after its parent has died.
+await writeFile(
+  join(root, "chain.sh"),
+  [
+    'n="$1"',
+    'echo $$ > "chain-$n.pid"',
+    'if [ "$n" -gt 0 ]; then setsid sh ./chain.sh $((n - 1)) & else echo 1 > chain.ready; fi',
+    "exec sleep 600",
+    "",
+  ].join("\n"),
+);
+const depth = 30;
+const chain = await execute(
+  `setsid sh ./chain.sh ${depth} & ${waitFor("chain.ready")}; echo done`,
+  signal,
+);
+assert.deepEqual(result(chain), ["done", 0]);
+await gone(...Array.from({ length: depth + 1 }, (_, n) => `chain-${n}.pid`));
 console.log(
   "Synthetic process privacy, detached-descendant cleanup, concurrent commands and repository-configured programs passed.",
 );
