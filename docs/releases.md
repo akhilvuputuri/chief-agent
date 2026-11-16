@@ -1,8 +1,8 @@
 ## A job on a retired worker image moves itself to the current one (16 November 2026)
 
-- **Code.** Host only. When a Pi job is about to start a box and its worker image has been retired from the coding profile, the host moves it to the image new jobs use, with the same settings change as `coding_job_update` (`upgradeWorker`), and starts the box instead of pausing. The owner gets one notice saying so. A job whose models fail the direct-model check stays paused and says why; a job that cannot be moved keeps the "start a new coding job" text. Nothing in the worker image changes.
+- **Code.** Host only. When a Pi job is about to start a box and its worker image has been retired from the coding profile, the host moves it to the image new jobs use, with the same settings change as `coding_job_update` (`upgradeWorker`), and starts the box instead of pausing. The owner gets one notice saying so. A job whose models fail the direct-model check stays paused and says why; a job that cannot be moved keeps the "start a new coding job" text. If the move does not apply (the job changed after it was claimed), the job is paused with a text that says so, or left alone if another pass now holds it. The worker image's build includes `src/`, but the worker never loads this code, so no new image pin is needed.
 - **Why.** An answered job paused with advice to move it, and the owner started a new job instead. See [journal 202](journey/202-retired-image-moves-itself.md).
-- **Tested.** `tests/coding-on-boxes.test.ts` and `tests/coding-job-update.test.ts` locally, typecheck and format.
+- **Tested.** `tests/coding-on-boxes.test.ts` (including the move matching no row, a replayed move, a PR job, and the automatic retry of a moved job) and `tests/coding-job-update.test.ts` locally, typecheck and format.
 - **Not measured.** No real job has been moved this way; the notice has not been seen on a phone.
 - **Deployment.** Not yet released.
 

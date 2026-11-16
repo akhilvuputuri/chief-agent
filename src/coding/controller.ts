@@ -3023,11 +3023,34 @@ export class CodingController {
           by: "host",
           reason: "worker_image_retired",
           changes: [{ field: "Worker image", from, to }],
-          summary: `This job's worker image was retired, so Chief moved it to the current one and is starting it. Worker image: ${from} → ${to}. Its saved work, its models and your Start of the request stay as they were.`,
+          summary: `This job's worker image was retired, so Chief moved it to the current one and is starting it. Worker image: ${from} → ${to}. Its saved work, its coder and reviewer models and your Start of the request stay as they were.`,
         }),
       ],
     );
-    if (!moved.rows.length) return false;
+    if (!moved.rows.length) {
+      // Nothing was moved. Nothing in this file changes a provisioning job's settings except
+      // this move, which needs the lease, and no queued job has publication_started, so the
+      // row either left this pass (its lease ran out and another pass took it, or the owner
+      // cancelled it) or was changed outside the controller. Only a job this pass still holds
+      // is paused, with a text that says what happened; one it no longer holds is left alone.
+      const held = (
+        await this.db.query(
+          "SELECT 1 FROM coding_jobs WHERE id=$1 AND attempt_id=$2 AND lease=$3 AND state='provisioning' AND sandbox_id IS NULL",
+          [j.id, j.attempt_id, j.lease],
+        )
+      ).rows.length;
+      opsLog("coding.worker_move_skipped", "warn", {
+        ref: j.id,
+        state: held ? "paused" : "not_held",
+      });
+      if (held)
+        await this.stopped(
+          j,
+          "This job's worker image has been retired, and moving it to the current one did not apply, so no coding box was started. Its saved work is kept; resume it to try again",
+          false,
+        );
+      return false;
+    }
     j.settings = next;
     opsLog("coding.worker_moved", "info", { ref: j.id });
     return true;

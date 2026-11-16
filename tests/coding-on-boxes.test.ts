@@ -1,5 +1,6 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { BoxController } from "../src/boxes/controller.js";
 import { FakeBoxProvider } from "../src/boxes/provider.js";
 import { codingSettings } from "../src/coding/schema.js";
@@ -187,19 +188,158 @@ test("a Pi job on a retired worker image is moved to the current image by the ho
   ]);
   assert.match(notices[0].payload.summary, /worker image was retired/);
   assert.match(notices[0].payload.summary, /Start of the request stay/);
-  // A repeated pass moves nothing and writes no second notice.
+  assert.match(notices[0].payload.summary, /coder and reviewer models/);
+});
+
+const RETIRED = `ghcr.io/example/coding@sha256:${"9".repeat(64)}`;
+/** A started job snapshotted with a retired image. */
+async function retiredJob(f: Awaited<ReturnType<typeof retiredFixture>>) {
+  const job = await f.start();
+  await f.db.query(
+    "UPDATE coding_jobs SET settings=jsonb_set(settings,'{image}',to_jsonb($2::text)) WHERE id=$1",
+    [job.id, RETIRED],
+  );
+  return job;
+}
+/** Runs `act` once, between the claim and the move's statement. */
+function beforeMove(
+  f: Awaited<ReturnType<typeof retiredFixture>>,
+  act: (
+    query: (text: string, params?: unknown[]) => Promise<any>,
+  ) => Promise<unknown>,
+) {
+  const query = f.db.query.bind(f.db) as (
+    text: string,
+    params?: unknown[],
+  ) => Promise<any>;
+  let done = false;
+  (f.db as any).query = async (text: string, params?: unknown[]) => {
+    if (!done && typeof text === "string" && text.includes("'worker-moved:'")) {
+      done = true;
+      await act(query);
+    }
+    return query(text, params);
+  };
+}
+const movedNotices = async (
+  f: Awaited<ReturnType<typeof retiredFixture>>,
+  id: string,
+) =>
+  (
+    await f.db.query(
+      "SELECT count(*)::int AS n FROM coding_events WHERE job_id=$1 AND event_key LIKE 'worker-moved:%'",
+      [id],
+    )
+  ).rows[0].n as number;
+const boxCount = async (f: Awaited<ReturnType<typeof retiredFixture>>) =>
+  (await f.db.query("SELECT count(*)::int AS n FROM boxes")).rows[0]
+    .n as number;
+
+test("a move that no longer matches the claimed job's settings pauses it with a true text and starts no box", async (t) => {
+  const f = await retiredFixture(t);
+  const job = await retiredJob(f);
+  beforeMove(f, (query) =>
+    query(
+      "UPDATE coding_jobs SET settings=jsonb_set(settings,'{reviewerModel}','\"synthetic/other\"') WHERE id=$1",
+      [job.id],
+    ),
+  );
   await f.c.tick();
+  const j = await f.row(job.id);
+  assert.equal(j.state, "paused");
+  assert.match(j.summary, /moving it to the current one did not apply/);
+  assert.match(j.summary, /resume it to try again/);
+  assert.doesNotMatch(j.summary, /never started/);
+  assert.equal(j.settings.image, RETIRED);
+  assert.equal(j.sandbox_id, null);
+  assert.equal(j.cleanup, "none");
+  assert.equal(await movedNotices(f, job.id), 0);
+  assert.equal(await boxCount(f), 0);
+});
+
+test("a move after this pass lost the claim leaves the job to the pass that holds it", async (t) => {
+  const f = await retiredFixture(t);
+  const job = await retiredJob(f);
+  const other = randomUUID();
+  beforeMove(f, (query) =>
+    query("UPDATE coding_jobs SET lease=$2 WHERE id=$1", [job.id, other]),
+  );
   await f.c.tick();
+  const j = await f.row(job.id);
+  assert.equal(j.state, "provisioning");
+  assert.equal(j.lease, other);
+  assert.equal(j.settings.image, RETIRED);
+  assert.equal(j.sandbox_id, null);
+  assert.equal(j.cleanup, "pending");
+  assert.equal(await movedNotices(f, job.id), 0);
+  assert.equal(await boxCount(f), 0);
+});
+
+test("replaying the move for the same attempt writes no second notice", async (t) => {
+  const f = await retiredFixture(t);
+  const job = await retiredJob(f);
+  const before = await f.row(job.id);
+  await f.c.tick();
+  const moved = await f.row(job.id);
+  assert.match(moved.sandbox_id, /^box:/);
+  assert.equal(await movedNotices(f, job.id), 1);
+  // The same attempt, claimed and on the retired image again, goes through the move again.
+  await f.db.query(
+    "UPDATE coding_jobs SET settings=$2::jsonb,sandbox_id=NULL,state='provisioning',lease=$3 WHERE id=$1",
+    [job.id, JSON.stringify(before.settings), randomUUID()],
+  );
+  const replay = await f.row(job.id);
+  assert.equal(replay.attempt_id, moved.attempt_id);
+  assert.equal(await (f.c as any).moveRetiredWorker(replay), true);
+  assert.equal(await movedNotices(f, job.id), 1);
+});
+
+test("a job with a PR that automation queued again is moved and its box launches", async (t) => {
+  const f = await retiredFixture(t);
+  const job = await retiredJob(f);
+  // As the rebase and PR-feedback requeues leave it (automation.ts).
+  await f.db.query(
+    "UPDATE coding_jobs SET pr_url='https://github.com/example/repo/pull/7',head_sha=$2,cleanup='none',summary='PR feedback went to the coder; review and CI run again before the Merge card' WHERE id=$1",
+    [job.id, "c".repeat(40)],
+  );
+  await f.c.tick();
+  const j = await f.row(job.id);
+  assert.match(j.sandbox_id, /^box:/);
+  assert.notEqual(j.settings.image, RETIRED);
+  assert.equal(await movedNotices(f, job.id), 1);
+});
+
+test("a moved job whose box stopped is still retried automatically once", async (t) => {
+  const f = await retiredFixture(t);
+  const job = await retiredJob(f);
+  await f.c.tick();
+  const moved = await f.row(job.id);
+  assert.match(moved.sandbox_id, /^box:/);
+  // The box stopped without a reason a few minutes after the move (as the host records it).
+  await f.db.query(
+    "UPDATE coding_events SET created_at=now()-interval '10 minutes' WHERE job_id=$1 AND payload->>'reason'='worker_image_retired'",
+    [job.id],
+  );
+  await f.db.query(
+    "UPDATE coding_jobs SET state='paused',stage='paused',cleanup='complete',summary='The coding box stopped',updated_at=now()-interval '5 minutes' WHERE id=$1",
+    [job.id],
+  );
+  await f.db.query(
+    'INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,$2,\'{"summary":"The coding box stopped","cause":"sandbox_stopped"}\'::jsonb,\'suppressed\')',
+    [job.id, `${moved.attempt_id}:paused`],
+  );
+  await f.c.autoRetryOnce();
+  const j = await f.row(job.id);
+  assert.equal(j.state, "queued");
   assert.equal(
     (
       await f.db.query(
-        "SELECT count(*)::int AS n FROM coding_events WHERE job_id=$1 AND event_key LIKE 'worker-moved:%'",
-        [job.id],
+        "SELECT count(*)::int AS n FROM coding_revisions WHERE job_id=$1 AND request_key=$2",
+        [job.id, `auto-retry:${moved.attempt_id}`],
       )
     ).rows[0].n,
     1,
   );
-  assert.equal((await f.row(job.id)).settings.image, current);
 });
 
 test("a retired Pi job whose move fails the model check stays paused and says why", async (t) => {
