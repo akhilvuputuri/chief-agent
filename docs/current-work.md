@@ -4,6 +4,8 @@ A serial run of the TypeScript tests now uses several shared processes at once, 
 
 Next: read the next coding job's profile for the time of its full check, and for how often the suite ran now that `kite test FILE` is live.
 
+> **Update, 16 November 2026:** live in `edb071a` (PR 503); the gateway is healthy on it. No coding box has run it yet. Open: a pipe closed early by its reader ends the run with an unhandled error.
+
 # Worker request arrays check their length first — live in `0013525`, 16 November 2026
 
 Released by PR 494. The gateway is healthy on `0013525`, and the deployed checkpoint schema refuses an array of a million bad elements with one issue in 3 ms (run once in a separate process in the gateway container). No coding job has gone through it yet. zod stays at 3.25.76; moving to zod 4, and whether checkpoint, finish and publish need a 64 MB body, are open. See [journal 198](journey/198-worker-arrays-check-length-first.md#release-closure--2026-11-16).

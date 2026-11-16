@@ -4,6 +4,8 @@
 - **Why.** A coding box ran the TypeScript tests on one of its three CPUs, in 310.7 s. On a CI machine held to three CPUs, three workers took 197 s against 390 s serial. Earlier attempts gained little because one test file kept its process alive for three minutes after its tests, retrying a request to a server the test had closed. See [journal 201](journey/201-test-workers.md).
 - **Not measured.** A coding box. Whether Node counts three CPUs there, or four, was not checked.
 
+> **Update, 16 November 2026:** live. Merged as `edb071a` (PR 503) after independent review of its exact head `6c13fee`; main's checks and release run 43815513056 succeeded and the gateway reported `edb071a`, healthy. Review found that piped output could be cut off at exit on macOS; the run now waits for its output. A pipe closed early by its reader still ends the run with an unhandled error ([journal 201](journey/201-test-workers.md#release-closure--2026-11-16)).
+
 ## Worker image with the guard that waits for the kill (16 November 2026)
 
 - **Configuration.** New coding jobs pin worker image `sha256:90cb1dcc…`, built from `4da138b` (run 43805890191). It carries [journal 200](journey/200-wait-for-the-kill.md): the guard kills command leftovers until none remain, with no time window, so a command that leaves a large process behind keeps its result. No code, migration or Compose change.
