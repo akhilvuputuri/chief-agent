@@ -7,6 +7,8 @@
 
 > **Update, 16 November 2026 ([journal 198](docs/journey/198-worker-arrays-check-length-first.md)):** the owner chose the length check. Arrays in the schemas a coding worker's request reaches check their length before their elements (`src/bounded-array.ts`); the 8 MB case went from 1.1 GB of heap to none. Tested, release pending. zod 3.25.76 is unchanged and still flagged, and other schemas keep zod's array.
 
+> **Update, 16 November 2026 ([journal 198](docs/journey/198-worker-arrays-check-length-first.md#release-closure--2026-11-16)):** live in `0013525` (PR 494); the gateway is healthy and the deployed schema refuses a million bad elements with one issue. No coding job has gone through it yet.
+
 # Direct Anthropic route — adapter released (`a7c1993`), enabling change prepared, 11 November 2026
 
 - **Update, 11 November 2026, live:** PR 442 merged as `ef825c4` and rolled out; Opus 5.5 calls go direct in production, verified with a live call ([journal 161](docs/journey/161-enabling-direct-anthropic.md)).

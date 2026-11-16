@@ -1,3 +1,10 @@
+## Worker request arrays check their length first: live (16 November 2026)
+
+- **Deployment.** [PR 494](https://github.com/akhilvuputuri/chief-agent/pull/494) merged as `0013525`. Release run 43794367459 succeeded at 02:49 UTC on 16 November; the gateway reported `0013525`, healthy, with no warn or error line in its first minute. No migration, Compose or worker image change.
+- **Review.** Independent review (Claude Opus 5.5) approved `44bb151` with five notes, `4e55174` with them applied, and the merged head `61c086d`; each round is in [journal 198](journey/198-worker-arrays-check-length-first.md).
+- **Checked on the host.** The deployed `checkpoint` schema, run once in a separate process in the gateway container, refused an array of 1,000,000 zeros with one issue in 3 ms and accepted a valid checkpoint.
+- **Not measured.** No coding job has sent a request through the changed schemas.
+
 ## Worker request arrays check their length first (16 November 2026)
 
 - **Code.** `src/bounded-array.ts` adds `boundedArray`, an array schema that checks its declared minimum and maximum before any element and stops at the first element that fails. Every array in the schemas a coding worker's request reaches uses it (`src/coding/schema.ts`, `squad-schema.ts`, `memory-schema.ts`, `pi-sessions.ts`, and the legacy model request in `api.ts`). Valid payloads parse to the same values. No new limit, and no database, Compose or worker image change.

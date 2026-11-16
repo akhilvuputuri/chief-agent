@@ -1,7 +1,7 @@
 # 198 — Can one coding worker request still exhaust the gateway's memory through zod?
 
 Work date: 2026-11-16. Written: 2026-11-16.
-Status: tested; release pending. The schemas a coding worker's request reaches check an array's length before its elements. Other schemas still use zod 3's array, behind body limits of 400 kB or less.
+Status: released in `0013525` on 16 November 2026. The schemas a coding worker's request reaches check an array's length before its elements. Other schemas still use zod 3's array, behind body limits of 400 kB or less.
 
 ## User-visible problem and preceding iteration
 
@@ -61,7 +61,13 @@ No database, Compose or worker-protocol change: a payload that was valid is stil
 - **Tested, 16 November, a Mac on Node 22.23.4:** `kite run check` exited 0 with no failing test on `44bb151` (6 min 0 s) and again on `4e55174` (6 min 24 s), the nine new tests among them. `kite run format:check` passed on `44bb151`, and the files changed since pass Prettier.
 - **Not verified:** a real worker request through the changed schemas in production.
 - **Still true after this change (reviewer's measurement):** reading a body costs memory before any schema runs. A 64 MB body of zeros took about 320 MB of heap in `JSON.parse` alone, against 777 MB available on the host. That is the price of the 64 MB allowance for checkpoint, finish and publish, which authenticate before they read.
-- **Not changed:** the other 104 `z.array` uses in `src`. The largest body any of them can receive is 400 kB (box events), which journal 162 measured at 62 MB of heap.
+- **Not changed:** the other 102 `z.array` uses in 33 files of `src`, counted as lines that contain `z.array(` or end in `.array(` (corrected on 16 November: this first said 104, which included two comment lines in the helper itself, as the review of the merged head pointed out). The largest body any of them can receive is 400 kB (box events), which journal 162 measured at 62 MB of heap.
+
+### Release closure — 2026-11-16
+
+[PR 494](https://github.com/akhilvuputuri/chief-agent/pull/494) merged as `0013525cf31a4ea8570ce3bc4ac980ba0ecd19ee`. Two other PRs had merged first and taken journal numbers 196 and 197, so main was merged in and this entry renumbered from 196 to 198; the reviewer approved that head, `61c086d`, in which the code differed from `acefe86` only by the number in two comments, and hosted CI passed on it. Main's checks and the [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/43794367459) succeeded, and `kite run release:status` reports that commit deployed with startup health passing at 02:49 UTC.
+
+Read on the host afterwards: the gateway container healthy, its logs carrying release `0013525` with no warn or error line in its first minute. The deployed `checkpoint` schema, loaded in a separate process inside the gateway container, refused an array of 1,000,000 zeros with one `too_big` issue in 3 ms and no heap growth, and accepted a one-file checkpoint. No coding job has sent a request through it yet.
 
 ## Follow-up and next iteration
 
