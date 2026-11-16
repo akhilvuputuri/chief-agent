@@ -84,6 +84,18 @@ export function namedTestFiles(names, all, cwd = process.cwd()) {
   return files.sort();
 }
 
+/** The files one run covers: the named ones, one shard of `all`, or all of them. */
+export function selectFiles(names, env, all, readWeights) {
+  if (names.length) {
+    if (env.TEST_SHARD)
+      throw new Error("TEST_SHARD does not apply to named test files.");
+    return namedTestFiles(names, all);
+  }
+  if (!env.TEST_SHARD) return all;
+  const { index, count } = parseShard(env.TEST_SHARD);
+  return assignShards(all, readWeights(), count)[index - 1];
+}
+
 /** "shared" for a serial run unless told otherwise; parallel files need their own processes. */
 export function isolationMode(env) {
   const concurrency = env.TEST_CONCURRENCY ?? "1";
@@ -216,21 +228,16 @@ if (
   process.argv[1] &&
   realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])
 ) {
-  let files = allTestFiles();
   const names = process.argv.slice(2);
-  if (names.length) {
-    try {
-      if (process.env.TEST_SHARD)
-        throw new Error("TEST_SHARD does not apply to named test files.");
-      files = namedTestFiles(names, files);
-    } catch (error) {
-      console.error(error.message);
-      process.exit(2);
-    }
-  } else if (process.env.TEST_SHARD) {
-    const { index, count } = parseShard(process.env.TEST_SHARD);
-    const weights = JSON.parse(readFileSync("tests/test-weights.json", "utf8"));
-    files = assignShards(files, weights, count)[index - 1];
+  let files;
+  try {
+    files = selectFiles(names, process.env, allTestFiles(), () =>
+      JSON.parse(readFileSync("tests/test-weights.json", "utf8")),
+    );
+  } catch (error) {
+    if (!names.length) throw error;
+    console.error(error.message);
+    process.exit(2);
   }
   // Serial unless asked: coding boxes run this too, and only CI has measured parallel files
   // for the SIGSEGV in journal 123 (journal 141).

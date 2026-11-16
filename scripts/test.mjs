@@ -6,6 +6,7 @@
 import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { allTestFiles, namedTestFiles } from "./test-shard.mjs";
 
 /** The kite commands, in order, for a run of every test or of the named files only. */
 export function testSteps(files) {
@@ -25,9 +26,21 @@ if (
   process.argv[1] &&
   realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])
 ) {
-  for (const args of testSteps(process.argv.slice(2))) {
-    const { status, error } = spawnSync("kite", args, { stdio: "inherit" });
+  const names = process.argv.slice(2);
+  // A mistyped name is refused before the build, not after it.
+  try {
+    if (names.length) namedTestFiles(names, allTestFiles());
+  } catch (error) {
+    console.error(error.message);
+    process.exit(2);
+  }
+  for (const args of testSteps(names)) {
+    const { status, signal, error } = spawnSync("kite", args, {
+      stdio: "inherit",
+    });
     if (error) console.error(error);
+    // A step ended by a signal ends this run the same way, as the shell chain did.
+    if (signal) process.kill(process.pid, signal);
     if (status !== 0) process.exit(status ?? 1);
   }
 }

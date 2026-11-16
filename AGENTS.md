@@ -16,7 +16,7 @@ Non-negotiable even without the plugin:
 
 - **Read first, from `origin/main`:** `docs/current-work.md`, `HANDOVER.md`, `docs/portable-development.md`, `docs/cloud-development.md` and the relevant source. For an incident, start with `docs/troubleshooting.md`. Historical incident reports and deferred candidates describe earlier states. Current code, exact release evidence and verified production diagnostics take precedence.
 - **Checks:** Node 22 and the pinned kite (`node tools/install-kite.mjs`; never npm). `kite ci`, `kite run check`, `kite run build`, `kite run format:check`. Use Prettier on changed files. Tests use PGlite and mocked integrations, so production credentials are unnecessary.
-  - `kite run check` is the whole check: types, every test (`kite test`), the Python runtime and the Pi package. Do not run `kite test` or `kite run test` as well, because that runs every test a second time.
+  - `kite run check` covers types, the build, every test (`kite test`), the Python runtime and the Pi package. Do not run `kite test` or `kite run test` as well, because that runs every test a second time. `kite run format:check` is separate and still needed.
   - While working, run only the test files that cover the change: `kite test tests/links.test.ts` builds and runs the named files alone, in seconds. Run `kite run check` once, when the change is finished.
   - Do not run routinely: `kite run smoke:runtime` (paid) and other paid evals, which remain deferred.
   - Exception: run `kite run eval:picker` (about $0.04) by hand after changing `config/tool-picker.json`, and record the result in the journal.
