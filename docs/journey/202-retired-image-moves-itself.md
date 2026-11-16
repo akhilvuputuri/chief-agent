@@ -3,6 +3,8 @@
 Work date: 2026-11-16 (UTC). Written: 2026-11-16.
 Status: tested locally; not released. Host only: the worker image's build context includes `src/` (`Dockerfile.coding-pi` copies it and builds all of it), but the worker (`src/coding/pi-worker.ts`) never imports `controller.ts`, directly or through its imports, so a rebuilt image would behave the same and no new image pin is needed. Branch `coding/auto-move-retired-image`.
 
+> **Update, 16 November 2026: released.** PR 506 merged as `3a5b5d88` after an independent review approved its exact head `746eb422` and CI was green; release run 43901081291 succeeded, the server's release file read `3a5b5d88`, the gateway restarted at 15:52 UTC and `/healthz` was ok with Telegram polling. No coding job was open at the merge. See the release closure below.
+
 ## User-visible problem and preceding iteration
 
 A coding job keeps the worker image it was started with. When a new worker image is pinned and the old one is removed from the coding profile (`image` and `previousImages` in `config/boxes.json`), no coding box can run the old one any more. [Journal 200](200-wait-for-the-kill.md) changed the text such a job is paused with: its image has been retired, its saved work is kept, and it can be moved with `coding_job_update` (`upgradeWorker`) and then resumed.
@@ -67,3 +69,9 @@ Record the release, and the first real job moved this way, in a dated note.
 > - The Crash bullet said that if the host stops before the move, "the move happens on the next attempt". A job is first paused as never started and needs the owner's resume, and a host restart in that window is refused at startup.
 >
 > The Notice bullet also said the key name keeps the automatic retry going; the retry's own time check already does that.
+
+## Release closure — 2026-11-16
+
+- **Live (measured from GitHub and the production host).** PR 506 merged as `3a5b5d88` after an independent review approved its exact head `746eb422` and CI was green; release run 43901081291 succeeded, the server's release file read `3a5b5d88`, the gateway restarted at 15:52 UTC and `/healthz` was ok with Telegram polling. No coding job was open at the merge.
+- **Still not measured.** No real job has been moved off a retired image yet, and the owner notice has not been seen on a phone; no job on a retired image exists now to try it on.
+- **The job that prompted this.** Job `46463771`, paused on a retired image since 03:34 UTC, was never moved. The owner started a new job for the same task (`477702af`), then asked for `46463771` to be cancelled and its PR 496 closed, which was done. So this change has not yet had the case it was built for.

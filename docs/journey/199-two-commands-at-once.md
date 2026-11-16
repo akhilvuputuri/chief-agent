@@ -73,6 +73,11 @@ The deferral alone still leaves the sweep killing and reaping the worker's own c
 - **Only CI verifies:** the native guard's session rule on Linux, the security smoke and container smoke cases above, and that the existing reaping and confinement assertions still hold with the new sweep. CI runs only the new guard; that the old guard hangs these cases rests on the local model test above. (Corrected 16 November 2026: this line first listed "that the old guard would have hung them" among what CI verifies, which was wrong when written.)
 - **Not measured:** a real job with parallel calls on a box after release.
 
+> **Update, 16 November 2026 (first real job with this fix):** no job ran on `sha256:bfecdb52…`; the fix is also in the next image, `sha256:90cb1dcc…` ([journal 200](200-wait-for-the-kill.md)). Job `477702af` ran entirely on worker image `sha256:90cb1dcc…` on 16 November, from Start at 10:11 UTC to its second publication at 10:46 UTC: 2 boxes, each ended because its work was done (PR opened, then PR feedback handled); 32.7 machine minutes; 60 model calls, all completed (coder 31, including 2 cache-warm calls; reviewer 29); $1.38 in model calls; 3 coder runs and 3 review rounds (approve, request changes, approve); largest request context 44.5k tokens, no compaction; no pause, no heartbeat loss, no automatic retry. Its PR 505 was merged by the owner's Merge card as `6eddf429` and released (the release run on `6eddf429` succeeded; the gateway restarted at 11:20 UTC).
+>
+> - **Two commands in one turn (measured):** one reviewer turn made two tool calls and both results came back; every other turn made one call. That is one real pass of the fix; a coder turn with two commands has still not happened in production.
+> - For comparison, the earlier job on the same task (`46463771`, on the image before these fixes) cost $0.96 in model calls and used 366.5 machine minutes, most of them in the review box hung on the two-commands bug.
+
 ## Follow-up and next iteration
 
 - After release, check the first jobs whose turns request more than one call: each turn's tool results should arrive and no run should outlive its work.
