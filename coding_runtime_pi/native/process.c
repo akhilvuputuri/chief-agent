@@ -31,12 +31,16 @@ static napi_value cleanup(napi_env env,napi_callback_info info) {
   char path[128];snprintf(path,sizeof(path),"/proc/%d/task/%d/children",getpid(),getpid());
   for(int pass=0;pass<100;pass++) {
     FILE *f=fopen(path,"r");int pid,count=0;
+    /* A guard that could not look must not report that nothing remains. */
+    if(!f&&pass==0) {napi_throw_error(env,"CLEANUP_FAILED","Cannot list the worker's children");return NULL;}
     if(f) {while(fscanf(f,"%d",&pid)==1) {if(!foreign(pid,own)) continue;kill(pid,SIGKILL);waitpid(pid,NULL,WNOHANG);count++;}fclose(f);}
     if(!count) break;
     struct timespec delay={0,1000000};nanosleep(&delay,NULL);
   }
   FILE *remaining=fopen(path,"r");int pid,survivor=0;
-  if(remaining) {while(fscanf(remaining,"%d",&pid)==1) if(foreign(pid,own)) survivor=1;fclose(remaining);}
+  if(!remaining) {napi_throw_error(env,"CLEANUP_FAILED","Cannot list the worker's children");return NULL;}
+  while(fscanf(remaining,"%d",&pid)==1) if(foreign(pid,own)) survivor=1;
+  fclose(remaining);
   if(survivor) {napi_throw_error(env,"CLEANUP_FAILED","Command descendants remain");return NULL;}
   napi_value result;napi_get_boolean(env,true,&result);return result;
 }

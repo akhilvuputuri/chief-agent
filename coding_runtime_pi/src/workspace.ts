@@ -1,6 +1,6 @@
 import { processCleanup } from "./process-boundary.js";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
@@ -64,7 +64,7 @@ const running: { count: number } = ((
  * guard's sweep, which runs while `running.count` is 0, that is after every command's `exit` has
  * been delivered, and reaps only processes outside the worker's own session (never one Node
  * spawned: commands have sessions of their own and are all finished; Node's other children share
- * the worker's session). A failed kill changes nothing: a process that is already gone was reaped
+ * the worker's session, and none of them runs a program the repository or the model chose). A failed kill changes nothing: a process that is already gone was reaped
  * by libuv, which emits its `exit`; SIGKILL cannot be caught or ignored.
  */
 export function localExecutor(
@@ -163,6 +163,26 @@ export function localExecutor(
     });
   };
 }
+const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+/** A git command line in a private git directory, with no home or attribute files applied. */
+function gitIn(own: string, args: string[]) {
+  return [
+    "git",
+    `--git-dir=${own}`,
+    "--work-tree=.",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.excludesFile=/dev/null",
+    "-c",
+    "core.attributesFile=/dev/null",
+    ...args,
+  ]
+    .map(quote)
+    .join(" ");
+}
 export class Workspace {
   private root = "";
   /** The snapshot's own git directory, kept for this workspace's life (journal 193). */
@@ -251,24 +271,12 @@ export class Workspace {
     }
   }
   /**
-   * The working tree against the job's base commit, never against HEAD, so commits, branches
-   * and staging the model does never hide or change the candidate.
-   *
-   * It runs in a git directory of its own that shares the repository's objects: none of the
-   * coder's repository configuration (filters, hooks, external diff, fsmonitor, its index
-   * flags, `.git/info/exclude`, `core.autocrlf`) or home-directory ignore and attribute files
-   * applies, so nothing the coder configured can run or hang here (journal 193). The
-   * directory lives outside the coder's repository and keeps its index between snapshots, so
-   * unchanged files are not read again (the first snapshot on a base reads every file); its
-   * configuration is written afresh and any index flag cleared before every snapshot.
+   * The workspace's private git directory (journal 193), with the repository's objects as
+   * alternates and a configuration written afresh on every use: none of the repository's own
+   * configuration (hooks, filters, external diff, pager, aliases, fsmonitor, promisor remotes,
+   * `core.sshCommand`, credential helpers) is read, so nothing configured there can run.
    */
-  async snapshot(
-    execute: Executor,
-    signal: AbortSignal,
-    base: string,
-  ): Promise<Artifact> {
-    if (!/^[a-f0-9]{40}$/.test(base))
-      throw new Error("Artifact base must be a full commit SHA");
+  private async privateGit() {
     if (!this.root) await this.initialize();
     if (!this.own || !(await lstat(this.own).catch(() => undefined))) {
       this.own = await mkdtemp(join(this.scratch, "chief-snapshot-"));
@@ -288,6 +296,68 @@ export class Workspace {
       join(own, "objects", "info", "alternates"),
       `${join(this.root, ".git", "objects")}\n`,
     );
+    return own;
+  }
+  /**
+   * Whether the repository has `commit`, read through the private git directory and run by
+   * `execute`, so it is a counted, swept command like any other (journal 197).
+   */
+  async hasCommit(execute: Executor, signal: AbortSignal, commit: string) {
+    if (!/^[a-f0-9]{40}$/.test(commit))
+      throw new Error("Base must be a full commit SHA");
+    const own = await this.privateGit();
+    const result = await execute(
+      gitIn(own, ["cat-file", "-e", `${commit}^{commit}`]),
+      signal,
+    );
+    return result.exitCode === 0;
+  }
+  /**
+   * A file's exact bytes as `commit` has it, or undefined when the commit has none. Read
+   * through the private git directory with `cat-file`, which applies no filter or text
+   * conversion, and run by `execute` (journal 197).
+   */
+  async committedFile(
+    execute: Executor,
+    signal: AbortSignal,
+    commit: string,
+    path: string,
+  ): Promise<Buffer | undefined> {
+    if (!/^[a-f0-9]{40}$/.test(commit))
+      throw new Error("Base must be a full commit SHA");
+    const own = await this.privateGit();
+    const out = join(own, `read-${randomUUID()}`);
+    try {
+      const result = await execute(
+        `${gitIn(own, ["cat-file", "blob", `${commit}:${path}`])} > ${quote(out)}`,
+        signal,
+      );
+      if (result.exitCode !== 0) return undefined;
+      return await readFile(out);
+    } finally {
+      await rm(out, { force: true });
+    }
+  }
+  /**
+   * The working tree against the job's base commit, never against HEAD, so commits, branches
+   * and staging the model does never hide or change the candidate.
+   *
+   * It runs in a git directory of its own that shares the repository's objects: none of the
+   * coder's repository configuration (filters, hooks, external diff, fsmonitor, its index
+   * flags, `.git/info/exclude`, `core.autocrlf`) or home-directory ignore and attribute files
+   * applies, so nothing the coder configured can run or hang here (journal 193). The
+   * directory lives outside the coder's repository and keeps its index between snapshots, so
+   * unchanged files are not read again (the first snapshot on a base reads every file); its
+   * configuration is written afresh and any index flag cleared before every snapshot.
+   */
+  async snapshot(
+    execute: Executor,
+    signal: AbortSignal,
+    base: string,
+  ): Promise<Artifact> {
+    if (!/^[a-f0-9]{40}$/.test(base))
+      throw new Error("Artifact base must be a full commit SHA");
+    const own = await this.privateGit();
     const fresh = this.indexBase !== base;
     this.indexBase = undefined;
     const artifact = await this.snapshotIn(own, execute, signal, base, fresh);
@@ -301,32 +371,10 @@ export class Workspace {
     base: string,
     fresh: boolean,
   ): Promise<Artifact> {
-    const quote = (value: string) =>
-      "'" + value.replaceAll("'", "'\"'\"'") + "'";
     const run = async (args: string[], max = 20_000_000) => {
       // No time limit: a large repository is slow, not stuck; cancellation still stops it.
       // The output bound guards memory.
-      const result = await execute(
-        [
-          "git",
-          `--git-dir=${own}`,
-          "--work-tree=.",
-          "-c",
-          "core.hooksPath=/dev/null",
-          "-c",
-          "core.fsmonitor=false",
-          "-c",
-          "core.excludesFile=/dev/null",
-          "-c",
-          "core.attributesFile=/dev/null",
-          ...args,
-        ]
-          .map(quote)
-          .join(" "),
-        signal,
-        undefined,
-        max,
-      );
+      const result = await execute(gitIn(own, args), signal, undefined, max);
       if (result.exitCode !== 0 || result.truncated)
         throw new Error("Git artifact operation failed or exceeded its bound");
       return result.output;

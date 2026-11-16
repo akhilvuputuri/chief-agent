@@ -1,5 +1,3 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { mkdir, realpath, readdir, rm } from "node:fs/promises";
 import { join, relative } from "node:path";
@@ -58,28 +56,6 @@ export const reportReminder =
 export const noReportAsk = (role: Role) =>
   `The ${role} stopped without a result; its last message is in the job record. Reply to continue.`;
 
-/** A file as the given commit has it, or undefined when the commit has none. */
-async function baseFile(workspace: string, base: string, path: string) {
-  try {
-    const { stdout } = await promisify(execFile)(
-      "git",
-      ["-c", "core.hooksPath=/dev/null", "show", `${base}:${path}`],
-      {
-        cwd: workspace,
-        encoding: "buffer",
-        maxBuffer: 64 * 1024 * 1024,
-        env: {
-          PATH: process.env.PATH,
-          GIT_CONFIG_NOSYSTEM: "1",
-          GIT_CONFIG_GLOBAL: "/dev/null",
-        },
-      },
-    );
-    return stdout as Buffer;
-  } catch {
-    return undefined;
-  }
-}
 export class CodingRuntime {
   private active?: {
     id: string;
@@ -104,20 +80,6 @@ export class CodingRuntime {
       throw new Error("Role must be coder or reviewer");
     if (!/^[a-f0-9]{40}$/.test(request.base))
       throw new Error("Base must be a full commit SHA");
-    await promisify(execFile)(
-      "git",
-      ["cat-file", "-e", `${request.base}^{commit}`],
-      {
-        cwd: workspace,
-        env: {
-          PATH: process.env.PATH,
-          GIT_CONFIG_NOSYSTEM: "1",
-          GIT_CONFIG_GLOBAL: "/dev/null",
-        },
-      },
-    ).catch(() => {
-      throw new Error("The base commit is not in the workspace's repository");
-    });
     const task: Task = {
       version: 1,
       id: randomUUID(),
@@ -129,6 +91,15 @@ export class CodingRuntime {
       summary: "Ready",
       events: [],
     };
+    // Through the task's own executor and the workspace's private git directory, so nothing
+    // the repository's configuration names can run, and anything run is swept (journal 197).
+    const present = await new Workspace(workspace).hasCommit(
+      this.options.executor(task),
+      new AbortController().signal,
+      request.base,
+    );
+    if (!present)
+      throw new Error("The base commit is not in the workspace's repository");
     await this.options.store.save(task);
     return task;
   }
@@ -238,9 +209,15 @@ export class CodingRuntime {
       // commit, so a candidate cannot rewrite the rules it is reviewed by; a changed AGENTS.md
       // is part of the diff it reads (journal 192).
       const agentsFiles: Array<{ path: string; content: string }> = [];
+      const execute = this.options.executor(task);
       const agents =
         task.role === "reviewer"
-          ? await baseFile(task.workspace, task.base, "AGENTS.md")
+          ? await workspace.committedFile(
+              execute,
+              stop.signal,
+              task.base,
+              "AGENTS.md",
+            )
           : await workspace.read("AGENTS.md").catch((error) => {
               if ((error as NodeJS.ErrnoException).code !== "ENOENT")
                 throw error;
@@ -252,7 +229,6 @@ export class CodingRuntime {
           content: new TextDecoder("utf-8", { fatal: true }).decode(agents),
         });
       let report: ReportDocument | undefined;
-      const execute = this.options.executor(task);
       const custom = tools(
         workspace,
         task.role,

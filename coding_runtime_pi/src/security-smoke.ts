@@ -1,11 +1,21 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { linuxProcessBoundary } from "./process-boundary.js";
-import { localExecutor, type Execution } from "./workspace.js";
+import { Workspace, localExecutor, type Execution } from "./workspace.js";
 const cleanup = linuxProcessBoundary("/opt/pi-runtime/process-boundary.node");
+// The guard lists the worker's children here; it must be able to (journal 197).
+await readFile(`/proc/${process.pid}/task/${process.pid}/children`, "utf8");
 const root = await mkdtemp(join(tmpdir(), "pi-isolation-"));
 const execute = localExecutor(root, join(root, "home"));
 const signal = new AbortController().signal;
@@ -106,6 +116,55 @@ const ownExit = new Promise<number | null>((accept) =>
 );
 assert.deepEqual(result(await execute("echo quick", signal)), ["quick", 0]);
 assert.equal(await settles(ownExit, "The worker's own child"), 7);
+// A repository model-run code configured: a partial clone missing its AGENTS.md blob, whose
+// `core.sshCommand` starts a daemon outside every process group. Reading the base file must not
+// run it; if anything did run, nothing may survive once no command runs (journal 197).
+const repo = join(root, "configured");
+await mkdir(repo);
+const repoGit = (...args: string[]) =>
+  execFileSync("git", ["-C", repo, ...args], {
+    env: {
+      PATH: process.env.PATH,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+    },
+    encoding: "utf8",
+  }).trim();
+repoGit("init", "-q");
+repoGit("config", "user.name", "Synthetic");
+repoGit("config", "user.email", "synthetic@example.invalid");
+await writeFile(join(repo, "AGENTS.md"), "Base rules.\n");
+repoGit("add", "AGENTS.md");
+repoGit("commit", "-qm", "base");
+const base = repoGit("rev-parse", "HEAD");
+const blob = repoGit("rev-parse", "HEAD:AGENTS.md");
+const configured = join(root, "configured.pid");
+repoGit("config", "core.repositoryformatversion", "1");
+repoGit("config", "extensions.partialClone", "origin");
+repoGit("config", "remote.origin.url", "ssh://synthetic.invalid/repo.git");
+repoGit("config", "remote.origin.promisor", "true");
+repoGit(
+  "config",
+  "core.sshCommand",
+  `cd '${root}' && ${daemonCommand("configured.pid")}; false`,
+);
+await rm(join(repo, ".git", "objects", blob.slice(0, 2), blob.slice(2)));
+const reviewed = await new Workspace(repo).initialize();
+const reader = localExecutor(repo, join(root, "review-home"));
+assert.equal(await reviewed.hasCommit(reader, signal, base), true);
+assert.equal(
+  await reviewed.committedFile(reader, signal, base, "AGENTS.md"),
+  undefined,
+);
+const ran = await access(configured).then(
+  () => true,
+  () => false,
+);
+if (ran)
+  assert.throws(() =>
+    process.kill(Number(readFileSync(configured, "utf8")), 0),
+  );
+assert.equal(ran, false, "The repository's configured program ran");
 console.log(
-  "Synthetic process privacy, detached-descendant cleanup and concurrent commands passed.",
+  "Synthetic process privacy, detached-descendant cleanup, concurrent commands and repository-configured programs passed.",
 );
