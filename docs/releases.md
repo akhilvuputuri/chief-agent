@@ -1,3 +1,9 @@
+## Command leftovers are waited for, not given a window (16 November 2026)
+
+- **Code.** The coding worker's Linux guard now waits until each leftover process it kills has actually exited, and then looks again for the processes that leftover had started. It used to give them about a tenth of a second, which a large test process does not meet. When something does survive, the error names it (pid, program name, state) for whoever handles the error; the model's message is unchanged. Gateway: a Pi job paused because its worker image was retired is now told to move to the current image with `coding_job_update` (`upgradeWorker`) and resume, instead of starting a new job. No migration or Compose change.
+- **Why.** A coding box lost the whole result of one `kite run check … | head` command to "Command descendant cleanup failed". On CI a killed process took about 63 ms per GiB to exit. See [journal 200](journey/200-wait-for-the-kill.md).
+- **Deployment.** Worker source and gateway message. It reaches coding jobs when a worker image built from it is pinned; not yet built or pinned.
+
 ## Worker image with the two-commands fix (16 November 2026)
 
 - **Configuration.** New coding jobs pin worker image `sha256:bfecdb52…`, built from `5ef1f8b` (run 43796246445). It carries [journal 199](journey/199-two-commands-at-once.md): two commands in one turn no longer hang a box, the worker reads the base without the repository's own git configuration, and the coder is told that Start is the approval. `previousImages` stays empty, because the previous image (`sha256:8e23a9ab…`) has the hang. No code, migration or Compose change.
@@ -5,6 +11,8 @@
 - **Gateway.** [PR 497](https://github.com/akhilvuputuri/chief-agent/pull/497) merged as `5ef1f8b` at the head the independent reviewer approved (`3457c94`). Release run 43796810592 succeeded at 03:14 UTC on 16 November; the gateway reported `5ef1f8b`, healthy, Telegram polling.
 - **Deployment.** Not yet recorded as live; a dated note follows on release.
 - **Not measured.** No job has run on this image. A second guard error from job `46463771` ("Command descendant cleanup failed" after one command, once in four full check runs) is not explained and is being investigated separately; this image may still show it.
+
+> **Update, 16 November 2026: live.** [PR 499](https://github.com/akhilvuputuri/chief-agent/pull/499) merged as `eac08bf`. Release run 43798225951 succeeded at 03:30 UTC on 16 November; the gateway reported `eac08bf`, healthy, Telegram polling. The server's `config/coding-pi.json` and `config/boxes.json` carry `sha256:bfecdb52…`. Independent review (Claude Opus 5.5) approved the exact head `3ecf3e8`. No job has run on the image yet. The second guard error is explained in [journal 200](journey/200-wait-for-the-kill.md); this image still has it.
 
 ## Two shell commands in one turn no longer hang a coding box (16 November 2026)
 

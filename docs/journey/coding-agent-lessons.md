@@ -434,3 +434,14 @@ Evidence boundary:
 - **Tested locally:** a model of the old guard hangs the old executor and not the new one.
 - **Verified only by CI:** the new native sweep and the concurrent cases in the security and container smokes.
 - **Not measured:** a released job with parallel calls.
+
+**Wait for the kill (16 November, [journal 200](200-wait-for-the-kill.md)).** The worker's process guard gave a SIGKILLed leftover about 100 x 1 ms to be reaped and failed the command otherwise. The kernel frees a killed process's memory before it can be reaped, about 63 ms per GiB on CI, so a large test process left by `… | head` cost one command its whole result. The guard now waits for each reap and looks again for the next generation.
+
+- A time window around an event that is certain (death after SIGKILL) is a guess; wait for the event itself, and keep a bound only where the event is not certain.
+- An error that the code swallows (`catch {}`) leaves the next investigation with a symptom and no name; carry the detail even when the caller's message stays short.
+
+Evidence boundary:
+
+- **Measured:** the lost result on production (job `46463771`); the leftover process on macOS (4 of 4); the kill-to-exit times on CI.
+- **Verified only by CI:** the new sweep and the five leftover cases in the security smoke.
+- **Not measured:** a production command with a large leftover after the fix; reap times on a coding box.
