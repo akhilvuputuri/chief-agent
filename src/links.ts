@@ -20,7 +20,7 @@ import {
 } from "./link-classifier.js";
 import type { LinkAction } from "./links-schema.js";
 import { linkMove, linkSave } from "./links-schema.js";
-import { canonicalUrl } from "./link-url.js";
+import { canonicalUrl, withLegacyDotted } from "./link-url.js";
 import type { McpTools } from "./mcp.js";
 import { mcpReaderLink } from "./news.js";
 import {
@@ -421,7 +421,7 @@ export class LinkTools {
     const existing = (
       await this.db.query(
         "SELECT * FROM study_resources WHERE user_id=$1 AND url=ANY($2::text[]) ORDER BY added_at LIMIT 1",
-        [user, candidates],
+        [user, withLegacyDotted(candidates)],
       )
     ).rows[0];
     if (existing) return { duplicate: true, entry: existing };
@@ -468,7 +468,7 @@ export class LinkTools {
            AND (COALESCE(o.source_payload,o.payload)->>'url' = ANY($2::text[])
              OR EXISTS (SELECT 1 FROM link_reader_keys k WHERE k.user_id=o.user_id AND k.request_key=o.request_key AND k.url=ANY($2::text[])))
          ORDER BY CASE o.state WHEN 'pending' THEN 0 WHEN 'complete' THEN 1 ELSE 2 END, o.created_at DESC LIMIT 1`,
-        [user, urls],
+        [user, withLegacyDotted(urls)],
       )
     ).rows[0];
   }
@@ -670,7 +670,7 @@ export class LinkTools {
         `SELECT 1 FROM mcp_operations o WHERE o.user_id=$1 AND o.connection='reader' AND o.state='pending'
            AND (COALESCE(o.source_payload,o.payload)->>'url'=ANY($2::text[])
              OR EXISTS (SELECT 1 FROM link_reader_keys k WHERE k.user_id=o.user_id AND k.request_key=o.request_key AND k.url=ANY($2::text[])))`,
-        [user, [...new Set([url, ...urls])]],
+        [user, withLegacyDotted([...new Set([url, ...urls])])],
       )
     ).rows.length;
     if (pending) return;
@@ -713,18 +713,19 @@ export class LinkTools {
     const pending = (
       await this.db.query(
         `SELECT o.connection,o.tool,COALESCE(o.source_payload,o.payload)->>'url' AS url,
-           EXISTS (SELECT 1 FROM link_reader_keys k WHERE k.user_id=o.user_id AND k.request_key=o.request_key AND k.url=$2) AS alias
+           EXISTS (SELECT 1 FROM link_reader_keys k WHERE k.user_id=o.user_id AND k.request_key=o.request_key AND k.url=ANY($2::text[])) AS alias
          FROM mcp_operations o WHERE o.user_id=$1 AND o.state='pending'`,
-        [user, url],
+        [user, withLegacyDotted([url])],
       )
     ).rows;
+    const forms = withLegacyDotted([url]);
     return (
       pending.length > 0 &&
       pending.every(
         (p) =>
           p.connection === "reader" &&
           p.tool === "save_link" &&
-          (p.url === url || p.alias === true),
+          (forms.includes(p.url) || p.alias === true),
       )
     );
   }
@@ -732,7 +733,7 @@ export class LinkTools {
   private async find(user: string, id?: string, url?: string) {
     if (!id && !url)
       throw new ToolValidationError("Give the study list entry id or its link");
-    const urls = url ? [canonicalUrl(url)] : [];
+    const urls = url ? withLegacyDotted([canonicalUrl(url)]) : [];
     return (
       await this.db.query(
         "SELECT * FROM study_resources WHERE user_id=$1 AND (id=$2::uuid OR url=ANY($3::text[])) LIMIT 1",
