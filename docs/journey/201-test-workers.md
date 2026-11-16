@@ -3,6 +3,8 @@
 Work date: 16 November 2026. Written: 16 November 2026.
 Status: tested locally and timed on a CI machine held to three CPUs; not yet released. No coding box has run it.
 
+> **Update, 16 November 2026:** live in `edb071a`; see Release closure below. No coding box has run it yet.
+
 ## User-visible problem and preceding iteration
 
 [Journal 197](197-one-test-file.md) stopped a coding job from running the whole suite seven times. One full run still belongs to every job, and in a box the TypeScript tests alone take 310.7 s of it, on one of the box's three CPUs. Coding boxes were kept serial by [journal 141](141-parallel-test-files.md), which left parallel runs there unmeasured.
@@ -88,8 +90,25 @@ Also from that review: a bad `TEST_WORKERS` is refused in a shared run only, wit
 
 **Not tested:** a coding box. Its CPUs are a limit set through Docker, not a list of CPUs as on the runner, and whether Node counts three CPUs there was not checked; with four it would start four workers on three CPUs.
 
+### Release closure — 2026-11-16
+
+- **Review:** the same reviewer approved `6c13fee` after the corrections above. It ran the queue through a pipe again and received all six reports and the closing line, and ran the whole suite through `tail` in about 93 s on four workers.
+- **Merged:** [PR 503](https://github.com/akhilvuputuri/chief-agent/pull/503), approved head `6c13fee`, as `edb071a`. Hosted checks passed on that head.
+- **Released:** main's checks (run 43814968157) and the release workflow (run 43815513056) succeeded for `edb071a`. Read-only host check: gateway on `edb071a` and healthy. Nothing in the running application changed, and coding jobs read the test scripts from the repository, so no worker image was needed.
+- **Not yet observed:** a coding job's full check with it.
+
+**Corrections from the final review, to the text above:**
+
+- "It fails without the wait" was shown on macOS only. Hosted CI runs Linux, where it was not shown that a pipe write can be left pending at exit, so the test may not catch the fault coming back there.
+- "The crash of journal 123 would cost time there, not a wrong result" is too strong. If a file crashes again in a process of its own, the run fails: a wrong failure, never a wrong pass.
+- "Such a file failing in its group runs again alone" means in a process of its own, while the other groups keep running.
+- The first line prints at most four processes. In a box, "3" will mean Node counted three CPUs; "4" will mean four or more.
+
+**Found in the final review, not fixed:** when the reader of a pipe closes it early, as `head -1` does, the run stops with an unhandled `EPIPE` error and exit status 1, and leaves its temporary report folder behind. No test process is left running. How the run behaved in that case before this change was not checked.
+
 ## Follow-up and next iteration
 
 - Read the next coding job's profile for the time of its full check.
+- Handle a pipe closed early by its reader: stop the groups, remove the temporary folders and exit quietly.
 - The request left in flight in the three tests is worth finding in the worker: it belongs to the coding loop.
 - CI's shards are balanced by the same stale weights; its four test jobs took 91 to 137 s in one run today (run 43792064669). `scripts/update-test-weights.mjs` refreshes them.
