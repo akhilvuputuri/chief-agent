@@ -126,3 +126,11 @@ Merged as `4da138b` (PR 500) at the reviewed head `f6e9494`; release run 4380641
 
 - **Review notes not yet acted on** (the second review approved with these): assert the traced-process case's attach status instead of only printing it; the bound counts passes that list a new process rather than tree depth, so a wide tree whose parents die at staggered times could reach it (it would fail loudly, not leak); the failure message can name a pid that the same pass already reaped; "several times the old window" for 6 GiB is about 1.6 times on the fastest runner seen (174 to 178 ms against about 110 ms); and the old loop did not handle a process stuck in I/O, it killed the others and failed loudly.
 - **Still not measured:** a job on this image, and reap time on a coding box.
+
+## Update, 16 November 2026: pin live, two review notes acted on, two corrections
+
+- **Live.** PR 501 merged as `172bd76` (reviewed head `f158f3b`); release run 43807726411 succeeded at 05:04 UTC and the gateway was healthy at `172bd76`. The server's configuration carries `sha256:90cb1dcc…`, with `sha256:bfecdb52…` as the previous image. No job has run on the image yet.
+- **Acted on.** The traced-process case in `security-smoke.ts` now fails if the tracer did not attach, instead of only printing the status. The smoke's comment on the 6 GiB size gives the measured range.
+- **Correction to "6 GiB takes several times the old window to be reaped, on any runner" above.** Measured on three CI runs (43804625282, 43803263803, 43802667234), 6 GiB took 170 to 178 ms on the two faster runners and 458 to 472 ms on the slower one, against an old window of about 110 ms: about 1.5 to 4.3 times. The old guard was run on the slower runner only (run 43802667234), where it failed from 2 GiB upward. That it would also fail at 6 GiB on the faster runners is inferred from the timings, not run.
+- **Correction to "The old 1 ms loop handled both" above.** It handled the traced process, by killing the tracer on its next pass. For a process stuck in uninterruptible I/O it killed every other leftover and then failed loudly after its window; it did not clean that process up.
+- **Still open from the review:** the bound counts passes that list a new process, not tree depth; a failure message can name a pid the same pass already reaped. Neither is exercised by a test.
