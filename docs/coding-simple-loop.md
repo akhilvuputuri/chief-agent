@@ -60,6 +60,8 @@ request (+ more owner messages) → [Start] → one coder session: build, run te
 
 > **Update, 13 November 2026 ([journal 191](journey/191-go-gate-no-planner.md)):** `config/coding-pi.json` now has these settings and no `leaderModel` or `planCheck`.
 
+> **Update, 16 November 2026 ([journal 199](journey/199-two-commands-at-once.md)):** parallel execution exposed a guard that still assumed one command at a time. On the Linux worker the first command to finish killed and reaped every child of the worker, so a sibling command's tool call never returned and a reviewer turn with two `bash` calls stalled for a box's whole lifetime, twice in one job. A finished command now kills its own process group; the sweep of adopted descendants runs only when no command runs, and touches only processes outside the worker's own session. The coder's role text also says the owner has started the job and no plan approval exists; ask only for a decision that is genuinely the owner's.
+
 ### Differences from stock Pi
 
 Each remaining difference needs a reason Chief cannot work without. A test fails when the prompt loses Pi's tool rules, a tool overrides Pi's execution mode, or `bash` gains a default time limit.

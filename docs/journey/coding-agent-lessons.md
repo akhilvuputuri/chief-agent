@@ -421,3 +421,16 @@ Evidence boundary:
 - **Measured:** token, cache and cost figures for one job, and 30-day totals.
 - **Tested:** synthetic jobs with larger pages and a second review round on the delta.
 - **Estimated, not measured:** the saving, roughly $10 of $16 on that job.
+
+**Two commands at once (16 November, [journal 199](199-two-commands-at-once.md)).** Removing the forced sequential tool execution (journal 182) left the Linux process guard assuming one command at a time: the first command to finish killed every child of the worker and reaped them with `waitpid(-1)`, so a sibling command's `exit` never reached Node and its tool call never returned. A reviewer turn with two `bash` calls stalled for a box's whole three-hour lifetime, twice.
+
+- When a change lifts a serialization, search for everything that relied on it, including native code and process-wide state, not only the code that set it.
+- A guard that runs only on Linux needs a Linux test of the new behaviour; local tests never ran it.
+- A role's project context written for development agents (here, "get plans approved") can contradict the flow the role runs in; the role text has to say what the flow already decided.
+
+Evidence boundary:
+
+- **Measured:** the stalls, their timing and the two-call turns on production (job `46463771`).
+- **Tested locally:** a model of the old guard hangs the old executor and not the new one.
+- **Verified only by CI:** the new native sweep and the concurrent cases in the security and container smokes.
+- **Not measured:** a released job with parallel calls.

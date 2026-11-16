@@ -353,6 +353,8 @@ The smallest move that puts coding on EC2 without weakening anything. Coding alr
 
   Without both, it refuses the task. The gateway checks at startup that the coding profile's task command is exactly `node --disable-sigusr1 /opt/chief-worker/dist/boxes/coding-task.js`.
 
+  > **Update, 16 November 2026 ([journal 199](journey/199-two-commands-at-once.md)):** the worker's own guard sweep (adopted command descendants) no longer assumes one command at a time: it runs only when no command is running and reaps only processes outside the worker's session.
+
 - **Startup grace.**
   - A cold box takes about two to three minutes before the worker's first heartbeat. While the attempt is still `provisioning`, the controller's 180-second heartbeat-loss rule therefore allows a provider-specific grace: 12 minutes for boxes, none for CodeBuild.
   - The first heartbeat sets the attempt deadline, so boot time does not consume coding time.
