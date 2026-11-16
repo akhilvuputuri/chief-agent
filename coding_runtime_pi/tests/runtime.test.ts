@@ -27,6 +27,7 @@ import {
   noReportAsk,
   reportDocument,
   reportReminder,
+  roleText,
   type Executor,
   type ModelFactory,
 } from "../src/index.js";
@@ -641,6 +642,32 @@ test("a coder session runs Pi's own prompt, execution mode and bash as shipped",
     undefined as any,
   );
   assert.deepEqual(timeouts, [undefined]);
+});
+
+test("the coder's prompt says the owner started the job and no plan approval exists", async () => {
+  // Job 46463771 opened by asking "Approve this plan?" after the owner's Start, following the
+  // repository's AGENTS.md workflow for development agents (journal 197).
+  const f = await fixture();
+  const seen: Context[] = [];
+  const r = f.runtime(
+    scripted([[report("done", "Nothing to change.")]], {
+      seen: (c) => seen.push(c),
+    }),
+  );
+  await r.run(await f.coder(r), "Fix sum");
+  const prompt =
+    seen[0]!.systemPrompt ??
+    JSON.stringify(seen[0]!.messages.filter((m) => m.role === "system"));
+  assert.match(prompt, /The owner has already started this job/);
+  assert.match(
+    prompt,
+    /never ask the owner to approve a plan or confirm an approach, even where the repository's instructions tell agents to get plans approved/,
+  );
+  assert.match(
+    prompt,
+    /Ask only when a decision is genuinely the owner's: a requirement that is unclear or contradictory, or a choice that changes the scope/,
+  );
+  assert(!roleText.reviewer.includes("plan approval"));
 });
 
 test("parallel tool calls overlap and checkpoints wait for the whole batch", async () => {
