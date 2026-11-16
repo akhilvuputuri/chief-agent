@@ -119,3 +119,10 @@ Updated in [coding-agent lessons](coding-agent-lessons.md).
 - Decide where the guard's survivor message should reach an operator (see the finding above).
 - Stock Pi's bash tool drops the command's streamed output when the executor rejects (`dist/core/tools/bash.js` rethrows the error without the text). If the guard ever fails again, the output is lost with it. Whether to keep the output in that case is open.
 - After release, check that no coding job shows "Command descendant cleanup failed".
+
+## Update, 16 November 2026: released, image built and pinned
+
+Merged as `4da138b` (PR 500) at the reviewed head `f6e9494`; release run 43806415588 succeeded at 04:51 UTC and the gateway was healthy at `4da138b`. The worker image built from it (run 43805890191, `sha256:90cb1dcc…`) is pinned in `config/coding-pi.json` and `config/boxes.json`. The image pinned earlier the same day (`sha256:bfecdb52…`) stays listed as a previous image so a job moved to it is not paused again.
+
+- **Review notes not yet acted on** (the second review approved with these): assert the traced-process case's attach status instead of only printing it; the bound counts passes that list a new process rather than tree depth, so a wide tree whose parents die at staggered times could reach it (it would fail loudly, not leak); the failure message can name a pid that the same pass already reaped; "several times the old window" for 6 GiB is about 1.6 times on the fastest runner seen (174 to 178 ms against about 110 ms); and the old loop did not handle a process stuck in I/O, it killed the others and failed loudly.
+- **Still not measured:** a job on this image, and reap time on a coding box.
