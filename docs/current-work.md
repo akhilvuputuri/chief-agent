@@ -1,3 +1,11 @@
+# Coding runtime on Pi 1.5.2 — tested, not yet released, 17 November 2026
+
+Branch `claude/pi-coding-agent-1-5-f3ae15`. The Pi coding runtime moves from `pi-coding-agent` and `pi-ai` 1.1.0 to 1.5.2, the newest published. That replaces the undici 8.10.2 and minimatch 10.2.6 copies Pi pinned with 8.12.3 and 11.0.3, and OSV now flags nothing in the Pi runtime's lockfile. One thing of ours changed: the worker's `grep` roots its `glob` at its `path`, as Pi's description of the tool now says. The requests Pi sends differ in four places, none of which the host's allowlist refuses, and a session started on 1.1.0 continued on 1.5.2 (both measured locally against a stand-in server). See [journal 203](journey/203-pi-1-5-2.md).
+
+Still open: six undici advisories fixed in 8.12.4 that OSV records by Git range only; no published Pi pins 8.12.4, and Kite has no `overrides`. zod 3.25.76 is unchanged. hono 4.13.13 and `@hono/node-server` 2.1.3 are newly flagged (advisories of 12 November) and not looked at.
+
+Next: release, build the worker image and pin it; then read the first job on it.
+
 # A full test run on several CPUs — tested, not yet released, 16 November 2026
 
 A serial run of the TypeScript tests now uses several shared processes at once, each taking groups of files from a queue: 197 s against 390 s on a CI machine held to three CPUs, the number a coding box has. One test file had been keeping its process alive for three minutes after its tests; that is fixed too ([journal 201](journey/201-test-workers.md)).
