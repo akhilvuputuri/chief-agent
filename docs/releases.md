@@ -1,3 +1,10 @@
+## Worker request arrays check their length first (16 November 2026)
+
+- **Code.** `src/bounded-array.ts` adds `boundedArray`, an array schema that checks its declared minimum and maximum before any element and stops at the first element that fails. Every array in the schemas a coding worker's request reaches uses it (`src/coding/schema.ts`, `squad-schema.ts`, `memory-schema.ts`, `pi-sessions.ts`, and the legacy model request in `api.ts`). Valid payloads parse to the same values. No new limit, and no database, Compose or worker image change.
+- **Why.** zod 3.25.76 validates every element of an over-long array and keeps an issue for each, and has no 3.x fix. An 8 MB worker body of bad elements grew the heap by 1.1 to 1.2 GB (measured); it is now refused in about 1 ms. See [journal 198](journey/198-worker-arrays-check-length-first.md).
+- **Not changed.** zod stays at 3.25.76 and is still flagged by OSV. Schemas outside the worker routes keep zod's array.
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## `kite test FILE` runs named test files alone (16 November 2026)
 
 - **Code.** Tests and instructions only. `scripts/test-shard.mjs` runs only the test files named on its command line and refuses a name that is not a test file. `kite test` now runs `scripts/test.mjs`: the same three steps as before without names, and the build plus the named files with them. `AGENTS.md` says that `kite run check` includes every test, and to run named files while working and the whole check once. No runtime code, migration or Compose change, and no worker image.

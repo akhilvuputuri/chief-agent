@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { boundedArray } from "../bounded-array.js";
 
 /** Worker observations are never requirements, verification or review authority. */
 export const notebook = z
@@ -12,29 +13,26 @@ export const notebook = z
 export const loopMemory = z
   .object({
     notes: notebook.default({}),
-    receipts: z
-      .array(
-        z
-          .object({
-            key: z.string().regex(/^[a-f0-9]{64}$/),
-            tool: z.string().max(40),
-            path: z.string().max(240).optional(),
-            fingerprint: z
-              .string()
-              .regex(/^[a-f0-9]{64}$/)
-              .optional(),
-            start: z.number().int().nonnegative().optional(),
-            end: z.number().int().nonnegative().optional(),
-            unit: z.enum(["characters", "lines"]).optional(),
-          })
-          .strict(),
-      )
-      .max(80)
-      .default([]),
-    recent: z
-      .array(z.string().regex(/^[a-f0-9]{64}$/))
-      .max(16)
-      .default([]),
+    receipts: boundedArray(
+      z
+        .object({
+          key: z.string().regex(/^[a-f0-9]{64}$/),
+          tool: z.string().max(40),
+          path: z.string().max(240).optional(),
+          fingerprint: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .optional(),
+          start: z.number().int().nonnegative().optional(),
+          end: z.number().int().nonnegative().optional(),
+          unit: z.enum(["characters", "lines"]).optional(),
+        })
+        .strict(),
+      { max: 80 },
+    ).default([]),
+    recent: boundedArray(z.string().regex(/^[a-f0-9]{64}$/), {
+      max: 16,
+    }).default([]),
     modelCalls: z.number().int().nonnegative().max(2000).default(0),
     toolsUsed: z.number().int().nonnegative().max(5000).default(0),
     compactions: z.number().int().nonnegative().max(2000).default(0),

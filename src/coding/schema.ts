@@ -1,4 +1,5 @@
 import { squadState } from "./squad-schema.js";
+import { boundedArray } from "../bounded-array.js";
 import { runtimeMemory } from "./memory-schema.js";
 import { z } from "zod";
 import { MAX_OUTPUT_TOKENS } from "../model.js";
@@ -101,7 +102,7 @@ export const checkpoint = z
         version: z.literal(1),
         phase: z.enum(["build", "review"]).optional(),
         /** Inbox events already in the coder's session. */
-        delivered: z.array(z.string().uuid()).default([]),
+        delivered: boundedArray(z.string().uuid()).default([]),
         /**
          * The commit the saved files are against (journal 193). After a conflict the job's
          * base moves to main while its saved work is still on the old base, until the worker
@@ -115,18 +116,16 @@ export const checkpoint = z
          * Files a rebase left conflicted, until the coder is told about them: git's status
          * code ("us" is main, "them" the change) and whether the file has conflict markers.
          */
-        conflicts: z
-          .array(
-            z
-              .object({
-                path: z.string().min(1).max(240),
-                status: z.enum(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]),
-                markers: z.boolean(),
-              })
-              .strict(),
-          )
-          .max(500)
-          .optional(),
+        conflicts: boundedArray(
+          z
+            .object({
+              path: z.string().min(1).max(240),
+              status: z.enum(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]),
+              markers: z.boolean(),
+            })
+            .strict(),
+          { max: 500 },
+        ).optional(),
         /** The candidate the reviewer last judged, so the next round reads what changed since. */
         reviewed: z
           .object({
@@ -162,17 +161,15 @@ export const checkpoint = z
             detail: z.string().max(reportLimits.document),
             verdict: z.enum(["APPROVE", "REQUEST_CHANGES"]).optional(),
             ask: z.string().max(reportLimits.ask).optional(),
-            options: z
-              .array(
-                z
-                  .string()
-                  .min(1)
-                  .max(reportLimits.option)
-                  // One line, as a button shows it.
-                  .regex(/^[^\n\r]*$/),
-              )
-              .max(reportLimits.options)
-              .optional(),
+            options: boundedArray(
+              z
+                .string()
+                .min(1)
+                .max(reportLimits.option)
+                // One line, as a button shows it.
+                .regex(/^[^\n\r]*$/),
+              { max: reportLimits.options },
+            ).optional(),
           })
           .strict()
           .refine((d) => {
@@ -186,18 +183,16 @@ export const checkpoint = z
       })
       .strict()
       .optional(),
-    files: z
-      .array(
-        z
-          .object({
-            path: z.string().min(1).max(240),
-            content: z.string().max(1_000_000).nullable(),
-            mode: z.enum(["100644", "100755"]).optional(),
-          })
-          .strict(),
-      )
-      .max(500)
-      .default([]),
+    files: boundedArray(
+      z
+        .object({
+          path: z.string().min(1).max(240),
+          content: z.string().max(1_000_000).nullable(),
+          mode: z.enum(["100644", "100755"]).optional(),
+        })
+        .strict(),
+      { max: 500 },
+    ).default([]),
   })
   .strict();
 export const outcome = z
@@ -213,33 +208,29 @@ export const outcome = z
     summary: z.string().min(1).max(4000),
     question: z.string().max(2000).default(""),
     /** Answers the owner can tap for a Pi ask (journal 192). */
-    options: z
-      .array(
-        z
-          .string()
-          .min(1)
-          .max(reportLimits.option)
-          // One line, as a button shows it.
-          .regex(/^[^\n\r]*$/),
-      )
-      .max(reportLimits.options)
-      .optional(),
+    options: boundedArray(
+      z
+        .string()
+        .min(1)
+        .max(reportLimits.option)
+        // One line, as a button shows it.
+        .regex(/^[^\n\r]*$/),
+      { max: reportLimits.options },
+    ).optional(),
     /** Which session asked the question, so the owner's answer goes back to it. */
     askedBy: z.enum(["coder", "reviewer"]).optional(),
     checkpoint,
     /** Receipts from the legacy runtimes; a Pi coder runs the tests itself (journal 192). */
-    checks: z
-      .array(
-        z
-          .object({
-            command: z.string().max(100),
-            exitCode: z.number().int(),
-            output: z.string().max(8000),
-          })
-          .strict(),
-      )
-      .max(4)
-      .default([]),
+    checks: boundedArray(
+      z
+        .object({
+          command: z.string().max(100),
+          exitCode: z.number().int(),
+          output: z.string().max(8000),
+        })
+        .strict(),
+      { max: 4 },
+    ).default([]),
     review: z
       .object({
         verdict: z.enum(["APPROVE", "REQUEST_CHANGES"]),
