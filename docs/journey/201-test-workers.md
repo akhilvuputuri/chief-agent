@@ -23,8 +23,8 @@ Status: tested locally and timed on a CI machine held to three CPUs; not yet rel
 
 ### Where the time is
 
-- **Temporary files on disk or in memory make no difference.** Serial runs with `TMPDIR` on disk took 307.7 s and 299.4 s, and in memory 310.5 s and 297.9 s (run 43803152950).
-- **A few files hold most of the time.** In that run the 14 slowest of 157 files held about 180 s of 303 s, and `tests/coding-one-session.test.ts` alone 49.3 s.
+- **Temporary files on disk or in memory make no difference to a serial run.** With `TMPDIR` on disk it took 307.7 s and 299.4 s, and in memory 310.5 s and 297.9 s (run 43803152950). Two runs on three workers in the same workflow took 205 s in memory and 249 s on disk; they are single runs and still included the file described below, so they show nothing either way.
+- **A few files hold most of the time.** In that run the 14 slowest of 159 files held about 180 s of 303 s, and `tests/coding-one-session.test.ts` alone 49.3 s.
 - **One shared process uses more than one CPU.** A serial run used 524 s of CPU in 390 s (run 43807796942), about 1.3 CPUs. On three CPUs that leaves room for a little over twice the speed, not three times.
 
 ### One test file kept its process alive for three minutes
@@ -40,26 +40,28 @@ Status: tested locally and timed on a CI machine held to three CPUs; not yet rel
 
 **Measured, run 43807796942, the same machine throughout:**
 
-| Run                                     | Elapsed      | CPU (user + system) |
-| --------------------------------------- | ------------ | ------------------- |
-| Serial                                  | 390 s, 428 s | 524 s, 559 s        |
-| 3 workers, 6 groups (27 files a group)  | 197 s        | 542 s               |
-| 3 workers, 10 groups (16 files a group) | 217 s        | 562 s               |
-| 3 workers, 20 groups (8 files a group)  | 253 s, 251 s | 651 s, 646 s        |
-| 3 workers, 40 groups (4 files a group)  | 304 s        | 811 s               |
-| 2 workers, 20 groups                    | 278 s        | 624 s               |
+| Run                                               | Elapsed      | CPU (user + system) |
+| ------------------------------------------------- | ------------ | ------------------- |
+| Serial, `tsx` run directly, first in the workflow | 390 s        | 524 s               |
+| Serial, through the script with one worker, last  | 428 s        | 559 s               |
+| 3 workers, 6 groups (27 files a group)            | 197 s        | 542 s               |
+| 3 workers, 10 groups (16 files a group)           | 217 s        | 562 s               |
+| 3 workers, 20 groups (8 files a group)            | 253 s, 251 s | 651 s, 646 s        |
+| 3 workers, 40 groups (4 files a group)            | 304 s        | 811 s               |
+| 2 workers, 20 groups                              | 278 s        | 624 s               |
 
-- Six groups ran in about half the serial time, and used the CPU time a serial run does.
+- Six groups ran in about half the serial time, and used the CPU time a serial run does. The two serial runs were made in different ways, as the table says, and each is one run.
 - **Starting a process costs about 7 s of CPU.** Forty groups used 287 s more CPU than serial and twenty used 127 s more. So fewer, larger groups are faster.
 - **Before the lingering file was found,** the same queue took 251 to 456 s against a 513 s serial run (run 43798997613).
+- **No crash in 23 runs.** Across the five workflow runs, 23 runs used more than one test process at once, and none crashed. Journal 123's SIGSEGV came with four test files at once, and its cause is still unknown.
 - All runs passed. In run 43791552589 the three- and four-group runs each ran five more tests than serial, which is one small file sent through a process of its own after failing in its group. Which file was not recorded.
 
 ## Diagnosis and alternatives
 
-- **Workers taking groups from a queue (chosen):** the files are dealt round into two groups a worker, and each worker takes the next group when it finishes one. No recorded timing decides the split, so a file that grows cannot starve the others as it did above.
+- **Workers taking groups from a queue (chosen):** the files are dealt round into two groups a worker, and each worker takes the next group when it finishes one. No recorded timing decides the split, so a file that grows cannot starve the others as it did above. Coding boxes are no longer serial, which journal 141 had kept them: a group that crashes runs its own files again one process each, so the crash of journal 123 would cost time there, not a wrong result. Journal 141's other warning, tests that assert wall-clock limits, stands; such a file failing in its group runs again alone.
 - **Split by recorded weights (rejected):** it was the first try, and the weights were wrong within five days of being recorded.
 - **Many small groups (rejected):** better balanced, but each process costs about 7 s of CPU.
-- **A process per file, several at a time, as CI runs (not measured on three CPUs):** it pays that start-up cost for each of 157 files.
+- **A process per file, several at a time, as CI runs (not measured on three CPUs):** it pays that start-up cost for every file, 159 of them.
 - **Temporary files in memory (ruled out by the measurement above).**
 - **A larger box (not explored):** more CPUs cost money, and that is the owner's decision.
 
@@ -68,6 +70,11 @@ Status: tested locally and timed on a CI machine held to three CPUs; not yet rel
 - **`scripts/test-shard.mjs`:** a serial run of 24 or more files now uses several shared processes at once. `TEST_WORKERS` sets how many; the default is one per CPU, up to four, and `TEST_WORKERS=1` is the single shared process as before. Each group is a shared run with its own reruns, as in [journal 159](159-shared-process-test-runs.md). A group's report is printed whole when the group ends, and the last line says whether every group passed.
 - **`tests/coding-one-session.test.ts`:** the worker client is aborted when each test ends.
 - **Not changed:** CI, which runs a process per file in four shards. A named run of a few files stays in one process.
+- **Timed code and shipped code differ in two small ways.** The timed runs set the group size by hand; the shipped code deals two groups a worker, which for three workers is the same six groups. Waiting for output to be written and closing a finished process's pipes were added after the timing, in review.
+
+**Review (Claude Opus 5.5), `d927376`: changes requested.** One fault: on macOS a write to a pipe is not finished when it returns, and the run exited straight after writing each group's report, so `kite run test:ts | tail` lost the last groups' reports and the closing line. The reviewer showed it with the queue itself: three of six reports arrived. The run now waits for each write, and a test runs 26 files on two workers through a pipe; it fails without the wait.
+
+Also from that review: a bad `TEST_WORKERS` is refused in a shared run only, with a plain message; a group whose run throws fails the run without stopping the others; the first line says how many groups run on how many processes, which will also show what Node counts in a box; the file counts and the two serial runs above are stated correctly; and the tests no longer inherit `TEST_WORKERS`.
 
 ## Verification and outcome
 
@@ -76,7 +83,8 @@ Status: tested locally and timed on a CI machine held to three CPUs; not yet rel
 - `kite run check` passed in 183.6 s with the default of four workers: eight groups of test files, all passed, then the script tests, the Python suites and the Pi package. The same check took 315.7 s on the single shared process in journal 197, on an earlier commit and a differently loaded machine.
 - `TEST_WORKERS=1 kite run test:ts` passed in 184.4 s (1,823 tests, 1 skipped): the single shared process still works, and alone takes as long as the whole check now does.
 - `tests/coding-one-session.test.ts` run alone exits at 41.2 s, against 197 to 209 s before.
-- The script's own tests cover the dealing of files, the worker count, and the queue: every group runs, no more than the workers at once, a slow group does not hold the others, each report is written whole, and one failed group fails the run.
+- After the review's corrections, `kite run test:ts` piped through `tee` passed on four workers in 92.1 s, with its first and last lines present.
+- The script's own tests cover the dealing of files, the worker count, and the queue: every group runs, no more than the workers at once, a slow group does not hold the others, each report is written whole, and one failed group fails the run. One test runs 26 real files on two workers through a pipe. Hosted CI runs a process per file, so these tests are the only hosted check of the new path.
 
 **Not tested:** a coding box. Its CPUs are a limit set through Docker, not a list of CPUs as on the runner, and whether Node counts three CPUs there was not checked; with four it would start four workers on three CPUs.
 

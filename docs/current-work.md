@@ -1,6 +1,6 @@
 # A full test run on several CPUs — tested, not yet released, 16 November 2026
 
-A serial run of the TypeScript tests now uses several shared processes at once, each taking groups of files from a queue: 197 s against 390 s on a CI machine held to three CPUs, as a coding box is. One test file had been keeping its process alive for three minutes after its tests; that is fixed too ([journal 201](journey/201-test-workers.md)).
+A serial run of the TypeScript tests now uses several shared processes at once, each taking groups of files from a queue: 197 s against 390 s on a CI machine held to three CPUs, the number a coding box has. One test file had been keeping its process alive for three minutes after its tests; that is fixed too ([journal 201](journey/201-test-workers.md)).
 
 Next: read the next coding job's profile for the time of its full check, and for how often the suite ran now that `kite test FILE` is live.
 

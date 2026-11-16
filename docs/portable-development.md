@@ -70,7 +70,7 @@ Test files run one at a time by default (`kite run test:ts`; set `TEST_SHARD=1/4
 
 > **Update, 16 November 2026 ([journal 197](journey/197-one-test-file.md)):** to run some test files alone, name them: `kite test tests/links.test.ts` builds and runs only those files. `kite run check` already includes every test, so there is no need to run `kite test` after it.
 >
-> **Update, 16 November 2026 ([journal 201](journey/201-test-workers.md)):** a serial run of every file now uses several shared processes at once, one per CPU up to four. Set `TEST_WORKERS=1` for the single shared process. Each group of files prints its report when it ends, and the last line says whether every group passed.
+> **Update, 16 November 2026 ([journal 201](journey/201-test-workers.md)):** a serial run of every file now uses several shared processes at once, one per CPU up to four. Set `TEST_WORKERS=1` for the single shared process. Each group of files prints its report when it ends, and the last line says whether every group passed. This replaces "Coding boxes stay serial" above: a box now runs several test processes at once, and a group that crashes runs its own files again one process each.
 
 ## Python coding-worker checks
 

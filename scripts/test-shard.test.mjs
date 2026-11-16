@@ -286,7 +286,7 @@ test("workers take groups from one queue, and one failed group fails the run", a
         sink.push(Buffer.from(`start ${group[0]}\n`));
         // The group holding the first file is slow; the others must not wait for it.
         await new Promise((r) =>
-          setTimeout(r, group.includes(files[0]) ? 60 : 5),
+          setTimeout(r, group.includes(files[0]) ? 400 : 5),
         );
         sink.push(Buffer.from(`end ${group[0]}\n`));
         ran.push(...group);
@@ -302,7 +302,8 @@ test("workers take groups from one queue, and one failed group fails the run", a
   assert.deepEqual(passed.ran.sort(), [...files].sort());
   assert.equal(passed.most, 3);
   // Each group's report is written whole: its start and end are never split by another's.
-  const reports = passed.written.slice(0, -1);
+  assert.match(passed.written[0], /^# 6 groups of test files on 3 processes/);
+  const reports = passed.written.slice(1, -1);
   assert.equal(reports.length, 6);
   for (const report of reports) assert.match(report, /^start (\S+)\nend \1\n$/);
   // The slow group was started first and reported last: the queue did not wait for it.
@@ -315,6 +316,96 @@ test("workers take groups from one queue, and one failed group fails the run", a
   assert.match(failed.written.at(-1), /1 of 6 groups of test files failed/);
 
   assert.equal((await run(undefined, 1)).most, 1);
+
+  // A group whose run throws fails the run; the other groups still run and report.
+  const written = [];
+  const ran = [];
+  const code = await sharedGroups(
+    files,
+    3,
+    async (group) => {
+      if (group.includes(files[7])) throw new Error("no temporary directory");
+      ran.push(...group);
+      return 0;
+    },
+    (text) => written.push(String(text)),
+  );
+  assert.equal(code, 1);
+  assert.equal(ran.length, files.length - 7);
+  assert.match(written.join(""), /no temporary directory/);
+  assert.match(written.at(-1), /1 of 6 groups of test files failed/);
+});
+
+test("a run of many files on two workers reports every file, whole, through a pipe", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "chief-worker-run-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, "tests"));
+  writeFileSync(join(dir, "package.json"), '{"type":"module"}');
+  const names = Array.from({ length: 26 }, (_, i) => `w${i}`);
+  // Each file prints 20 KB, so a group's report is larger than a pipe's buffer: a run that
+  // exits before its output has left would lose the end of it.
+  const write = (name, body = "") =>
+    writeFileSync(
+      join(dir, "tests", `${name}.test.ts`),
+      `import test from "node:test";\nimport assert from "node:assert/strict";\n` +
+        `test("${name} runs", () => { console.log("x".repeat(20000)); ${body} });\n`,
+    );
+  for (const name of names) write(name);
+  const {
+    TEST_SHARD,
+    TEST_CONCURRENCY,
+    TEST_ISOLATION,
+    TEST_WORKERS,
+    NODE_TEST_CONTEXT,
+    ...inherited
+  } = process.env;
+  const run = (env) => {
+    const result = spawnSync(
+      process.execPath,
+      [resolve("scripts/test-shard.mjs")],
+      {
+        cwd: dir,
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+        env: {
+          ...inherited,
+          ...env,
+          PATH: `${resolve("node_modules/.bin")}:${process.env.PATH}`,
+        },
+      },
+    );
+    return { code: result.status, output: result.stdout + result.stderr };
+  };
+
+  let result = run({ TEST_WORKERS: "2" });
+  assert.equal(result.code, 0, result.output.slice(-2000));
+  assert.match(result.output, /^# 4 groups of test files on 2 processes/);
+  assert.match(result.output, /# All 4 groups of test files passed\.\n$/);
+  for (const name of names)
+    assert.match(result.output, new RegExp(`\\bok \\d+ - ${name} runs\\n`));
+  assert.ok(result.output.length > 26 * 20000, String(result.output.length));
+
+  // One failing file fails its group and the run; the other groups still report.
+  write("w7", "assert.equal(1, 2);");
+  result = run({ TEST_WORKERS: "2" });
+  assert.equal(result.code, 1, result.output.slice(-2000));
+  assert.match(result.output, /not ok \d+ - w7 runs/);
+  assert.match(result.output, /# 1 of 4 groups of test files failed/);
+  for (const name of names.filter((name) => name !== "w7"))
+    assert.match(result.output, new RegExp(`\\bok \\d+ - ${name} runs\\n`));
+  write("w7");
+
+  // One worker is the single shared process, with no groups.
+  result = run({ TEST_WORKERS: "1" });
+  assert.equal(result.code, 0, result.output.slice(-2000));
+  assert.doesNotMatch(result.output, /groups of test files/);
+
+  // A bad worker count is refused in a shared run, and ignored with a process per file.
+  result = run({ TEST_WORKERS: "many" });
+  assert.equal(result.code, 2);
+  assert.match(result.output, /^Invalid TEST_WORKERS: many\n$/);
+  result = run({ TEST_WORKERS: "many", TEST_CONCURRENCY: "4" });
+  assert.equal(result.code, 0, result.output.slice(-2000));
 });
 
 test("files that failed or never reported are left undecided", () => {
@@ -377,6 +468,7 @@ test("a shared run decides nothing it cannot vouch for", (t) => {
     TEST_SHARD,
     TEST_CONCURRENCY,
     TEST_ISOLATION,
+    TEST_WORKERS,
     NODE_TEST_CONTEXT,
     ...inherited
   } = process.env;

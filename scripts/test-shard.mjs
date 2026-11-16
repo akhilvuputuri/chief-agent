@@ -298,23 +298,34 @@ export async function sharedGroups(
   files,
   workers,
   runGroup = shared,
-  write = (text) => process.stdout.write(text),
+  // Resolves once the text has left this process: a write to a pipe can still be pending
+  // when the run ends, and exiting then would drop it.
+  write = (text) => new Promise((sent) => process.stdout.write(text, sent)),
 ) {
   const queue = fileGroups(files, workers * 2);
   const total = queue.length;
   let failed = 0;
+  await write(
+    `# ${total} groups of test files on ${Math.min(workers, total)} processes at once.\n`,
+  );
   await Promise.all(
     Array.from({ length: Math.min(workers, total) }, async () => {
       for (let group; (group = queue.shift());) {
         const sink = [];
-        if ((await runGroup(group, sink)) !== 0) failed += 1;
-        write(Buffer.concat(sink));
+        try {
+          if ((await runGroup(group, sink)) !== 0) failed += 1;
+        } catch (error) {
+          // The group's run could not be made or cleaned up: it fails, and the others go on.
+          failed += 1;
+          sink.push(Buffer.from(`${error?.stack ?? error}\n`));
+        }
+        await write(Buffer.concat(sink));
       }
     }),
   );
-  write(
+  await write(
     failed
-      ? `\n# ${failed} of ${total} groups of test files failed: see the "not ok" lines above.\n`
+      ? `\n# ${failed} of ${total} groups of test files failed: see the failures above.\n`
       : `\n# All ${total} groups of test files passed.\n`,
   );
   return failed ? 1 : 0;
@@ -335,15 +346,23 @@ if (
     console.error(error.message);
     process.exit(2);
   }
-  // One file at a time in each process unless asked: only CI has measured parallel files
-  // in one tsx run for the SIGSEGV in journal 123 (journal 141).
+  // With a process per file, one file runs at a time unless asked: only CI has measured
+  // several at once for the SIGSEGV in journal 123 (journal 141). Shared workers also run
+  // test processes side by side; a group that crashes runs its own files again one process
+  // each, and no crash was seen in 23 such runs on a CI machine (journal 201).
   const concurrency = process.env.TEST_CONCURRENCY ?? "1";
-  const workers = workerCount(process.env);
+  if (isolationMode(process.env) !== "shared")
+    process.exit(await perFile(files, concurrency));
+  let workers;
+  try {
+    workers = workerCount(process.env);
+  } catch (error) {
+    console.error(error.message);
+    process.exit(2);
+  }
   process.exit(
-    isolationMode(process.env) !== "shared"
-      ? await perFile(files, concurrency)
-      : workers > 1 && files.length >= FEWEST_FILES_FOR_WORKERS
-        ? await sharedGroups(files, workers)
-        : await shared(files),
+    workers > 1 && files.length >= FEWEST_FILES_FOR_WORKERS
+      ? await sharedGroups(files, workers)
+      : await shared(files),
   );
 }
