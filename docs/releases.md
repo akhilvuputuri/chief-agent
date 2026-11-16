@@ -1,3 +1,9 @@
+## Two shell commands in one turn no longer hang a coding box (16 November 2026)
+
+- **Code.** The coding worker's process guard no longer kills and reaps every child of the worker after each command. The sweep for leftover processes waits until no command is running and touches only processes outside the worker's own session, so a command that finishes cannot kill a sibling command, the `grep` tool's search or the worker's own git; each command still kills its own process group when it exits, and nothing a command starts outlives the moment no command is running. The coder's role text says the owner's Start is the approval, so it does not ask the owner to approve a plan. Worker only; no host, migration or Compose change.
+- **Why.** Job `46463771`, the first real job on the rebuilt loop, spent 5.3 of its 6.2 hours idle: twice the reviewer ran two commands in one turn and the box waited for a result that could never arrive until its three-hour lifetime ended. See [journal 197](journey/197-two-commands-at-once.md).
+- **Deployment.** Worker source only. It reaches coding jobs when a worker image built from it is pinned; not yet built or pinned.
+
 ## Worker request arrays check their length first: live (16 November 2026)
 
 - **Deployment.** [PR 494](https://github.com/akhilvuputuri/chief-agent/pull/494) merged as `0013525`. Release run 43794367459 succeeded at 02:49 UTC on 16 November; the gateway reported `0013525`, healthy, with no warn or error line in its first minute. No migration, Compose or worker image change.
@@ -23,6 +29,8 @@
 - **Code.** Telegram polling retries a failed fetch every five seconds for as long as the gateway runs, instead of the library's doubling waits and fifteen-hour give-up, and each fetch has a sixty-second limit. If the polling loop ends it is logged and restarted without skipping or repeating an update. Failures, recovery and a ten-minute stale state are logged without message content; the heartbeat and `/healthz` carry the time of the last successful poll, the failure count and the number of busy intake slots. After an outage the owner gets one short line saying how long Chief was not receiving and that messages older than 24 hours must be resent. Each input records when the message was sent as well as received. No migration or Compose change.
 - **Why.** On 15 November four owner messages arrived together after a period in which Chief fetched nothing, logged nothing and reported healthy. See [journal 196](journey/196-chief-stopped-listening.md).
 - **Deployment.** Not yet released.
+
+> **Update, 16 November 2026:** merged as `d64685d` (PR 493) at the head the independent reviewer approved, after the running coding job had stopped; release run 43772652670 succeeded and the gateway was healthy at `d64685d`, with `/healthz` reporting `telegram.state: polling`, a last poll seconds old and no failures.
 
 ## A fact names what the owner pointed at; the judge and the repair read Chief's side (13 November 2026)
 
