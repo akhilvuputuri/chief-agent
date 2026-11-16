@@ -127,7 +127,8 @@ jobs:
           docker build -f Dockerfile.coding-pi -t chief-pi:test .
           docker build --build-context kite=tools -t pi-runtime-standalone:test coding_runtime_pi
           node scripts/pi-cli-container-smoke.mjs
-          docker run --rm --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-pi:test --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all node --disable-sigusr1 /opt/chief-worker/coding_runtime_pi/dist/security-smoke.js
+          # --init: the smoke is not PID 1, so its watchdog can end it if the guard ever freezes.
+          docker run --rm --init --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-pi:test --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all node --disable-sigusr1 /opt/chief-worker/coding_runtime_pi/dist/security-smoke.js
           CHIEF_BOX_DOCKER_IMAGE=chief-pi:test kite exec tsx --test tests/box-docker.test.ts
   images:
     name: sandbox and app images

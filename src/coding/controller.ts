@@ -3037,9 +3037,20 @@ export class CodingController {
           // EC2 boxes, or one retired from the coding profile) is paused before anything is
           // launched, so it never blocks the queue.
           if (this.provider.accepts && !this.provider.accepts(request)) {
+            // A Pi job can be moved to the image new jobs use (coding_job_update with
+            // upgradeWorker, which only a Pi job on a Pi host accepts) and then resumed, when the
+            // sandbox runs that image. Any other job keeps the earlier advice (journal 200).
+            const movable =
+              j.settings.runtime === "pi" &&
+              this.settings.runtime === "pi" &&
+              !!this.settings.image &&
+              this.settings.image !== j.settings.image &&
+              this.provider.accepts({ ...request, image: this.settings.image });
             await this.stopped(
               j,
-              "This job's worker image is no longer run by the coding sandbox (it predates EC2 boxes or has been retired); start a new coding job to continue",
+              movable
+                ? "This job's worker image has been retired, so no coding box runs it any more. Its saved work is kept. To continue, move the job to the current worker image (coding_job_update with upgradeWorker), then resume it"
+                : "This job's worker image is no longer run by the coding sandbox (it predates EC2 boxes or has been retired); start a new coding job to continue",
               false,
             );
             return;

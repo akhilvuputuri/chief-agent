@@ -14,6 +14,18 @@ import { tmpdir } from "node:os";
 import { linuxProcessBoundary } from "./process-boundary.js";
 import { Workspace, localExecutor, type Execution } from "./workspace.js";
 const cleanup = linuxProcessBoundary("/opt/pi-runtime/process-boundary.node");
+// The guard is a synchronous native call: if it froze, no timer here could fire. A child in the
+// worker's own session, which the guard never touches, ends the smoke instead (journal 200). The
+// CI job runs the smoke under an init process, so this process is not PID 1 and can be killed.
+const watchdog = spawn(
+  "sh",
+  [
+    "-c",
+    `sleep 600; echo "Security smoke froze for 600 s; killing it" >&2; kill -KILL ${process.pid}`,
+  ],
+  { stdio: ["ignore", "ignore", "inherit"] },
+);
+watchdog.unref();
 // The guard lists the worker's children here; it must be able to (journal 199).
 await readFile(`/proc/${process.pid}/task/${process.pid}/children`, "utf8");
 const root = await mkdtemp(join(tmpdir(), "pi-isolation-"));
@@ -165,6 +177,169 @@ if (ran)
     process.kill(Number(readFileSync(configured, "utf8")), 0),
   );
 assert.equal(ran, false, "The repository's configured program ran");
+
+// Command descendants still running, possibly large, when the command's shell exits (journal
+// 200). A coding box lost the result of `kite run check 2>&1 | grep -iE "error" | head; git status
+// --short` to "Command descendant cleanup failed". head exits after ten lines, the writers upstream
+// die of EPIPE, and a test process they started keeps running, re-parented to this subreaper (seen
+// on macOS in four of four runs). `finish` SIGKILLs it and the sweep must reap it. SIGKILL is
+// certain but not instant: the kernel frees the address space before the process can be reaped,
+// so the sweep waits for each reap instead of a fixed window. Each case below runs through the
+// real guard and names itself if it fails.
+await writeFile(
+  join(root, "big.js"),
+  // In chunks of at most 1 GiB, under any Buffer size limit.
+  "const b = [];\n" +
+    "for (let left = Number(process.argv[2]); left > 0; left -= 1024)\n" +
+    "  b.push(Buffer.alloc(Math.min(left, 1024) * 1048576, 1));\n" +
+    'require("node:fs").writeFileSync(process.argv[3], "1");\n' +
+    "setInterval(() => b[0][0]++, 1000);\n",
+);
+/** Milliseconds from SIGKILL until Node sees the exit of a child holding `mib` MiB, measured here. */
+async function killToExit(mib: number) {
+  const ready = join(root, `measure-${mib}.ready`);
+  await rm(ready, { force: true });
+  const child = spawn("node", [join(root, "big.js"), String(mib), ready], {
+    stdio: "ignore",
+  });
+  const exited = new Promise<void>((accept) =>
+    child.on("exit", () => accept()),
+  );
+  while (
+    !(await access(ready).then(
+      () => true,
+      () => false,
+    ))
+  )
+    await new Promise((accept) => setTimeout(accept, 20));
+  const start = process.hrtime.bigint();
+  child.kill("SIGKILL");
+  await exited;
+  return Number(process.hrtime.bigint() - start) / 1e6;
+}
+const measured: Record<string, number[]> = {};
+for (const mib of [256, 1024, 2048, 6144]) {
+  measured[`${mib} MiB`] = [];
+  for (let i = 0; i < 3; i++)
+    measured[`${mib} MiB`]!.push(Math.round(await killToExit(mib)));
+}
+console.log(`SIGKILL to exit, ms: ${JSON.stringify(measured)}`);
+/** Asserts each pid recorded in `files` (one pid per file, under root) is gone. */
+const gone = (...files: string[]) => {
+  for (const file of files) {
+    const recorded = Number(readFileSync(join(root, file), "utf8"));
+    assert.throws(
+      () => process.kill(recorded, 0),
+      `process ${recorded} (${file}) still exists`,
+    );
+  }
+};
+const waitFor = (file: string) => `while [ ! -e ${file} ]; do sleep 0.05; done`;
+/** The guard's own message travels as the executor error's cause (journal 200). */
+const explain = (error: unknown): string =>
+  error instanceof Error
+    ? error.message +
+      (error.cause === undefined ? "" : ` (cause: ${explain(error.cause)})`)
+    : String(error);
+const failed: string[] = [];
+/** Runs one leftover case through the real guard; a failure is recorded under its name. */
+async function leftover(name: string, command: string, ...pids: string[]) {
+  try {
+    const started = process.hrtime.bigint();
+    const run = await settles(execute(command, signal), name);
+    const ms = Number(process.hrtime.bigint() - started) / 1e6;
+    assert.deepEqual(result(run), ["done", 0], "the command's own result");
+    gone(...pids);
+    console.log(`Leftover case passed: ${name} (${Math.round(ms)} ms)`);
+  } catch (error) {
+    console.log(`Leftover case FAILED: ${name}: ${explain(error)}`);
+    failed.push(name);
+  }
+}
+// 6 GiB takes several times the old window of about 100 x 1 ms to be reaped on any runner, so
+// this size fails against the old guard by a clear margin.
+for (const mib of [1024, 2048, 6144]) {
+  // In the command's process group, orphaned before its shell exits: killed by `finish`, reaped
+  // by the sweep.
+  await leftover(
+    `${mib} MiB process left in the command's group`,
+    `sh -c 'node big.js ${mib} grouped-${mib}.ready & echo $! > grouped-${mib}.pid'; ${waitFor(`grouped-${mib}.ready`)}; echo done`,
+    `grouped-${mib}.pid`,
+  );
+  // A detached daemon of the same size in a session of its own: killed and reaped by the sweep.
+  await leftover(
+    `${mib} MiB detached daemon in its own session`,
+    `setsid sh -c 'echo $$ > detached-${mib}.pid; exec node big.js ${mib} detached-${mib}.ready' & ${waitFor(`detached-${mib}.ready`)}; echo done`,
+    `detached-${mib}.pid`,
+  );
+}
+// A chain of daemons, each in a session of its own and a child of the one before: each
+// generation becomes the worker's child only after its parent has died.
+await writeFile(
+  join(root, "chain.sh"),
+  [
+    'n="$1"',
+    'echo $$ > "chain-$n.pid"',
+    'if [ "$n" -gt 0 ]; then setsid sh ./chain.sh $((n - 1)) & else echo 1 > chain.ready; fi',
+    "exec sleep 600",
+    "",
+  ].join("\n"),
+);
+const depth = 30;
+await leftover(
+  `chain of ${depth + 1} daemons, each in its own session`,
+  `setsid sh ./chain.sh ${depth} & ${waitFor("chain.ready")}; echo done`,
+  ...Array.from({ length: depth + 1 }, (_, n) => `chain-${n}.pid`),
+);
+// A traced leftover whose tracer is a generation later and never waits for it. The kernel shows
+// a traced zombie only to its tracer, so the worker can reap the killed tracee only once the
+// tracer, adopted when its parent dies, has been killed as well. A sweep that blocked on the
+// tracee would freeze here (the watchdog above then fails the smoke).
+await writeFile(
+  join(root, "tracer.py"),
+  [
+    "import ctypes, os, time",
+    "libc = ctypes.CDLL(None, use_errno=True)",
+    "libc.ptrace.argtypes = [ctypes.c_long, ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p]",
+    "libc.prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]",
+    "ready_r, ready_w = os.pipe()",
+    "tracee = os.fork()",
+    "if tracee == 0:",
+    "    # Any process may trace this one (Yama's ptrace_scope 1 otherwise allows only ancestors).",
+    "    libc.prctl(0x59616D61, ctypes.c_ulong(-1).value, 0, 0, 0)",
+    "    os.write(ready_w, b'1')",
+    "    while True: time.sleep(60)",
+    "os.read(ready_r, 1)",
+    "open('traced-tracee.pid', 'w').write(str(tracee))",
+    "holder = os.fork()",
+    "if holder == 0:",
+    "    tracer = os.fork()",
+    "    if tracer == 0:",
+    "        if libc.ptrace(16, tracee, None, None) == 0:",
+    "            os.waitpid(tracee, 0)",
+    "            status = 'attached'",
+    "        else:",
+    "            status = 'refused: errno %d' % ctypes.get_errno()",
+    "        open('traced-tracer.pid', 'w').write(str(os.getpid()))",
+    "        open('traced.status', 'w').write(status)",
+    "        while True: time.sleep(60)",
+    "    while True: time.sleep(60)",
+    "open('traced-holder.pid', 'w').write(str(holder))",
+    "while not os.path.exists('traced.status'): time.sleep(0.05)",
+    "",
+  ].join("\n"),
+);
+await leftover(
+  "traced process whose tracer is a later generation and never waits",
+  `setsid python3 tracer.py & ${waitFor("traced.status")}; sleep 0.2; echo done`,
+  "traced-tracee.pid",
+  "traced-holder.pid",
+  "traced-tracer.pid",
+);
+const traced = readFileSync(join(root, "traced.status"), "utf8");
+console.log(`Tracer case ptrace attach: ${traced}`);
+assert.deepEqual(failed, [], "Leftover cases failed");
+watchdog.kill();
 console.log(
-  "Synthetic process privacy, detached-descendant cleanup, concurrent commands and repository-configured programs passed.",
+  "Synthetic process privacy, detached-descendant cleanup, concurrent commands, repository-configured programs and large, multi-generation or traced leftovers passed.",
 );

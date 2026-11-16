@@ -102,3 +102,9 @@ Merged as `5ef1f8b` (PR 497) at the reviewed head `3457c94`; release run 4379681
 - **Open job.** Job `46463771` keeps the previous image in its settings. It is waiting for the owner and has not started publishing, so `coding_job_update` with `upgradeWorker` moves it to this image before it continues.
 - **Still not measured:** a real job with two commands in one turn on a box.
 - **Found while reading the same job's trace, not explained:** one single command (a full `kite run check`, about ten minutes) returned only "Command descendant cleanup failed; inspect before continuing", so its output was lost. Three earlier full runs in the same box did not fail. The guard gives killed processes about 100 passes of one millisecond to leave the worker's child list, and this change kept that window. Whether the window is the cause is a hypothesis; a reproduction on Linux is in progress.
+
+## Update, 16 November 2026: the pinned image is live
+
+[PR 499](https://github.com/akhilvuputuri/chief-agent/pull/499) merged as `eac08bf`. Release run 43798225951 succeeded at 03:30 UTC on 16 November; the gateway reported `eac08bf`, healthy, Telegram polling. The server's `config/coding-pi.json` and `config/boxes.json` carry `sha256:bfecdb52…`. Independent review (Claude Opus 5.5) approved the exact head `3ecf3e8`. No job has run on the image yet.
+
+The unexplained cleanup error above is diagnosed in [journal 200](200-wait-for-the-kill.md): the window was too short for a large killed process to be reaped. The fix is not in this image.
