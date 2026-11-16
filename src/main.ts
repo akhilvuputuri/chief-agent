@@ -27,6 +27,7 @@ import {
 } from "./delivery-routing.js";
 import "./process-guard.js";
 import { errorFields, opsLog } from "./ops-log.js";
+import { startPolling, type Polling } from "./telegram-polling.js";
 import { RoutineScheduler, RoutineDelivery } from "./routines.js";
 import { Responsibilities } from "./responsibilities.js";
 import {
@@ -47,7 +48,6 @@ import {
   saveKeyboard,
 } from "./news.js";
 import { PublicFeedFetcher } from "./news-feed.js";
-import { run as runTelegram, type RunnerHandle } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
 import { FallbackAlerts, ModelRouter } from "./model-router.js";
 import { AnthropicMessagesGateway } from "./anthropic.js";
@@ -329,6 +329,9 @@ const mirror = new DailySheet(db, {
   spreadsheetId: c.DAILY_SPREADSHEET_ID,
 });
 const shutdown = new AbortController();
+// Telegram intake. Assigned after bot.init(); a signal during startup finds no runner
+// yet and must also stop it from starting against a closed pool.
+let runner: Polling | undefined;
 let notifyOwner: (text: string) => Promise<void> = async () => {};
 const libraryClient = new LibraryClient({
   pacing:
@@ -945,6 +948,7 @@ const app = server(
         gathering,
       }
     : undefined,
+  () => runner?.status(),
 );
 const bot = telegram(c, assistant, db, media);
 if (coding) await codingApi(app, coding);
@@ -1534,9 +1538,6 @@ scheduleTimer.unref();
 await app.listen({ host: "0.0.0.0", port: c.PORT });
 // Failures are logged by the index and retried on the next gmail_recall.
 void mailIndex?.start();
-// Assigned after bot.init(); a signal during startup finds no runner yet and
-// must also stop it from starting against a closed pool.
-let runner: RunnerHandle | undefined;
 let stopping = false;
 for (const signal of ["SIGINT", "SIGTERM"])
   process.once(signal, () => {
@@ -1582,12 +1583,12 @@ await bot.init();
 // Never start polling after a stop began: the next getUpdates would confirm
 // updates to Telegram that a closed pool can no longer record.
 if (!stopping)
-  runner = runTelegram(bot, {
-    runner: {
-      silent: true,
-      fetch: { allowed_updates: ["message", "callback_query"] },
-    },
-    sink: { concurrency: 8 },
+  // Retries at a steady pace for the life of the process, restarts an ended loop and
+  // reports outages to the owner, the log and /healthz (journal 196).
+  runner = startPolling(bot, {
+    notifyOwner: (text) => notifyOwner(text),
+    allowedUpdates: ["message", "callback_query"],
+    concurrency: 8,
   });
 const started = Date.now();
 // The Node version shows which undici fixes are live (journal 126).
@@ -1633,6 +1634,8 @@ setInterval(
     opsLog("gateway.heartbeat", "info", {
       uptimeS: Math.round((Date.now() - started) / 1000),
       rssMb: Math.round(process.memoryUsage().rss / 1048576),
+      // Whether the gateway is still hearing Telegram (journal 196).
+      ...runner?.status(),
     }),
   300000,
 ).unref();

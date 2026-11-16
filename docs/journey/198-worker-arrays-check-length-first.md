@@ -1,4 +1,4 @@
-# 196 — Can one coding worker request still exhaust the gateway's memory through zod?
+# 198 — Can one coding worker request still exhaust the gateway's memory through zod?
 
 Work date: 2026-11-16. Written: 2026-11-16.
 Status: tested; release pending. The schemas a coding worker's request reaches check an array's length before its elements. Other schemas still use zod 3's array, behind body limits of 400 kB or less.

@@ -1,6 +1,12 @@
 # Worker request arrays check their length first — tested, release pending, 16 November 2026
 
-Branch `claude/zod-array-bound`. zod 3 validates every element of an array even when it is over its declared maximum, and keeps an issue for each (GHSA-mrhx-c7xc-m3w5, no 3.x fix). Measured on the real checkpoint and outcome schemas, an 8 MB worker body of bad elements grew the heap by 1.1 to 1.2 GB; the host had 777 MB available, and those routes accept up to 64 MB with a job's worker capability. The schemas a coding worker's request reaches now use `boundedArray` (`src/bounded-array.ts`), which checks the declared length first, as zod 4 does, and stops at the first bad element: the same bodies are refused in about 1 ms with no heap growth. No new limit, and valid payloads parse as before, so the worker image is unchanged. zod 3 stays, and other schemas keep its array behind body limits of 400 kB or less. See [journal 196](journey/196-worker-arrays-check-length-first.md).
+Branch `claude/zod-array-bound`. zod 3 validates every element of an array even when it is over its declared maximum, and keeps an issue for each (GHSA-mrhx-c7xc-m3w5, no 3.x fix). Measured on the real checkpoint and outcome schemas, an 8 MB worker body of bad elements grew the heap by 1.1 to 1.2 GB; the host had 777 MB available, and those routes accept up to 64 MB with a job's worker capability. The schemas a coding worker's request reaches now use `boundedArray` (`src/bounded-array.ts`), which checks the declared length first, as zod 4 does, and stops at the first bad element: the same bodies are refused in about 1 ms with no heap growth. No new limit, and valid payloads parse as before, so the worker image is unchanged. zod 3 stays, and other schemas keep its array behind body limits of 400 kB or less. See [journal 198](journey/198-worker-arrays-check-length-first.md).
+
+# One test file at a time in coding jobs — tested, not yet released, 16 November 2026
+
+The first job on the rebuilt coding loop spent nearly all of its coder's 40 minutes running the whole test suite, seven times for a two-file change. `kite test tests/NAME.test.ts` now builds and runs the named files alone, and `AGENTS.md` says that `kite run check` already includes every test ([journal 197](journey/197-one-test-file.md)).
+
+Next: read the next coding job's profile for how often the suite ran. Then measure several shared test processes at once on a machine like a box: a full TypeScript run there takes about 310 s on one of three CPUs.
 
 # A fact names what the owner pointed at — live, no night measured, 13 November 2026
 

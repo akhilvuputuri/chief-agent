@@ -9,7 +9,7 @@ import { checkpoint, outcome } from "../src/coding/schema.js";
 import { squadState } from "../src/coding/squad-schema.js";
 
 // zod 3 validates every element of an over-long array and keeps an issue for each
-// (GHSA-mrhx-c7xc-m3w5, journal 196). These tests count element visits and issues, not time.
+// (GHSA-mrhx-c7xc-m3w5, journal 198). These tests count element visits and issues, not time.
 
 const counted = () => {
   let seen = 0;

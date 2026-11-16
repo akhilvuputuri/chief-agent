@@ -1,4 +1,5 @@
-// Runs the TypeScript tests, or one CI shard of them (TEST_SHARD=i/n).
+// Runs the TypeScript tests, or one CI shard of them (TEST_SHARD=i/n), or only the test files
+// named on the command line: `kite test tests/links.test.ts` (journal 197).
 //
 // A serial run loads every file into one process (TEST_ISOLATION=shared), which takes about
 // a third less time than a process per file: each process otherwise compiles the test
@@ -62,6 +63,37 @@ export function allTestFiles(dir = "tests") {
     .filter((f) => f.endsWith(".test.ts"))
     .sort()
     .map((f) => `${dir}/${f}`);
+}
+
+/**
+ * The test files named on the command line, as `all` spells them. A name that is not one of
+ * the files a full run would run is an error, so a mistyped name cannot pass by running
+ * nothing.
+ */
+export function namedTestFiles(names, all, cwd = process.cwd()) {
+  const files = [
+    ...new Set(names.map((name) => relative(cwd, resolve(cwd, name)))),
+  ];
+  const unknown = files.filter((file) => !all.includes(file));
+  if (unknown.length)
+    throw new Error(
+      `Not a TypeScript test file in tests/: ${unknown.join(", ")}. ` +
+        "Name files such as tests/links.test.ts. A script test runs with " +
+        "`node --test scripts/NAME.test.mjs`.",
+    );
+  return files.sort();
+}
+
+/** The files one run covers: the named ones, one shard of `all`, or all of them. */
+export function selectFiles(names, env, all, readWeights) {
+  if (names.length) {
+    if (env.TEST_SHARD)
+      throw new Error("TEST_SHARD does not apply to named test files.");
+    return namedTestFiles(names, all);
+  }
+  if (!env.TEST_SHARD) return all;
+  const { index, count } = parseShard(env.TEST_SHARD);
+  return assignShards(all, readWeights(), count)[index - 1];
 }
 
 /** "shared" for a serial run unless told otherwise; parallel files need their own processes. */
@@ -196,11 +228,16 @@ if (
   process.argv[1] &&
   realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])
 ) {
-  let files = allTestFiles();
-  if (process.env.TEST_SHARD) {
-    const { index, count } = parseShard(process.env.TEST_SHARD);
-    const weights = JSON.parse(readFileSync("tests/test-weights.json", "utf8"));
-    files = assignShards(files, weights, count)[index - 1];
+  const names = process.argv.slice(2);
+  let files;
+  try {
+    files = selectFiles(names, process.env, allTestFiles(), () =>
+      JSON.parse(readFileSync("tests/test-weights.json", "utf8")),
+    );
+  } catch (error) {
+    if (!names.length) throw error;
+    console.error(error.message);
+    process.exit(2);
   }
   // Serial unless asked: coding boxes run this too, and only CI has measured parallel files
   // for the SIGSEGV in journal 123 (journal 141).

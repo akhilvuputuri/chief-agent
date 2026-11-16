@@ -7,7 +7,7 @@ import { z } from "zod";
  * zod 3's `z.array(item).max(n)` validates every element even when the array is longer
  * than `n`, and keeps an issue for each element that fails. A body of millions of bad
  * elements then costs the process about 290 bytes each before it is refused
- * (GHSA-mrhx-c7xc-m3w5, journal 196). zod 4.6.6 fixed that by checking the length first;
+ * (GHSA-mrhx-c7xc-m3w5, journal 198). zod 4.6.6 fixed that by checking the length first;
  * this does the same on zod 3. Stopping at the first bad element also bounds an array
  * that declares no maximum, which zod 4 does not.
  *

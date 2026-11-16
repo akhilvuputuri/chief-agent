@@ -1002,6 +1002,10 @@ export function telegram(
     const file = classifyInbound(ctx.message);
     const needsPreparation = !!(file || ctx.message.voice || !ctx.message.text);
     const forwarded = ctx.message.forward_origin !== undefined;
+    const receivedAt = new Date();
+    // Telegram's send time, in whole seconds; 0 only in synthetic updates.
+    const sentAt =
+      ctx.message.date > 0 ? new Date(ctx.message.date * 1000) : undefined;
     const received =
       ctx.message.text ??
       ctx.message.caption ??
@@ -1024,7 +1028,8 @@ export function telegram(
               ctx.message.reply_to_message?.caption ??
               ctx.message.quote?.text
             )?.slice(0, 2000),
-        receivedAt: new Date().toISOString(),
+        receivedAt: receivedAt.toISOString(),
+        sentAt: sentAt?.toISOString(),
         preparing: true,
         voiceReply: !!ctx.message.voice,
         topic: topics.cachedKey(user, thread),
@@ -1036,6 +1041,12 @@ export function telegram(
       updateId: ctx.update.update_id,
       messageId: ctx.message.message_id,
       replyToMessageId: ctx.message.reply_to_message?.message_id ?? null,
+      delayS: sentAt
+        ? Math.max(
+            0,
+            Math.round((receivedAt.getTime() - sentAt.getTime()) / 1000),
+          )
+        : null,
     });
     let deliveryGuard: (() => Promise<boolean>) | undefined;
     let deliveryRun: string | undefined;

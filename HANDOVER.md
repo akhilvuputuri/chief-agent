@@ -5,7 +5,7 @@
 - **Measured exposure:** zod keeps one issue per failing array element even past `.max()`: 22 MB of heap for a 120 kB body, 1.1 GB for an 8 MB worker request. Bodies over 400 kB are allowed only on coding worker routes, and zod parses them only after the job's token is checked.
 - **Pending:** a worker image built from this change, then its pin; the owner's decisions on `pi-coding-agent` 1.5.x or setting the worker's default dispatcher from the 8.12.4 copy, and on zod 4 or a length check ahead of zod on worker routes.
 
-> **Update, 16 November 2026 ([journal 196](docs/journey/196-worker-arrays-check-length-first.md)):** the owner chose the length check. Arrays in the schemas a coding worker's request reaches check their length before their elements (`src/bounded-array.ts`); the 8 MB case went from 1.1 GB of heap to none. Tested, release pending. zod 3.25.76 is unchanged and still flagged, and other schemas keep zod's array.
+> **Update, 16 November 2026 ([journal 198](docs/journey/198-worker-arrays-check-length-first.md)):** the owner chose the length check. Arrays in the schemas a coding worker's request reaches check their length before their elements (`src/bounded-array.ts`); the 8 MB case went from 1.1 GB of heap to none. Tested, release pending. zod 3.25.76 is unchanged and still flagged, and other schemas keep zod's array.
 
 # Direct Anthropic route — adapter released (`a7c1993`), enabling change prepared, 11 November 2026
 

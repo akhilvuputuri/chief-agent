@@ -11,3 +11,5 @@ Gmail operations are read tools gated by the `gmail` availability flag. `gmail_s
 Library operations are read tools gated by availability flags: `library_check` and `library_availability` on `library`, `library_shelf` on `libraryAccount` (encrypted identity configured). Library writes are never model tools: `/library link` and `/library revoke` are host commands that create approval cards, and only the authenticated `lib:` Telegram callback executes them. The client enforces host pinning, pacing and neutral error wording (see [library](library.md)).
 
 The production Fastify server exposes only `/healthz`; `/internal/tools` and the Python callback protocol have been removed. Telegram is the authenticated client. A future web or realtime-voice client should reuse the normalized runtime boundary and provide its own authenticated owner scope.
+
+> **Update, 15 November 2026 ([journal 196](journey/196-chief-stopped-listening.md)):** `/healthz` reports Telegram intake as well as liveness; see [deployment](deployment.md).
