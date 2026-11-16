@@ -12,6 +12,11 @@
 // In the shared process node imports every file before running any test, and a hook at
 // the top of one file runs around every file's tests.
 //
+// A serial run of many files uses several such processes at once (TEST_WORKERS, by default
+// one per CPU up to four). Each takes the next group of files from a queue, so no recorded
+// timing decides how the work is split (journal 201). TEST_WORKERS=1 is the single shared
+// process.
+//
 // Node's own
 // --test-shard splits by file count, which left shards from 83 s to 182 s (journal 138), so
 // shards are balanced using each file's recorded time in tests/test-weights.json.
@@ -25,7 +30,7 @@ import {
   realpathSync,
   rmSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -147,37 +152,95 @@ export function rerunPlan({ files, undecided, code, crashed, complete }) {
   };
 }
 
-const run = (args) =>
+/** How long a finished process's output is waited for; a child it left can hold the pipe. */
+const DRAIN_MS = 2000;
+
+/**
+ * Runs tsx. With `sink`, an array, the process's output is collected there instead of
+ * going to the terminal, so several runs at once do not mix their reports.
+ */
+const run = (args, sink) =>
   new Promise((done) => {
-    const child = spawn("tsx", args, { stdio: "inherit" });
+    const child = spawn("tsx", args, {
+      stdio: sink ? ["ignore", "pipe", "pipe"] : "inherit",
+    });
+    const ended = [child.stdout, child.stderr].filter(Boolean).map(
+      (stream) =>
+        new Promise((end) => {
+          stream.on("data", (data) => sink.push(data));
+          stream.on("end", end);
+        }),
+    );
     child.on("error", (error) => {
       console.error(error);
       done({ code: 1, crashed: true });
     });
-    child.on("exit", (code, signal) =>
-      done({ code: signal ? 1 : (code ?? 1), crashed: Boolean(signal) }),
-    );
+    child.on("exit", async (code, signal) => {
+      await Promise.race([
+        Promise.all(ended),
+        new Promise((timeout) => setTimeout(timeout, DRAIN_MS).unref()),
+      ]);
+      // A child the tests left running must not keep this run waiting on its pipe.
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      done({ code: signal ? 1 : (code ?? 1), crashed: Boolean(signal) });
+    });
   });
 
-const perFile = async (files, concurrency) =>
-  (await run(["--test", `--test-concurrency=${concurrency}`, ...files])).code;
+const perFile = async (files, concurrency, sink) =>
+  (await run(["--test", `--test-concurrency=${concurrency}`, ...files], sink))
+    .code;
 
 const list = (files) => files.map((file) => `  ${file}`).join("\n");
 
-async function shared(files) {
+/** A run of fewer files than this stays in one shared process. */
+const FEWEST_FILES_FOR_WORKERS = 24;
+
+/**
+ * Deals files into `count` groups. Dealing them round, not in runs, spreads files with
+ * similar names, which are often similar in weight, over the groups.
+ */
+export function fileGroups(files, count) {
+  const groups = Array.from(
+    { length: Math.max(1, Math.min(count, files.length)) },
+    () => [],
+  );
+  files.forEach((file, i) => groups[i % groups.length].push(file));
+  return groups;
+}
+
+/** How many shared processes a serial run uses at once: TEST_WORKERS, or the CPUs up to four. */
+export function workerCount(env, cpus = availableParallelism()) {
+  const value = env.TEST_WORKERS;
+  if (value === undefined) return Math.max(1, Math.min(4, cpus));
+  if (!/^[1-9]\d?$/.test(value))
+    throw new Error(`Invalid TEST_WORKERS: ${value}`);
+  return Number(value);
+}
+
+/**
+ * One shared-process run of `files`, then the reruns it calls for. With `sink` every line
+ * goes there instead of to the terminal.
+ */
+async function shared(files, sink) {
+  const say = (text) =>
+    sink ? sink.push(Buffer.from(`${text}\n`)) : console.log(text);
   const dir = mkdtempSync(join(tmpdir(), "chief-test-run-"));
   const report = join(dir, "ran");
   try {
-    const { code, crashed } = await run([
-      "--test",
-      "--experimental-test-isolation=none",
-      // Naming a second reporter drops the default one, so it is named too.
-      `--test-reporter=${process.stdout.isTTY ? "spec" : "tap"}`,
-      "--test-reporter-destination=stdout",
-      `--test-reporter=${fileURLToPath(new URL("test-ran-files.mjs", import.meta.url))}`,
-      `--test-reporter-destination=${report}`,
-      ...files,
-    ]);
+    const { code, crashed } = await run(
+      [
+        "--test",
+        "--experimental-test-isolation=none",
+        // Naming a second reporter drops the default one, so it is named too.
+        `--test-reporter=${process.stdout.isTTY ? "spec" : "tap"}`,
+        "--test-reporter-destination=stdout",
+        `--test-reporter=${fileURLToPath(new URL("test-ran-files.mjs", import.meta.url))}`,
+        `--test-reporter-destination=${report}`,
+        ...files,
+      ],
+      sink,
+    );
     let written = "";
     try {
       written = readFileSync(report, "utf8");
@@ -194,7 +257,7 @@ async function shared(files) {
       complete,
     });
     if (!first.length) return code;
-    console.log(
+    say(
       (crashed || !complete
         ? "\nThe shared process stopped before finishing, so its results are not used. "
         : code !== 0 && !undecided.length
@@ -203,25 +266,69 @@ async function shared(files) {
         `Running ${first.length === files.length ? "every file" : "them"} one process each, which decides the result:\n` +
         list(first),
     );
-    const decided = await perFile(first, "1");
+    const decided = await perFile(first, "1", sink);
     if (decided !== 0) return decided;
     if (!thenIfPassed.length) {
       // Only a failed shared run says anything about files disturbing each other.
       if (complete && !crashed && code !== 0)
-        console.log(
+        say(
           "\nThey pass on their own. A file that fails only in the shared process " +
             "depends on, or disturbs, another file's state.",
         );
       return 0;
     }
-    console.log(
+    say(
       "\nThey pass on their own, which leaves the shared run's failure unexplained. " +
         `Running the other ${thenIfPassed.length} file(s) one process each before deciding.`,
     );
-    return perFile(thenIfPassed, "1");
+    return perFile(thenIfPassed, "1", sink);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * A serial run on several shared processes at once. The files are dealt into two groups a
+ * worker, and each worker takes the next group from the queue, so a slow group delays only
+ * itself. A process costs about 7 s of CPU to start, so more, smaller groups are slower:
+ * 6 groups took 197 s and 40 groups 304 s on three CPUs (journal 201). A group's whole
+ * report is printed when the group ends.
+ */
+export async function sharedGroups(
+  files,
+  workers,
+  runGroup = shared,
+  // Resolves once the text has left this process: a write to a pipe can still be pending
+  // when the run ends, and exiting then would drop it.
+  write = (text) => new Promise((sent) => process.stdout.write(text, sent)),
+) {
+  const queue = fileGroups(files, workers * 2);
+  const total = queue.length;
+  let failed = 0;
+  await write(
+    `# ${total} groups of test files on ${Math.min(workers, total)} processes at once.\n`,
+  );
+  await Promise.all(
+    Array.from({ length: Math.min(workers, total) }, async () => {
+      for (let group; (group = queue.shift());) {
+        const sink = [];
+        try {
+          if ((await runGroup(group, sink)) !== 0) failed += 1;
+        } catch (error) {
+          // The group's run could not be made or cleaned up: it fails, and the others go on.
+          failed += 1;
+          sink.push(Buffer.from(`${error?.stack ?? error}\n`));
+        }
+        await write(Buffer.concat(sink));
+      }
+    }),
+  );
+  await write(
+    failed
+      ? `\n# ${failed} of ${total} groups of test files failed: see the failures above.\n`
+      : `\n# All ${total} groups of test files passed.\n`,
+  );
+  return failed ? 1 : 0;
 }
 
 if (
@@ -239,12 +346,23 @@ if (
     console.error(error.message);
     process.exit(2);
   }
-  // Serial unless asked: coding boxes run this too, and only CI has measured parallel files
-  // for the SIGSEGV in journal 123 (journal 141).
+  // With a process per file, one file runs at a time unless asked: only CI has measured
+  // several at once for the SIGSEGV in journal 123 (journal 141). Shared workers also run
+  // test processes side by side; a group that crashes runs its own files again one process
+  // each, and no crash was seen in 23 such runs on a CI machine (journal 201).
   const concurrency = process.env.TEST_CONCURRENCY ?? "1";
+  if (isolationMode(process.env) !== "shared")
+    process.exit(await perFile(files, concurrency));
+  let workers;
+  try {
+    workers = workerCount(process.env);
+  } catch (error) {
+    console.error(error.message);
+    process.exit(2);
+  }
   process.exit(
-    isolationMode(process.env) === "shared"
-      ? await shared(files)
-      : await perFile(files, concurrency),
+    workers > 1 && files.length >= FEWEST_FILES_FOR_WORKERS
+      ? await sharedGroups(files, workers)
+      : await shared(files),
   );
 }

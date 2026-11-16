@@ -1,3 +1,9 @@
+# A full test run on several CPUs — tested, not yet released, 16 November 2026
+
+A serial run of the TypeScript tests now uses several shared processes at once, each taking groups of files from a queue: 197 s against 390 s on a CI machine held to three CPUs, the number a coding box has. One test file had been keeping its process alive for three minutes after its tests; that is fixed too ([journal 201](journey/201-test-workers.md)).
+
+Next: read the next coding job's profile for the time of its full check, and for how often the suite ran now that `kite test FILE` is live.
+
 # Worker request arrays check their length first — live in `0013525`, 16 November 2026
 
 Released by PR 494. The gateway is healthy on `0013525`, and the deployed checkpoint schema refuses an array of a million bad elements with one issue in 3 ms (run once in a separate process in the gateway container). No coding job has gone through it yet. zod stays at 3.25.76; moving to zod 4, and whether checkpoint, finish and publish need a 64 MB body, are open. See [journal 198](journey/198-worker-arrays-check-length-first.md#release-closure--2026-11-16).
@@ -11,6 +17,8 @@ Branch `claude/zod-array-bound`. zod 3 validates every element of an array even 
 The first job on the rebuilt coding loop spent nearly all of its coder's 40 minutes running the whole test suite, seven times for a two-file change. `kite test tests/NAME.test.ts` now builds and runs the named files alone, and `AGENTS.md` says that `kite run check` already includes every test ([journal 197](journey/197-one-test-file.md)).
 
 Next: read the next coding job's profile for how often the suite ran. Then measure several shared test processes at once on a machine like a box: a full TypeScript run there takes about 310 s on one of three CPUs.
+
+> **Update, 16 November 2026:** live in `fb53ba9` (PR 495); the gateway is healthy on it. No coding job has run with it yet.
 
 # A fact names what the owner pointed at — live, no night measured, 13 November 2026
 

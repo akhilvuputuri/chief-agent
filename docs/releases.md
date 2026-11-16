@@ -1,3 +1,9 @@
+## A full test run uses several processes; one test file no longer waits three minutes (16 November 2026)
+
+- **Code.** Tests only. A serial run of `kite run test:ts` now uses several shared processes at once, one per CPU up to four (`TEST_WORKERS`; 1 is the single process as before). The files are dealt into two groups a worker, and each worker takes the next group from a queue. `tests/coding-one-session.test.ts` aborts its worker client when a test ends. CI is unchanged. No runtime code, migration, Compose change or worker image.
+- **Why.** A coding box ran the TypeScript tests on one of its three CPUs, in 310.7 s. On a CI machine held to three CPUs, three workers took 197 s against 390 s serial. Earlier attempts gained little because one test file kept its process alive for three minutes after its tests, retrying a request to a server the test had closed. See [journal 201](journey/201-test-workers.md).
+- **Not measured.** A coding box. Whether Node counts three CPUs there, or four, was not checked.
+
 ## Worker image with the guard that waits for the kill (16 November 2026)
 
 - **Configuration.** New coding jobs pin worker image `sha256:90cb1dcc…`, built from `4da138b` (run 43805890191). It carries [journal 200](journey/200-wait-for-the-kill.md): the guard kills command leftovers until none remain, with no time window, so a command that leaves a large process behind keeps its result. No code, migration or Compose change.
@@ -44,6 +50,8 @@
 - **Why.** zod 3.25.76 validates every element of an over-long array and keeps an issue for each, and has no 3.x fix. An 8 MB worker body of bad elements grew the heap by 1.1 to 1.2 GB (measured); it is now refused in about 1 ms. See [journal 198](journey/198-worker-arrays-check-length-first.md).
 - **Not changed.** zod stays at 3.25.76 and is still flagged by OSV. Schemas outside the worker routes keep zod's array.
 - **Deployment.** Not yet recorded as live; update this entry on release.
+
+> **Update, 16 November 2026, to the entry below:** `kite test FILE` is live. Merged as `fb53ba9` (PR 495) after independent review of its exact head; main's checks and the release succeeded and the gateway reported `fb53ba9`, healthy. No coding job has run with it yet.
 
 ## `kite test FILE` runs named test files alone (16 November 2026)
 
