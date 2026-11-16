@@ -35,3 +35,22 @@ export function savableLink(input: string) {
     return false;
   }
 }
+
+/** The canonical links plus their trailing-dot-host spelling. Rows saved before the host was
+ * normalised (study entries, Reader payloads) may hold the dotted form, which stays the stored
+ * identity; lookups match both so an old row is still found and a pending save still retried. */
+export function withLegacyDotted(urls: string[]) {
+  const out = new Set(urls);
+  for (const href of urls) {
+    try {
+      const u = new URL(href);
+      if (!u.hostname.endsWith(".")) {
+        u.hostname += ".";
+        out.add(u.href);
+      }
+    } catch {
+      // Not a URL: only its own form can match.
+    }
+  }
+  return [...out];
+}

@@ -303,10 +303,46 @@ test("a trailing-dot host and the plain host are one study list entry", async ()
       f.run,
       save("https://news.example.com/2026/city-budget"),
     );
+    assert.equal(b.study.duplicate, true);
     const rows = await f.rows("study_resources");
     assert.equal(rows.length, 1);
     assert.equal(rows[0].url, "https://news.example.com/2026/city-budget");
     assert.equal(f.reader.sent.length, 0);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("rows stored before host normalisation (trailing-dot URL) are still found: duplicate, retry and pending match", async () => {
+  const dotted = "https://news.example.com./2026/city-budget";
+  const plain = "https://news.example.com/2026/city-budget";
+  const s = await fixture({ destination: "study", p: 0.93 });
+  try {
+    await s.links.call("123", s.run, save(plain));
+    await s.db.query("UPDATE study_resources SET url=$1", [dotted]);
+    const again: any = await s.links.call("123", s.run, save(plain));
+    assert.equal(again.study.duplicate, true);
+    assert.equal((await s.rows("study_resources")).length, 1);
+  } finally {
+    await s.pg.close();
+  }
+  const f = await fixture({ destination: "reader", p: 0.9 });
+  try {
+    f.reader.set("uncertain");
+    const first: any = await f.links.call("123", f.run, save(plain));
+    assert.equal(first.reader.state, "pending");
+    await f.db.query(
+      "UPDATE mcp_operations SET payload=jsonb_set(payload,'{url}',to_jsonb($1::text)), source_payload=CASE WHEN source_payload IS NULL THEN NULL ELSE jsonb_set(source_payload,'{url}',to_jsonb($1::text)) END",
+      [dotted],
+    );
+    await f.db.query("UPDATE link_reader_keys SET url=$1", [dotted]);
+    for (const u of [plain, dotted])
+      assert.equal(await f.links.retriesPending("123", save(u)), true);
+    const key = (await f.rows("mcp_operations"))[0]!.request_key;
+    f.reader.set("ok");
+    const retry: any = await f.links.call("123", f.run, save(plain));
+    assert.equal(retry.reader.key, key);
+    assert.equal((await f.rows("mcp_operations")).length, 1);
   } finally {
     await f.pg.close();
   }
@@ -864,6 +900,40 @@ test("an uncertain earlier link_save blocks other writes, but its own retry runs
       await f.db.query("SELECT state FROM runtime_calls WHERE id=$1", [call])
     ).rows;
     assert.equal(settled.state, "success");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a legacy dotted pending Reader save keeps an earlier uncertain link_save unsettled when the plain link needs a choice", async () => {
+  const dotted = "https://news.example.com./2026/city-budget";
+  const f = await fixture({ destination: "study", p: 0.5 });
+  try {
+    const stopped = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_runs(id,user_id,state) VALUES($1,'123','stopped')",
+      [stopped],
+    );
+    const call = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state) VALUES($1,$2,'p','link_save',$3::jsonb,true,'uncertain')",
+      [call, stopped, JSON.stringify({ raw: JSON.stringify({ url: dotted }) })],
+    );
+    await f.db.query(
+      `INSERT INTO mcp_operations(user_id,connection,request_key,tool,binding,schema_hash,payload,state)
+       VALUES('123','reader',$1,'save_link','b','h',$2::jsonb,'pending')`,
+      [randomUUID(), JSON.stringify({ url: dotted })],
+    );
+    const r: any = await f.links.call(
+      "123",
+      f.run,
+      save("https://news.example.com/2026/city-budget"),
+    );
+    assert.equal(r.state, "needs_choice");
+    const [c] = (
+      await f.db.query("SELECT state FROM runtime_calls WHERE id=$1", [call])
+    ).rows;
+    assert.equal(c.state, "uncertain");
   } finally {
     await f.pg.close();
   }
