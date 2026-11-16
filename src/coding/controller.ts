@@ -161,6 +161,23 @@ const STALE_HOURS = 24;
 /** Jobs a coding_resume or coding_reply can requeue (with a matching revision). */
 const RESTARTABLE =
   "state IN ('plan_ready','awaiting_input','paused','failed') AND NOT publication_started AND cleanup IN ('none','complete') AND (lease IS NULL OR lease_until<now())";
+/**
+ * A Pi job's settings moved to the worker image new jobs use: the boxes accept it and it is the
+ * reviewed one. That image's worker refuses the limits a Pi job carried before journal 193, and
+ * Pi's own catalogue gives each Claude model's window (journal 190), so none is snapshotted.
+ * Shared by coding_job_update's upgradeWorker and the host's move of a job whose image was
+ * retired (journal 202), so both change a job the same way.
+ */
+function onCurrentWorker(
+  settings: CodingSettings,
+  image: string,
+): CodingSettings {
+  const next = { ...settings, image };
+  delete next.limits;
+  delete next.leaderModel;
+  delete (next as { contextWindows?: unknown }).contextWindows;
+  return next;
+}
 /** Owner-merge PRs stopped for the owner, which coding_resume returns to automation. */
 const CONTINUABLE =
   "state='pr_ready' AND settings->>'prWorkflow'='owner_merge' AND stage IN ('manual_review','merge_declined') AND (lease IS NULL OR lease_until<now())";
@@ -1062,18 +1079,15 @@ export class CodingController {
         !this.settings.image)
     )
       throw new ToolValidationError("Only a Pi coding job can change worker");
-    const next = {
+    const models = {
       ...job.settings,
       ...(a.coderModel ? { model: a.coderModel } : {}),
       ...(a.reviewerModel ? { reviewerModel: a.reviewerModel } : {}),
-      // Only to the image new jobs use: the boxes accept it, and it is the reviewed one.
-      ...(a.upgradeWorker ? { image: this.settings.image } : {}),
     };
-    // That image's worker refuses the limits a Pi job carried before journal 193.
-    if (a.upgradeWorker) {
-      delete next.limits;
-      delete next.leaderModel;
-    }
+    // Only to the image new jobs use (checked above to exist on a Pi host).
+    const next = a.upgradeWorker
+      ? onCurrentWorker(models, this.settings.image!)
+      : models;
     const changes = [
       ["Coder", job.settings.model, next.model],
       ["Reviewer", job.settings.reviewerModel, next.reviewerModel],
@@ -2958,6 +2972,66 @@ export class CodingController {
       [j.id, j.revision, j.attempt_id, summary, key],
     );
   }
+  /**
+   * Moves a just-claimed Pi job off a retired worker image to the one new jobs use, with the
+   * same settings change as coding_job_update's upgradeWorker (journal 202). Returns true when
+   * the job was moved (and `j.settings` updated) so its box can launch; false when it was
+   * paused instead or is no longer this pass's to launch.
+   *
+   * updateJob changes only a stopped job (RESTARTABLE) so that no box, lease, cleanup or
+   * publication is using the settings it replaces. The same holds here, checked in the update:
+   * this pass holds the lease it claimed the job with, the attempt has no box yet (sandbox_id
+   * is null and cleanup='pending' only marks this attempt), and every path that queues a job
+   * clears publication_started. The owner's Start covers the request, not who carries it out
+   * (requirements.ts), so it stands, as it does for upgradeWorker; the revision is unchanged,
+   * as in updateJob for a job past Start.
+   */
+  private async moveRetiredWorker(j: CodingJob) {
+    const next = onCurrentWorker(j.settings, this.settings.image!);
+    try {
+      // The check updateJob applies to the moved settings; the models themselves are unchanged.
+      this.assertDirectPiModels(next, "The job was not moved.");
+    } catch (error) {
+      if (!(error instanceof ToolValidationError)) throw error;
+      await this.stopped(
+        j,
+        `This job's worker image has been retired, so no coding box runs it any more. Its saved work is kept. It could not be moved to the current worker image: ${error.message} Change its models and move it (coding_job_update with upgradeWorker), then resume it`,
+        false,
+      );
+      return false;
+    }
+    const from = j.settings.image.slice(-12);
+    const to = next.image.slice(-12);
+    // One statement: the settings and the owner's notice change together or not at all, and
+    // the notice is keyed to the attempt, so a repeated pass cannot write a second one.
+    const moved = await this.db.query(
+      `WITH changed AS (
+        UPDATE coding_jobs SET settings=$5::jsonb
+        WHERE id=$1 AND attempt_id=$2 AND lease=$3 AND state='provisioning' AND sandbox_id IS NULL AND NOT publication_started AND settings=$4::jsonb RETURNING id
+      ), noted AS (
+        INSERT INTO coding_events(job_id,event_key,payload)
+        SELECT id,'worker-moved:'||$2::text,$6::jsonb FROM changed ON CONFLICT DO NOTHING RETURNING job_id
+      ) SELECT id FROM changed`,
+      [
+        j.id,
+        j.attempt_id,
+        j.lease,
+        JSON.stringify(j.settings),
+        JSON.stringify(next),
+        JSON.stringify({
+          kind: "settings_change",
+          by: "host",
+          reason: "worker_image_retired",
+          changes: [{ field: "Worker image", from, to }],
+          summary: `This job's worker image was retired, so Chief moved it to the current one and is starting it. Worker image: ${from} → ${to}. Its saved work, its models and your Start of the request stay as they were.`,
+        }),
+      ],
+    );
+    if (!moved.rows.length) return false;
+    j.settings = next;
+    opsLog("coding.worker_moved", "info", { ref: j.id });
+    return true;
+  }
   async tick() {
     if (this.ticking) return;
     this.ticking = true;
@@ -3037,23 +3111,27 @@ export class CodingController {
           // EC2 boxes, or one retired from the coding profile) is paused before anything is
           // launched, so it never blocks the queue.
           if (this.provider.accepts && !this.provider.accepts(request)) {
-            // A Pi job can be moved to the image new jobs use (coding_job_update with
-            // upgradeWorker, which only a Pi job on a Pi host accepts) and then resumed, when the
-            // sandbox runs that image. Any other job keeps the earlier advice (journal 200).
+            // A Pi job can move to the image new jobs use (what coding_job_update with
+            // upgradeWorker does, which only a Pi job on a Pi host accepts) when the sandbox
+            // runs that image. Any other job keeps the earlier advice (journal 200).
             const movable =
               j.settings.runtime === "pi" &&
               this.settings.runtime === "pi" &&
               !!this.settings.image &&
               this.settings.image !== j.settings.image &&
               this.provider.accepts({ ...request, image: this.settings.image });
-            await this.stopped(
-              j,
-              movable
-                ? "This job's worker image has been retired, so no coding box runs it any more. Its saved work is kept. To continue, move the job to the current worker image (coding_job_update with upgradeWorker), then resume it"
-                : "This job's worker image is no longer run by the coding sandbox (it predates EC2 boxes or has been retired); start a new coding job to continue",
-              false,
-            );
-            return;
+            if (!movable) {
+              await this.stopped(
+                j,
+                "This job's worker image is no longer run by the coding sandbox (it predates EC2 boxes or has been retired); start a new coding job to continue",
+                false,
+              );
+              return;
+            }
+            // A retired image can never run the job, so moving it was the only way on: the
+            // host moves it now and launches its box (journal 202).
+            if (!(await this.moveRetiredWorker(j))) return;
+            request.image = j.settings.image;
           }
           const id = await this.provider.create(request);
           await this.db.query(

@@ -1,3 +1,11 @@
+## A job on a retired worker image moves itself to the current one (16 November 2026)
+
+- **Code.** Host only. When a Pi job is about to start a box and its worker image has been retired from the coding profile, the host moves it to the image new jobs use, with the same settings change as `coding_job_update` (`upgradeWorker`), and starts the box instead of pausing. The owner gets one notice saying so. A job whose models fail the direct-model check stays paused and says why; a job that cannot be moved keeps the "start a new coding job" text. Nothing in the worker image changes.
+- **Why.** An answered job paused with advice to move it, and the owner started a new job instead. See [journal 202](journey/202-retired-image-moves-itself.md).
+- **Tested.** `tests/coding-on-boxes.test.ts` and `tests/coding-job-update.test.ts` locally, typecheck and format.
+- **Not measured.** No real job has been moved this way; the notice has not been seen on a phone.
+- **Deployment.** Not yet released.
+
 ## A full test run uses several processes; one test file no longer waits three minutes (16 November 2026)
 
 - **Code.** Tests only. A serial run of `kite run test:ts` now uses several shared processes at once, one per CPU up to four (`TEST_WORKERS`; 1 is the single process as before). The files are dealt into two groups a worker, and each worker takes the next group from a queue. `tests/coding-one-session.test.ts` aborts its worker client when a test ends. CI is unchanged. No runtime code, migration, Compose change or worker image.

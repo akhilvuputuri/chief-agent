@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { BoxController } from "../src/boxes/controller.js";
 import { FakeBoxProvider } from "../src/boxes/provider.js";
@@ -103,14 +103,16 @@ test("a coding attempt in a box: the controller pauses a worker that exited as t
   assert.equal((await f.row(job.id)).cleanup, "complete");
 });
 
-test("a Pi job on a retired worker image is told to move to the current image and resume (journal 200)", async (t) => {
+/** A controller whose coding boxes run only the image new jobs use. */
+async function retiredFixture(t: TestContext) {
   const pi = codingSettings.parse({
     ...settings,
     limits: undefined,
     runtime: "pi",
   });
   const provider = new FakeBoxProvider({ canStop: true });
-  const f = await fixture(t, {
+  const runs = pi.image!;
+  return fixture(t, {
     settings: pi,
     provider: (db) =>
       new BoxSandbox(
@@ -122,7 +124,7 @@ test("a Pi job on a retired worker image is told to move to the current image an
             profiles: {
               coding: {
                 provider: "fake",
-                image: pi.image!,
+                image: runs,
                 idleTtlMinutes: 15,
                 retentionHours: 0,
                 hardMaxHours: 3,
@@ -136,26 +138,95 @@ test("a Pi job on a retired worker image is told to move to the current image an
           "https://coding.example.com",
         ),
         "coding",
-        [pi.image!],
+        [runs],
       ),
   });
+}
+
+test("a Pi job on a retired worker image is moved to the current image by the host and its box launches (journal 202)", async (t) => {
+  const f = await retiredFixture(t);
+  const job = await f.start();
+  const current = (await f.row(job.id)).settings.image as string;
+  const retired = `ghcr.io/example/coding@sha256:${"9".repeat(64)}`;
+  // Snapshotted before journal 193 and 190: the move drops what upgradeWorker drops.
+  await f.db.query(
+    "UPDATE coding_jobs SET settings=settings || jsonb_build_object('image',$2::text,'leaderModel','synthetic/leader','contextWindows',jsonb_build_object('synthetic/coder',200000)) WHERE id=$1",
+    [job.id, retired],
+  );
+  const before = await f.row(job.id);
+  await f.c.tick();
+  const j = await f.row(job.id);
+  assert.notEqual(j.state, "paused");
+  assert.match(j.sandbox_id, /^box:/);
+  assert.equal(j.revision, before.revision);
+  assert.deepEqual(j.checkpoint, before.checkpoint);
+  // Exactly upgradeWorker's change: image replaced; limits, leaderModel and contextWindows gone.
+  const expected = { ...before.settings, image: current };
+  delete expected.limits;
+  delete expected.leaderModel;
+  delete expected.contextWindows;
+  assert.deepEqual(j.settings, expected);
+  const box = (
+    await f.db.query("SELECT image FROM boxes WHERE id=$1", [
+      j.sandbox_id.slice("box:".length),
+    ])
+  ).rows[0];
+  assert.equal(box.image, current);
+  const notices = (
+    await f.db.query(
+      "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND event_key LIKE 'worker-moved:%'",
+      [job.id],
+    )
+  ).rows;
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].delivery, "pending");
+  assert.equal(notices[0].payload.kind, "settings_change");
+  assert.equal(notices[0].payload.by, "host");
+  assert.deepEqual(notices[0].payload.changes, [
+    { field: "Worker image", from: retired.slice(-12), to: current.slice(-12) },
+  ]);
+  assert.match(notices[0].payload.summary, /worker image was retired/);
+  assert.match(notices[0].payload.summary, /Start of the request stay/);
+  // A repeated pass moves nothing and writes no second notice.
+  await f.c.tick();
+  await f.c.tick();
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT count(*)::int AS n FROM coding_events WHERE job_id=$1 AND event_key LIKE 'worker-moved:%'",
+        [job.id],
+      )
+    ).rows[0].n,
+    1,
+  );
+  assert.equal((await f.row(job.id)).settings.image, current);
+});
+
+test("a retired Pi job whose move fails the model check stays paused and says why", async (t) => {
+  const f = await retiredFixture(t);
   const job = await f.start();
   const retired = `ghcr.io/example/coding@sha256:${"9".repeat(64)}`;
   await f.db.query(
-    "UPDATE coding_jobs SET settings=jsonb_set(settings,'{image}',to_jsonb($2::text)) WHERE id=$1",
+    "UPDATE coding_jobs SET settings=settings || jsonb_build_object('image',$2::text,'model','unrouted/model') WHERE id=$1",
     [job.id, retired],
   );
   await f.c.tick();
   const j = await f.row(job.id);
   assert.equal(j.state, "paused");
-  assert.match(j.summary, /worker image has been retired/);
-  assert.match(j.summary, /saved work is kept/);
-  assert.match(
-    j.summary,
-    /move the job to the current worker image \(coding_job_update with upgradeWorker\), then resume it/,
-  );
-  assert.doesNotMatch(j.summary, /start a new coding job/);
+  assert.equal(j.settings.image, retired);
   assert.equal(j.sandbox_id, null);
+  assert.match(j.summary, /worker image has been retired/);
+  assert.match(j.summary, /could not be moved/);
+  assert.match(j.summary, /coding_job_update with upgradeWorker/);
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT count(*)::int AS n FROM coding_events WHERE job_id=$1 AND event_key LIKE 'worker-moved:%'",
+        [job.id],
+      )
+    ).rows[0].n,
+    0,
+  );
   assert.equal(
     (await f.db.query("SELECT count(*)::int AS n FROM boxes")).rows[0].n,
     0,
