@@ -767,6 +767,64 @@ test("grep is confined to the workspace and truncates like stock grep", async ()
   await assert.rejects(run({ path: "../" }));
 });
 
+test("grep's glob is relative to its path, as the tool's description says", async () => {
+  const f = await fixture();
+  for (const dir of ["repo/migrations/main", "migrations/main"]) {
+    await mkdir(join(f.workspace, dir), { recursive: true });
+    await writeFile(join(f.workspace, dir, "a.js"), "NEEDLE\n");
+  }
+  await writeFile(join(f.workspace, "repo", "top.js"), "NEEDLE\n");
+  await writeFile(join(f.workspace, "repo", ".env"), "NEEDLE=secret\n");
+  const grep = tools(
+    await new Workspace(f.workspace).initialize(),
+    "reviewer",
+    localExecutor(f.workspace, join(f.root, "home")),
+    () => {},
+  ).find((t) => t.name === "grep")!;
+  // The description is Pi's own; this is the sentence the wrapper has to honour.
+  assert.match(
+    (grep.parameters as any).properties.glob.description,
+    /relative to path/,
+  );
+  const run = async (input: Record<string, unknown>) =>
+    (
+      await grep.execute(
+        "g",
+        { pattern: "NEEDLE", ...input },
+        undefined,
+        undefined,
+        undefined as any,
+      )
+    ).content[0].text as string;
+  // Pi's own example (earendil-works/pi#11807): the glob names a path under `path`.
+  assert.equal(
+    await run({ path: "repo", glob: "migrations/main/*.js" }),
+    "migrations/main/a.js:1: NEEDLE",
+  );
+  // A leading "./" is dropped, also behind a negation.
+  assert.equal(
+    await run({ path: "repo", glob: "./migrations/main/*.js" }),
+    "migrations/main/a.js:1: NEEDLE",
+  );
+  assert.equal(
+    await run({ path: "repo", glob: "!./migrations/**" }),
+    ["top.js:1: NEEDLE"].join("\n"),
+  );
+  // A pattern without "/" still matches file names at any depth, and protected files stay out.
+  assert.equal(
+    (await run({ path: "repo", glob: "*" })).split("\n").sort().join("\n"),
+    ["migrations/main/a.js:1: NEEDLE", "top.js:1: NEEDLE"].join("\n"),
+  );
+  assert.equal(await run({ path: "repo", glob: ".env" }), "No matches found");
+  // From the workspace root the same glob names the root's own directory.
+  assert.equal(
+    await run({ glob: "migrations/main/*.js" }),
+    "migrations/main/a.js:1: NEEDLE",
+  );
+  // A file as the path is searched as before.
+  assert.equal(await run({ path: "repo/top.js" }), "top.js:1: NEEDLE");
+});
+
 test("the command executor arms no timer when no timeout is given", async () => {
   const f = await fixture();
   const execute = localExecutor(f.workspace, join(f.root, "home"));

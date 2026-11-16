@@ -446,3 +446,16 @@ Evidence boundary:
 - **Measured:** the lost result on production (job `46463771`); the leftover process on macOS (4 of 4); the kill-to-exit times on CI.
 - **Verified only by CI:** the new sweep and the eight leftover cases in the security smoke, plus the old guard failing them and the first version freezing (see journal 200).
 - **Not measured:** a production command with a large leftover after the fix; reap times on a coding box.
+
+**Pi 1.5.2 (17 November, [journal 203](203-pi-1-5-2.md)).** Moving the worker from Pi 1.1.0 to 1.5.2 broke one thing: the worker's own `grep`. It keeps Pi's schema and description and replaces only the function that runs ripgrep, so that `.git` and `.env` files stay out. Pi 1.5.1 changed `glob` to be relative to `path` and said so in the description. The worker went on matching from the workspace root, so the model was told one rule and got another.
+
+- A tool that borrows another tool's description has borrowed a contract. After an upgrade, compare the text the model is sent, not only the types: the build and every existing test passed with the mismatch in place.
+- The quickest way to find what an upgrade changes for the model was to record the same session's requests on both versions and compare them whole. Four things differed; one of them needed a change.
+- A session written by the old version has to continue on the new one, because a job can move to a new worker image mid-way ([journal 202](202-retired-image-moves-itself.md)). Testing that needs both versions installed side by side, so it cannot be a permanent test; it was run once and its result recorded.
+- Comments that name the version of a dependency they were read from are worth the trouble: they showed exactly which claims had to be read again.
+
+Evidence boundary:
+
+- **Tested locally:** the new `grep` test fails on the old function and passes on the new; the runtime's and the host's Pi tests pass on 1.5.2.
+- **Measured locally, against a stand-in server:** the request comparison, and a 1.1.0 session continued on 1.5.2 whose requests pass the host's allowlist.
+- **Not measured:** a real coding job on 1.5.2; the effect of Pi's shorter system prompt on a job.

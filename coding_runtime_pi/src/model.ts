@@ -56,8 +56,9 @@ export function anthropicModel(config: ModelConfig): ModelFactory {
           headers: {
             ...options?.headers,
             // Pi's cache warmer is the one caller that asks for a single output token
-            // (pi-coding-agent 1.1.0, core/cache-warmer.js `refresh`): agent turns use the
-            // model's output limit and compaction its own reserve (journal 192).
+            // (pi-ai 1.5.2, cache-warming.js `getCacheWarmingRequestOptions`, which
+            // pi-coding-agent's core/cache-warmer.js `refresh` sends): agent turns and, since
+            // Pi 1.4.0, compaction use the model's output limit (journals 192 and 203).
             [purposeHeader]:
               options?.maxTokens === 1 ? "cache_warm" : requestPurpose,
             // Caller-chosen headers, such as the candidate a review round is about.

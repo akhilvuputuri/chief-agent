@@ -228,13 +228,17 @@ function grep(
       const args = ["--json", "--line-number", "--color=never", "--hidden"];
       if (input.ignoreCase) args.push("--ignore-case");
       if (input.literal) args.push("--fixed-strings");
-      if (input.glob) args.push("--glob", input.glob);
+      // As stock grep (pi-coding-agent 1.5.2): rg never matches a leading "./", so it is dropped.
+      if (input.glob)
+        args.push("--glob", input.glob.replace(/^(!?)(?:\.\/)+/, "$1"));
       args.push("--glob", "!**/.git/**", "--glob", "!**/.env");
       args.push("--glob", "!**/.env.*");
       if (context) args.push("--context", String(context));
-      args.push("--", input.pattern, target);
+      // Stock grep's description says `glob` is relative to `path`. rg roots --glob at its own
+      // working directory, so a directory is searched from inside it, as ".", the way stock does.
+      args.push("--", input.pattern, directory ? "." : target);
       const name = (path: string) => {
-        const rel = relative(target, path);
+        const rel = relative(target, resolve(target, path));
         return directory && rel && !rel.startsWith("..") ? rel : basename(path);
       };
       const lines: string[] = [];
@@ -244,7 +248,7 @@ function grep(
       await new Promise<void>((accept, reject) => {
         if (signal?.aborted) return reject(new Error("Operation aborted"));
         const child = spawn("rg", args, {
-          cwd: workspace.requestedRoot,
+          cwd: directory ? target : workspace.requestedRoot,
           stdio: ["ignore", "pipe", "pipe"],
           env: { PATH: process.env.PATH, LANG: "C.UTF-8" },
         });

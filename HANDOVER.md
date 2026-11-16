@@ -9,6 +9,8 @@
 
 > **Update, 16 November 2026 ([journal 198](docs/journey/198-worker-arrays-check-length-first.md#release-closure--2026-11-16)):** live in `0013525` (PR 494); the gateway is healthy and the deployed schema refuses a million bad elements with one issue. No coding job has gone through it yet.
 
+> **Update, 17 November 2026 ([journal 203](docs/journey/203-pi-1-5-2.md)):** the owner chose the Pi upgrade. The coding runtime pins `pi-coding-agent` and `pi-ai` 1.5.2, with undici 8.12.3 and minimatch 11.0.3; OSV flags nothing in the Pi runtime's lockfile. The runtime's own undici dependency mentioned above was removed on 13 November (PR 479), so the copy Pi pins is the only undici 8 a worker loads. Tested, release and worker image pending. Still open: six undici advisories fixed in 8.12.4 that OSV records by Git range only (no published Pi pins 8.12.4), and zod 3.25.76.
+
 # Direct Anthropic route — adapter released (`a7c1993`), enabling change prepared, 11 November 2026
 
 - **Update, 11 November 2026, live:** PR 442 merged as `ef825c4` and rolled out; Opus 5.5 calls go direct in production, verified with a live call ([journal 161](docs/journey/161-enabling-direct-anthropic.md)).

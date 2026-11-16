@@ -1,3 +1,12 @@
+## Coding runtime on Pi 1.5.2 (17 November 2026)
+
+- **Code.** The Pi coding runtime pins `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai` 1.5.2 (was 1.1.0), in both lockfiles. With them come undici 8.12.3 (was 8.10.2) and minimatch 11.0.3 (was 10.2.6) where Pi resolves them. The worker's `grep` now roots its `glob` at its `path`: it runs ripgrep inside the directory it searches, as Pi's own `grep` does since 1.5.1. Comments in the host's request allowlist were re-read against 1.5.2; the allowlist itself is unchanged. No migration, Compose or configuration change.
+- **Why.** `pi-coding-agent` 1.1.0 pinned an undici and a minimatch with published advisories, and only a Pi upgrade could move them ([journal 162](journey/162-advisories-in-the-dependency-tree.md)). See [journal 203](journey/203-pi-1-5-2.md) for what the four minor releases change for the runtime.
+- **Tested.** The Pi runtime's check and the host's Pi message tests locally. Measured against a stand-in server: the requests of one session on both versions differ only in the `User-Agent`, Pi's system prompt, the `grep` description and Pi's fixed top-level effort (which the host overwrites); a session started on 1.1.0 continues on 1.5.2 and its requests pass the allowlist.
+- **Still open.** undici 8.12.3 is behind 8.12.4, which fixes six advisories OSV records by Git range only; no published Pi pins it. zod 3.25.76 is unchanged.
+- **Not measured.** No coding job has run on 1.5.2.
+- **Deployment.** Worker source and lockfiles. It reaches coding jobs when a worker image built from it is pinned; not yet built or pinned.
+
 ## A job on a retired worker image moves itself to the current one (16 November 2026)
 
 - **Code.** Host only. When a Pi job is about to start a box and its worker image has been retired from the coding profile, the host moves it to the image new jobs use, with the same settings change as `coding_job_update` (`upgradeWorker`), and starts the box instead of pausing. The owner gets one notice saying so. A job whose models fail the direct-model check stays paused and says why; a job that cannot be moved keeps the "start a new coding job" text. If the move does not apply (the job changed after it was claimed), the job is paused with a text that says so, or left alone if another pass now holds it. The worker image's build includes `src/`, but the worker never loads this code, so no new image pin is needed.

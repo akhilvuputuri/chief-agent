@@ -92,10 +92,12 @@ export class MessagesRefusal extends Error {
 
 /**
  * The top-level fields Pi's Anthropic client sends for Claude Opus 5.5 and Sonnet 5.5
- * (pi-ai 1.1.0, `dist/api/anthropic-messages.js`, `buildParams`): model, messages, max_tokens,
+ * (pi-ai 1.5.2, `dist/api/anthropic-messages.js`, `buildParams`): model, messages, max_tokens,
  * stream, system, tools, thinking, output_config, and metadata or tool_choice only when its
  * caller sets them. `betas` is not a body field there: the SDK sends it as the anthropic-beta
- * header. `temperature` and `fallbacks` are never sent for these models. The box is untrusted,
+ * header. `temperature` and `fallbacks` are never sent for these models, and `thread` (message
+ * threads, pi-ai 1.5.1) only by the `anthropic` provider on api.anthropic.com or a model whose
+ * compat asks for it; the worker's provider is neither. The box is untrusted,
  * so anything else is refused: some fields (workspace_id, user_profile_id, betas) would be
  * lifted into headers by the SDK, and others turn on paid or server-side features.
  */
@@ -158,8 +160,9 @@ function assertClientTool(tool: unknown) {
 
 /**
  * The content blocks Pi's client builds (`convertMessages` and `convertContentBlocks` in
- * pi-ai 1.1.0 `dist/api/anthropic-messages.js`): user turns hold text, base64 images and
- * tool results (whose content is a string or text and base64 image blocks); assistant turns
+ * pi-ai 1.5.2 `dist/api/anthropic-messages.js`): user turns hold text, base64 images and
+ * tool results (whose content is a string or text and base64 image blocks; the images of a
+ * failed tool's result follow the turn's tool results as text and image blocks); assistant turns
  * hold text, thinking, redacted thinking and tool calls; mid-conversation system messages hold
  * text and native tool changes. The box is untrusted, and a block with a URL or file source,
  * a server-tool block or a container upload would let it make Anthropic fetch or run something,
@@ -179,7 +182,7 @@ const MESSAGE_FIELDS: Record<string, Set<string>> = {
 
 /**
  * The keys Pi's client writes on each block (`convertMessages`, `convertToolResult`,
- * `convertContentBlocks` and the system prompt in `buildParams`, pi-ai 1.1.0): a block with
+ * `convertContentBlocks` and the system prompt in `buildParams`, pi-ai 1.5.2): a block with
  * any other key (`citations`, a `source` URL, `container`, server-tool fields) is refused, so
  * the untrusted box cannot turn on a feature by adding a key to a block of an allowed type.
  * `cache_control` is the breakpoint Pi puts on the last user or system block and on the
@@ -426,8 +429,9 @@ export function messagesRequest(
   return {
     ...body,
     max_tokens: Math.min(requested, pinned.maxTokens),
-    // Pi hard-codes "high" here; the per-turn markers carry its session effort. Setting the top
-    // level makes a request without markers run at the job's effort too.
+    // Pi sends a fixed value here ("low" since pi-ai 1.5.0, "high" before); the per-turn markers
+    // carry its session effort. Setting the top level makes a request without markers run at
+    // the job's effort too.
     output_config: { effort: pinned.effort },
   };
 }
