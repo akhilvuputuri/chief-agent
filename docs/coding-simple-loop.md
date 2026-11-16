@@ -62,7 +62,7 @@ request (+ more owner messages) → [Start] → one coder session: build, run te
 
 > **Update, 16 November 2026 ([journal 199](journey/199-two-commands-at-once.md)):** parallel execution exposed a guard that still assumed one command at a time. On the Linux worker the first command to finish killed and reaped every child of the worker, so a sibling command's tool call never returned and a reviewer turn with two `bash` calls stalled for a box's whole lifetime, twice in one job. A finished command now kills its own process group; the sweep of adopted descendants runs only when no command runs, and touches only processes outside the worker's own session. The coder's role text also says the owner has started the job and no plan approval exists; ask only for a decision that is genuinely the owner's.
 
-> **Update, 16 November 2026 ([journal 200](journey/200-wait-for-the-kill.md)):** the sweep gave each killed leftover about 100 passes of 1 ms to be reaped, which a large process does not meet (about 63 ms per GiB on CI). It now waits for each killed process to be reaped and reads the child list again for the next generation; the pass bound remains only as a loud failure for a tree that forks faster than it is killed.
+> **Update, 16 November 2026 ([journal 200](journey/200-wait-for-the-kill.md)):** the sweep gave each killed leftover about 100 passes of 1 ms to be reaped, which a large process does not meet (about 63 ms per GiB on CI). It now repeats its kill-and-reap passes with no time limit until no leftover is listed, killing later generations as they are adopted; only a tree that keeps producing new processes, more than 100 generations of them, fails loudly.
 
 ### Differences from stock Pi
 
