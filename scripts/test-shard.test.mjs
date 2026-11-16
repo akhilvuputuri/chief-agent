@@ -14,12 +14,15 @@ import ranFiles from "./test-ran-files.mjs";
 import {
   allTestFiles,
   assignShards,
+  fileGroups,
   isolationMode,
   namedTestFiles,
   parseShard,
   rerunPlan,
   selectFiles,
+  sharedGroups,
   undecidedFiles,
+  workerCount,
 } from "./test-shard.mjs";
 import { testSteps } from "./test.mjs";
 import {
@@ -238,6 +241,80 @@ test("kite test with file names builds and runs those files, and nothing else", 
   const scripts = JSON.parse(readFileSync("package.json", "utf8")).scripts;
   assert.equal(scripts.test, "node scripts/test.mjs");
   assert.equal(scripts["test:ts"], "node scripts/test-shard.mjs");
+});
+
+test("files are dealt into groups: each file once, sizes within one of each other", () => {
+  const files = Array.from({ length: 157 }, (_, i) => `tests/f${i}.test.ts`);
+  const groups = fileGroups(files, 6);
+  assert.equal(groups.length, 6);
+  assert.deepEqual(groups.flat().sort(), [...files].sort());
+  const sizes = groups.map((group) => group.length);
+  assert.ok(Math.max(...sizes) - Math.min(...sizes) <= 1, String(sizes));
+  // Neighbours in name, often alike in weight, land in different groups.
+  assert.notEqual(
+    groups.findIndex((group) => group.includes(files[0])),
+    groups.findIndex((group) => group.includes(files[1])),
+  );
+  // Never an empty group, even with fewer files than groups.
+  assert.deepEqual(fileGroups(files.slice(0, 2), 6), [[files[0]], [files[1]]]);
+  assert.deepEqual(fileGroups([], 6), [[]]);
+});
+
+test("a serial run uses one shared process a CPU, up to four, unless told", () => {
+  assert.equal(workerCount({}, 3), 3);
+  assert.equal(workerCount({}, 16), 4);
+  assert.equal(workerCount({}, 1), 1);
+  assert.equal(workerCount({ TEST_WORKERS: "1" }, 16), 1);
+  assert.equal(workerCount({ TEST_WORKERS: "6" }, 2), 6);
+  for (const bad of ["0", "-1", "two", "1.5", ""])
+    assert.throws(() => workerCount({ TEST_WORKERS: bad }, 4), /Invalid/);
+});
+
+test("workers take groups from one queue, and one failed group fails the run", async () => {
+  const files = Array.from({ length: 40 }, (_, i) => `tests/f${i}.test.ts`);
+  const run = async (failing, workers = 3) => {
+    const ran = [];
+    const written = [];
+    let active = 0;
+    let most = 0;
+    const code = await sharedGroups(
+      files,
+      workers,
+      async (group, sink) => {
+        active += 1;
+        most = Math.max(most, active);
+        sink.push(Buffer.from(`start ${group[0]}\n`));
+        // The group holding the first file is slow; the others must not wait for it.
+        await new Promise((r) =>
+          setTimeout(r, group.includes(files[0]) ? 60 : 5),
+        );
+        sink.push(Buffer.from(`end ${group[0]}\n`));
+        ran.push(...group);
+        active -= 1;
+        return group.includes(failing) ? 1 : 0;
+      },
+      (text) => written.push(String(text)),
+    );
+    return { code, ran, written, most };
+  };
+  const passed = await run(undefined);
+  assert.equal(passed.code, 0);
+  assert.deepEqual(passed.ran.sort(), [...files].sort());
+  assert.equal(passed.most, 3);
+  // Each group's report is written whole: its start and end are never split by another's.
+  const reports = passed.written.slice(0, -1);
+  assert.equal(reports.length, 6);
+  for (const report of reports) assert.match(report, /^start (\S+)\nend \1\n$/);
+  // The slow group was started first and reported last: the queue did not wait for it.
+  assert.match(reports.at(-1), /^start tests\/f0\.test\.ts\n/);
+  assert.match(passed.written.at(-1), /All 6 groups of test files passed/);
+
+  const failed = await run("tests/f7.test.ts");
+  assert.equal(failed.code, 1);
+  assert.deepEqual(failed.ran.sort(), [...files].sort());
+  assert.match(failed.written.at(-1), /1 of 6 groups of test files failed/);
+
+  assert.equal((await run(undefined, 1)).most, 1);
 });
 
 test("files that failed or never reported are left undecided", () => {

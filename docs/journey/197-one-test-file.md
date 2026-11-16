@@ -3,6 +3,8 @@
 Work date: 16 November 2026. Written: 16 November 2026.
 Status: tested locally; not yet released. No coding job has run with it.
 
+> **Update, 16 November 2026:** live in `fb53ba9`; see Release closure below. No coding job has run with it yet. The unexplained error at the end of the 603 s command is taken up in [journal 200](200-wait-for-the-kill.md), and the next step, a full run on more than one CPU, is [journal 201](201-test-workers.md).
+
 ## User-visible problem and preceding iteration
 
 The first real job on the rebuilt coding loop ([journal 193](193-rebase-backstop-limits.md)) made a two-file change: one line of source and its tests. Its coder took 40 minutes. Chief told the owner that most of that was waiting on test runs, at roughly 7.5 minutes for a full suite, and the owner asked why it was so slow.
@@ -67,6 +69,13 @@ Also from that review: the script test no longer depends on the caller's `TEST_S
 - The script's own tests cover a named file, a mistyped name, a name with a shard and the steps `kite test` runs.
 
 **Not tested:** a coding job. Whether a coder and a reviewer now run named files and one full check will show in the next job's profile.
+
+### Release closure — 2026-11-16
+
+- **Review:** the same reviewer approved `aaea2e3` after the corrections above. Main then moved and conflicted in two documents; the merge of main, `f0d7f1d`, was approved as bringing in main's changes and nothing else.
+- **Merged:** [PR 495](https://github.com/akhilvuputuri/chief-agent/pull/495), approved head `f0d7f1d`, as `fb53ba9`. Hosted checks passed on that head.
+- **Released:** main's checks and the release workflow succeeded for `fb53ba9`. Read-only host check: gateway on `fb53ba9` and healthy. Nothing in the running application changed; coding jobs read `AGENTS.md` and the test scripts from the repository, so no worker image was needed.
+- **Not yet observed:** a coding job started after the merge.
 
 ## Follow-up and next iteration
 

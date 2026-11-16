@@ -108,6 +108,10 @@ async function piJob(
     };
   });
   const app = server();
+  // A request still in flight when the server closes would otherwise be retried for the
+  // client's three-minute outage window, keeping the test process alive (journal 201).
+  const gone = new AbortController();
+  t.after(() => gone.abort());
   t.after(() => app.close());
   await codingApi(app, f.c);
   const origin = await app.listen({ host: "127.0.0.1", port: 0 });
@@ -118,7 +122,7 @@ async function piJob(
       origin,
       job.id,
       f.c.token(job.id, job.attempt_id),
-      new AbortController().signal,
+      gone.signal,
     );
     if (agent) {
       // As a host with the agent App configured would hand it out.

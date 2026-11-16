@@ -48,6 +48,8 @@ The work is spread over four entries. This one puts their results side by side, 
 - **Coding boxes:** neither test time nor `kite build` has been timed or tested inside a box.
 - **Box boot on the baked image:** the configuration is live, and no launch from it had been observed when [journal 144](144-baked-box-image.md) was last updated.
 
+> **Update, 16 November 2026:** coding boxes are now measured. A serial TypeScript run takes 310.7 s in a box and one test file 8.3 s ([journal 197](197-one-test-file.md)); running it on several CPUs is [journal 201](201-test-workers.md).
+
 ## Diagnosis and alternatives
 
 The owner asked for Kite to do more, for speed. The measurements put the time elsewhere: it was database set-up and per-file process start-up, and both were fixed in Chief's own test code. Kite's new command removed a 17 s step from two jobs and one tool from the build, which is a gain in scope more than in time.
