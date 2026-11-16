@@ -1,3 +1,11 @@
+## Worker image with the two-commands fix (16 November 2026)
+
+- **Configuration.** New coding jobs pin worker image `sha256:bfecdb52…`, built from `5ef1f8b` (run 43796246445). It carries [journal 199](journey/199-two-commands-at-once.md): two commands in one turn no longer hang a box, the worker reads the base without the repository's own git configuration, and the coder is told that Start is the approval. `previousImages` stays empty, because the previous image (`sha256:8e23a9ab…`) has the hang. No code, migration or Compose change.
+- **Open job.** Job `46463771` is waiting for the owner's answer and was snapshotted with the previous image. It has not started publishing, so the owner can move it with `coding_job_update` (`upgradeWorker`) before answering. If it is resumed without that, it is paused before any box starts, with a message that its image is retired; it can still be moved then.
+- **Gateway.** [PR 497](https://github.com/akhilvuputuri/chief-agent/pull/497) merged as `5ef1f8b` at the head the independent reviewer approved (`3457c94`). Release run 43796810592 succeeded at 03:14 UTC on 16 November; the gateway reported `5ef1f8b`, healthy, Telegram polling.
+- **Deployment.** Not yet recorded as live; a dated note follows on release.
+- **Not measured.** No job has run on this image. A second guard error from job `46463771` ("Command descendant cleanup failed" after one command, once in four full check runs) is not explained and is being investigated separately; this image may still show it.
+
 ## Two shell commands in one turn no longer hang a coding box (16 November 2026)
 
 - **Code.** The coding worker's process guard no longer kills and reaps every child of the worker after each command. The sweep for leftover processes waits until no command is running and touches only processes outside the worker's own session, so a command that finishes cannot kill a sibling command, the `grep` tool's search or the worker's own git; each command still kills its own process group when it exits, and nothing a command starts outlives the moment no command is running. The coder's role text says the owner's Start is the approval, so it does not ask the owner to approve a plan. Worker only; no host, migration or Compose change.
