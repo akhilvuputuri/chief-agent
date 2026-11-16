@@ -277,6 +277,41 @@ test("link config parses and has no model of its own; the classifier uses Jev fr
   assert.deepEqual(Object.keys(qs), ["topic"]);
 });
 
+test("canonical URL drops one trailing dot from the host so example.com. is example.com", () => {
+  assert.equal(
+    canonicalUrl("https://example.com./path?x=1"),
+    canonicalUrl("https://example.com/path?x=1"),
+  );
+  assert.equal(
+    canonicalUrl("http://WWW.Example.COM./a#f"),
+    "https://www.example.com/a",
+  );
+  assert.equal(canonicalUrl("https://example.com./"), "https://example.com/");
+});
+
+test("a trailing-dot host and the plain host are one study list entry", async () => {
+  const f = await fixture({ destination: "study", p: 0.93 });
+  try {
+    const a: any = await f.links.call(
+      "123",
+      f.run,
+      save("https://news.example.com./2026/city-budget"),
+    );
+    assert.equal(a.state, "saved");
+    const b: any = await f.links.call(
+      "123",
+      f.run,
+      save("https://news.example.com/2026/city-budget"),
+    );
+    const rows = await f.rows("study_resources");
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].url, "https://news.example.com/2026/city-budget");
+    assert.equal(f.reader.sent.length, 0);
+  } finally {
+    await f.pg.close();
+  }
+});
+
 test("confident study: an X thread on agent architectures goes to the study list, never Reader", async () => {
   const f = await fixture({
     destination: "study",

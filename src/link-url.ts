@@ -7,13 +7,13 @@ const TRACKING =
 const X_HOSTS = /^(?:www\.|mobile\.)?(?:x|twitter)\.com$/i;
 
 /** One canonical form per link: public HTTPS (a plain http link is upgraded), lowercase
- * host, no fragment, no tracking parameters (and X's share parameters s and t), remaining
+ * host without one trailing dot (example.com. is example.com), no fragment, no tracking parameters (and X's share parameters s and t), remaining
  * parameters sorted. A Reddit post keeps only its page. Used for the study list and as the
  * exact Reader payload. Throws for a link that is not a public hostname. */
 export function canonicalUrl(input: string) {
   const u = new URL(input);
   if (u.protocol === "http:") u.protocol = "https:";
-  u.hostname = u.hostname.toLowerCase();
+  u.hostname = u.hostname.toLowerCase().replace(/\.$/, "");
   u.hash = "";
   const x = X_HOSTS.test(u.hostname);
   const kept = [...u.searchParams.entries()]
