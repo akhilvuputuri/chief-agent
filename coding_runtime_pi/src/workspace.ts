@@ -43,6 +43,30 @@ export function artifactHash(patch: string, files: FileChange[]) {
   // Defined wire identity, independent of the client publisher's identity scheme.
   return createHash("sha256").update(JSON.stringify(ordered)).digest("hex");
 }
+/**
+ * Commands running in this process, across every executor: Pi runs the tool calls of one
+ * message at once, and the worker's own git runs through executors of its own (journal 197).
+ * Kept on `globalThis` so a second copy of this module still shares the one count.
+ */
+const running: { count: number } = ((
+  globalThis as { [key: symbol]: { count: number } }
+)[Symbol.for("chief.pi-runtime.running-commands")] ??= { count: 0 });
+/**
+ * Runs commands in a session and process group of their own (`detached`). A finished command
+ * kills its own process group. `cleanup` (the Linux guard's sweep of descendants that escaped
+ * their group and were adopted by the subreaper worker) runs only once no command is running in
+ * this process, so it can never kill a running command or take the exit status of a shell Node
+ * still waits for (journal 197).
+ *
+ * Why every promise settles: once `spawn` returns, libuv emits either `error` (the process did
+ * not start) or `exit` (it started and libuv reaped it); both call `finish`, which settles exactly
+ * once. libuv reaps each child by its own pid, and the only other reaping in the process is the
+ * guard's sweep, which runs while `running.count` is 0, that is after every command's `exit` has
+ * been delivered, and reaps only processes outside the worker's own session (never one Node
+ * spawned: commands have sessions of their own and are all finished; Node's other children share
+ * the worker's session). A failed kill changes nothing: a process that is already gone was reaped
+ * by libuv, which emits its `exit`; SIGKILL cannot be caught or ignored.
+ */
 export function localExecutor(
   root: string,
   home: string,
@@ -69,6 +93,8 @@ export function localExecutor(
           GIT_CONFIG_GLOBAL: "/dev/null",
         },
       });
+      // Counted from the moment a process may exist until its `exit` or `error` is handled.
+      running.count++;
       let output = "",
         timedOut = false,
         settled = false,
@@ -102,11 +128,14 @@ export function localExecutor(
       const finish = (error?: Error, code?: number | null) => {
         if (settled) return;
         settled = true;
+        running.count--;
         clearTimeout(timer);
         signal.removeEventListener("abort", kill);
         kill();
         try {
-          cleanup?.();
+          // While another command runs, its own descendants may legitimately have been adopted
+          // by the worker; the sweep waits until none runs (journal 197).
+          if (running.count === 0) cleanup?.();
         } catch {
           child.stdout.destroy();
           child.stderr.destroy();
