@@ -25,6 +25,7 @@ import { event } from "./db.js";
 import { action } from "./protocol.js";
 import type { WebTools } from "./providers.js";
 import type { CalendarActions } from "./calendar-actions.js";
+import type { GithubIssues } from "./github-issues.js";
 import type { LibraryTools } from "./library.js";
 import { SubscriptionTools } from "./subscriptions.js";
 import { ParcelTools } from "./parcels.js";
@@ -63,6 +64,7 @@ export class JobTools {
     private recallEmbedder?: Embedder,
     readonly publicBrowser?: PublicBrowser,
     readonly linkTools?: LinkTools,
+    private githubIssues?: GithubIssues,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -248,6 +250,18 @@ export class JobTools {
         throw new Error("Calendar creation is not configured");
       const { operation, ...draft } = a;
       return this.calendarActions.draft(user, run, draft);
+    }
+    if (a.operation === "github_issue_draft") {
+      if (!this.githubIssues)
+        throw new Error("GitHub issue filing is not configured");
+      const { operation, ...draft } = a;
+      return this.githubIssues.draft(user, run, draft);
+    }
+    if (a.operation === "github_issue_search") {
+      if (!this.githubIssues)
+        throw new Error("GitHub issue filing is not configured");
+      const { operation, ...search } = a;
+      return this.githubIssues.search(user, search);
     }
     if (a.operation === "observation_read") {
       const found = (
@@ -584,6 +598,11 @@ export class JobTools {
     if (!this.libraryActions)
       throw new Error("Library account is not configured");
     return this.libraryActions.decide(user, id, approve, { chat });
+  }
+  async decideGithubIssue(user: string, id: string, approve: boolean) {
+    if (!this.githubIssues)
+      throw new Error("GitHub issue filing is not configured");
+    return this.githubIssues.decide(user, id, approve);
   }
   async decideCalendar(user: string, id: string, approve: boolean) {
     if (!this.calendarActions)

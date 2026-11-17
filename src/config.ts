@@ -64,6 +64,11 @@ const schema = z.object({
     ])
     .default(""),
   CALENDAR_REFRESH_TOKEN: z.string().default(""),
+  // Fine-grained GitHub token, Issues read/write on the allowlisted repos only (docs/github-issues.md).
+  // Empty: the issue tools answer "not configured". Never logged or shown.
+  GITHUB_ISSUES_TOKEN: z.string().default(""),
+  // Comma-separated owner/name repos Chief may file issues in; reviewed config, not a secret.
+  GITHUB_ISSUE_REPOS: z.string().default("akhilvuputuri/chief-agent"),
   // Encrypts the runtime-obtained Libby identity at rest; account features are off when empty.
   LIBRARY_IDENTITY_KEY: z
     .union([z.literal(""), z.string().regex(/^[0-9a-f]{64}$/i)])
@@ -214,6 +219,7 @@ export const RUNTIME_SETTINGS = [
   "IBKR_ORDER_DRAFTS",
   "IBKR_DRAFT_MAX_USD",
   "CODING_QUIET_HOURS",
+  "GITHUB_ISSUE_REPOS",
   // PORT is deployment wiring (Compose ports, health checks), not behaviour; it stays in the environment.
 ] as const satisfies readonly (keyof z.infer<typeof schema>)[];
 type RuntimeSetting = (typeof RUNTIME_SETTINGS)[number];

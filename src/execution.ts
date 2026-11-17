@@ -63,6 +63,7 @@ export const readOperations = new Set([
   "watchlist_list",
   "news_status",
   "calendar_list",
+  "github_issue_search",
   "library_check",
   "library_availability",
   "library_shelf",

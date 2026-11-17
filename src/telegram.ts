@@ -29,6 +29,8 @@ import {
 } from "./telegram-topics.js";
 import { calendarPreview, validateDraft } from "./calendar-draft.js";
 import { GoogleAuthError } from "./calendar.js";
+import { issuePreview } from "./github-issues.js";
+import type { GithubIssueDraft } from "./github-issue-schema.js";
 import {
   LibraryActions,
   libraryButtons,
@@ -312,6 +314,102 @@ export function telegram(
             ? "Google Calendar rejected the connection, so this event's status could not be checked. Fix or reconnect Calendar, then tap Check status again. No new creation request was sent."
             : "This calendar approval is unavailable, expired, or could not be checked. No new creation request will be retried automatically.",
         );
+      }
+    });
+  });
+  bot.callbackQuery(/^gh:(yes|no):([0-9a-f-]{36})$/, async (ctx) => {
+    if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+    const user = String(ctx.from.id);
+    await ctx.answerCallbackQuery();
+    await controls.run(user, async () => {
+      const id = ctx.match[2]!;
+      let result: Awaited<ReturnType<typeof assistant.tools.decideGithubIssue>>;
+      try {
+        result = await assistant.tools.decideGithubIssue(
+          user,
+          id,
+          ctx.match[1] === "yes",
+        );
+      } catch (e) {
+        opsLog("github_issue.decide_failed", "warn", errorFields(e));
+        // An approved attempt may have created the issue, so a failed check or a failed
+        // record is uncertain, never "draft it again".
+        const state = await db
+          .query(
+            "SELECT status FROM approvals WHERE id=$1 AND user_id=$2 AND operation='github_issue_create'",
+            [id, user],
+          )
+          .then((r) => r.rows[0]?.status as string | undefined)
+          .catch(() => "approved");
+        const open = state === "approved";
+        await ctx
+          .reply(
+            open
+              ? "I couldn't confirm whether GitHub created this issue (the check failed). I will not create it again. Tap Check status to look for it first."
+              : "This GitHub issue approval is unavailable, expired, or already used. Ask me to draft it again if you still want it.",
+            open
+              ? {
+                  reply_markup: {
+                    inline_keyboard: [
+                      [{ text: "Check status", callback_data: `gh:yes:${id}` }],
+                    ],
+                  },
+                }
+              : undefined,
+          )
+          .catch((x) =>
+            opsLog("github_issue.reply_failed", "warn", errorFields(x)),
+          );
+        return;
+      }
+      try {
+        const text =
+          result.status === "created"
+            ? `GitHub issue created${result.number ? ` (#${result.number})` : ""}.\n${result.url}`
+            : result.status === "denied"
+              ? "Draft discarded. No GitHub issue was created."
+              : result.status === "failed"
+                ? `No GitHub issue was created. ${
+                    {
+                      authorization:
+                        "GitHub rejected the token (it may be expired or revoked). Ask the operator to replace it, then ask me to draft the issue again.",
+                      forbidden:
+                        "GitHub refused the request (the token may lack Issues write on this repo, or GitHub is rate-limiting). Nothing was filed.",
+                      not_found:
+                        "GitHub could not find the repository with this token, or the issue was not found after the attempt. Check the token's repository access.",
+                      issues_disabled:
+                        "Issues are turned off on that repository.",
+                      rejected:
+                        "GitHub rejected the issue's content. Ask me to draft it again.",
+                      rate_limited:
+                        "GitHub is rate-limiting requests. Try again later.",
+                      not_configured:
+                        "The GitHub token is no longer configured on the server.",
+                      repo_not_allowed:
+                        "That repository is no longer on the allowlist.",
+                    }[result.reason ?? ""] ??
+                    "The request stopped before anything was sent to GitHub. Ask me to draft the issue again."
+                  }`
+                : "I couldn't confirm whether GitHub created this issue. I will not create it again. Tap Check status to look for it; a missing issue is confirmed as not created only after 5 minutes.";
+        await ctx.reply(text, {
+          reply_markup: {
+            inline_keyboard:
+              result.status === "uncertain"
+                ? [[{ text: "Check status", callback_data: `gh:yes:${id}` }]]
+                : [],
+          },
+        });
+        await ctx.editMessageReplyMarkup({
+          reply_markup: { inline_keyboard: [] },
+        });
+        if (result.status === "created" || result.status === "denied")
+          await db.query(
+            "UPDATE work_tasks SET status='queued',pause_reason=NULL,next_run=now() WHERE user_id=$1 AND id IN (SELECT w.task_id FROM work_turns w JOIN approvals a ON a.run_id=w.run_id AND a.user_id=w.user_id WHERE a.id=$2 AND a.user_id=$1) AND status='paused' AND pause_reason='awaiting_approval' AND used_ms<budget_ms AND used_models<budget_models AND used_tools<budget_tools",
+            [user, id],
+          );
+      } catch (e) {
+        // The outcome is already recorded; only the notice or the task resume failed.
+        opsLog("github_issue.reply_failed", "warn", errorFields(e));
       }
     });
   });
@@ -1268,6 +1366,14 @@ export function telegram(
             replyThread,
             reply.runId,
           );
+          await sendGithubApprovals(
+            bot,
+            db,
+            user,
+            deliveryGuard,
+            replyThread,
+            reply.runId,
+          );
           await sendLibraryApprovals(
             bot,
             db,
@@ -1512,6 +1618,18 @@ export function sendCalendarApprovals(
 ) {
   return approvalSends.run(user, () =>
     sendCalendarApprovalsOnce(bot, db, user, guard, thread, run),
+  );
+}
+export function sendGithubApprovals(
+  bot: Bot,
+  db: Database,
+  user: string,
+  guard?: () => Promise<boolean>,
+  thread?: number,
+  run?: string,
+) {
+  return approvalSends.run(user, () =>
+    sendCalendarApprovalsOnce(bot, db, user, guard, thread, run, "github"),
   );
 }
 export function sendLibraryApprovals(
@@ -1861,6 +1979,23 @@ export async function sendSlowPointer(
     });
   }
 }
+// The two draft cards that wait for one owner tap and are created only from that tap.
+const draftCards = {
+  calendar: {
+    operation: "calendar_create",
+    text: (draft: unknown) => calendarPreview(validateDraft(draft)),
+    approve: "Approve event",
+    decline: "Decline",
+    prefix: "cal",
+  },
+  github: {
+    operation: "github_issue_create",
+    text: (draft: unknown) => issuePreview(draft as GithubIssueDraft),
+    approve: "Approve issue",
+    decline: "Discard",
+    prefix: "gh",
+  },
+} as const;
 async function sendCalendarApprovalsOnce(
   bot: Bot,
   db: Database,
@@ -1868,12 +2003,14 @@ async function sendCalendarApprovalsOnce(
   guard?: () => Promise<boolean>,
   thread?: number,
   run?: string,
+  kind: keyof typeof draftCards = "calendar",
 ) {
+  const card = draftCards[kind];
   if (guard && !(await guard())) return;
   const rows = (
     await db.query(
-      "SELECT id,run_id,payload FROM approvals WHERE user_id=$1 AND operation='calendar_create' AND status='pending' AND expires_at>now() AND NOT (payload ? 'telegramMessageId') ORDER BY created_at",
-      [user],
+      "SELECT id,run_id,payload FROM approvals WHERE user_id=$1 AND operation=$2 AND status='pending' AND expires_at>now() AND NOT (payload ? 'telegramMessageId') ORDER BY created_at",
+      [user, card.operation],
     )
   ).rows;
   const family = run
@@ -1898,14 +2035,20 @@ async function sendCalendarApprovalsOnce(
       db,
       user,
       row.id,
-      calendarPreview(validateDraft(row.payload.draft)),
+      card.text(row.payload.draft),
       {
         ...inThread(run && family.has(row.run_id) ? thread : undefined),
         reply_markup: {
           inline_keyboard: [
             [
-              { text: "Approve event", callback_data: `cal:yes:${row.id}` },
-              { text: "Decline", callback_data: `cal:no:${row.id}` },
+              {
+                text: card.approve,
+                callback_data: `${card.prefix}:yes:${row.id}`,
+              },
+              {
+                text: card.decline,
+                callback_data: `${card.prefix}:no:${row.id}`,
+              },
             ],
           ],
         },

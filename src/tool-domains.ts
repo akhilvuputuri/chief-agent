@@ -31,6 +31,7 @@ export const TOOL_DOMAINS = [
   "links",
   "gmail",
   "calendar",
+  "github",
   "daily",
   "jobs",
   "work",
@@ -58,6 +59,8 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
     "saving a shared link: classify it as study material or offline reading, the study list, moving between it and Reader",
   gmail: "read-only Gmail search/thread/read across connected accounts",
   calendar: "Calendar lookups and approval-gated event drafts",
+  github:
+    "owner-approved GitHub issues in the allowlisted repos: duplicate search and drafts",
   daily: "saved items, reminders, briefings and the daily Sheet",
   jobs: "saved roles, analysis, alignment scopes, preparation and its Sheet",
   work: "durable background tasks: start, revise, steps, evidence, yield, cancel",
@@ -93,6 +96,8 @@ export const DOMAIN_GUIDANCE: Partial<Record<ToolDomain, string>> = {
     'Link-saving skill. When the owner shares a link and asks to save it ("save this", "bookmark", "keep this"), call link_save; never save an owner-shared link with mcp_write save_link, and never default to Reader. link_save reads the page and has the classifier judge study material (tutorials, courses, papers, repos, technical threads in the owner\'s learning interests) versus offline reading (news, essays, general-interest long reads). Set destination only when the owner\'s own words say where: "to study", "for learning" or "for AI learning" is study; "for offline reading", "read later" or "to Reader" is reader; "both" is both. Pass interests: the owner\'s learning interests from their explicit memories, whatever key holds them (the host also reads a learning_interests memory, or one whose key names learning, interests or study). Do not invent a title or topic; pass title only when the owner wrote it. Relay the result\'s where line in one sentence. needs_choice means the owner got Study list / Reader / Both buttons: say so briefly and do not ask an open question. A pending, refused or uncertain Reader result is not saved; say what the result says. Corrections: "move it to Reader" is link_move to reader (it leaves the study list only after Reader confirms), "move it to my study list" is link_move to study with the link, "take it off my study list" is study_remove. Reader is only for offline reading. For "what\'s on my study list" call study_list (filter by topic, tag or status when asked) and reply as a short phone list grouped by status: title, site, topic. Use study_update for status (to study, in progress, done), notes and tags.',
   canvas:
     "When canvas tools are available, use saved canvases for rich results worth revisiting (tables of roles, evidence-backed analyses, preparation plans). Choose useful components based on the request; short conversation stays in Telegram. canvas_list finds earlier documents; canvas_read retrieves exact revisions in chunks. Refining the same topic updates that canvas; a new topic creates a separate canvas. Updates must reconcile the latest base revision and preserve block IDs. A saved canvas is a snapshot, not an independently verified finding. Ground content in actual records/sources; do not invent URLs or data. Use finish_turn.canvases with saved IDs and optional exact revisions to attach open buttons. The Mini App never authorizes sensitive actions. Do not promise a canvas or link before a successful save.",
+  github:
+    'GitHub issue skill. When the owner asks to file or log something as a GitHub issue (a bug report or feature request, mainly about Chief in the chief-agent repo), first search for duplicates with github_issue_search when it is cheap, and tell the owner if an open issue already covers it. Then write the title and markdown body yourself, in your own words: what happened, steps, expected versus actual, and the Chief behaviour or version if known. Use judgment to keep private data out of the body, since the issue may be public: no meeting or booking links, email addresses, phone numbers, account, booking, order or tracking numbers, tokens, keys or passwords, home or office addresses, or other people\'s details. Describe the shape ("an email address", <email>) instead of the value, and quote tool output or logs only after removing such details. Call github_issue_draft; it only saves a draft and the owner gets a Telegram card with Approve and Discard buttons. Say that the draft is waiting for their tap, nothing is filed yet, and that only the button approves it, not a text reply. Never say an issue was filed, or give an issue number, until githubIssueApprovals shows execution created with its url; relay that url. If the status is uncertain, say so and point to the Check status button; never draft the same issue again to retry. A not_configured result means the operator has not set up the GitHub token: say so plainly. Only allowlisted repositories work; you cannot comment on, edit or close issues, or touch pull requests.',
   jobs: "For job fit, interview research and preparation, use the job-alignment skill and job_alignment_start/resume/read. The scope can be selected roles or all saved roles, never force a one-role workflow. Get exact role IDs from the jobs agent (its refs) or allSaved, and select relevant memory keys. For substantial work establish durable work tracking. Automatically resume pending roles within the existing allocation, keeping scopeId in the task checkpoint; do not restart the scope on each pass. Read full reports before synthesis and requested prep/Sheet saves. Combine overlapping preparation while retaining role/evidence links. Scope history is context, not authorization to resume old work. Reports distinguish unknown experience and interview uncertainty; do not upgrade those to gaps or confirmed stages.",
   work: "Reuse successful research for the current task; do not repeat identical searches. Read a promising original page before searching for more snippets. If a quote is rejected, inspect the source and correct the quote rather than repeating the same claim. Stop discovery when enough evidence supports an answer or a clear limitation. Reserve remaining work for synthesis and recording outcomes. Work in small batches and persist useful findings, evidence and completed steps before collecting many more sources. Older tool observations can leave the bounded context; do not defer all assessment and saving until after exhaustive browsing. For each researched target use an evidence step; writes/exports use action steps with expectedOperation. Use web_read sourceId for work_evidence, observationId for observation_read, and receiptId for execution proofs; these IDs are not interchangeable. Successful tools return receiptId; use those and matched evidence IDs as proofs. Analysis is synthesis, not proof of a write.",
 };
@@ -104,6 +109,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["study_", "links"],
   ["gmail_", "gmail"],
   ["calendar_", "calendar"],
+  ["github_", "github"],
   ["item_", "daily"],
   ["schedule_", "daily"],
   ["daily_", "daily"],
@@ -161,6 +167,10 @@ const CUES: [ToolDomain, RegExp][] = [
   [
     "calendar",
     /\b(calendar|meetings?|events?|appointments?|agenda|today|tonight|tomorrow|yesterday|this week|next week|(mon|tues|wednes|thurs|fri|satur|sun)days?|free time|busy|availability|dentist|doctor|(lunch|dinner|breakfast|coffee|call) with|\d{1,2}(:\d{2})? ?(am|pm)|on the \d{1,2}(st|nd|rd|th))\b/i,
+  ],
+  [
+    "github",
+    /\b(github|git hub)\b|\b(file|log|raise|open|create|report)\b.{0,30}\b(an? )?(issue|bug report|feature request)s?\b/i,
   ],
   [
     "daily",
@@ -225,6 +235,7 @@ export interface DomainSignals {
   /** Operations used recently by this owner or by the bound task. */
   recentOperations?: Iterable<string>;
   pendingCalendarApproval?: boolean;
+  pendingGithubApproval?: boolean;
   /** A coding job of this owner waits on them (plan, question, pause or merge card). */
   pendingCoding?: boolean;
   pendingLibraryApproval?: boolean;
@@ -237,6 +248,7 @@ export function selectDomains(signals: DomainSignals): Set<ToolDomain> {
     if (cue.test(signals.message)) selected.add(domain);
   if (signals.taskBound) selected.add("work");
   if (signals.pendingCalendarApproval) selected.add("calendar");
+  if (signals.pendingGithubApproval) selected.add("github");
   if (signals.pendingCoding) selected.add("coding");
   if (signals.pendingLibraryApproval) selected.add("library");
   for (const op of signals.recentOperations ?? []) {

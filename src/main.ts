@@ -66,6 +66,7 @@ import type { Delivery } from "./answer.js";
 import { WorkWorker } from "./work-worker.js";
 import { DailyTools, DailyWorker, ScheduleParser } from "./daily.js";
 import { CalendarActions } from "./calendar-actions.js";
+import { GithubIssues } from "./github-issues.js";
 import { LibraryClient } from "./library-client.js";
 import { MemoryPacing, PostgresPacing } from "./library-pacing.js";
 import { LibraryTools } from "./library.js";
@@ -113,6 +114,7 @@ import {
 import {
   telegram,
   sendCalendarApprovals,
+  sendGithubApprovals,
   sendLibraryApprovals,
   sendLinkChoices,
   sendPortfolioApprovals,
@@ -455,6 +457,15 @@ const newsBulletin = new NewsBulletin(
   // `mcp` is assigned below; Reader learning is off when connectors are.
   () => (mcp?.configured ? mcpReaderLink(mcp) : undefined),
 );
+// Owner-approved GitHub issues (docs/github-issues.md). Always constructed so a missing token
+// answers "not configured" instead of the tool vanishing.
+const githubIssues = new GithubIssues(db, {
+  owner: c.TELEGRAM_ALLOWED_USER_IDS.split(",")[0]!,
+  token: c.GITHUB_ISSUES_TOKEN,
+  repos: c.GITHUB_ISSUE_REPOS.split(",")
+    .map((r) => r.trim())
+    .filter(Boolean),
+});
 const daily = new DailyTools(db, parser, calendar, mirror);
 if (
   c.RESPONSIBILITIES === "on" &&
@@ -879,6 +890,7 @@ const assistant = new Assistant(
     recallEmbedder,
     publicBrowser,
     linkTools,
+    githubIssues,
   ),
   {
     links: !!links,
@@ -1117,6 +1129,14 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
         });
       }
       await sendCalendarApprovals(
+        bot,
+        db,
+        user,
+        undefined,
+        extra.message_thread_id,
+        delivery.runId,
+      );
+      await sendGithubApprovals(
         bot,
         db,
         user,

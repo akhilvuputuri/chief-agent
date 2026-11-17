@@ -16,6 +16,7 @@ DOMAINS = (
     "links",
     "gmail",
     "calendar",
+    "github",
     "daily",
     "jobs",
     "work",
