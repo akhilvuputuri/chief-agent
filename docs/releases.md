@@ -1,3 +1,11 @@
+## Worker image with Pi 1.5.2 (17 November 2026)
+
+- **Configuration.** New coding jobs pin worker image `sha256:537f6c79…`, built from `3e1e314` (run 43917426099). It carries [journal 203](journey/203-pi-1-5-2.md): Pi 1.5.2, with undici 8.12.3 and minimatch 11.0.3, and a `grep` whose `glob` is relative to its `path`. No code, migration or Compose change.
+- **Previous image kept.** `previousImages` lists `sha256:90cb1dcc…`, the image pinned until now. Two coding jobs are open on it (read on the host at 11:08 UTC on 17 November): one paused, one with an open PR in manual review. They keep that image, and Pi 1.1.0, until they close. `sha256:bfecdb52…` is dropped: no open job is on it. A first version of this pin emptied the list, on a read from the evening before that showed no open job; both jobs started after that read. Independent review also found that an emptied list can stop the gateway from starting: a job claimed on a dropped image with no box yet is treated as stranded by the startup check (`codingSandbox`), before the move of [journal 202](journey/202-retired-image-moves-itself.md) can run. Remove `sha256:90cb1dcc…` at a later pin, once no open job is on it.
+- **Gateway.** Unchanged by this pin. It has run `3e1e314` since 16:41 UTC on 16 November; its request allowlist is the same for both Pi versions.
+- **Deployment.** Not yet recorded as live; a dated note follows on release.
+- **Not measured.** No job has run on this image, and no request built by Pi 1.5.2 has reached Anthropic. Still open: the six undici advisories fixed in 8.12.4, which no published Pi pins.
+
 ## Coding runtime on Pi 1.5.2 (17 November 2026)
 
 - **Code.** The Pi coding runtime pins `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai` 1.5.2 (was 1.1.0), in both lockfiles. With them come undici 8.12.3 (was 8.10.2) and minimatch 11.0.3 (was 10.2.6) where Pi resolves them. The worker's `grep` now roots its `glob` at its `path`: it runs ripgrep inside the directory it searches, as Pi's own `grep` does since 1.5.1. Comments in the host's request allowlist were re-read against 1.5.2; the allowlist itself is unchanged. No migration, Compose or configuration change.
@@ -6,6 +14,8 @@
 - **Still open.** undici 8.12.3 is behind 8.12.4, which fixes six advisories OSV records by Git range only; no published Pi pins it. zod 3.25.76 is unchanged.
 - **Not measured.** No coding job has run on 1.5.2.
 - **Deployment.** Worker source and lockfiles. It reaches coding jobs when a worker image built from it is pinned; not yet built or pinned.
+
+> **Update, 17 November 2026: live on the gateway; worker image built.** [PR 514](https://github.com/akhilvuputuri/chief-agent/pull/514) merged as `3e1e314` at 16:36 UTC on 16 November, at the head the independent reviewer (Claude Opus 5.5) approved, `b4cc728`, with CI green on that head and Devin's review reporting no issues. Main's checks and release run 43910071482 succeeded at 16:41 UTC; `kite run release:status` reports the commit deployed with startup health passing, and the host's release file read `3e1e314` with the gateway container healthy. No coding job was open at the merge. The gateway does not load Pi, so this changes nothing for it. The worker image built from `3e1e314` is pinned by the entry above.
 
 ## A job on a retired worker image moves itself to the current one (16 November 2026)
 
