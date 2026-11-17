@@ -52,8 +52,9 @@ function toolGroup(name: string, result: unknown, id = name): Message[] {
 // The incident these tests come from had 54,264 characters of fixed context. The coordinator's
 // own schemas and instructions have since grown past that (55,014 with memory_forget, 13
 // November 2026), so the fixture pads to a round size above them; the tests need a fixed
-// context of this order, not that exact figure.
-const FIXED_SIZE = 56000;
+// context of this order, not that exact figure. The two GitHub issue tools added about 3,000
+// more (17 November 2026), so it is now 59000.
+const FIXED_SIZE = 59000;
 
 /** Real coordinator schemas plus owner memory/state, padded to the incident's order of size. */
 function request(
@@ -1039,7 +1040,9 @@ test("older history stays the same across a turn's calls as its results grow", (
       answer(`Earlier answer ${i} ` + "a".repeat(600)),
     );
   older.push(user("Thanks"), answer("You are welcome."));
-  const runtime = runtimeContext({ web: true }, null);
+  // Core tools only: the test needs headroom above the history floor, which every new tool
+  // schema in the full list (the GitHub issue tools, 17 November 2026) eats into.
+  const runtime = runtimeContext({ web: true }, null, undefined, new Set());
   const call = (results: number, historyAllowance?: number) => {
     const turn: Message[] = [user("Do the task")];
     for (let i = 0; i < results; i++)

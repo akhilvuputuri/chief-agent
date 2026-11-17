@@ -1336,5 +1336,47 @@
     "message": "is Old Airport Road food centre closed this week?",
     "gold": ["singapore"],
     "split": "held-out"
+  },
+  {
+    "id": "github-1",
+    "message": "can you file that as a GitHub issue?",
+    "gold": ["github"],
+    "split": "tuning"
+  },
+  {
+    "id": "github-2",
+    "message": "log this bug on GitHub: the reminder card showed the wrong time",
+    "gold": ["github"],
+    "split": "tuning"
+  },
+  {
+    "id": "github-3",
+    "message": "is there already an open issue about the calendar card duplicating?",
+    "gold": ["github"],
+    "split": "tuning"
+  },
+  {
+    "id": "github-4",
+    "message": "raise a feature request for Chief to support recurring events",
+    "gold": ["github"],
+    "split": "tuning"
+  },
+  {
+    "id": "github-5",
+    "message": "please open an issue in chief-agent for the missing Reader button",
+    "gold": ["github"],
+    "split": "held-out"
+  },
+  {
+    "id": "github-6",
+    "message": "write up those bugs and file them on GitHub",
+    "gold": ["github"],
+    "split": "held-out"
+  },
+  {
+    "id": "github-7",
+    "message": "fix that bug in the repo and open a PR",
+    "gold": ["coding"],
+    "split": "held-out"
   }
 ]

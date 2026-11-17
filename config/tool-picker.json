@@ -35,6 +35,10 @@
       "description": "Read the user's Google Calendar or draft a new event.",
       "examples": "am I free Thursday, what's on at 3pm, when is my meeting, add dentist on the 12th"
     },
+    "github": {
+      "description": "File a bug report or feature request as a GitHub issue (mainly about Chief itself), after searching existing open issues; the owner approves each one with a button.",
+      "examples": "file this as a GitHub issue, log this bug on GitHub, raise an issue for that, is there already an issue about this, open a feature request on GitHub"
+    },
     "daily": {
       "description": "The user's to-do items, notes, timed reminders and daily reminder/briefing schedules.",
       "examples": "remind me at 7pm, add milk to my list, what's open on my list, morning briefing"

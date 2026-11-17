@@ -32,6 +32,7 @@
     "GROQ_STT_MODEL": "whisper-large-v3-turbo",
     "IBKR_ORDER_DRAFTS": "on",
     "IBKR_DRAFT_MAX_USD": 100,
-    "CODING_QUIET_HOURS": "23:00-08:00"
+    "CODING_QUIET_HOURS": "23:00-08:00",
+    "GITHUB_ISSUE_REPOS": "akhilvuputuri/chief-agent"
   }
 }

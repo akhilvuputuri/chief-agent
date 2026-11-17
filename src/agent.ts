@@ -694,7 +694,7 @@ export class Assistant {
       const pendingApprovals =
         (
           await this.db.query(
-            "SELECT bool_or(operation='calendar_create') AS calendar,bool_or(operation LIKE 'library\\_%') AS library FROM approvals WHERE user_id=$1 AND status='pending' AND expires_at>now()",
+            "SELECT bool_or(operation='calendar_create') AS calendar,bool_or(operation='github_issue_create') AS github,bool_or(operation LIKE 'library\\_%') AS library FROM approvals WHERE user_id=$1 AND status='pending' AND expires_at>now()",
             [user],
           )
         ).rows[0] ?? {};
@@ -720,6 +720,7 @@ export class Assistant {
           (await codingWaitsOnOwner(this.db, user)),
         recentOperations,
         pendingCalendarApproval: pendingApprovals.calendar === true,
+        pendingGithubApproval: pendingApprovals.github === true,
         pendingLibraryApproval: pendingApprovals.library === true,
       };
       const previousTurns = recentTurns(history);
@@ -964,6 +965,12 @@ export class Assistant {
         calendarApprovals: (
           await this.db.query(
             "SELECT id,status,expires_at,payload->'draft' AS draft,payload->>'execution' AS execution,payload->'result' AS result FROM approvals WHERE user_id=$1 AND operation='calendar_create' AND status='pending' AND expires_at>now() ORDER BY created_at DESC LIMIT 3",
+            [user],
+          )
+        ).rows,
+        githubIssueApprovals: (
+          await this.db.query(
+            "SELECT id,status,expires_at,payload->'draft'->>'repo' AS repo,left(payload->'draft'->>'title',120) AS title,payload->>'execution' AS execution,payload->'result' AS result FROM approvals WHERE user_id=$1 AND operation='github_issue_create' AND created_at>now()-interval '1 day' ORDER BY created_at DESC LIMIT 5",
             [user],
           )
         ).rows,

@@ -104,6 +104,8 @@ services:
         "/migrations/035_mail_index_vectors.sql",
         "-f",
         "/migrations/036_study_resources.sql",
+        "-f",
+        "/migrations/037_github_issues.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
@@ -153,6 +155,7 @@ services:
       GROQ_STT_MODEL: ${GROQ_STT_MODEL:-whisper-large-v3-turbo}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       CALENDAR_REFRESH_TOKEN: ${CALENDAR_REFRESH_TOKEN:-}
+      GITHUB_ISSUES_TOKEN: ${GITHUB_ISSUES_TOKEN:-}
       DAILY_SPREADSHEET_ID: ${DAILY_SPREADSHEET_ID:-}
       SHEETS_OWNER_USER_ID: ${SHEETS_OWNER_USER_ID:-}
       SHEETS_REFRESH_TOKEN: ${SHEETS_REFRESH_TOKEN:-}
