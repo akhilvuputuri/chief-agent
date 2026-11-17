@@ -34,7 +34,7 @@ An environment value still wins over the file.
 - **Passed by Compose (20 names):** production's Compose file passes these with Compose defaults, so the file cannot change them in production until Compose stops passing them. That step is part of the operator rollout in #143.
 - **Not passed (`MEDIA_MODEL`, `TOOL_PICKER`, `MAIL_INDEX`, `SHADOW_DECISIONS`, `EFFORT_PICKER`, `TELEGRAM_TOPICS`, `CODING_QUIET_HOURS`, `MODEL_PROVIDER`):** the file is already authoritative in production. Editing them in a PR changes production on the next release, with no operator step, and a server `.env` line for them has no effect. `MODEL_PROVIDER` (`anthropic`, the default, or `openrouter`) chooses whether policy-mapped Anthropic models go direct; it does nothing until the gateway has `ANTHROPIC_API_KEY` ([model providers](model-providers.md)). `CODING_QUIET_HOURS` (`HH:MM-HH:MM`, Asia/Singapore, empty for off) holds coding progress that would start a new message ([journal 115](journey/115-fewer-coding-notices.md)).
 
-> **Update, 17 November 2026 ([GitHub issues](github-issues.md)):** `GITHUB_ISSUE_REPOS` (the repos Chief may file issues in, default `akhilvuputuri/chief-agent`) is also not passed by Compose, so the file is authoritative. The token `GITHUB_ISSUES_TOKEN` is a secret: it stays in the host `.env` and is passed by Compose.
+> **Update, 17 November 2026 ([journal 204](journey/204-github-issues.md), [GitHub issues](github-issues.md)):** `GITHUB_ISSUE_REPOS` (the repos Chief may file issues in, default `akhilvuputuri/chief-agent`) is also not passed by Compose, so the file is authoritative. The token `GITHUB_ISSUES_TOKEN` is a secret: it stays in the host `.env` and is passed by Compose.
 
 To make the switch safe:
 

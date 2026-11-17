@@ -788,3 +788,68 @@ test("the card shows a long body fully or says how much is hidden", () => {
     false,
   );
 });
+
+test("an identical draft is refused while an earlier approval is uncertain, and allowed once it settled as not created", async () => {
+  const { pg, db, gh, issues } = await fixture(TOKEN, {
+    post: () => new Response("{}", { status: 502 }),
+  });
+  try {
+    const a: any = await issues.draft("123", randomUUID(), draft);
+    assert.equal(
+      (await issues.decide("123", a.approvalId, true)).status,
+      "uncertain",
+    );
+    await assert.rejects(
+      () => issues.draft("123", randomUUID(), draft),
+      (e) =>
+        e instanceof ToolValidationError &&
+        /uncertain/.test((e as Error).message),
+    );
+    // The first attempt did land: the retry is told where it is.
+    gh.issues.push({
+      number: 90,
+      body: `x\n<!-- chief-request:${a.approvalId} -->`,
+    });
+    await assert.rejects(
+      () => issues.draft("123", randomUUID(), draft),
+      (e) => /issues\/90/.test((e as Error).message),
+    );
+    assert.equal(posts(gh).length, 1);
+    // A different issue is not blocked; nor is the same one once it is known not to exist.
+    const b: any = await issues.draft("123", randomUUID(), {
+      ...draft,
+      title: "Other",
+    });
+    assert.equal(b.status, "awaiting_approval");
+    const c: any = await issues.draft("123", randomUUID(), {
+      ...draft,
+      body: "different body",
+    });
+    assert.equal(c.status, "awaiting_approval");
+  } finally {
+    await pg.close();
+  }
+});
+
+test("an incomplete or unreadable search is not reported as a completed duplicate check", async () => {
+  const { pg, db } = await fixture();
+  try {
+    for (const body of [
+      { items: [], incomplete_results: true },
+      { nothing: true },
+    ]) {
+      const s = new GithubIssues(
+        db,
+        { owner: "123", token: TOKEN, repos: [REPO] },
+        (async () => Response.json(body)) as typeof fetch,
+      );
+      assert.equal(
+        ((await s.search("123", { repo: REPO, query: "x", limit: 5 })) as any)
+          .status,
+        "unavailable",
+      );
+    }
+  } finally {
+    await pg.close();
+  }
+});

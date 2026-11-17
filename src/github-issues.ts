@@ -138,6 +138,22 @@ export class GithubIssues {
         JSON.stringify(p.draft.labels ?? []) ===
           JSON.stringify(draft.labels ?? []),
     );
+    // An earlier identical attempt that may have created the issue blocks a new card: its
+    // outcome is read first (read-only), because a second approval would post again.
+    for (const earlier of (
+      await this.db.query(
+        "SELECT * FROM approvals WHERE user_id=$1 AND operation='github_issue_create' AND status='approved' AND payload->>'execution' IN ('creating','uncertain') AND payload->'draft'->>'repo'=$2 AND payload->'draft'->>'title'=$3 AND payload->'draft'->>'body'=$4",
+        [user, draft.repo, draft.title, draft.body],
+      )
+    ).rows) {
+      const settled = await this.settle(earlier).catch(() => null);
+      if (settled?.status === "failed") continue;
+      throw new ToolValidationError(
+        settled?.status === "created"
+          ? `An identical issue was already created: ${settled.url}. No new draft was saved.`
+          : "An identical issue was approved earlier and its outcome is uncertain. No new draft was saved; ask the owner to tap Check status on that card first.",
+      );
+    }
     const respond = (id: string) => ({
       approvalId: id,
       status: "awaiting_approval",
@@ -184,7 +200,13 @@ export class GithubIssues {
         httpStatus: response.status,
         note: "GitHub refused or failed the search; no duplicate check was done.",
       };
-    const found = ((await response.json().catch(() => ({}))) as any).items;
+    const payload = (await response.json().catch(() => null)) as any;
+    if (!Array.isArray(payload?.items) || payload.incomplete_results === true)
+      return {
+        status: "unavailable",
+        note: "GitHub returned an incomplete or unreadable search; treat the duplicate check as not done.",
+      };
+    const found = payload.items;
     const suffix = `/repos/${repo}`.toLowerCase();
     return {
       status: "ok",
