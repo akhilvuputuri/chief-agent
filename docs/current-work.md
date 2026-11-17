@@ -6,7 +6,7 @@ Still open: six undici advisories fixed in 8.12.4 that OSV records by Git range 
 
 Next: release, build the worker image and pin it; then read the first job on it.
 
-> **Update, 17 November 2026:** released on the gateway in `3e1e314` (PR 514), healthy; the gateway does not load Pi. The worker image built from it, `sha256:537f6c79…`, is pinned for new coding jobs with no previous image kept; that pin is not yet recorded as live. No coding job has run on it.
+> **Update, 17 November 2026:** released on the gateway in `3e1e314` (PR 514), healthy; the gateway does not load Pi. The worker image built from it, `sha256:537f6c79…`, is pinned for new coding jobs; the pin is not yet recorded as live. The image pinned until now stays in `previousImages` for the two jobs open on it. No coding job has run on the new image.
 
 # A full test run on several CPUs — tested, not yet released, 16 November 2026
 

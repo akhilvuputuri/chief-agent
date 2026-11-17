@@ -19,7 +19,9 @@
       "hardMaxHours": 6,
       "absoluteDays": 1,
       "concurrency": 1,
-      "previousImages": []
+      "previousImages": [
+        "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:90cb1dcca35b1034b4caf56c608031183de076ad9a5ed46d1c49333404667fad"
+      ]
     }
   },
   "ec2": {

@@ -11,7 +11,7 @@
 
 > **Update, 17 November 2026 ([journal 203](docs/journey/203-pi-1-5-2.md)):** the owner chose the Pi upgrade. The coding runtime pins `pi-coding-agent` and `pi-ai` 1.5.2, with undici 8.12.3 and minimatch 11.0.3; OSV flags nothing in the Pi runtime's lockfile. The runtime's own undici dependency mentioned above was removed on 13 November (PR 479), so the copy Pi pins is the only undici 8 a worker loads. Tested, release and worker image pending. Still open: six undici advisories fixed in 8.12.4 that OSV records by Git range only (no published Pi pins 8.12.4), and zod 3.25.76.
 
-> **Update, 17 November 2026 ([journal 203](docs/journey/203-pi-1-5-2.md#release-closure--2026-11-17)):** released in `3e1e314` (PR 514); the gateway is healthy on it. The worker image built from it, `sha256:537f6c79…`, is pinned for new coding jobs with `previousImages` empty; the pin is not yet recorded as live, and no coding job has run on Pi 1.5.2.
+> **Update, 17 November 2026 ([journal 203](docs/journey/203-pi-1-5-2.md#release-closure--2026-11-17)):** released in `3e1e314` (PR 514); the gateway is healthy on it. The worker image built from it, `sha256:537f6c79…`, is pinned for new coding jobs; the pin is not yet recorded as live, and no coding job has run on Pi 1.5.2. `sha256:90cb1dcc…` (Pi 1.1.0) stays in `previousImages` for the two jobs open on it; remove it at a later pin once they have closed.
 
 # Direct Anthropic route — adapter released (`a7c1993`), enabling change prepared, 11 November 2026
 
