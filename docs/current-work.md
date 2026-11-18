@@ -8,6 +8,8 @@ Next: release, build the worker image and pin it; then read the first job on it.
 
 > **Update, 17 November 2026:** released on the gateway in `3e1e314` (PR 514), healthy; the gateway does not load Pi. The worker image built from it, `sha256:537f6c79…`, is pinned for new coding jobs; the pin is not yet recorded as live. The image pinned until now stays in `previousImages` for the two jobs open on it. No coding job has run on the new image.
 
+> **Update, 17 November 2026:** the pin is live in `07f8118` (PR 516); the gateway is healthy on it and the server's configuration names `sha256:537f6c79…`. Next: read the first job on it for refused requests and cache-warm calls; remove `sha256:90cb1dcc…` from `previousImages` once the two jobs open on it have closed; upgrade Pi again when a release pins undici 8.12.4 or later.
+
 # A full test run on several CPUs — tested, not yet released, 16 November 2026
 
 A serial run of the TypeScript tests now uses several shared processes at once, each taking groups of files from a queue: 197 s against 390 s on a CI machine held to three CPUs, the number a coding box has. One test file had been keeping its process alive for three minutes after its tests; that is fixed too ([journal 201](journey/201-test-workers.md)).

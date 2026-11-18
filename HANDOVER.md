@@ -13,6 +13,8 @@
 
 > **Update, 17 November 2026 ([journal 203](docs/journey/203-pi-1-5-2.md#release-closure--2026-11-17)):** released in `3e1e314` (PR 514); the gateway is healthy on it. The worker image built from it, `sha256:537f6c79…`, is pinned for new coding jobs; the pin is not yet recorded as live, and no coding job has run on Pi 1.5.2. `sha256:90cb1dcc…` (Pi 1.1.0) stays in `previousImages` for the two jobs open on it; remove it at a later pin once they have closed.
 
+> **Update, 17 November 2026:** the pin is live in `07f8118` (PR 516); the gateway is healthy on it. No coding job has run on Pi 1.5.2 yet.
+
 # Direct Anthropic route — adapter released (`a7c1993`), enabling change prepared, 11 November 2026
 
 - **Update, 11 November 2026, live:** PR 442 merged as `ef825c4` and rolled out; Opus 5.5 calls go direct in production, verified with a live call ([journal 161](docs/journey/161-enabling-direct-anthropic.md)).
