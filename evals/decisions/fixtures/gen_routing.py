@@ -2,7 +2,8 @@
 
 Gold is one agent type from Chief's catalogue, or "chief" when Chief must handle it itself
 (small talk, memory, several agents at once, canvases, background work, skills, job fit and
-preparation). Splits are kept from the picker eval.
+preparation, and since 22 November 2026 email, which Chief searches and reads itself).
+Splits are kept from the picker eval.
 
 Run: python3 evals/decisions/fixtures/gen_routing.py
 """
@@ -16,7 +17,6 @@ HERE = Path(__file__).resolve().parent
 SCENARIOS = HERE.parents[1] / "picker" / "scenarios.json"
 
 AGENT = {
-    "gmail": "email",
     "calendar": "calendar",
     "daily": "daily",
     "routines": "daily",
@@ -29,8 +29,9 @@ AGENT = {
     "news": "news",
     "singapore": "merlion",
 }
-# Domains the coordinator keeps; a message needing one is Chief's to handle.
-CHIEF = {"canvas", "work", "skills"}
+# Domains the coordinator keeps; a message needing one is Chief's to handle. Gmail joined on
+# 22 November 2026, when the email agent was retired (journal 204).
+CHIEF = {"canvas", "work", "skills", "gmail"}
 # Unlabelled public-web questions now go to the web agent.
 WEB = {"none-6", "res-4", "t-none-8", "t-res-3"}
 # Job fit, preparation and the prep Sheet stay on Chief (job alignment is Chief's workflow).

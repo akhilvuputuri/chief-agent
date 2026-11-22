@@ -98,6 +98,24 @@ export async function resolveReferences(
 }
 
 /**
+ * Agent types that were retired, which old tasks and histories can still name. The coordinator
+ * does that work itself now, so the refusal says how (journal 204).
+ */
+const RETIRED_EMAIL =
+  "Agent validation: the email agent is retired; search and read Gmail yourself with gmail_search, gmail_read and gmail_thread (gmail_accounts lists the mailboxes, gmail_recall searches by meaning when offered). The core/email-search skill describes them.";
+const RETIRED: Record<string, string> = {
+  email: RETIRED_EMAIL,
+  "core/email": RETIRED_EMAIL,
+};
+function resolveType(registry: PluginRegistry, type: string) {
+  try {
+    return registry.resolve(type);
+  } catch (error) {
+    if (RETIRED[type]) throw new Error(RETIRED[type]);
+    throw error;
+  }
+}
+/**
  * agent_run: the coordinator names a type, a brief, and optionally a model tier and effort.
  * The type's definition decides tools, contract and limits; the host resolves the model.
  */
@@ -113,7 +131,7 @@ export async function runAgentType(
   if (!req.execution || !req.signal)
     throw new Error("Agent validation: delegation unavailable");
   const a = agentRun.parse(raw);
-  const agentId = registry.resolve(a.type);
+  const agentId = resolveType(registry, a.type);
   const definition = await pinPlugin(req.execution, agentId, registry);
   if (definition.invocable === false)
     throw new Error(

@@ -1,7 +1,7 @@
 # 204 — Why did Chief miss most of a set of receipt emails, and how will a redesign be measured?
 
 Work date: 2026-11-22. Written: 2026-11-22.
-Status: in progress. Phase 0, the eval, is written and tested with a fake Gmail and a scripted model; it has not been run against the real mailbox, so there is no baseline yet. Phases 1 to 4 are planned. (Updated 22 November 2026: Phase 1, the tools, is reviewed and tested, not released; see the last update below.) Design: [email search](../email-search.md).
+Status: in progress. Phase 0, the eval, is written and tested with a fake Gmail and a scripted model; it has not been run against the real mailbox, so there is no baseline yet. Phases 1 to 4 are planned. (Updated 22 November 2026: Phase 1, the tools, is reviewed and tested, not released; see the last update below.) (Updated 22 November 2026: Phases 0 and 1 are live in `4ee82e6`, with the eval run before and after Phase 1; see the release closure below.) Design: [email search](../email-search.md).
 
 ## User-visible problem and preceding iteration
 
@@ -75,3 +75,64 @@ Tested only. No run against the real mailbox and no paid model call has been mad
 > **Update, 22 November 2026 — automated review of PR 520:** three capability losses in the read path, all from reusing the mail index's HTML conversion for reading (the coordinator's instruction, and wrong for reads: the index wants only new text, a reader wants everything). Reads cut HTML at the first quote container, so a forwarded message's content, an inline or bottom-posted reply and the signature were invisible without notice; `cleanText` decodes entities before stripping tags, so an address written `&lt;name@example.com&gt;` was removed as markup, and it collapses all whitespace, so receipt line items ran together; and search never set Gmail's `includeSpamTrash`, which defaults to false, although the prompt and the empty-page hint said `in:anywhere` includes spam and trash. Reads now use their own linear-time conversion (`readerText`: hidden content dropped, tags stripped before entities are decoded, blocks as lines and cells as tabs, the whole message including quoted and forwarded content), while `indexBody` keeps its output byte for byte (tested against the previous commit's code). `includeSpamTrash` is set when the query asks for spam or trash outside quoted text (tested; to be checked against real Gmail before merge). Known low item from the last tools review: the header fit can shorten escape-dense headers below the documented share of about 40,000 serialised characters, because it converts by an average escaping ratio; the warning-first guarantee is unaffected, and the design doc now says "about".
 
 > **Update, 22 November 2026 — batched metadata under Gmail's burst limit:** measured, production mailbox, read-only, counts only (run by the coordinator on `1c01eb0`): after a 75-second pause, the first 50-row page had 4 of 50 rows rate limited and a 5-row page ten seconds later was clean; under heavier use, several 100-row pages within a minute, one page had 77 of 100 rows rate limited and the next list call was refused; earlier single runs of 50- and 100-row pages had none. Gmail rate-limits parts of a batch as a burst limit even in a fresh quota window, as Google's batch guide warns, and returning those rows without retrying left the model with bare IDs in ordinary use. The tools now send a page's metadata in sequential batches of 25, retry only the refused parts (or a refused batch) with exponential backoff and jitter within a 15-second window per call, retry plain calls and batch-read messages the same way, never retry a daily-quota refusal, and keep row metadata in a ten-minute per-mailbox cache so narrowing searches fetch only new rows. The `gmail_search` description says rows count against Gmail's per-user rate limit and how to fetch a rate-limited row again (tested; not yet re-measured live). 25 parts is a judgement from this measurement, not a documented figure.
+
+## Release closure — 2026-11-22
+
+- **Phase 0, live (measured from GitHub).** PR 519 merged as `4586732`; release run 44994632126 succeeded.
+- **Phase 1, live (measured from GitHub and the production host).** PR 520 merged as `4ee82e6` on 22 November 2026; release run 45001140371 succeeded. The host reports `4ee82e6` with a healthy gateway, and the mail index loaded 1,499 messages with none omitted.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `03b028a`, `fbdeeb42`, `b727a5f` (docs) and `9f0758b` (header fit), and approved `5e7913eb`. The eval's scoring was approved separately at `9f0758b`.
+
+### Measured: the eval before and after Phase 1
+
+Production mailbox, 22 November 2026: 15 private tasks with 144 expected emails, of which 98 have no plain-text part. The same arm both times: the email agent's instructions, `claude-haiku-5.5`, 10 steps. One run each, so task-level figures can vary between runs.
+
+|                                              | Before (`4586732`, old tools) | After (`4ee82e6`) |
+| -------------------------------------------- | ----------------------------- | ----------------- |
+| Expected emails found                        | 115 of 144                    | 131 of 144        |
+| Expected emails surfaced in search results   | 120 of 144                    | 144 of 144        |
+| Tasks with every email found                 | 12 of 15                      | 14 of 15          |
+| Lookup answers containing the expected value | 2 of 3                        | 3 of 3            |
+| Searches per task, median and maximum        | 3 and 4                       | 4 and 7           |
+| Unexpected emails reported                   | 16                            | 19                |
+| Rate-limited calls or rows                   | not applicable                | 0                 |
+| Model cost for the run                       | $0.025                        | $0.072            |
+
+- The receipts task went from 1 of 12 to 12 of 12, with all 12 bodies read. One 17-email task went from 10 (one page) to 17.
+- In the "after" run one 13-email task scored 0: the model surfaced and read all 13, then answered in plain text without calling the eval's report tool. Rerunning that task alone twice found 13 of 13 both times, so 131 understates the tools.
+- `readable` is not comparable as a rate between the runs: on collection tasks the model usually answers from search rows without opening messages.
+
+**Measured, read-only on the production mailbox with the final code before merge:** 470 result rows across seven back-to-back searches with no row missing its metadata, and twelve HTML receipts returned as multi-line text of 38 to 107 lines.
+
+**Not measured:** the coordinator using the tools, a real Telegram turn, and token cost in real use.
+
+### Low review items left open
+
+- Gathering searches can include spam and trash when their query names them, so a spam PDF could become an invoice candidate. To be addressed in Phase 2.
+- A search row's folder, category and unread flag can come from the ten-minute row cache, and the `gmail_search` description does not say so. To be addressed in Phase 2.
+- An unclosed `<script>` or `<style>` element in HTML mail leaks its contents into the converted text.
+- Rate-limit retry waits cannot be interrupted by a cancelled turn.
+- The header fit shortens escape-dense headers more than needed (see the `9f0758b` update above).
+
+> **Update, 22 November 2026 — Phase 2, the coordinator (branch `feat/email-coordinator`):** implemented and tested; not reviewed or released, and the eval has not been run on it. Design, the run-kind table, the safety and context analysis: [email search, Phase 2](../email-search.md#phase-2-coordinator).
+>
+> **What changed.** The Gmail tools are no longer delegated, so Chief searches and reads mail itself (`gmail_recall` with the mail index), under every picker mode. The email agent, its alias, its prompt and the grants only it used are gone; `parcels` keeps its Gmail tools, and an `agent_run` for `email` is refused with a message naming the Gmail tools. A new plugin skill, `core/email-search`, describes the tools and the facts a searcher needs; the Gmail domain guidance and one line of the instructions point to it. `observation_read` of a stored Gmail result leads with the untrusted-content warning on every page. Two low items from the Phase 1 review are addressed: gathering's searches leave `includeSpamTrash` unset (see the correction below: spam stays out because the query cannot name it), and the search description says how old a row's flags can be (up to fifteen minutes, not the ten of the review note: rows are reused for ten minutes and whole searches for five). The routing decision eval labels email messages `chief`.
+>
+> **Run kinds.** Foreground turns and background task passes (continuations and routine occurrences) now call the Gmail tools directly; before, they reached the same five through the email agent. Responsibility investigations still get only `gmail_read` within a confirmed scope, the daily briefing reads its digest in host code, and no other agent gained Gmail tools (tested for investigations and background passes).
+>
+> **Context.** The coordinator's fixed instructions, tools and configuration grow from 74,345 to 78,699 characters with every integration on. Within a turn, earlier results stay whole until about 1,080,000 characters, roughly eight maximal Gmail results; then all of them become excerpts with their `observationId` at once. Nothing is dropped silently, but the cut is abrupt; whether real turns reach it is not measured.
+>
+> **Eval.** The default arm is now `skill:email-search`: a coordinator turn assembled by `context()` on the main model, with the skill offered through `skill_read`. `retired:email` replays the retired agent from instructions frozen in `src/email-eval.ts`, whose hash matches the `agent:email` arm of the Phase 1 runs, so the earlier result stays comparable at the cost of 3,019 characters of text in the eval module. `docs/email-search.md` lists what still differs from a real coordinator turn.
+>
+> **Not measured.** The `skill:email-search` arm on the private tasks; a real Telegram turn; token cost of email turns.
+
+> **Correction and update, 22 November 2026 — after the review of `5d0773f`:** measured read-only on the production mailbox by the coordinator on 22 November 2026, counts only. A default search already returns archived mail (a query excluding inbox and sent returned 35 rows, all `archived`, without `in:anywhere`); `in:anywhere` added only spam and trash (the same 35 and 25 spam rows). And Gmail honours `in:spam` and `in:anywhere` written in the query whether or not `includeSpamTrash` is set (15 rows both ways for one `in:spam` query, 28 both ways for one `in:anywhere` query). So the automated review of PR 520 above, and Phase 1, were wrong to say spam and trash were unreachable without the parameter; setting it is harmless and stays. The Phase 2 gathering opt-out therefore does not by itself keep spam out: what does is that the model's gathering `query` cannot hold a colon, hence no operator, and labels go in quoted (see the next correction: quoting does not hold). The tool description, the empty-result hint, the personal-assistance skill (version 7) and the email-search skill now say searches cover all mail including archived, except spam and trash. The reviewer approved `5d0773f` with low findings; the email-search skill now also gives the search rows' header caps and the large-conversation fallback, and the plugin is re-pinned.
+
+> **Correction, 22 November 2026 — after `7ada8d6f`:** measured read-only on the production mailbox by the coordinator on 22 November 2026, counts only. Gmail reads an operator inside quotes, and inside braces, as an operator: `"in:spam" newer_than:14d` returned the same 15 spam rows as the unquoted form, and so did `{"acme in:spam x" "in:spam"} newer_than:14d`. So a gathering target label carrying `in:spam` or `in:anywhere` would have pulled spam into invoice candidates whatever `includeSpamTrash` said. Gathering now drops spam and trash rows by their `folder` before anything is recorded, returned, inspected or counted for coverage, and says how many in the result's notice; a row without metadata stays a result, so coverage still accounts for it, and its folder is read from the message itself at inspection and capture: a message in spam or trash is inspected with no files and can never be captured, whichever search or earlier attempt named it. Pagination is unchanged. Tested with a label carrying `in:spam`.
+
+## Follow-ups after Phase 2
+
+- Read text includes content hidden only by CSS (`display:none`, white text on white), which the owner never sees in Gmail and which is an easy carrier for injected instructions. Dropping it is a candidate hardening.
+- `evals/decisions/fixtures/gen_routing.py` fails on the current picker scenarios (it does not map newer domains such as `links`) and needs repair; the routing fixture was edited in place.
+- `OPTIONAL_OPERATIONS` (`src/plugins.ts`) has no user now that no shipped agent lists `gmail_recall`.
+- In a long turn, crossing the compaction threshold turns every earlier result of the turn into an excerpt at once, not the oldest first. Whether real email turns reach it is not measured.
+- Still open from Phase 1: an unclosed script or style element leaks its contents into read text; retry waits cannot be interrupted by a cancelled turn; the header fit shortens escape-dense headers more than needed.

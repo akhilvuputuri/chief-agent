@@ -101,6 +101,47 @@ test("domain-limited runtime offers the core plus selected domains and lists the
   assert.ok(TOOL_DOMAINS.includes("gmail"));
 });
 
+test("the coordinator gets the Gmail domain under every picker mode, with the email-search pointer only when it is offered", () => {
+  const coordinator = (domains?: Set<ToolDomain>) =>
+    runtimeContext(
+      { web: true, gmail: true, mailIndex: true },
+      null,
+      undefined,
+      domains,
+      true,
+    );
+  const gmail = (r: ReturnType<typeof coordinator>) =>
+    r.tools
+      .map((t) => t.name)
+      .filter((n) => n.startsWith("gmail_"))
+      .sort();
+  const five = [
+    "gmail_accounts",
+    "gmail_read",
+    "gmail_recall",
+    "gmail_search",
+    "gmail_thread",
+  ];
+  // TOOL_PICKER "all" offers every available domain; "jev" and "off" offer the cued ones.
+  for (const domains of [
+    new Set<ToolDomain>(TOOL_DOMAINS),
+    selectDomains({ message: "any new email from the bank?" }),
+  ]) {
+    const r = coordinator(domains);
+    assert.deepEqual(gmail(r), five);
+    assert.match(
+      JSON.parse(r.context).domainGuidance.gmail,
+      /skill_read core\/email-search/,
+    );
+  }
+  // Without a cue the domain is loadable with tools_load, and its guidance waits for it.
+  const uncued = coordinator(selectDomains({ message: "hi" }));
+  assert.deepEqual(gmail(uncued), []);
+  const state = JSON.parse(uncued.context);
+  assert.ok(state.toolDomains.loadable.gmail);
+  assert.equal(state.domainGuidance?.gmail, undefined);
+});
+
 async function fixture(model: ModelAdapter, stableTools = false) {
   const pg = await migratedPGlite([
     "001_initial",

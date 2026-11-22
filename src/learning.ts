@@ -3039,7 +3039,7 @@ export class Learner {
         if (c.state === "success" || c.state === "failed")
           operations[c.operation]![c.state as "success" | "failed"] += c.n;
       }
-      // What delegated agents read counts too: an email agent's gmail_read tags the turn email.
+      // What delegated agents read counts too: a parcels agent's gmail_read tags the turn email.
       const delegated = (
         await this.db.query(
           `SELECT DISTINCT c.operation FROM runtime_calls c

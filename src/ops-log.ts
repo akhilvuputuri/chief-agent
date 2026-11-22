@@ -39,7 +39,7 @@ const fields: Record<string, Shape> = {
   lane: "name",
   dependency: "name",
   phase: "name",
-  // An agent type such as "email" or "public-research/researcher".
+  // An agent type such as "parcels" or "public-research/researcher".
   agentType: "model",
   // Shadow routing: Jev's own pick (an agent type or chief), before the threshold.
   choice: "model",

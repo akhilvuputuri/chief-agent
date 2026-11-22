@@ -31,9 +31,9 @@ DECISIONS = json.loads((ROOT / "config" / "decisions.json").read_text(encoding="
 MAIN_CALL_MS = 4200
 MAIN_CALL_USD = 0.0208
 
-# Cue domains → agent types, as in fixtures/gen_routing.py.
+# Cue domains → agent types, as in fixtures/gen_routing.py. Gmail is the coordinator's own since
+# 22 November 2026 (journal 204), so a Gmail cue leaves the message to Chief.
 CUE_AGENT = {
-    "gmail": "email",
     "calendar": "calendar",
     "daily": "daily",
     "routines": "daily",

@@ -10,7 +10,7 @@ import {
   unreadDigest,
 } from "../src/gmail.js";
 import { action } from "../src/protocol.js";
-import { toolError } from "../src/tool-errors.js";
+import { SpamOrTrashMessage, toolError } from "../src/tool-errors.js";
 import { projectionLimits, projectObservation } from "../src/observations.js";
 /**
  * Results must survive the model-facing projection intact: above the operation's
@@ -1487,6 +1487,38 @@ test("briefing lines and attachment names are cut on code points", async () => {
   assert.equal(file!.name, "n".repeat(119));
 });
 
+test("gathering's attachment reads refuse a message in spam or trash, by its own labels", async () => {
+  for (const [label, folder] of [
+    ["SPAM", "spam"],
+    ["TRASH", "trash"],
+  ]) {
+    const r = routed(() => ({
+      id: "abc",
+      threadId: "fabc",
+      labelIds: [label],
+      payload: {
+        mimeType: "multipart/mixed",
+        parts: [
+          {
+            mimeType: "application/pdf",
+            filename: "invoice.pdf",
+            body: { attachmentId: "att1", size: 10 },
+          },
+        ],
+      },
+    }));
+    const g = new GmailTools(config, r.request, Date.now, instant);
+    await assert.rejects(
+      g.attachmentInfo("123", "abc", "primary"),
+      (e: unknown) => e instanceof SpamOrTrashMessage && e.folder === folder,
+    );
+    await assert.rejects(
+      g.attachmentBytes("123", "abc", "0.0", "primary"),
+      SpamOrTrashMessage,
+    );
+  }
+});
+
 test("search metadata for a page comes from sequential batches of at most 25", async () => {
   const ids = Array.from({ length: 50 }, (_, i) => `a${i}`);
   let batchInit: RequestInit | undefined;
@@ -2119,6 +2151,24 @@ test("spam and trash are included only when the query asks for them", async () =
     false,
   );
   assert.equal(plainSearch.includeSpamTrash, undefined);
+  // Gathering opts out: its model-supplied query cannot bring spam or trash in, and the
+  // model's cached search for the same query is not served to it.
+  const listed = r.calls.length;
+  const gathered: any = await g.call(
+    "123",
+    "gmail_search",
+    "receipt in:anywhere",
+    undefined,
+    undefined,
+    undefined,
+    { spamTrash: false },
+  );
+  assert.equal(r.calls.length, listed + 1);
+  assert.equal(
+    new URL("https://x" + r.calls.at(-1)).searchParams.has("includeSpamTrash"),
+    false,
+  );
+  assert.equal(gathered.includeSpamTrash, undefined);
 });
 
 test("rate-limited batch parts are retried with backoff and filled in order", async () => {

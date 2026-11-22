@@ -328,22 +328,22 @@ test("the record counts only delegations that ran, by catalogue name, and marks 
     ).rows[0].data;
   try {
     // A full agent ID is the same delegation as its alias.
-    const one = await turn([["core/email", "success"]]);
-    await shadow.record(db, "owner", one, [routing("email")]);
-    assert.equal((await recorded(one)).actual, "email");
+    const one = await turn([["core/stocks", "success"]]);
+    await shadow.record(db, "owner", one, [routing("stocks")]);
+    assert.equal((await recorded(one)).actual, "stocks");
     assert.equal((await recorded(one)).agree, true);
     assert.equal((await recorded(one)).matched, true);
     // Below the threshold: no fast path, but Jev's own pick still matched Chief.
-    const below = await turn([["email", "success"]]);
-    await shadow.record(db, "owner", below, [routing("chief", "email")]);
+    const below = await turn([["stocks", "success"]]);
+    await shadow.record(db, "owner", below, [routing("chief", "stocks")]);
     assert.equal((await recorded(below)).agree, true);
-    assert.equal((await recorded(below)).choice, "email");
+    assert.equal((await recorded(below)).choice, "stocks");
     assert.equal((await recorded(below)).matched, true);
     // A refused type and a never-dispatched call do not count; the retry that ran does.
     const retried = await turn([
-      ["emial", "failed"],
+      ["stokcs", "failed"],
       ["calendar", "interrupted"],
-      ["email", "success"],
+      ["stocks", "success"],
     ]);
     await shadow.record(db, "owner", retried, [routing("calendar")], {
       interrupted: true,
@@ -351,29 +351,29 @@ test("the record counts only delegations that ran, by catalogue name, and marks 
       messages: 2,
     });
     const r = await recorded(retried);
-    assert.deepEqual(r.delegated, ["email"]);
+    assert.deepEqual(r.delegated, ["stocks"]);
     assert.equal(r.agree, false);
     assert.equal(r.matched, false);
     assert.equal(r.interrupted, true);
     assert.equal(r.messages, 2);
     // Two delegations that ran are "several"; a chief prediction never disagrees.
     const two = await turn([
-      ["email", "success"],
+      ["stocks", "success"],
       ["parcels", "success"],
     ]);
-    await shadow.record(db, "owner", two, [routing("chief", "email")]);
+    await shadow.record(db, "owner", two, [routing("chief", "stocks")]);
     assert.equal((await recorded(two)).actual, "several");
     assert.equal((await recorded(two)).agree, true);
     // One agent cannot match a turn that needed several.
     assert.equal((await recorded(two)).matched, false);
     // Below the threshold and wrong: no harm (agree) but not accurate (matched).
     const itself = await turn([]);
-    await shadow.record(db, "owner", itself, [routing("chief", "email")]);
+    await shadow.record(db, "owner", itself, [routing("chief", "stocks")]);
     assert.equal((await recorded(itself)).actual, "chief");
     assert.equal((await recorded(itself)).agree, true);
     assert.equal((await recorded(itself)).matched, false);
     // A failed prediction has no pick, so neither agreement nor accuracy.
-    const failed = await turn([["email", "success"]]);
+    const failed = await turn([["stocks", "success"]]);
     await shadow.record(db, "owner", failed, [
       {
         ...routing("chief"),

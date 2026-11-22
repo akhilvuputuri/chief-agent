@@ -27,6 +27,8 @@ Shadow mode lets Chief try a decision model on real messages without changing an
 
   Nothing from tool results, email or memories is sent.
 
+> **Update, 22 November 2026 ([journal 204](journey/204-email-search-redesign.md)):** the `email` agent is retired, so a turn in which Chief searches Gmail itself records `chief` as the actual choice, and the routing eval's fixtures label email messages `chief`.
+
 - **Cost.** Two Jev calls per foreground message, about $0.00003 each. The charge is recorded in the turn's provider charges.
 
 ## Switches

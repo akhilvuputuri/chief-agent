@@ -1,7 +1,7 @@
 // Email memory MVP (docs/mail-recall.md). A meaning index over the primary mailbox's
 // Primary-category mail from the last 12 months, stored and searched in Postgres with pgvector.
-// Gmail stays the source of truth. Results are message and thread IDs that the email agent
-// confirms with gmail_thread before reporting.
+// Gmail stays the source of truth. Results are message and thread IDs that the coordinator
+// confirms with gmail_thread or gmail_read before relying on them.
 import { z } from "zod";
 import type { GmailTools } from "./gmail.js";
 import { errorFields, opsLog } from "./ops-log.js";
@@ -34,7 +34,7 @@ const MAX_CHUNKS = 6;
 const EMBED_BATCH = 64;
 /**
  * Gmail limits each user to 6,000 query-cost units a minute (totalQueryCostPerMinutePerUser),
- * shared with the email agent's own searches and reads. Four concurrent full reads used it up
+ * shared with the model's own Gmail searches and reads. Four concurrent full reads used it up
  * after about 330 messages, so the index reads one message at a time, about two a second.
  */
 const READ_INTERVAL_MS = 500;

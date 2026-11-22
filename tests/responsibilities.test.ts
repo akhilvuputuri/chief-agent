@@ -297,6 +297,14 @@ test("U1 real runtime reads one admitted email, applies parcel provenance, resol
               ].includes(t.name),
             ),
           );
+          // The coordinator now has every Gmail tool; an investigation still gets only the
+          // confirmed message read its scope allows (journal 204, Phase 2).
+          assert.deepEqual(
+            input.tools
+              .map((t) => t.name)
+              .filter((n) => n.startsWith("gmail_")),
+            ["gmail_read"],
+          );
           const { operation, ...args } = actions[index++];
           return {
             message: {
@@ -333,7 +341,8 @@ test("U1 real runtime reads one admitted email, applies parcel provenance, resol
         undefined,
         f.service,
       ),
-      { responsibilities: true, gmail: true, parcels: true, delegation: false },
+      // The coordinator, as in production.
+      { responsibilities: true, gmail: true, parcels: true, mailIndex: true },
     );
     let sends = 0,
       progress = 0;

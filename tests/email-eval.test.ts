@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { instructions } from "../src/context.js";
+import { defaultBudget } from "../src/execution.js";
 import {
+  coordinatorContext,
+  coordinatorTools,
   gmailToolDefinitions,
   normalise,
   parseFlags,
@@ -747,7 +752,15 @@ test("malformed task input is refused with its line, field and code, never its v
   }
   assert.throws(() => parseTasks(`${good}\n${good}`), /repeats/);
   assert.throws(() => parseTasks(""), /No tasks/);
-  assert.throws(() => parseFlags(["--instructions", "file:-"]), /agent:/);
+  assert.throws(
+    () => parseFlags(["--instructions", "file:-"]),
+    /retired:email/,
+  );
+  // The retired agent's arm is replayed from its frozen text, not the registry.
+  assert.throws(
+    () => parseFlags(["--instructions", "agent:email"]),
+    /retired:email/,
+  );
   assert.throws(() => parseFlags(["--model", "huge"]), /--model/);
 });
 
@@ -774,7 +787,7 @@ test("the summary carries aggregates only, without request text or IDs", async (
       "No.",
     ]),
   ];
-  const summary = summarise(scores, { instructions: "agent:email" });
+  const summary = summarise(scores, { instructions: "retired:email" });
   const text = JSON.stringify(summary);
   for (const secret of [
     "private",
@@ -797,50 +810,108 @@ test("the summary carries aggregates only, without request text or IDs", async (
   assert.deepEqual(summary.searchesPerTask, { median: 0, max: 1 });
 });
 
-test("arms take tools from the runtime and resolve the model as agent runs do", () => {
+test("the default arm is a coordinator turn on the main model; retired:email replays the frozen agent", () => {
   assert.deepEqual(
     gmailToolDefinitions().map((t) => t.name),
     ["gmail_accounts", "gmail_search", "gmail_thread", "gmail_read"],
   );
-  const arm = resolveArm(
-    parseFlags(["--instructions", "agent:email"]),
-    "test/main",
+  assert.deepEqual(
+    coordinatorTools().map((t) => t.name),
+    [
+      "gmail_accounts",
+      "gmail_search",
+      "gmail_thread",
+      "gmail_read",
+      "skill_read",
+    ],
   );
-  const agent = plugins.get("core/email");
-  assert.equal(arm.instructions, agent.instructions);
-  assert.equal(arm.maxSteps, agent.limits.models);
+  const arm = resolveArm(parseFlags([]), "test/main");
+  assert.equal(arm.arm.instructions, "skill:email-search");
+  assert.equal(arm.skill, "core/email-search");
+  assert.equal(arm.instructions, instructions);
   assert.deepEqual(
     { tier: arm.tier, model: arm.model },
-    resolveAgentModel(agent.model, "test/main"),
+    { tier: "main", model: "test/main" },
+  );
+  assert.equal(arm.maxSteps, defaultBudget.models);
+  assert.equal(
+    arm.arm.version,
+    plugins.skills().find((s) => s.key === "core/email-search")!.version,
   );
   const asked = resolveArm(
-    parseFlags(["--instructions", "agent:email", "--model", "standard"]),
+    parseFlags(["--instructions", "skill:email-search", "--model", "fast"]),
     "test/main",
   );
   assert.deepEqual(
     { tier: asked.tier, model: asked.model },
-    resolveAgentModel("standard", "test/main"),
+    resolveAgentModel("fast", "test/main"),
   );
-  // A registry-pinned host model wins over any tier, as in runAgentType.
-  const pinned = resolveArm(
-    parseFlags(["--instructions", "agent:email", "--model", "standard"]),
+  // The retired email agent's frozen text hashes as the agent:email arm of the Phase 1 runs did
+  // (plugins/core/agents/email.md at 4ee82e6), on its own tier, effort and step count.
+  const retired = resolveArm(
+    parseFlags(["--instructions", "retired:email"]),
     "test/main",
-    undefined,
-    {
-      get: (id) => ({ ...plugins.get(id), hostModel: "test/pinned" }),
-      resolve: (type) => plugins.resolve(type),
-      skills: () => plugins.skills(),
-    },
   );
+  assert.equal(
+    createHash("sha256").update(retired.instructions).digest("hex"),
+    "61b719445991cfd260b32bd15ad79622941914207b031464b16bf23d7df33e7c",
+  );
+  assert.equal(retired.arm.instructionsSha256, "61b719445991cfd2");
+  assert.equal(retired.skill, undefined);
+  assert.equal(retired.maxSteps, 10);
+  assert.equal(retired.effort, "medium");
   assert.deepEqual(
-    { tier: pinned.tier, model: pinned.model },
-    { tier: "host", model: "test/pinned" },
+    { tier: retired.tier, model: retired.model },
+    resolveAgentModel("fast", "test/main"),
   );
   assert.throws(
     () =>
       resolveArm(parseFlags(["--instructions", "skill:missing"]), "test/main"),
     /No plugin skill/,
   );
+});
+
+test("a coordinator turn is assembled by context(), offers the skill through skill_read and counts its reads", async () => {
+  const gmail = fakeGmail({}, ["a1"]);
+  const { model, seen, offered } = scripted([
+    [{ name: "skill_read", args: { key: "core/email-search" } }],
+    search("from:store receipt"),
+    report([ref("a1")], "One monthly receipt."),
+  ]);
+  const record = await runTask(task, {
+    ...options(gmail, model, 40),
+    instructions,
+    tools: coordinatorTools(),
+    coordinator: { context: await coordinatorContext() },
+  });
+  const score = scoreTask(task, record);
+  assert.equal(score.ended, "reported");
+  assert.equal(score.found, 1);
+  assert.equal(score.skillReads, 1);
+  assert.deepEqual(offered[0], [
+    "gmail_accounts",
+    "gmail_search",
+    "gmail_thread",
+    "gmail_read",
+    "skill_read",
+    "eval_report",
+  ]);
+  const first = JSON.parse(seen[0]!);
+  // Chief's own instructions and configuration open the request, the owner's words follow
+  // verbatim, and the state closes it, as context() assembles every coordinator call.
+  assert.ok(first[0].content.startsWith(instructions));
+  assert.match(first[0].content, /This turn is an evaluation/);
+  assert.match(first[0].content, /skill_read core\/email-search/);
+  assert.match(first[0].content, /"key":"core\/email-search"/);
+  assert.deepEqual(first[1], { role: "user", content: task.request });
+  assert.match(first.at(-1).content, /^Current state/);
+  // The skill's own text came back from skill_read, with no private version consulted.
+  const skill = plugins.skills().find((s) => s.key === "core/email-search")!;
+  const read = JSON.parse(
+    JSON.parse(seen[1]!).findLast((m: any) => m.role === "tool").content,
+  );
+  assert.equal(read.result.version.content, skill.content);
+  assert.equal(summarise([score], {}).tasksReadingSkill, 1);
 });
 
 test("pageSize, messageIds and offset reach GmailTools as src/tools.ts passes them", async () => {

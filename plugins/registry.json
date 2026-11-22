@@ -4,9 +4,8 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "f3caf492eaa3977147185cbe96c1373067693ed928895882c72d86519279e75f",
+      "sha256": "96b4debcdf7ec7bf3425121ff702813e37b7c209496ff5ce076ada3b27754d3e",
       "agents": [
-        "email",
         "parcels",
         "subscriptions",
         "calendar",
@@ -39,7 +38,6 @@
         "gather_status",
         "gmail_accounts",
         "gmail_read",
-        "gmail_recall",
         "gmail_search",
         "gmail_thread",
         "item_list",
@@ -58,7 +56,6 @@
         "news_source_add",
         "news_source_remove",
         "news_status",
-        "observation_read",
         "parcel_list",
         "parcel_match",
         "parcel_record",
@@ -127,7 +124,6 @@
     }
   ],
   "aliases": {
-    "email": "core/email",
     "parcels": "core/parcels",
     "calendar": "core/calendar",
     "daily": "core/daily",
@@ -159,11 +155,6 @@
     "gather_match",
     "gather_progress",
     "gather_search",
-    "gmail_accounts",
-    "gmail_read",
-    "gmail_recall",
-    "gmail_search",
-    "gmail_thread",
     "item_list",
     "item_save",
     "item_update",

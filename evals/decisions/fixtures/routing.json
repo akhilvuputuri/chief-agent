@@ -74,56 +74,56 @@
     "split": "tuning",
     "message": "did Sarah reply to me?",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "gmail-2",
     "split": "tuning",
     "message": "anything from DBS in the last few days?",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "gmail-3",
     "split": "tuning",
     "message": "find the invoice Grab sent me",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "gmail-4",
     "split": "tuning",
     "message": "summarise my unread mail",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "gmail-5",
     "split": "tuning",
     "message": "what did my landlord say about renewing the lease?",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "gmail-6",
     "split": "tuning",
     "message": "check my other inbox too",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "gmail-7",
     "split": "tuning",
     "message": "did the airline send my booking confirmation?",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "gmail-8",
     "split": "tuning",
     "message": "any messages from HR about the offer letter?",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "cal-1",
@@ -633,7 +633,7 @@
         "tools": ["gmail_search"]
       }
     ],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "fu-2",
@@ -776,7 +776,7 @@
         "tools": ["gmail_search"]
       }
     ],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "t-none-1",
@@ -853,42 +853,42 @@
     "split": "held-out",
     "message": "has the insurance company got back to me?",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "t-gmail-2",
     "split": "held-out",
     "message": "what did James send yesterday?",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "t-gmail-3",
     "split": "held-out",
     "message": "any bills due that came in this week?",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "t-gmail-4",
     "split": "held-out",
     "message": "did Netflix change my plan price? they emailed something",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "t-gmail-5",
     "split": "held-out",
     "message": "pull up the conversation with the contractor about the kitchen",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "t-gmail-6",
     "split": "held-out",
     "message": "what's new in my secondary account?",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "t-cal-1",
@@ -1238,7 +1238,7 @@
     "split": "held-out",
     "message": "ok and anything from the other bank?",
     "prior": [],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "t-sig-5",
@@ -1291,7 +1291,7 @@
         "tools": ["gmail_search"]
       }
     ],
-    "gold": "email"
+    "gold": "chief"
   },
   {
     "id": "t-fu-4",

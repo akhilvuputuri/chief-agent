@@ -7,7 +7,8 @@
 //
 // For each sampled email a model writes a question the owner might ask while half-remembering
 // it, without the subject's or sender's words. Two retrieval conditions are compared:
-//   keyword: up to three Gmail searches a model writes for the question (today's email agent)
+//   keyword: up to three Gmail searches a model writes for the question (the email agent's
+//            approach when this was written; it was retired on 22 November 2026)
 //   recall:  the same searches plus gmail_recall's top results (the agent with both tools)
 // A question counts as found when the target message is among the results. It only reads the
 // stored index, which it shares with the running gateway. Email text comes from Gmail.
