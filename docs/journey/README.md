@@ -200,6 +200,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 16 November | [201 — Test workers](201-test-workers.md): can a full test run in a coding box use all its CPUs? | Tested locally and timed on a CI machine held to three CPUs; not yet released. Three shared processes taking six groups of files from a queue ran in 197 s against 390 s serial. One test file had been keeping its process alive for three minutes after its tests, which capped every earlier attempt. Update, 16 November: live in `edb071a`; no coding box has run it yet |
 | 16 November | [202 — Retired image moves itself](202-retired-image-moves-itself.md): why did an answered coding job stop instead of continuing? | Released 16 November as `3a5b5d88` (PR 506); no real job has been moved yet. Tested locally; not yet released (as first written). A job on a retired worker image was paused with advice to move it with `upgradeWorker`, and the owner started a new job instead. The host now makes that move itself just before the box starts, with the same settings change as `upgradeWorker`, and tells the owner in one line; jobs that cannot be moved keep the pause. |
 | 16–17 November | [203 — Pi 1.5.2](203-pi-1-5-2.md): what does moving the coding runtime from Pi 1.1.0 to 1.5.2 change, and which advisories does it close? | Released on the gateway in `3e1e314`; the worker image `sha256:537f6c79…` is pinned for new coding jobs in `07f8118`. No coding job has run on it. The requests Pi sends differ in four places and none is refused by the host; a session started on 1.1.0 continues on 1.5.2. The worker's own `grep` had to follow Pi's new rule that `glob` is relative to `path`. OSV flags nothing in the Pi runtime's lockfile; six undici advisories fixed in 8.12.4 remain, because no published Pi pins it. |
+| 22 November | [204 — Email search redesign](204-email-search-redesign.md): why did Chief miss most of a set of receipt emails, and how will a redesign be measured? | In progress. Phase 0, a replayable deterministic eval over the real Gmail tools (`src/email-eval.ts`), tested with a fake Gmail and a scripted model; no baseline run yet. Tool, coordinator, invoice and recall phases planned. |
 
 ## Coding-agent learning path
 
@@ -231,6 +232,8 @@ Brokerage: [25 — Stock watchlist](25-stock-watchlist.md) → [59 — IBKR hold
 Recurring payments: [33 — Delivery provenance](33-delivery-tracker.md) → [24 — Scheduled work](24-scheduled-routines.md) → [49 — Domain agents](49-coordinator-agents.md) → [54 — Subscriptions](54-subscriptions.md) → [62 — Durable gathering](62-gathering-harness.md) → [93 — Invoice-backed tracker](93-invoice-backed-tracker.md) → [97 — Price-change alerts](97-price-change-alerts.md) → [98 — Monthly subscription summary](98-monthly-subscription-summary.md).
 
 Preparation continuity: [09 — Job alignment](09-job-alignment.md) → [21 — Preserving preparation evidence](21-preparation-chain.md).
+
+Email search: [27 — Separate Gmail accounts](27-multiple-gmail-accounts.md) → [120 — Email memory MVP](120-email-memory-mvp.md) → [204 — Email search redesign](204-email-search-redesign.md).
 
 ## Keep the record useful
 

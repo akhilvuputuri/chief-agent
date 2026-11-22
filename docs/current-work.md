@@ -1,3 +1,9 @@
+# Email search redesign, Phase 0 eval — tested, not yet released, 22 November 2026
+
+Branch `eval/email-search`. Chief reported 4 of 13 existing monthly receipt emails from one primary-mailbox search. `src/email-eval.ts` is an operator-run eval that replays private tasks through the real Gmail tools and observation projection, with the email agent's shipped instructions or a plugin skill, and scores found, surfaced, readable and extra messages deterministically. Tested with a fake Gmail and a scripted model; no baseline run yet. See [email search](email-search.md) and [journal 204](journey/204-email-search-redesign.md).
+
+Next: review and release; write the private tasks and run the baseline; then Phase 1, the Gmail tool changes.
+
 # Coding runtime on Pi 1.5.2 — tested, not yet released, 17 November 2026
 
 Branch `claude/pi-coding-agent-1-5-f3ae15`. The Pi coding runtime moves from `pi-coding-agent` and `pi-ai` 1.1.0 to 1.5.2, the newest published. That replaces the undici 8.10.2 and minimatch 10.2.6 copies Pi pinned with 8.12.3 and 11.0.3, and OSV now flags nothing in the Pi runtime's lockfile. One thing of ours changed: the worker's `grep` roots its `glob` at its `path`, as Pi's description of the tool now says. The requests Pi sends differ in four places, none of which the host's allowlist refuses, and a session started on 1.1.0 continued on 1.5.2 (both measured locally against a stand-in server). See [journal 203](journey/203-pi-1-5-2.md).
