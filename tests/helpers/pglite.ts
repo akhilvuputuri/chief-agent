@@ -70,8 +70,9 @@ const UNCLEAN = `SELECT (SELECT count(*) FROM test_pool.changes)::int AS changes
 // The sizes the planner assumes for everything the migrations created: object ids below
 // 16384 belong to Postgres itself. A table that was never vacuumed says so (reltuples is
 // -1) and is planned as ten pages; the reset's VACUUM would leave it marked as vacuumed and
-// planned at its real size. PGlite forbids sequential scans, so with rows in one page that
-// difference alone turned an unordered read of a table into an index scan, in index order.
+// planned at its real size. PGlite turns sequential scans off (enable_seqscan), so with rows
+// in one page that difference alone turned an unordered read of a table into an index scan,
+// in index order.
 // PGlite goes on planning from the numbers it read before the VACUUM until something makes
 // it open the table again, such as a rolled-back ALTER TABLE, so the change showed only
 // in a database that an earlier test had filled and a later one reopened (journal 206).

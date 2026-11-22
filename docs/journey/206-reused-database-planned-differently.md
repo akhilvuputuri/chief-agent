@@ -16,7 +16,7 @@ Status: tested locally; not yet released. Tests only.
 - **It is not load.** The runner's default four workers deal the 160 test files into eight groups, and the pool file is the nineteenth of twenty in the last. That group, run in one shared process, failed the test in 2 of 2 runs, each time at `reuse 6`. The file list at `6e243ede` is the same, so the groups were too.
 - **One file sets it up.** Each of the 18 files before it in the group was run with the pool file as a pair in one process. Only the pair with `tests/coding-confirmation-telegram.test.ts` failed.
 - **The heap was in order.** At the failure the eleven rows sat at `ctid` (0,1) to (0,11) in insertion order. The plan was `Index Only Scan using users_pkey`, estimated at 120 rows. In the file alone the plan was `Bitmap Heap Scan`, estimated at 1,200 rows, in all 60 cycles.
-- **PGlite forbids sequential scans.** `enable_seqscan` is `off`, from PGlite's own command line. A read of a whole table is therefore planned through an index where one can serve it: a bitmap scan returns heap order, an index scan returns index order.
+- **PGlite turns sequential scans off.** `enable_seqscan` is `off`, from PGlite's own command line, which prices a sequential scan out wherever another plan exists. A read of a whole table is therefore planned through an index where one can serve it: a bitmap scan returns heap order, an index scan returns index order.
 - **A vacuumed table is planned at its real size.** `pg_class.reltuples` is -1 for a table never vacuumed, and Postgres plans such a table as ten pages. The reset's `VACUUM` sets it to 0, and the table is then planned at the one page it has, which makes the index-only scan the cheaper plan.
 - **PGlite does not notice at once.** On a bare PGlite, a table was filled, emptied, vacuumed and refilled. `pg_class` showed `reltuples` 0, and the plan stayed the 1,200-row bitmap scan through 3,000 further rounds. Of 15 kinds of statement tried after the vacuum (transactions, errors, rollbacks, locks, `DISCARD ALL`, a second vacuum), only a rolled-back `ALTER TABLE` on the table changed the plan to the index-only scan, with the rows then returned as 0, 1, 10, 2, ….
 - **Why reuse 6.** The plan was the index-only scan from the first cycle. Cycle 6 is the first to insert eleven rows, the first where text order (`10` before `2`) differs from insertion order.
@@ -52,6 +52,13 @@ Reuse changed behaviour: the reset left planner statistics that a fresh database
 - **Index pages.** An index keeps the pages it grew to, since vacuum does not return them, so a reused database's index can be larger than a fresh one's and its plans cost more. The new test compares plans without costs for that reason. Measured with the change: with an index of 4 to 21 pages left by an earlier lease of 100 to 1,000 users, the plan for the unordered read was still the bitmap scan, at a higher cost.
 - **Stale numbers within one test.** A test that vacuums a table itself goes on being planned from the old numbers until the table is reopened. That is PGlite's behaviour in a fresh database too.
 - **Why PGlite misses its own catalog changes** was observed, not traced into PGlite.
+- **System catalogs.** A test that runs `ANALYZE` or `VACUUM` on one of Postgres's own tables changes sizes the restore does not cover and adds no `pg_statistic` row, so the database is reused with them (review finding, below). No test does.
+
+**Review (Claude Opus 5.5), `3fd736b6`: approved, three low findings.** The reviewer reproduced the chain on a bare PGlite with its own scripts, confirmed that both new tests fail against the earlier helper, and found no difference in `pg_class` sizes after a large fill with toasted values, with a partial schema up to the pgvector migration, or over 1,500 reuses.
+
+- **System catalogs.** `ANALYZE pg_class` left `pg_class.reltuples` at 976 against 415 in the next lease, undetected. Recorded above as a known limit.
+- **"Forbids sequential scans" overstated it.** The setting makes such a scan very expensive, not impossible. The wording here and in the helper's comment is corrected.
+- **The new test's size comparison partly repeats the restore.** An index's `relpages` matches a fresh database's because the restore wrote it; the file is larger. The plan and row-order assertions in the same test do not depend on the restore.
 
 ## Verification and outcome
 
