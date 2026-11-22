@@ -94,6 +94,16 @@ export function toolError(error: unknown) {
             : "MCP operation failed; inspect its durable state before retrying a write.",
       retryAfterSeconds: error.retryAfterSeconds,
     };
+  // A Google grant is gone and the host already sent the owner a reconnect button
+  // (GoogleAuthError in src/calendar.ts; matched by field to keep this module free of it).
+  if ((error as { reconnectSent?: unknown } | null)?.reconnectSent === true)
+    return {
+      code: "AUTHORIZATION_REQUIRED",
+      retryable: false,
+      message:
+        message.replace(/\.?$/, ".") +
+        " Do not retry: tell the owner to tap the button to reconnect, then ask again.",
+    };
   if (error instanceof WriteBlockedError)
     return {
       code: "WRITE_BLOCKED",

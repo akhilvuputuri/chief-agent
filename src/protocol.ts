@@ -450,6 +450,12 @@ export const action = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("portfolio_disconnect") }).strict(),
   z
     .object({
+      operation: z.literal("google_connect"),
+      account: z.enum(["gmail", "gmail_secondary", "calendar", "sheets"]),
+    })
+    .strict(),
+  z
+    .object({
       operation: z.literal("portfolio_ibkr_query"),
       tool: z.enum(IBKR_QUERY_TOOLS),
       arguments: z

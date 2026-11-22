@@ -22,6 +22,8 @@ export const CORE_OPERATIONS = new Set([
   "work_status",
   "coding_status",
   "gather_status",
+  // Sends the owner a Google connect button (src/google-connect.ts); needed when any Google tool breaks.
+  "google_connect",
   "tools_load",
   "agent_run",
   // The file space (src/file-space.ts): general tools for any file a tool puts there.

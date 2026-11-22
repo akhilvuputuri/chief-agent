@@ -1,8 +1,9 @@
 import type { Database } from "./db.js";
 import { boundedBytes } from "./providers.js";
 import { SerialQueue } from "./security.js";
-import { z } from "zod";
 import { ToolValidationError } from "./tool-errors.js";
+import { googleToken } from "./calendar.js";
+import type { GoogleConnections } from "./google-connect.js";
 function chainText(task: any, render: (chain: any) => string): string {
   const text = (task.evidence_chain ?? []).map(render).join("\n\n");
   return text.length <= 30000
@@ -100,6 +101,8 @@ export class SheetsTools {
       clientSecret: string;
       refreshToken: string;
       spreadsheetId: string;
+      /** Chat-made connections (src/google-connect.ts); absent when that feature is off. */
+      connections?: GoogleConnections;
     },
     private request: typeof fetch = fetch,
   ) {}
@@ -111,9 +114,7 @@ export class SheetsTools {
   private async write(user: string) {
     const c = this.config;
     if (
-      !c.refreshToken ||
-      !c.clientId ||
-      !c.clientSecret ||
+      ((!c.refreshToken || !c.clientId || !c.clientSecret) && !c.connections) ||
       !/^[a-zA-Z0-9_-]+$/.test(c.spreadsheetId)
     )
       throw new Error("Google Sheets setup is incomplete");
@@ -240,20 +241,10 @@ export class SheetsTools {
       );
     const read = async (r: Response) =>
       JSON.parse(new TextDecoder().decode(await boundedBytes(r, 1000000)));
-    const token = z.object({ access_token: z.string().min(1) }).parse(
-      await read(
-        await this.request("https://oauth2.googleapis.com/token", {
-          method: "POST",
-          body: new URLSearchParams({
-            client_id: c.clientId,
-            client_secret: c.clientSecret,
-            refresh_token: c.refreshToken,
-            grant_type: "refresh_token",
-          }),
-          redirect: "error",
-          signal: AbortSignal.timeout(15000),
-        }),
-      ),
+    // The stored chat connection when there is one, else the .env token.
+    const access = await googleToken(
+      { ...c, email: "", account: "sheets" },
+      this.request,
     );
     await read(
       await this.request(
@@ -261,7 +252,7 @@ export class SheetsTools {
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${token.access_token}`,
+            Authorization: `Bearer ${access}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ requests: sheetRequests(tables) }),

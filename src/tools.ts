@@ -31,6 +31,7 @@ import { ParcelTools } from "./parcels.js";
 import type { LibraryActions } from "./library-actions.js";
 import type { WatchlistTools } from "./stocks.js";
 import type { Portfolio } from "./portfolio.js";
+import type { GoogleConnect } from "./google-connect.js";
 import type { StockLookup } from "./stock-lookup.js";
 import { RuleTools } from "./stock-rules.js";
 import type { SingaporeTools } from "./singapore/tools.js";
@@ -74,6 +75,8 @@ export class JobTools {
     readonly files: FileSpace = new FileSpace(),
     /** The coordinator's browser, in the public-browser container. */
     readonly browser?: BrowserTool,
+    /** Google sign-in from the chat; absent when its web client is not configured. */
+    readonly google?: GoogleConnect,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -350,6 +353,11 @@ export class JobTools {
     ) {
       if (!this.stocks) throw new Error("Stock watchlist is not configured");
       return this.stocks.call(user, run, a);
+    }
+    if (a.operation === "google_connect") {
+      if (!this.google)
+        throw new Error("Google sign-in from chat is not configured");
+      return this.google.offer(user, a.account);
     }
     if (
       a.operation === "portfolio_read" ||
