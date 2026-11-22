@@ -1,3 +1,9 @@
+# Image job retries a failed attestation — tested, not yet released, 22 November 2026
+
+Branch `ci/attest-retry`. The `publish gateway image` job gives its provenance attestation up to three attempts, after two main merges on 22 November passed their tests and were not released: the transparency log answered 404 for an entry it had just accepted. The job still fails when every attempt fails, and the release's attestation check is unchanged. See [journal 207](journey/207-attestation-read-back-404.md).
+
+Next: independent review and release; then watch for the retry warning on main's image job.
+
 # Email tools: attachments, file space, browser and `file_merge` — live in `6fbf927`, 22 November 2026
 
 PR 526 (`76eb6c4`, attachments, link targets and routing wording), PR 527 (`cd051c5`, file space and file tools) and PR 528 (`6fbf927`, `browser` and `file_merge`) are released, and the browser sidecar was refreshed on the host. Measured read-only on the production mailbox: twelve HTML receipts opened as one document and printed to one 24-page PDF (13.2 s to open, 2.9 s to print), with every receipt's text present ([journal 204](journey/204-email-search-redesign.md#release-closure--attachments-file-tools-and-browser--2026-11-22), [email search](email-search.md#what-shipped-on-22-november-2026)).

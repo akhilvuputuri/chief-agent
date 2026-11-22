@@ -232,7 +232,42 @@ jobs:
           build-args: RELEASE_SHA=${{ github.sha }}
           cache-from: type=gha,scope=gateway
           cache-to: type=gha,mode=max,scope=gateway
-      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+      # The provenance attestation is required: the release verifies it and deploys
+      # nothing without it. Signing depends on the public transparency log, which
+      # twice on 22 November 2026 answered 404 for an entry it had just accepted
+      # (journal 207); that failed this job and skipped the release. So the same
+      # pinned action gets up to three attempts, each signing afresh, and the job
+      # fails only when the third does. Change the three copies together.
+      - name: Attest build provenance
+        id: attest1
+        continue-on-error: true
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}-gateway
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Wait before the second attestation attempt
+        if: steps.attest1.outcome == 'failure'
+        run: |
+          echo "::warning::The first provenance attestation attempt failed; trying again in 20 s."
+          sleep 20
+      - name: Attest build provenance (second attempt)
+        id: attest2
+        if: steps.attest1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}-gateway
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Wait before the third attestation attempt
+        if: steps.attest2.outcome == 'failure'
+        run: |
+          echo "::warning::The second provenance attestation attempt failed; trying once more in 60 s."
+          sleep 60
+      - name: Attest build provenance (third attempt)
+        if: steps.attest2.outcome == 'failure'
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-name: ghcr.io/${{ github.repository }}-gateway
           subject-digest: ${{ steps.build.outputs.digest }}
