@@ -150,6 +150,11 @@ export const NEVER_GRANTED = new Set([
   "skill_activate",
   // Agents read only their own pinned skills, through the runner's skill_read.
   "skill_read",
+  // The file space is the coordinator's.
+  "file_list",
+  "file_send",
+  "file_save",
+  "file_zip",
 ]);
 const OPERATIONS = new Set(
   action.options.map((o) => o.shape.operation.value as string),

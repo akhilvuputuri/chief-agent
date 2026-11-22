@@ -2,22 +2,23 @@ import type { Database } from "./db.js";
 import { runFamily } from "./run-family.js";
 
 export interface OutgoingMedia {
-  kind: "photo" | "animation";
+  kind: "photo" | "animation" | "document";
   bytes: Buffer;
   filename: string;
   /** Plain text, at most 1024 characters (Telegram's caption limit). */
   caption: string;
 }
 
-/** Pictures older than this are dropped unsent; the owner can ask again. */
+/** Media older than this is dropped unsent; the owner can ask again. */
 const TTL_MS = 15 * 60_000;
-const PER_RUN = 3;
+// file_send queues up to ten documents a call; a reply carries at most this many items.
+export const MEDIA_PER_RUN = 20;
 const RUNS = 10;
 type Queued = OutgoingMedia & { seq: number };
 
 /**
- * Pictures a tool made during a run, held in memory until the reply for that
- * run is sent. Tools only queue them; the Telegram client sends them after the
+ * Pictures a tool made, and files file_send queued, during a run, held in memory
+ * until the reply for that run is sent. Tools only queue them; the Telegram client sends them after the
  * text reply, under the same delivery guard. Nothing is persisted, so a restart
  * or a background run that never replies simply drops them.
  */
@@ -33,7 +34,7 @@ export class MediaOutbox {
       caption: media.caption.slice(0, 1024),
       seq: this.seq++,
     });
-    if (entry.media.length > PER_RUN) entry.media.shift();
+    if (entry.media.length > MEDIA_PER_RUN) entry.media.shift();
     this.runs.delete(run);
     this.runs.set(run, entry);
     while (this.runs.size > RUNS)

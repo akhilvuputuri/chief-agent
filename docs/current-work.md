@@ -1,3 +1,9 @@
+# File space and file tools — tested, not yet released, 22 November 2026
+
+Branch `feat/file-tools`, on top of the Phase 3, part 1 branch. The coordinator has a temporary per-owner file space in memory (20 MiB per file, 100 MiB per owner, an hour after last use, gone on restart) with `file_list`, `file_send` (Telegram documents to the owner after the reply), `file_save` (a PDF into the encrypted vault) and `file_zip`; `gmail_attachment` takes `toFile: true` to put an attachment there ([journal 204](journey/204-email-search-redesign.md), [design](email-search.md#file-space-and-file-tools)).
+
+Next: independent review; rebase onto main after the attachments PR merges; release. A later change adds a browser that prints pages and emails to PDF into the same space.
+
 # Email search redesign, Phase 3, part 1: attachments, link targets and routing — tested, not yet released, 22 November 2026
 
 Branch `feat/email-receipts`. `gmail_read` and `gmail_thread` list attachments; a new read-only `gmail_attachment` returns an attachment's text (PDF, text, CSV, calendar, HTML), reading spam and trash but saving nothing, while gathering still never takes a file from either; `gmail_read` takes `links: true` for link targets, never opened. The collection and Gmail descriptions, cues, catalogue entries and the email-search skill say that finding and reading receipts is Gmail work and a collection saves files (from email, PDF attachments only, until part 3). Coordinator turns and background passes get the new tool; investigations, `parcels` and other agents do not. See [email search, Phase 3, part 1](email-search.md#phase-3-part-1-attachments-link-targets-and-routing) and [journal 204](journey/204-email-search-redesign.md).

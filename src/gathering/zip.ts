@@ -9,27 +9,18 @@ export function crc32(data: Uint8Array) {
   for (const b of data) crc = table[(crc ^ b) & 255]! ^ (crc >>> 8);
   return (crc ^ 0xffffffff) >>> 0;
 }
-/** ZIP stored entries, streamed one bounded PDF at a time. No user paths, compression bombs or executable files. */
-export async function* collectionZip(
-  gather: Gathering,
-  user: string,
-  id: string,
+/**
+ * A ZIP of stored (uncompressed) entries, one entry at a time. Names are used as given, so
+ * callers pass plain file names without paths.
+ */
+export async function* storedZip(
+  entries: AsyncIterable<{ name: string; data: Buffer }>,
 ): AsyncGenerator<Buffer> {
-  const rows = (
-    await gather.db.query(
-      "SELECT DISTINCT a.id,a.name FROM gather_items g JOIN gather_collections c ON c.id=g.collection_id AND c.user_id=g.user_id JOIN file_artifacts a ON a.id=g.artifact_id AND a.user_id=g.user_id WHERE g.collection_id=$1 AND g.user_id=$2 AND g.scope_revision=c.task_revision ORDER BY a.id",
-      [id, user],
-    )
-  ).rows;
   const central: Buffer[] = [];
   let offset = 0,
-    index = 0;
-  for (const row of rows) {
-    const file = await gather.vault.read(user, row.id),
-      name = Buffer.from(
-        `${String(++index).padStart(3, "0")}-${fileName(file.name)}`,
-        "utf8",
-      ),
+    count = 0;
+  for await (const file of entries) {
+    const name = Buffer.from(file.name, "utf8"),
       crc = crc32(file.data),
       size = file.data.length;
     const header = Buffer.alloc(30);
@@ -55,14 +46,40 @@ export async function* collectionZip(
     yield name;
     yield file.data;
     offset += header.length + name.length + size;
+    count++;
   }
   const directory = Buffer.concat(central);
   yield directory;
   const end = Buffer.alloc(22);
   end.writeUInt32LE(0x06054b50);
-  end.writeUInt16LE(rows.length, 8);
-  end.writeUInt16LE(rows.length, 10);
+  end.writeUInt16LE(count, 8);
+  end.writeUInt16LE(count, 10);
   end.writeUInt32LE(directory.length, 12);
   end.writeUInt32LE(offset, 16);
   yield end;
+}
+/** ZIP stored entries, streamed one bounded PDF at a time. No user paths, compression bombs or executable files. */
+export async function* collectionZip(
+  gather: Gathering,
+  user: string,
+  id: string,
+): AsyncGenerator<Buffer> {
+  const rows = (
+    await gather.db.query(
+      "SELECT DISTINCT a.id,a.name FROM gather_items g JOIN gather_collections c ON c.id=g.collection_id AND c.user_id=g.user_id JOIN file_artifacts a ON a.id=g.artifact_id AND a.user_id=g.user_id WHERE g.collection_id=$1 AND g.user_id=$2 AND g.scope_revision=c.task_revision ORDER BY a.id",
+      [id, user],
+    )
+  ).rows;
+  yield* storedZip(
+    (async function* () {
+      let index = 0;
+      for (const row of rows) {
+        const file = await gather.vault.read(user, row.id);
+        yield {
+          name: `${String(++index).padStart(3, "0")}-${fileName(file.name)}`,
+          data: file.data,
+        };
+      }
+    })(),
+  );
 }

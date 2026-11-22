@@ -33,6 +33,16 @@ The owner has a primary mailbox and may have a secondary one; gmail_accounts lis
 
 `gmail_attachment` with `messageId`, a `partId` from the list (`""` included) and the same `account` returns one attachment's text: a PDF's selectable text, a plain-text, CSV or calendar file decoded as UTF-8, or an HTML file converted to text as an HTML email is. A PDF is recognised by its type or a `.pdf` name. Other types have no text to read and are refused, as is a file over 20 MB. Text comes in 20,000-character windows: when `truncated` is set, call again with `offset` set to `nextOffset`; `totalChars` is the text's length. The result also gives `name` (whole, as on a single read), `mimeType`, `bytes`, the message's `folder` and, for a PDF, `pages`. The PDF reader stops at 50 pages, 200,000 characters or 20 seconds, and a scanned PDF has little or no selectable text; `note` says when either happens. Reading saves no file, and a message in spam or trash can be read.
 
+## Files
+
+The file space holds files during a conversation so they can be sent or kept. It is temporary and per owner: held in memory, a file is dropped an hour after it was last used, everything is gone after a restart, each file is at most 20 MiB, and past 100 MiB in all the oldest are dropped first.
+
+- `gmail_attachment` with `toFile: true` puts the attachment itself, of any type, into the space instead of returning its text, and returns its `fileId`, `name`, `mimeType` and `bytes`. File contents are never shown.
+- `file_list` lists the files in the space.
+- `file_send` sends files to the owner as Telegram documents in this chat and thread, right after the reply; a run that ends without a reply sends nothing.
+- `file_save` keeps a PDF in the owner's encrypted vault under a name of your choice, with a note of where it came from. The vault keeps PDFs only.
+- `file_zip` bundles files into one ZIP, a new file in the space.
+
 ## gmail_recall
 
 Offered only when the mail index is available. It searches by meaning over the primary mailbox's Primary-category mail received in the last 12 months, optionally fused with one to three keyword searches of that mailbox, and returns up to ten candidates, best first. It suits an email described by what it was about when its wording is unknown; the closest candidate is not necessarily a match, so read it before relying on it. Other mail, other categories and the other mailbox need gmail_search.

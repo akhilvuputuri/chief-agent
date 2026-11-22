@@ -38,7 +38,7 @@ export type PreparedFile = {
   name: string;
   bytes: number;
   encrypted: Buffer;
-  facts: InvoiceFacts;
+  facts: InvoiceFacts & { savedFrom?: string };
 };
 export class FileVault {
   constructor(
@@ -109,6 +109,18 @@ export class FileVault {
       ]),
       inputId,
     );
+  }
+  /**
+   * file_save: keeps a PDF from the file space under its own name (not invoice-<sha>.pdf),
+   * with a note of where it came from in its facts. The same PDF kept twice is one file.
+   */
+  async keep(user: string, name: string, bytes: Uint8Array, source: string) {
+    const file = await this.prepare(user, name, bytes);
+    return this.put(user, {
+      ...file,
+      name: fileName(name),
+      facts: { ...file.facts, savedFrom: source },
+    });
   }
   async read(user: string, id: string) {
     const row = (

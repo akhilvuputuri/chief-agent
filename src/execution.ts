@@ -102,6 +102,9 @@ export const readOperations = new Set([
   "gmail_thread",
   "gmail_attachment",
   "gmail_recall",
+  // In-memory file space; file_send and file_save are writes, to the owner only.
+  "file_list",
+  "file_zip",
   "job_list",
   "job_analyze",
   "memory_list",

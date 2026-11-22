@@ -922,6 +922,11 @@ export type GmailCallOptions = {
   attachmentsOffset?: number;
   /** gmail_attachment: the part to read, as gmail_read lists it. */
   partId?: string;
+  /**
+   * gmail_attachment: return the attachment's bytes as `data` (any type) instead of its
+   * text. The caller puts them in the file space; they never go to the model.
+   */
+  toFile?: boolean;
 };
 /** One call's retry window: waits grow exponentially with jitter until the window is used. */
 class Backoff {
@@ -1714,6 +1719,7 @@ export class GmailTools {
     id: string,
     partId: string,
     offset = 0,
+    toFile = false,
   ) {
     if (!Number.isInteger(offset) || offset < 0)
       throw new ToolValidationError(
@@ -1739,6 +1745,22 @@ export class GmailTools {
       throw new ToolValidationError(
         "This attachment is larger than 20 MB, so it is not read",
       );
+    if (toFile) {
+      const data = await this.partBytes(token, id, found.part.body!, listed);
+      return {
+        warning: UNTRUSTED,
+        account: "primary",
+        email: this.config.email,
+        messageId: id,
+        partId,
+        name,
+        ...(nameTruncated ? { nameTruncated } : {}),
+        mimeType,
+        bytes: data.length,
+        folder: folder(m.labelIds),
+        data,
+      };
+    }
     const kind = readableKind(mimeType!, found.part.filename ?? "");
     if (!kind)
       throw new ToolValidationError(
@@ -1930,7 +1952,13 @@ export class GmailTools {
       operation === "gmail_thread"
         ? await this.thread(token, value)
         : operation === "gmail_attachment"
-          ? await this.attachment(token, value, options.partId!, options.offset)
+          ? await this.attachment(
+              token,
+              value,
+              options.partId!,
+              options.offset,
+              options.toFile,
+            )
           : await this.read(
               token,
               value,

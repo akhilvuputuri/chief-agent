@@ -24,6 +24,11 @@ export const CORE_OPERATIONS = new Set([
   "gather_status",
   "tools_load",
   "agent_run",
+  // The file space (src/file-space.ts): general tools for any file a tool puts there.
+  "file_list",
+  "file_send",
+  "file_save",
+  "file_zip",
 ]);
 
 export const TOOL_DOMAINS = [

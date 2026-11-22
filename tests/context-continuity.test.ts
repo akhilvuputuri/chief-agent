@@ -53,7 +53,8 @@ function toolGroup(name: string, result: unknown, id = name): Message[] {
 // own schemas and instructions have since grown past that (55,014 with memory_forget, 13
 // November 2026; 55,998 with the complete Gmail tool descriptions, 22 November 2026; 56,583
 // with the email-search pointer once the coordinator searches Gmail itself, the same day; 58,958
-// with gmail_attachment, attachment lists and link targets described, Phase 3, the same day), so the
+// with gmail_attachment, attachment lists and link targets described, Phase 3, the same day; 60,943
+// with the file-space tools, the same day), so the
 // fixture pads to a round size above them with room for the tool descriptions to keep
 // growing; the tests need a fixed context of this order, not that exact figure.
 const FIXED_SIZE = 64000;
@@ -1042,7 +1043,10 @@ test("older history stays the same across a turn's calls as its results grow", (
       answer(`Earlier answer ${i} ` + "a".repeat(600)),
     );
   older.push(user("Thanks"), answer("You are welcome."));
-  const runtime = runtimeContext({ web: true }, null);
+  // The coordinator's core tools only: with every tool definition the fixed part leaves
+  // less than the history floor under the soft budget (since the file-space tools, 22
+  // November 2026), and the floor alone cannot show the allowance freezing.
+  const runtime = runtimeContext({ web: true }, null, undefined, new Set());
   const call = (results: number, historyAllowance?: number) => {
     const turn: Message[] = [user("Do the task")];
     for (let i = 0; i < results; i++)

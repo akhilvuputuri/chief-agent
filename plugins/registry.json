@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "3a95b3ba73922da00e1a11ca77818ae43459615a3e2784fff4c56c0f2af9291e",
+      "sha256": "c9c134e23a4df49632ddbd8c6b59420be714db84e52ac9ae3796a259d39843cd",
       "agents": [
         "parcels",
         "subscriptions",

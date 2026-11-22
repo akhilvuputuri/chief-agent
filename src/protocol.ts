@@ -84,6 +84,8 @@ const monitoringWindow = z
   })
   .strict();
 const text = z.string().min(1).max(20000);
+// A file space handle (src/file-space.ts).
+const fileId = z.string().regex(/^f-[a-f0-9]{12}$/);
 export const status = z.enum([
   "saved",
   "interested",
@@ -613,6 +615,30 @@ export const action = z.discriminatedUnion("operation", [
         .min(0)
         .max(20 * 1024 * 1024)
         .optional(),
+      // Puts the attachment's bytes in the file space instead of returning its text.
+      toFile: z.boolean().optional(),
+    })
+    .strict(),
+  z.object({ operation: z.literal("file_list") }).strict(),
+  z
+    .object({
+      operation: z.literal("file_send"),
+      fileIds: z.array(fileId).min(1).max(10),
+      caption: z.string().min(1).max(1024).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("file_save"),
+      fileId,
+      name: z.string().min(1).max(200).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("file_zip"),
+      fileIds: z.array(fileId).min(2).max(50),
+      name: z.string().min(1).max(200),
     })
     .strict(),
   z

@@ -8,9 +8,9 @@ import {
 } from "./telegram-topics.js";
 
 /**
- * Sends the pictures queued for a run (and the agent runs it started) to the
- * owner, after that run's text reply, in the same thread. Used for direct
- * replies and for background work replies alike. Each picture is sent on its
+ * Sends the pictures and documents queued for a run (and the agent runs it
+ * started) to the owner, after that run's text reply, in the same thread. Used for direct
+ * replies and for background work replies alike. Each item is sent on its
  * own: one failure is logged and the rest still go. If delivery is withheld
  * part-way, the rest are dropped rather than sent late.
  */
@@ -42,7 +42,9 @@ export async function sendRunMedia(
         const options = { ...extra, caption: item.caption };
         return item.kind === "animation"
           ? api.sendAnimation(user, file, options).then(() => {})
-          : api.sendPhoto(user, file, options).then(() => {});
+          : item.kind === "document"
+            ? api.sendDocument(user, file, options).then(() => {})
+            : api.sendPhoto(user, file, options).then(() => {});
       });
       sent++;
     } catch (error) {
