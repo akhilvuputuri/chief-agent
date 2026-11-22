@@ -94,6 +94,8 @@ Measured, tools only, read-only against the real mailbox on 22 November 2026 (ru
 
 Not measured: whether the email agent now finds the 13 receipts or how the eval scores move (no baseline or Phase 1 run of the eval yet); Gmail's per-user quota under heavy paging; model token cost per email task.
 
+> **Update, 22 November 2026 ([journal 204](journey/204-email-search-redesign.md#release-closure--2026-11-22)):** Phase 1 is live in `4ee82e6`. The eval ran on 15 private tasks before (`4586732`) and after, with the email agent's instructions, `claude-haiku-5.5` and 10 steps, one run each: expected emails found went from 115 to 131 of 144 and surfaced from 120 to 144; the receipts task went from 1 to 12 of 12. The journal has the full table and caveats.
+
 ## Eval
 
 `src/email-eval.ts` is an operator-run script, following [the mail recall eval](mail-recall.md#eval). It runs inside the production gateway container, reads the private tasks from standard input, and prints one private line per task and a summary line.

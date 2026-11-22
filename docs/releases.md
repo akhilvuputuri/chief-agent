@@ -1,3 +1,12 @@
+## Email search redesign: the eval and the Gmail tools (22 November 2026)
+
+- **Code.** Phase 0: `src/email-eval.ts`, an operator-run eval that replays private tasks through the real Gmail tools and scores found, surfaced, readable and extra messages. Phase 1: `gmail_read` and `gmail_thread` read HTML-only mail as text; `gmail_read` shows 20,000 characters with `offset`, or up to 25 `messageIds` at once; threads show up to 50 messages; search pages go up to 100 rows with batched metadata, received time, category and folder, calendar dates as Singapore midnight and guidance on an empty page; Gmail rate limits are `RATE_LIMITED` and retried; the per-run Gmail request budget is removed. No migration or Compose change.
+- **Why.** Chief reported 4 of 13 monthly receipt emails that existed. See [journal 204](journey/204-email-search-redesign.md) and [email search](email-search.md).
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `03b028a`, `fbdeeb42`, `b727a5f` and `9f0758b` and approved `5e7913eb`; the eval's scoring was approved separately at `9f0758b`.
+- **Deployment.** Phase 0: PR 519 merged as `4586732`, release run 44994632126 succeeded. Phase 1: PR 520 merged as `4ee82e6` on 22 November, release run 45001140371 succeeded; the host reports `4ee82e6` with a healthy gateway, and the mail index loaded 1,499 messages with none omitted.
+- **Measured.** On 15 private tasks with 144 expected emails, the same arm before and after (the email agent's instructions, `claude-haiku-5.5`, 10 steps, one run each): found 115 → 131, surfaced in search results 120 → 144, tasks fully found 12 → 14 of 15, lookup answers 2 → 3 of 3, model cost $0.025 → $0.072. The receipts task went from 1 to 12 of 12. Details and caveats in journal 204.
+- **Not measured.** The coordinator using the tools, a real Telegram turn, token cost in real use.
+
 ## A reused test database is planned as a fresh one (22 November 2026)
 
 - **Code.** Tests only. The test database pool's reset (`tests/helpers/pglite.ts`) puts back the table sizes the planner reads from `pg_class`, which its vacuum had changed, and no longer reuses a database a test has run `ANALYZE` in. Two regression tests. No runtime code, migration, Compose change or worker image.

@@ -1,3 +1,9 @@
+# Email search redesign, Phases 0 and 1 — live in `4ee82e6`, 22 November 2026
+
+Phase 0 (the eval, PR 519, `4586732`) and Phase 1 (the Gmail tools, PR 520, `4ee82e6`) are live; the gateway is healthy on `4ee82e6` and the mail index loaded 1,499 messages. Measured on 15 private tasks, the same email-agent arm before and after Phase 1 found 115 and then 131 of 144 expected emails, and surfaced 120 and then 144 in search results; the receipts task went from 1 to 12 of 12 ([journal 204](journey/204-email-search-redesign.md#release-closure--2026-11-22)).
+
+Next: Phase 2, the coordinator gets the Gmail tools and an `email-search` skill, and the email agent is retired. Open low items: an unclosed script or style element leaks into read text; retry waits cannot be interrupted by a cancelled turn; the header fit shortens escape-dense headers more than needed.
+
 # A reused test database is planned as a fresh one — tested, not yet released, 22 November 2026
 
 Tests only. `tests/test-db-pool.test.ts` failed in a full local run because a reused database returned an unordered read in index order. The reset's vacuum had left tables marked as vacuumed, which changes the plan under PGlite's disabled sequential scans; which files shared a process decided whether it showed, not load. The reset now restores the planner's sizes, at about 1 ms a reuse ([journal 206](journey/206-reused-database-planned-differently.md)).
