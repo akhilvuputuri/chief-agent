@@ -192,7 +192,7 @@ function boundary(text: string, i: number) {
     : i;
 }
 /** At most `max` UTF-16 units of `text`, never ending on half a surrogate pair. */
-function cut(text: string, max: number) {
+export function cut(text: string, max: number) {
   return text.slice(0, boundary(text, Math.min(max, text.length)));
 }
 function header(
@@ -396,6 +396,56 @@ type TextWindow = {
   offset?: number;
   totalChars?: number;
 };
+/**
+ * Serialised room a single read's headers always keep when a result is too large; beyond
+ * it the body has priority, so real headers never crowd out its full 20,000 characters.
+ */
+const HEADER_SHARE = 40_000;
+/**
+ * Sender-controlled headers can be long and escape-dense. When a single read would not
+ * fit the projection, the headers are levelled down, longest first with escaping counted
+ * and cuts on code points, to whatever room the rest of the result leaves, but never
+ * below HEADER_SHARE; the body is shortened after that. Shortened headers are named in
+ * headersTruncated, so the warning stays the first key whatever the headers contain.
+ */
+function fitHeaders(
+  result: Record<string, unknown>,
+  headers: { name: string; value: string }[],
+) {
+  const size = (value: string) => JSON.stringify(value).length;
+  const total = () => JSON.stringify(headers).length;
+  const shortened = new Set<string>();
+  // Escaping makes the serialised size only roughly proportional to the cut, so a few
+  // passes may be needed; each one cuts every header above an even per-header cap.
+  for (let pass = 0; pass < 8; pass++) {
+    const rest = JSON.stringify(result).length - total();
+    if (JSON.stringify(result).length <= SERIALISED_LIMIT) break;
+    // A little under the room left, so rounding in the cut never spills onto the body.
+    const target = Math.max(HEADER_SHARE, SERIALISED_LIMIT - rest - 1_000);
+    const over = total() - target;
+    if (over <= 0) break;
+    // The largest cap whose total over all values (sizes above it cut to it) frees `over`.
+    const sizes = headers.map((h) => size(h.value)).sort((x, y) => y - x);
+    let cap = 0;
+    for (let k = 1, freed = 0; k <= sizes.length; k++) {
+      const below = sizes[k] ?? 0;
+      const step = (sizes[k - 1]! - below) * k;
+      if (freed + step >= over) {
+        cap = sizes[k - 1]! - Math.ceil((over - freed) / k);
+        break;
+      }
+      freed += step;
+    }
+    for (const h of headers) {
+      const current = size(h.value);
+      if (current <= cap) continue;
+      const ratio = Math.max(1, (current - 2) / Math.max(1, h.value.length));
+      h.value = cut(h.value, Math.max(0, Math.floor((cap - 2) / ratio)));
+      shortened.add(h.name);
+    }
+  }
+  if (shortened.size) result.headersTruncated = [...shortened];
+}
 /** Shortens the longest text until the serialised result fits the projection. */
 function fitText<T extends object>(result: T, messages: TextWindow[]) {
   for (;;) {
@@ -406,7 +456,15 @@ function fitText<T extends object>(result: T, messages: TextWindow[]) {
       undefined,
     );
     if (!longest?.text) return result;
-    const keep = Math.max(0, longest.text.length - Math.max(over, 500));
+    // Convert the serialised excess to characters at this text's escaping ratio.
+    const ratio = Math.max(
+      1,
+      (JSON.stringify(longest.text).length - 2) / longest.text.length,
+    );
+    const keep = Math.max(
+      0,
+      longest.text.length - Math.ceil(Math.max(over, 500) / ratio),
+    );
     const total =
       longest.totalChars ?? (longest.offset ?? 0) + longest.text.length;
     longest.text = cut(longest.text, keep);
@@ -874,13 +932,15 @@ export class GmailTools {
         "offset must be a whole number of characters",
       );
     const m = await this.message(token, id);
+    const headers = fullHeaders(m.payload?.headers);
     const result: Record<string, unknown> & TextWindow = {
       warning: UNTRUSTED,
       id: m.id,
       threadId: m.threadId,
-      headers: fullHeaders(m.payload?.headers),
+      headers,
       ...bodyWindow(m, offset, MESSAGE_CHARS),
     };
+    fitHeaders(result, headers);
     fitText(result, [result]);
     if (result.truncated)
       result.note = `Text continues: call gmail_read with this messageId and offset ${result.nextOffset} for the rest.`;

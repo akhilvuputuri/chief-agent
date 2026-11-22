@@ -1831,3 +1831,88 @@ test("only an operator at the start of a token is rewritten, never to a non-posi
   // 2 January 1970 is the first Singapore midnight with a positive epoch.
   assert.equal(singaporeDates("after:1970/01/02"), "after:57600");
 });
+
+/** A single message whose five full headers all carry `value`, with a 30,000-character body. */
+function headerHeavy(value: string, body = "b".repeat(30_000)) {
+  return routed(() => ({
+    id: "abc",
+    threadId: "fabc",
+    payload: {
+      headers: ["From", "To", "Cc", "Subject", "Date"].map((name) => ({
+        name,
+        value,
+      })),
+      ...plain(body),
+    },
+  }));
+}
+
+test("escape-dense maximal headers are shortened so the warning still leads the projection", async () => {
+  // Quotes serialise as two characters and control characters as six, so five
+  // 20,000-character headers would serialise to 200,000 or 600,000 characters.
+  for (const dense of ['"', "\u0001", "h"]) {
+    const r = headerHeavy(dense.repeat(25_000));
+    const out: any = await new GmailTools(config, r.request).call(
+      "123",
+      "gmail_read",
+      "abc",
+    );
+    const projected = assertProjects(out, "gmail_read");
+    assert.equal(projected.excerpt, undefined);
+    // Levelled evenly, all five named, and the body keeps its full 20,000.
+    assert.deepEqual(out.headersTruncated, [
+      "from",
+      "to",
+      "cc",
+      "subject",
+      "date",
+    ]);
+    assert.equal(new Set(out.headers.map((h: any) => h.value.length)).size, 1);
+    assert.ok(out.headers[0].value.length > 0);
+    assert.equal(out.text.length, 20_000);
+    assert.equal(out.nextOffset, 20_000);
+  }
+});
+
+test("when the body itself is escape-dense, headers keep their share and the body is cut", async () => {
+  const r = headerHeavy("\u0001".repeat(25_000), "\u0001".repeat(30_000));
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_read",
+    "abc",
+  );
+  assertProjects(out, "gmail_read");
+  const headers = JSON.stringify(out.headers).length;
+  assert.ok(headers <= 40_100 && headers > 38_000, `headers ${headers}`);
+  assert.ok(out.text.length > 5_000 && out.text.length < 20_000);
+  assert.equal(out.nextOffset, out.text.length);
+  assert.equal(out.truncated, true);
+});
+
+test("ordinary long recipient lists are returned uncut", async () => {
+  const to = Array.from(
+    { length: 200 },
+    (_, i) => `"Person ${i}" <person${i}@example.com>`,
+  ).join(", ");
+  assert.ok(to.length > 6000);
+  const r = routed(() => ({
+    id: "abc",
+    threadId: "fabc",
+    payload: {
+      headers: [
+        { name: "To", value: to },
+        { name: "Cc", value: to },
+      ],
+      ...plain("c".repeat(30_000)),
+    },
+  }));
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_read",
+    "abc",
+  );
+  assert.equal(out.headersTruncated, undefined);
+  assert.equal(out.headers.find((h: any) => h.name === "to").value, to);
+  assert.equal(out.headers.find((h: any) => h.name === "cc").value, to);
+  assert.equal(out.text.length, 20_000);
+});
