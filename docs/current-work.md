@@ -4,6 +4,8 @@ Tests only. `tests/test-db-pool.test.ts` failed in a full local run because a re
 
 Next: review and merge.
 
+> **Update, 22 November 2026:** live. Merged as `2abfda6` (PR 523) after independent review of its exact head `4ce7fe6c`; release run 45002901284 succeeded. Nothing further is planned here.
+
 # Email search redesign, Phase 1 tools — tested, not yet released, 22 November 2026
 
 Branch `fix/gmail-tools`. `gmail_read` and `gmail_thread` read HTML-only mail as converted text; `gmail_read` shows 20,000 characters with `offset` continuation or reads up to 25 `messageIds` at once; threads show up to 50 messages; search pages go up to 100 with batched metadata, Singapore dates and empty-result guidance; Gmail rate limits are reported as `RATE_LIMITED`; the per-run Gmail request budget is removed under the owner's direction that limits stay only for safety or result size. The email eval scores the new shapes. Three independent review rounds; the last approved `2907c5a`. Tools checked read-only on real mail; the eval has not been run. See [email search, Phase 1](email-search.md#phase-1-tools) and [journal 204](journey/204-email-search-redesign.md).
