@@ -588,6 +588,24 @@ export const action = z.discriminatedUnion("operation", [
         .min(1)
         .max(25)
         .optional(),
+      // With a single messageId only; the Gmail adapter rejects it with messageIds.
+      links: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("gmail_attachment"),
+      account: z.string().min(1).max(254).optional(),
+      messageId: z.string().regex(/^[a-f0-9]{1,64}$/i),
+      // A part number as gmail_read lists it (PART_ID in src/gmail.ts).
+      partId: z.string().regex(/^\d{1,3}(?:\.\d{1,3}){0,16}$/),
+      // A text file can be as long as its 20 MB.
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .max(20 * 1024 * 1024)
+        .optional(),
     })
     .strict(),
   z

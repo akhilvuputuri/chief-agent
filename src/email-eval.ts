@@ -57,7 +57,12 @@ export const GMAIL_OPERATIONS = [
   "gmail_thread",
   "gmail_read",
 ] as const;
-type GmailOperation = (typeof GMAIL_OPERATIONS)[number];
+/** A coordinator turn also has gmail_attachment (Phase 3); the retired agent never did. */
+const COORDINATOR_GMAIL_OPERATIONS = [
+  ...GMAIL_OPERATIONS,
+  "gmail_attachment",
+] as const;
+type GmailOperation = (typeof COORDINATOR_GMAIL_OPERATIONS)[number];
 const REPORT = "eval_report";
 /**
  * The retired email agent (plugins/core/agents/email.md and its plugin.json entry as shipped in
@@ -645,8 +650,14 @@ export async function runTask(
               a.operation === "gmail_search"
                 ? { pageSize: a.pageSize }
                 : a.operation === "gmail_read"
-                  ? { offset: a.offset, messageIds: a.messageIds }
-                  : {},
+                  ? {
+                      offset: a.offset,
+                      messageIds: a.messageIds,
+                      links: a.links,
+                    }
+                  : a.operation === "gmail_attachment"
+                    ? { partId: a.partId, offset: a.offset }
+                    : {},
             );
             const projected = projectObservation(
               a.operation,
@@ -657,7 +668,11 @@ export async function runTask(
               typeof result?.account === "string" ? result.account : "primary";
             if (a.operation === "gmail_search")
               surfacedIn(projected.result, mailbox, record);
-            else if (a.operation !== "gmail_accounts")
+            // Attachment text is not an email body, so it scores nothing.
+            else if (
+              a.operation === "gmail_read" ||
+              a.operation === "gmail_thread"
+            )
               bodiesIn(a.operation, projected.result, mailbox, record);
             content = projected;
           }
@@ -832,9 +847,11 @@ export function summarise(scores: TaskScore[], arm: Record<string, unknown>) {
 }
 
 /** The tool definitions the runtime itself offers, so the eval follows later tool changes. */
-export function gmailToolDefinitions(): ToolDefinition[] {
+export function gmailToolDefinitions(
+  operations: readonly string[] = GMAIL_OPERATIONS,
+): ToolDefinition[] {
   const tools = runtimeContext({ gmail: true }, null).tools;
-  return GMAIL_OPERATIONS.map((name) => {
+  return operations.map((name) => {
     const tool = tools.find((t) => t.name === name);
     if (!tool) throw new Error(`The runtime does not define ${name}`);
     return tool;
@@ -884,7 +901,7 @@ export function coordinatorTools(): ToolDefinition[] {
     true,
   ).tools.find((t) => t.name === "skill_read");
   if (!skillRead) throw new Error("The runtime does not define skill_read");
-  return [...gmailToolDefinitions(), skillRead];
+  return [...gmailToolDefinitions(COORDINATOR_GMAIL_OPERATIONS), skillRead];
 }
 
 /**

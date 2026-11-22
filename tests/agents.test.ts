@@ -91,6 +91,7 @@ test("the coordinator is offered agent_run and a catalogue instead of domain too
     [...names(r)].filter((n) => n.startsWith("gmail_")).sort();
   assert.deepEqual(gmail(chief), [
     "gmail_accounts",
+    "gmail_attachment",
     "gmail_read",
     "gmail_search",
     "gmail_thread",
@@ -107,6 +108,7 @@ test("the coordinator is offered agent_run and a catalogue instead of domain too
     ),
     [
       "gmail_accounts",
+      "gmail_attachment",
       "gmail_read",
       "gmail_recall",
       "gmail_search",
@@ -275,13 +277,15 @@ test("a background task pass (routines run this way) is offered the Gmail tools 
       await assistant.resumeDetailed("owner", task);
       assert.ok(offered.length);
       // Before journal 204's Phase 2 this pass reached the same five tools through
-      // agent_run email (gmail_accounts, gmail_search, gmail_thread, gmail_read, gmail_recall).
+      // agent_run email (gmail_accounts, gmail_search, gmail_thread, gmail_read, gmail_recall);
+      // Phase 3 adds gmail_attachment, exactly as for a foreground turn.
       for (const tools of offered)
         assert.deepEqual(
           tools.filter((n) => n.startsWith("gmail_")).sort(),
           gmail
             ? [
                 "gmail_accounts",
+                "gmail_attachment",
                 "gmail_read",
                 "gmail_recall",
                 "gmail_search",

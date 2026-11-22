@@ -469,6 +469,9 @@ export class Responsibilities {
     // Unattended reads stay one confirmed message per call, so each read is checked alone.
     if (a.operation === "gmail_read" && a.messageIds)
       fail("Read one confirmed candidate message per gmail_read call");
+    // Link targets are for the owner's own turns; an unattended run gains nothing new.
+    if (a.operation === "gmail_read" && a.links)
+      fail("Link targets are not read in a responsibility investigation");
     if (a.operation === "gmail_read" || a.operation === "parcel_record") {
       const candidate = s.candidates.find(
         (c) =>

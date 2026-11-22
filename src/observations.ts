@@ -1,11 +1,12 @@
 const DEFAULT_LIMITS = { field: 8000, total: 12000 };
-// Email reads return whole messages and a full search page by design (src/gmail.ts
-// bounds each result below `total`); every other tool keeps the default limits.
+// Email reads return whole messages, attachment text and a full search page by design
+// (src/gmail.ts bounds each result below `total`); every other tool keeps the default limits.
 const EMAIL_LIMITS = { field: 20_000, total: 110_000 };
 const LIMITS: Record<string, { field: number; total: number }> = {
   gmail_search: EMAIL_LIMITS,
   gmail_thread: EMAIL_LIMITS,
   gmail_read: EMAIL_LIMITS,
+  gmail_attachment: EMAIL_LIMITS,
 };
 /** Longest payload field and serialised result an operation's projection keeps whole. */
 export function projectionLimits(operation: string) {

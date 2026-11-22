@@ -56,7 +56,8 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   mcp: "connected remote MCP tools, Reader brief saving and submission status",
   links:
     "saving a shared link: classify it as study material or offline reading, the study list, moving between it and Reader",
-  gmail: "read-only Gmail search/thread/read across connected accounts",
+  gmail:
+    "read-only Gmail search, thread and message reads and attachment text across connected accounts, receipts and invoices included",
   calendar: "Calendar lookups and approval-gated event drafts",
   daily: "saved items, reminders, briefings and the daily Sheet",
   jobs: "saved roles, analysis, alignment scopes, preparation and its Sheet",
@@ -150,7 +151,8 @@ const CUES: [ToolDomain, RegExp][] = [
   ],
   [
     "gathering",
-    /\b(gather|collect|download|retrieve|find).{0,70}\b(invoices?|receipts?|billing documents?)\b|\b(invoice collection|billing portal|browser login|gathering task)\b|\[Attached invoice PDF/i,
+    // A saving verb near the documents: finding or reading receipts is Gmail work.
+    /\b(save[ds]?|saving|download\w*|keep|kept|export\w*|zip\w*|collect\w*|gather\w*)\b.{0,70}\b(invoices?|receipts?|billing documents?|pdfs?)\b|\b(invoice collection|billing portal|browser login|gathering task)\b|\[Attached invoice PDF/i,
   ],
   [
     "responsibilities",
@@ -158,7 +160,7 @@ const CUES: [ToolDomain, RegExp][] = [
   ],
   [
     "gmail",
-    /\b(e-?mails?|mails?|inbox|gmail|senders?|newsletters?|unread|messages? from|new messages|repl(y|ies|ied)|threads?)\b/i,
+    /\b(e-?mails?|mails?|inbox|gmail|senders?|newsletters?|unread|messages? from|new messages|repl(y|ies|ied)|threads?|receipts?|invoices?|statements?|charge[ds]?|billed)\b/i,
   ],
   [
     "calendar",

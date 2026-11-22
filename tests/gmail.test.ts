@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   GmailTools,
   indexBody,
+  linkTargets,
   readerText,
   searchesSpamOrTrash,
   plainBody,
@@ -2391,4 +2392,656 @@ test("a page's batches go one after another, at most 25 parts each", async () =>
     out.results.map((x: any) => x.id),
     ids,
   );
+});
+
+// Phase 3, part 1 (journal 204): attachment lists, gmail_attachment and link targets.
+
+/** A one-page PDF whose selectable text extractPdfText reads, as tests/gathering.test.ts builds one. */
+function pdf(text: string) {
+  const body = `BT /F1 12 Tf 40 720 Td (${text.replace(/[\\()]/g, (c) => "\\" + c)}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${Buffer.byteLength(body)} >>\nstream\n${body}\nendstream`,
+  ];
+  let output = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [i, obj] of objects.entries()) {
+    offsets.push(Buffer.byteLength(output));
+    output += `${i + 1} 0 obj\n${obj}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(output);
+  output +=
+    "xref\n0 6\n0000000000 65535 f \n" +
+    offsets
+      .slice(1)
+      .map((n) => `${String(n).padStart(10, "0")} 00000 n \n`)
+      .join("") +
+    `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(output);
+}
+const file = (
+  filename: string,
+  mimeType: string,
+  body: { data?: string; attachmentId?: string; size?: number },
+) => ({ filename, mimeType, body });
+const inline = (filename: string, mimeType: string, content: Buffer | string) =>
+  file(filename, mimeType, {
+    data: Buffer.from(content).toString("base64url"),
+    size: Buffer.byteLength(content),
+  });
+/** A route table for one message (and, optionally, its attachment endpoint). */
+function withMessage(
+  parts: object[],
+  extra: { labelIds?: string[]; attachments?: Record<string, Buffer> } = {},
+) {
+  return (url: URL) => {
+    const at = /\/messages\/abc\/attachments\/([^/]+)$/.exec(url.pathname);
+    if (at) {
+      const bytes = extra.attachments?.[decodeURIComponent(at[1]!)];
+      return bytes
+        ? { data: bytes.toString("base64url"), size: bytes.length }
+        : new Reply(404, { error: { code: 404 } });
+    }
+    return {
+      id: "abc",
+      threadId: "fabc",
+      labelIds: extra.labelIds ?? ["INBOX"],
+      payload: {
+        headers: [{ name: "Subject", value: "Your receipt" }],
+        mimeType: "multipart/mixed",
+        parts: [
+          {
+            mimeType: "multipart/alternative",
+            parts: [plain("Thanks for your order"), html("<p>Thanks</p>")],
+          },
+          ...parts,
+        ],
+      },
+    };
+  };
+}
+const attachmentCall = (
+  g: GmailTools,
+  partId: string,
+  offset?: number,
+  account?: string,
+) =>
+  g.call("123", "gmail_attachment", "abc", undefined, undefined, account, {
+    partId,
+    offset,
+  }) as Promise<any>;
+
+test("a single read lists attachments from the payload it already fetched", async () => {
+  const emoji = "\u{1F600}";
+  const r = routed(
+    withMessage([
+      file("invoice.pdf", "application/pdf", {
+        attachmentId: "att1",
+        size: 10,
+      }),
+      // An inline image with a filename counts; one without a filename does not.
+      file("logo.png", "image/png", { attachmentId: "att2", size: 20 }),
+      { mimeType: "image/gif", body: { data: "R0lG", size: 3 } },
+      file("in\u0001voice‮\u0007.csv", "TEXT/CSV", { data: "YQ", size: 1 }),
+      file("n".repeat(119) + emoji + ".txt", "text/plain", {
+        attachmentId: "att3",
+        size: 5,
+      }),
+      // A filename without any body is not a file Gmail can return.
+      { filename: "empty.txt", mimeType: "text/plain" },
+    ]),
+  );
+  const out: any = await new GmailTools(
+    config,
+    r.request,
+    Date.now,
+    instant,
+  ).call("123", "gmail_read", "abc");
+  assert.equal(Object.keys(out)[0], "warning");
+  assert.equal(out.text, "Thanks for your order");
+  assert.deepEqual(out.attachments, [
+    {
+      partId: "1",
+      name: "invoice.pdf",
+      mimeType: "application/pdf",
+      bytes: 10,
+    },
+    { partId: "2", name: "logo.png", mimeType: "image/png", bytes: 20 },
+    { partId: "4", name: "invoice.csv", mimeType: "text/csv", bytes: 1 },
+    { partId: "5", name: "n".repeat(119), mimeType: "text/plain", bytes: 5 },
+  ]);
+  assert.equal(out.attachmentsOmitted, undefined);
+  // Listed from the one message request: no attachment was fetched.
+  assert.deepEqual(
+    r.calls.filter((c) => c.includes("/messages/")),
+    ["/gmail/v1/users/me/messages/abc?format=full"],
+  );
+  assertProjects(out, "gmail_read");
+});
+
+test("attachment lists stop at 20 per message in a single read, a batch read and a thread", async () => {
+  const many = Array.from({ length: 25 }, (_, i) =>
+    file(`receipt-${i}.pdf`, "application/pdf", {
+      attachmentId: `a${i}`,
+      size: 100,
+    }),
+  );
+  const message = (id: string) => ({
+    id,
+    threadId: "fabc",
+    internalDate: "1",
+    payload: { mimeType: "multipart/mixed", parts: [plain("x"), ...many] },
+  });
+  const r = routed((url) =>
+    url.pathname.includes("/threads/")
+      ? { id: "fabc", messages: [message("abc"), message("abd")] }
+      : message(url.pathname.split("/").pop()!),
+  );
+  const g = new GmailTools(config, r.request, Date.now, instant);
+  const one: any = await g.call("123", "gmail_read", "abc");
+  const batch: any = await g.call(
+    "123",
+    "gmail_read",
+    "",
+    undefined,
+    undefined,
+    undefined,
+    { messageIds: ["abc", "abd"] },
+  );
+  const thread: any = await g.call("123", "gmail_thread", "fabc");
+  for (const entry of [one, ...batch.messages, ...thread.messages]) {
+    assert.equal(entry.attachments.length, 20);
+    assert.equal(entry.attachments[19].partId, "20");
+    assert.equal(entry.attachmentsOmitted, 5);
+  }
+  assert.match(thread.note, /gmail_attachment/);
+  assert.match(batch.note, /gmail_attachment/);
+});
+
+test("escape-dense attachment names and types keep the warning first in a batch, a thread and a single read", async () => {
+  const dense = Array.from({ length: 20 }, (_, i) =>
+    file('"'.repeat(300) + i, '"'.repeat(300), {
+      attachmentId: `a${i}`,
+      size: 1,
+    }),
+  );
+  const message = (id: string, i = 0, body = 10_000) => ({
+    id,
+    threadId: "fabc",
+    internalDate: String(i + 1),
+    payload: {
+      mimeType: "multipart/mixed",
+      parts: [plain('\\"'.repeat(body)), ...dense],
+    },
+  });
+  const ids = Array.from({ length: 25 }, (_, i) => `b${i}`);
+  const r = routed((url) =>
+    url.pathname.includes("/threads/")
+      ? {
+          id: "fabc",
+          // Shorter bodies keep 50 messages inside the response guard.
+          messages: Array.from({ length: 50 }, (_, i) =>
+            message(`c${i}`, i, 1_000),
+          ),
+        }
+      : message(url.pathname.split("/").pop()!),
+  );
+  const g = new GmailTools(config, r.request, Date.now, instant);
+  const batch: any = await g.call(
+    "123",
+    "gmail_read",
+    "",
+    undefined,
+    undefined,
+    undefined,
+    { messageIds: ids },
+  );
+  const projected = assertProjects(batch, "gmail_read");
+  assert.equal(projected.messages.length, 25);
+  // Names were shortened to 120 characters and types to 100 before any were dropped.
+  const kept = batch.messages.flatMap((m: any) => m.attachments);
+  assert.ok(kept.every((a: any) => a.name.length <= 120));
+  assert.ok(kept.every((a: any) => a.mimeType.length <= 100));
+  assert.ok(batch.messages.some((m: any) => m.attachmentsOmitted > 0));
+  assertProjects(await g.call("123", "gmail_thread", "fabc"), "gmail_thread");
+  const one: any = await g.call("123", "gmail_read", "abc");
+  assertProjects(one, "gmail_read");
+  assert.equal(one.attachments.length, 20);
+});
+
+test("gmail_attachment reads a PDF's text with the existing extractor", async () => {
+  const bytes = pdf("Invoice total SGD 4.98");
+  const r = routed(
+    withMessage(
+      [
+        file("invoice.pdf", "application/pdf", {
+          attachmentId: "att1",
+          size: bytes.length,
+        }),
+      ],
+      { attachments: { att1: bytes } },
+    ),
+  );
+  const out = await attachmentCall(
+    new GmailTools(config, r.request, Date.now, instant),
+    "1",
+  );
+  assert.deepEqual(Object.keys(out).slice(0, 10), [
+    "warning",
+    "account",
+    "email",
+    "messageId",
+    "partId",
+    "name",
+    "mimeType",
+    "bytes",
+    "folder",
+    "pages",
+  ]);
+  assert.equal(out.account, "primary");
+  assert.equal(out.email, config.email);
+  assert.equal(out.name, "invoice.pdf");
+  assert.equal(out.bytes, bytes.length);
+  assert.equal(out.folder, "inbox");
+  assert.equal(out.pages, 1);
+  assert.match(out.text, /Invoice total SGD 4\.98/);
+  assert.equal(out.truncated, false);
+  assert.equal(out.totalChars, out.text.length);
+  assert.match(out.warning, /Untrusted email content/);
+  assertProjects(out, "gmail_attachment");
+  // A PDF sent as a generic type is recognised by its name, as gathering recognises one.
+  const generic = routed(
+    withMessage([inline("statement.PDF", "application/octet-stream", bytes)]),
+  );
+  const named = await attachmentCall(
+    new GmailTools(config, generic.request, Date.now, instant),
+    "1",
+  );
+  assert.match(named.text, /Invoice total/);
+});
+
+test("gmail_attachment decodes text, CSV and calendar files and converts HTML", async () => {
+  const r = routed(
+    withMessage([
+      inline("notes.txt", "text/plain", "Line one\nCafé \u{1F600}"),
+      inline("items.csv", "text/csv", "item,amount\nCloud,4.98\n"),
+      inline("event.ics", "text/calendar", "BEGIN:VCALENDAR\nEND:VCALENDAR"),
+      inline(
+        "receipt.html",
+        "text/html",
+        '<html><head><script>steal()</script></head><body><table><tr><td>Plan</td><td>SGD&nbsp;4.98</td></tr></table><a href="https://example.com/x">Manage</a></body></html>',
+      ),
+    ]),
+  );
+  const g = new GmailTools(config, r.request, Date.now, instant);
+  assert.equal((await attachmentCall(g, "1")).text, "Line one\nCafé \u{1F600}");
+  assert.equal(
+    (await attachmentCall(g, "2")).text,
+    "item,amount\nCloud,4.98\n",
+  );
+  assert.match((await attachmentCall(g, "3")).text, /^BEGIN:VCALENDAR/);
+  const page = await attachmentCall(g, "4");
+  assert.equal(page.text, "Plan\tSGD 4.98\nManage");
+  assert.equal(page.pages, undefined);
+  // Nothing the HTML names was requested.
+  assert.ok(r.calls.every((c) => !c.includes("example.com")));
+});
+
+test("gmail_attachment continues long text with offset and reassembles it exactly", async () => {
+  // An emoji straddles the 20,000-character window boundary.
+  const text =
+    "a".repeat(19_999) + "\u{1F600}" + "b".repeat(20_000) + "é".repeat(5_000);
+  const r = routed(withMessage([inline("long.txt", "text/plain", text)]));
+  const g = new GmailTools(config, r.request, Date.now, instant);
+  let offset: number | undefined;
+  let joined = "";
+  for (let i = 0; i < 10; i++) {
+    const out = await attachmentCall(g, "1", offset);
+    assert.equal(out.totalChars, text.length);
+    joined += out.text;
+    if (!out.truncated) break;
+    assert.match(
+      out.note,
+      /gmail_attachment with this messageId, partId and offset/,
+    );
+    offset = out.nextOffset;
+  }
+  assert.equal(joined, text);
+  const past = await attachmentCall(g, "1", text.length + 5);
+  assert.equal(past.text, "");
+  assert.match(past.note, /No text at this offset/);
+});
+
+test("gmail_attachment refuses a part over 20 MB and a type with no text, before fetching it", async () => {
+  const r = routed(
+    withMessage([
+      file("huge.pdf", "application/pdf", {
+        attachmentId: "big",
+        size: 20 * 1024 * 1024 + 1,
+      }),
+      file("photo.png", "image/png", { attachmentId: "img", size: 10 }),
+      file("odd.bin", '"weird"\u0001type', { attachmentId: "odd", size: 10 }),
+    ]),
+  );
+  const g = new GmailTools(config, r.request, Date.now, instant);
+  await assert.rejects(attachmentCall(g, "1"), /larger than 20 MB/);
+  await assert.rejects(attachmentCall(g, "2"), (e: Error) => {
+    assert.match(e.message, /image\/png, which has no text to read/);
+    assert.equal(toolError(e).code, "VALIDATION_FAILED");
+    return true;
+  });
+  // A sender-written type that is not a clean MIME type is not repeated.
+  await assert.rejects(attachmentCall(g, "3"), (e: Error) => {
+    assert.doesNotMatch(e.message, /weird/);
+    assert.match(e.message, /no text to read/);
+    return true;
+  });
+  await assert.rejects(attachmentCall(g, "9"), /no attachment with partId 9/);
+  assert.ok(r.calls.every((c) => !c.includes("/attachments/")));
+});
+
+test("gmail_attachment reads a message in spam and says so; gathering still refuses it", async () => {
+  const bytes = pdf("Spam invoice");
+  const r = routed(
+    withMessage([inline("invoice.pdf", "application/pdf", bytes)], {
+      labelIds: ["SPAM"],
+    }),
+  );
+  const g = new GmailTools(config, r.request, Date.now, instant);
+  const out = await attachmentCall(g, "1");
+  assert.equal(out.folder, "spam");
+  assert.match(out.text, /Spam invoice/);
+  // Gathering's own lookup keeps refusing the same message.
+  await assert.rejects(
+    g.attachmentInfo("123", "abc", "primary"),
+    SpamOrTrashMessage,
+  );
+  await assert.rejects(
+    g.attachmentBytes("123", "abc", "0.1", "primary"),
+    SpamOrTrashMessage,
+  );
+});
+
+test("gmail_attachment checks the owner, the mailbox and its arguments before any request", async () => {
+  const m = mock([]);
+  const g = new GmailTools(config, m.request, Date.now, instant);
+  await assert.rejects(
+    g.call("456", "gmail_attachment", "abc", undefined, undefined, undefined, {
+      partId: "1",
+    }),
+    /not connected for this user/,
+  );
+  // No secondary mailbox is configured, and an unknown one never falls back to primary.
+  for (const account of ["secondary", "other@example.com"])
+    await assert.rejects(
+      attachmentCall(g, "1", undefined, account),
+      (e: Error) => {
+        assert.match(e.message, /do not fall back to another mailbox/);
+        return true;
+      },
+    );
+  for (const partId of ["", "../1", "1.", ".1", "a", "1/2", "1234", "1 "])
+    await assert.rejects(attachmentCall(g, partId), /partId must be/);
+  await assert.rejects(
+    g.call("123", "gmail_attachment", "../x", undefined, undefined, undefined, {
+      partId: "1",
+    }),
+    /Invalid Gmail message id/,
+  );
+  assert.equal(m.calls.length, 0);
+  for (const a of [
+    { operation: "gmail_attachment", messageId: "abc", partId: "../1" },
+    { operation: "gmail_attachment", messageId: "abc", partId: "1.a" },
+    { operation: "gmail_attachment", messageId: "../x", partId: "1" },
+    { operation: "gmail_attachment", messageId: "abc" },
+    {
+      operation: "gmail_attachment",
+      messageId: "abc",
+      partId: "1",
+      offset: -1,
+    },
+    { operation: "gmail_attachment", messageId: "abc", partId: "1", url: "x" },
+  ])
+    assert.equal(action.safeParse(a).success, false, JSON.stringify(a));
+  for (const a of [
+    { operation: "gmail_attachment", messageId: "abc", partId: "0.2" },
+    {
+      operation: "gmail_attachment",
+      account: "secondary",
+      messageId: "abc",
+      partId: "1",
+      offset: 20000,
+    },
+    { operation: "gmail_read", messageId: "abc", links: true },
+  ])
+    assert.equal(action.safeParse(a).success, true, JSON.stringify(a));
+});
+
+test("gmail_attachment reads the secondary mailbox with its own credential and labels it", async () => {
+  const tokens: string[] = [];
+  const route = withMessage([inline("a.txt", "text/plain", "second")]);
+  const request = (async (u: unknown, init?: RequestInit) => {
+    const url = new URL(String(u));
+    const token =
+      new Headers(init?.headers).get("Authorization")?.replace("Bearer ", "") ??
+      "";
+    if (url.hostname === "oauth2.googleapis.com")
+      return Response.json({
+        access_token: new URLSearchParams(String(init?.body)).get(
+          "refresh_token",
+        ),
+        expires_in: 3600,
+      });
+    if (url.pathname.endsWith("/profile"))
+      return Response.json({
+        emailAddress: token === "refresh" ? config.email : "second@example.com",
+      });
+    tokens.push(token);
+    return Response.json(route(url));
+  }) as typeof fetch;
+  const g = new GmailTools(
+    {
+      ...config,
+      secondary: { email: "second@example.com", refreshToken: "second" },
+    },
+    request,
+    Date.now,
+    instant,
+  );
+  const out = await attachmentCall(g, "1", undefined, "secondary");
+  assert.equal(Object.keys(out)[0], "warning");
+  assert.equal(out.account, "secondary");
+  assert.equal(out.email, "second@example.com");
+  assert.deepEqual(tokens, ["second"]);
+});
+
+test("a rate-limited attachment read is retried, then reported as RATE_LIMITED", async () => {
+  let refusals = 2;
+  const route = withMessage([inline("a.txt", "text/plain", "body")]);
+  const r = routed((url) => {
+    if (refusals > 0) {
+      refusals -= 1;
+      return new Reply(429, { error: { code: 429 } });
+    }
+    return route(url);
+  });
+  const g = new GmailTools(config, r.request, Date.now, instant);
+  waits.length = 0;
+  assert.equal((await attachmentCall(g, "1")).text, "body");
+  assert.equal(waits.length, 2);
+  refusals = 3;
+  await assert.rejects(attachmentCall(g, "1"), (e: Error) => {
+    assert.equal(toolError(e).code, "RATE_LIMITED");
+    return true;
+  });
+});
+
+test("an escape-dense text attachment is shortened so the warning still leads the projection", async () => {
+  const r = routed(
+    withMessage([
+      inline('"'.repeat(300) + ".txt", "text/plain", "\u0001".repeat(30_000)),
+    ]),
+  );
+  const out = await attachmentCall(
+    new GmailTools(config, r.request, Date.now, instant),
+    "1",
+  );
+  assertProjects(out, "gmail_attachment");
+  assert.equal(out.truncated, true);
+  assert.equal(out.nextOffset, out.text.length);
+  assert.equal(out.totalChars, 30_000);
+});
+
+test("links: true returns http, https and mailto targets apart from the unchanged text", async () => {
+  const body =
+    "<html><head><title><a href='https://hidden.example.com/'>t</a></title></head><body>" +
+    '<p>Your receipt</p><a href="https://shop.example.com/order?id=1&amp;ref=mail">View &amp; manage</a>' +
+    "<a href='HTTP://Shop.Example.com/help'>Help</a>" +
+    '<a href="mailto:billing@example.com?subject=Receipt">Billing</a>' +
+    '<a href="javascript:alert(1)">Bad</a><a href="jav&#x09;ascript:alert(1)">Bad</a>' +
+    '<a href="data:text/html,hi">Data</a><a href="ftp://files.example.com/x">FTP</a>' +
+    '<a href="/relative/path">Relative</a><a name="anchor">No target</a>' +
+    '<a href="https://shop.example.com/order?id=1&amp;ref=mail">Again</a>' +
+    '<!-- <a href="https://comment.example.com/">c</a> -->' +
+    `<a href=https://unquoted.example.com/u>${"long text ".repeat(30)}</a>` +
+    `<a href="https://shop.example.com/${"p".repeat(600)}"><img src="x"></a>` +
+    "<a href='https://unsubscribe.example.com/u'>Unsub\u0001scribe</a></body></html>";
+  const single = routed(() => ({
+    id: "abc",
+    threadId: "fabc",
+    payload: {
+      mimeType: "text/html",
+      body: { data: Buffer.from(body).toString("base64url") },
+    },
+  }));
+  const g = new GmailTools(config, single.request, Date.now, instant);
+  const plainRead: any = await g.call("123", "gmail_read", "abc");
+  // Off by default.
+  assert.equal("links" in plainRead, false);
+  const withLinks: any = await g.call(
+    "123",
+    "gmail_read",
+    "abc",
+    undefined,
+    undefined,
+    undefined,
+    { links: true },
+  );
+  assert.equal(withLinks.text, plainRead.text);
+  assert.deepEqual(withLinks.links, [
+    {
+      text: "View & manage",
+      url: "https://shop.example.com/order?id=1&ref=mail",
+    },
+    { text: "Help", url: "http://shop.example.com/help" },
+    {
+      text: "Billing",
+      url: "mailto:billing@example.com?subject=Receipt",
+    },
+    {
+      text: "long text ".repeat(12).trim(),
+      url: "https://unquoted.example.com/u",
+    },
+    {
+      text: "",
+      url: ("https://shop.example.com/" + "p".repeat(600)).slice(0, 500),
+      urlTruncated: true,
+    },
+    { text: "Unsubscribe", url: "https://unsubscribe.example.com/u" },
+  ]);
+  assert.equal(withLinks.linksOmitted, undefined);
+  // Nothing was opened: the only request is the message itself.
+  assert.ok(single.calls.every((c) => !c.includes("example.com")));
+  assertProjects(withLinks, "gmail_read");
+  // A plain-text message has no HTML part, so its list is empty.
+  const text = routed(() => ({
+    id: "abc",
+    threadId: "fabc",
+    payload: plain("See https://example.com/a"),
+  }));
+  const none: any = await new GmailTools(
+    config,
+    text.request,
+    Date.now,
+    instant,
+  ).call("123", "gmail_read", "abc", undefined, undefined, undefined, {
+    links: true,
+  });
+  assert.deepEqual(none.links, []);
+  // Only a single read takes links.
+  await assert.rejects(
+    g.call("123", "gmail_read", "", undefined, undefined, undefined, {
+      messageIds: ["abc"],
+      links: true,
+    }),
+    /single messageId/,
+  );
+  await assert.rejects(
+    g.call("123", "gmail_thread", "fabc", undefined, undefined, undefined, {
+      links: true,
+    }),
+    /single messageId/,
+  );
+});
+
+test("link targets stop at 100 distinct URLs and are fitted with an escape-dense body", async () => {
+  const anchors = Array.from(
+    { length: 130 },
+    (_, i) => `<a href="https://example.com/${i}">Link ${i}</a>`,
+  ).join("");
+  const capped = linkTargets(anchors + anchors);
+  assert.equal(capped.links.length, 100);
+  assert.equal(capped.omitted, 30);
+  assert.equal(capped.links[99]!.url, "https://example.com/99");
+  // Quote-dense mailto targets and text, with an escape-dense body and long headers.
+  const dense = Array.from(
+    { length: 100 },
+    (_, i) =>
+      `<a href='mailto:${'"'.repeat(480)}${i}@example.com'>${'"'.repeat(200)}</a>`,
+  ).join("");
+  const r = routed(() => ({
+    id: "abc",
+    threadId: "fabc",
+    payload: {
+      headers: [{ name: "Subject", value: '"'.repeat(20_000) }],
+      mimeType: "multipart/alternative",
+      parts: [plain('\\"'.repeat(10_000)), html(dense)],
+    },
+  }));
+  const out: any = await new GmailTools(
+    config,
+    r.request,
+    Date.now,
+    instant,
+  ).call("123", "gmail_read", "abc", undefined, undefined, undefined, {
+    links: true,
+  });
+  assertProjects(out, "gmail_read");
+  assert.ok(out.links.every((l: any) => l.text.length <= 120));
+  assert.ok(out.links.every((l: any) => l.url.length <= 500));
+  assert.equal(out.links.length + (out.linksOmitted ?? 0), 100);
+});
+
+test("link extraction is linear on hostile markup and never fetches", () => {
+  const unique = Array.from(
+    { length: 60_000 },
+    (_, i) => `<a href="https://x.example/${i}">`,
+  ).join("");
+  for (const hostile of [
+    "<".repeat(2_000_000),
+    "<a ".repeat(700_000),
+    '<a href="'.repeat(250_000),
+    "<a href=x>".repeat(200_000),
+    "</a".repeat(600_000),
+    "&amp;".repeat(400_000),
+    unique.slice(0, 2_000_000),
+  ]) {
+    const started = Date.now();
+    const { links } = linkTargets(hostile);
+    assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
+    assert.ok(links.length <= 100);
+  }
 });

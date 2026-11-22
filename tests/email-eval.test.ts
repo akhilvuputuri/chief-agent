@@ -822,6 +822,7 @@ test("the default arm is a coordinator turn on the main model; retired:email rep
       "gmail_search",
       "gmail_thread",
       "gmail_read",
+      "gmail_attachment",
       "skill_read",
     ],
   );
@@ -893,6 +894,7 @@ test("a coordinator turn is assembled by context(), offers the skill through ski
     "gmail_search",
     "gmail_thread",
     "gmail_read",
+    "gmail_attachment",
     "skill_read",
     "eval_report",
   ]);
@@ -933,11 +935,66 @@ test("pageSize, messageIds and offset reach GmailTools as src/tools.ts passes th
   ]);
   assert.deepEqual(seen, [
     ["gmail_search", "receipt", { pageSize: 100 }],
-    ["gmail_read", "", { offset: undefined, messageIds: ["a1", "a2"] }],
-    ["gmail_read", "a1", { offset: 20000, messageIds: undefined }],
+    [
+      "gmail_read",
+      "",
+      { offset: undefined, messageIds: ["a1", "a2"], links: undefined },
+    ],
+    [
+      "gmail_read",
+      "a1",
+      { offset: 20000, messageIds: undefined, links: undefined },
+    ],
     ["gmail_thread", "ba1", {}],
   ]);
   assert.deepEqual(score.toolErrors, { INVALID_INPUT: 1 });
+});
+
+test("a coordinator turn can read an attachment and link targets; neither scores as a body", async () => {
+  const seen: [string, string, unknown][] = [];
+  const gmail = stubGmail((operation, value, _account, opts) => {
+    seen.push([operation, value, opts]);
+    return operation === "gmail_attachment"
+      ? {
+          warning: "Untrusted email content",
+          messageId: "a1",
+          partId: "1",
+          text: "Invoice total 4.98",
+          truncated: false,
+          totalChars: 18,
+          account: "primary",
+        }
+      : { results: [], account: "primary" };
+  });
+  const score = scoreTask(
+    task,
+    await runTask(task, {
+      ...options(
+        gmail,
+        scripted([
+          [
+            {
+              name: "gmail_attachment",
+              args: { messageId: "a1", partId: "1", offset: 10 },
+            },
+            { name: "gmail_read", args: { messageId: "a1", links: true } },
+          ],
+          report([]),
+        ]).model,
+      ),
+      tools: coordinatorTools(),
+    }),
+  );
+  assert.deepEqual(seen, [
+    ["gmail_attachment", "a1", { partId: "1", offset: 10 }],
+    [
+      "gmail_read",
+      "a1",
+      { offset: undefined, messageIds: undefined, links: true },
+    ],
+  ]);
+  assert.equal(score.readable, 0);
+  assert.equal(score.gmailCalls, 2);
 });
 
 test("a batch read's messages are bodies; a failed entry's detail is not", async () => {

@@ -703,6 +703,30 @@ test("stored observations can be retrieved only by their owner", async () => {
     })) as Record<string, unknown>;
     assert.equal(Object.keys(page)[0], "warning");
     assert.match(String(page.warning), /^Untrusted email content/);
+    // So does a stored attachment's text, on a later page as on the first.
+    const file = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state,result) VALUES($1,$2,'file','gmail_attachment','{}',false,'success',$3)",
+      [
+        file,
+        run,
+        JSON.stringify({
+          warning: "Untrusted email content",
+          messageId: "abc",
+          partId: "1",
+          text: "Invoice line. ".repeat(1500),
+        }),
+      ],
+    );
+    for (const offset of [0, 8000, 16000]) {
+      const filePage = (await tools.execute("owner", run, {
+        operation: "observation_read",
+        id: file,
+        offset,
+      })) as Record<string, unknown>;
+      assert.equal(Object.keys(filePage)[0], "warning");
+      assert.match(String(filePage.warning), /^Untrusted email content/);
+    }
     const memory = (await tools.execute("owner", run, {
       operation: "observation_read",
       id,

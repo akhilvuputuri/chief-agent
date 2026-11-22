@@ -444,6 +444,25 @@ test("dispatcher scope refuses unrelated reads/writes and forged owner authority
         }),
       /one confirmed candidate message per gmail_read call/,
     );
+    // Neither link targets nor attachment text reach an unattended investigation.
+    await assert.rejects(
+      () =>
+        f.service.authorize("a", run, {
+          operation: "gmail_read",
+          messageId: "abc",
+          links: true,
+        }),
+      /Link targets are not read/,
+    );
+    await assert.rejects(
+      () =>
+        f.service.authorize("a", run, {
+          operation: "gmail_attachment",
+          messageId: "abc",
+          partId: "1",
+        }),
+      /outside the responsibility permission scope/,
+    );
     await f.service.authorize("a", run, {
       operation: "gmail_read",
       messageId: "abc",
