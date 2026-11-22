@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolValidationError } from "./tool-errors.js";
+import { RateLimitedError, ToolValidationError } from "./tool-errors.js";
 import { cleanText } from "./news-feed.js";
 import { discardBody, readBody } from "./http-body.js";
 import { projectionLimits } from "./observations.js";
@@ -50,22 +50,16 @@ const threadSchema = z.object({
     .array(messageSchema.and(z.object({ internalDate: z.string().optional() })))
     .default([]),
 });
-/**
- * Gmail API requests one run may make, where a batch request counts once. A backstop
- * against a runaway tool loop and the shared Gmail quota (6,000 units per user per
- * minute), not a steering limit: ordinary searching, paging and reading stays far
- * below it.
- */
-export const GMAIL_RUN_BUDGET = 200;
-// Google's own Gmail MCP server uses the same default and maximum page size.
+// Gmail's own default page is 100; 20 keeps an ordinary first look short.
 export const SEARCH_PAGE_DEFAULT = 20;
-export const SEARCH_PAGE_MAX = 50;
+export const SEARCH_PAGE_MAX = 100;
 // Gmail's batch endpoint accepts 100 calls; Google advises at most 50 to avoid rate limits.
 const BATCH_MAX = 50;
-const METADATA_CONCURRENCY = 2;
+// Requests in flight at once for single fetches, so one call does not trip Gmail's
+// per-user concurrency limit.
 const READ_CONCURRENCY = 4;
 const SEARCH_CACHE_MS = 300_000;
-// Header caps keep a full 50-row page and a full thread below the email projection
+// Header caps keep a full 100-row page and a full thread below the email projection
 // limit in src/observations.ts, which otherwise replaces the result with a bare
 // excerpt and drops the untrusted-content warning.
 const FROM = 120;
@@ -93,9 +87,29 @@ export class ResponseTooLarge extends Error {
     super("Gmail response too large");
   }
 }
+const RATE_LIMIT_REASONS =
+  /"(?:rateLimitExceeded|userRateLimitExceeded|quotaExceeded|RESOURCE_EXHAUSTED)"/;
+const RATE_LIMITED =
+  "Gmail rate limited this request (its own per-user quota). Wait a few seconds and retry; the connection is fine.";
+const RATE_LIMITED_ROW =
+  "not retrieved: Gmail rate limited this request; retry it shortly";
+/**
+ * Whether a refused response is Gmail's rate limit: always for 429, and for 403 only
+ * when Google's error body names a rate or quota reason (other 403s are permission).
+ */
+function rateLimited(status: number, body: string) {
+  return status === 429 || (status === 403 && RATE_LIMIT_REASONS.test(body));
+}
 async function json(response: Response, maxBytes = 2_000_000) {
   if (!response.ok) {
-    await discardBody(response);
+    let body = "";
+    if (response.status === 403)
+      body = (
+        await readBody(response, 65_536).catch(() => Buffer.alloc(0))
+      ).toString("utf8");
+    else await discardBody(response);
+    if (rateLimited(response.status, body))
+      throw new RateLimitedError(RATE_LIMITED);
     throw new Error(
       `Gmail request failed (${response.status}); reconnect if authorization expired`,
     );
@@ -144,12 +158,32 @@ function bodyText(p: Part | undefined, max: number) {
 export function indexBody(p?: Part, max = 12_000) {
   return bodyText(p, max).text;
 }
+const isHigh = (code: number) => code >= 0xd800 && code <= 0xdbff;
+const isLow = (code: number) => code >= 0xdc00 && code <= 0xdfff;
+/**
+ * The nearest index at or before `i` that is not between the two halves of a
+ * surrogate pair. Postgres refuses lone surrogates in jsonb (src/storable.ts), so a
+ * result cut mid-emoji could never be recorded.
+ */
+function boundary(text: string, i: number) {
+  return i > 0 &&
+    i < text.length &&
+    isHigh(text.charCodeAt(i - 1)) &&
+    isLow(text.charCodeAt(i))
+    ? i - 1
+    : i;
+}
+/** At most `max` UTF-16 units of `text`, never ending on half a surrogate pair. */
+function cut(text: string, max: number) {
+  return text.slice(0, boundary(text, Math.min(max, text.length)));
+}
 function header(
   list: { name: string; value: string }[] | undefined,
   name: string,
   cap: number,
 ) {
-  return list?.find((h) => h.name.toLowerCase() === name)?.value.slice(0, cap);
+  const value = list?.find((h) => h.name.toLowerCase() === name)?.value;
+  return value === undefined ? undefined : cut(value, cap);
 }
 /** The four retained headers, each bounded, for a message body result. */
 function kept(list: { name: string; value: string }[] | undefined) {
@@ -187,10 +221,11 @@ function hintFor(count: number, morePages: boolean) {
   return undefined;
 }
 const SGT_OFFSET_MS = 8 * 3_600_000;
-// A date operand at a term boundary, year first (2026/09/01, 2026-09-01) or in Gmail's
+// A date operand at the start of a token (start of query, after whitespace, "(" or
+// "{", optionally negated with "-"), year first (2026/09/01, 2026-09-01) or in Gmail's
 // month-first form (09/01/2026). Relative forms and epoch seconds do not match.
 const DATE_OPERAND =
-  /(?<=^|[\s(){}-])(after|before|older|newer):(?:(\d{4})[/-](\d{1,2})[/-](\d{1,2})|(\d{1,2})\/(\d{1,2})\/(\d{4}))(?=$|[\s(){}])/gi;
+  /(?<=^|[\s({])(-?)(after|before|older|newer):(?:(\d{4})[/-](\d{1,2})[/-](\d{1,2})|(\d{1,2})\/(\d{1,2})\/(\d{4}))(?=$|[\s(){}])/gi;
 /**
  * Gmail reads a calendar date in after:, before:, older: and newer: as midnight
  * Pacific time. The owner works in Singapore time, so each date is sent as epoch
@@ -204,7 +239,7 @@ export function singaporeDates(query: string) {
         ? segment
         : segment.replace(
             DATE_OPERAND,
-            (match, op: string, y1, m1, d1, m2, d2, y2) => {
+            (match, minus: string, op: string, y1, m1, d1, m2, d2, y2) => {
               const [y, m, d] = (y1 ? [y1, m1, d1] : [y2, m2, d2]).map(Number);
               const utc = Date.UTC(y!, m! - 1, d!);
               const date = new Date(utc);
@@ -214,11 +249,13 @@ export function singaporeDates(query: string) {
                 date.getUTCDate() !== d
               )
                 return match;
+              const epoch = (utc - SGT_OFFSET_MS) / 1000;
+              if (epoch <= 0) return match;
               const name = op.toLowerCase();
               // Gmail documents epoch seconds for after: and before:; older: and newer: are their synonyms.
               const operator =
                 name === "older" ? "before" : name === "newer" ? "after" : name;
-              return `${operator}:${(utc - SGT_OFFSET_MS) / 1000}`;
+              return `${minus}${operator}:${epoch}`;
             },
           ),
     )
@@ -262,6 +299,18 @@ function shares(lengths: number[], total: number, cap: number) {
   return out;
 }
 type Message = z.infer<typeof messageSchema>;
+/** IDs and received times of thread messages past the shown ones, for gmail_read messageIds. */
+function omittedList(rest: { id: string; internalDate?: string }[]) {
+  const ids = rest.filter((m) => ID.test(m.id));
+  return ids.length
+    ? {
+        omittedMessages: ids.map((m) => ({
+          id: m.id,
+          received: received(m.internalDate),
+        })),
+      }
+    : {};
+}
 /** One message's readable body window, with what the model needs to continue it. */
 function bodyWindow(
   m: Message,
@@ -269,19 +318,24 @@ function bodyWindow(
   size: number,
   body = bodyText(m.payload, BODY_MAX),
 ) {
-  const text = body.text.slice(offset, offset + size);
-  const end = offset + text.length;
+  // An offset inside a pair starts at its first half, so the emoji is shown whole.
+  const start = boundary(body.text, Math.min(offset, body.text.length));
+  let end = boundary(body.text, Math.min(start + size, body.text.length));
+  // A one-character share that meets a pair still shows that whole code point.
+  if (end <= start && start < body.text.length && size > 0)
+    end = start + (isHigh(body.text.charCodeAt(start)) ? 2 : 1);
+  const text = body.text.slice(start, end);
   const truncated = end < body.text.length;
   return {
     text:
       text ||
       (!body.text
-        ? m.snippet?.slice(0, SNIPPET_STAND_IN) || "No readable body"
+        ? cut(m.snippet ?? "", SNIPPET_STAND_IN) || "No readable body"
         : `No text at this offset; the body has ${body.text.length} characters.`),
     truncated,
     ...(body.html ? { fromHtml: true } : {}),
     ...(body.text ? {} : { bodyless: true }),
-    ...(offset ? { offset } : {}),
+    ...(offset ? { offset: start } : {}),
     ...(truncated ? { nextOffset: end, totalChars: body.text.length } : {}),
   };
 }
@@ -305,9 +359,9 @@ function fitText<T extends object>(result: T, messages: TextWindow[]) {
     const keep = Math.max(0, longest.text.length - Math.max(over, 500));
     const total =
       longest.totalChars ?? (longest.offset ?? 0) + longest.text.length;
-    longest.text = longest.text.slice(0, keep);
+    longest.text = cut(longest.text, keep);
     longest.truncated = true;
-    longest.nextOffset = (longest.offset ?? 0) + keep;
+    longest.nextOffset = (longest.offset ?? 0) + longest.text.length;
     longest.totalChars = total;
   }
 }
@@ -339,7 +393,6 @@ export class GmailTools {
   private token = "";
   private expires = 0;
   private searches = new Map<string, { at: number; result: unknown }>();
-  private spent = new Map<string, { at: number; used: number }>();
   private secondary?: GmailTools;
   constructor(
     private config: {
@@ -365,31 +418,7 @@ export class GmailTools {
         request,
         now,
       );
-      this.secondary.spent = this.spent;
     }
-  }
-  /**
-   * Charges one Gmail API request to the turn, so a search loop cannot walk a
-   * mailbox. A caller without a run identifier shares one bucket rather than
-   * being exempt; the hourly sweep releases it.
-   */
-  private charge(run: string | undefined, required = true) {
-    run = run || "unattributed";
-    const at = this.now();
-    for (const [key, value] of this.spent)
-      if (at - value.at > 3_600_000) this.spent.delete(key);
-    const entry = this.spent.get(run) ?? { at, used: 0 };
-    if (entry.used >= GMAIL_RUN_BUDGET) {
-      if (required)
-        throw new ToolValidationError(
-          `Gmail request budget for this turn is used (${GMAIL_RUN_BUDGET} requests). Answer from what you already retrieved, or ask the user to narrow the search.`,
-        );
-      return false;
-    }
-    entry.used += 1;
-    entry.at = at;
-    this.spent.set(run, entry);
-    return true;
   }
   private cached(key: string) {
     const hit = this.searches.get(key);
@@ -472,7 +501,7 @@ export class GmailTools {
       subject: header(m.payload?.headers, "subject", SUBJECT),
       date: header(m.payload?.headers, "date", DATE),
       received: received(m.internalDate),
-      snippet: m.snippet?.slice(0, SNIPPET),
+      snippet: m.snippet === undefined ? undefined : cut(m.snippet, SNIPPET),
       unread: m.labelIds.includes("UNREAD"),
       category: m.labelIds.map((l) => CATEGORIES[l]).find(Boolean),
       folder: folder(m.labelIds),
@@ -492,7 +521,8 @@ export class GmailTools {
   }
   /**
    * Metadata for up to BATCH_MAX hits in one Gmail batch request, keyed by hit index.
-   * A part that failed or did not parse is simply absent, for the caller to retry.
+   * A rate-limited part is marked; one that failed otherwise or did not parse is
+   * simply absent, for the caller to fetch on its own.
    */
   private async batchMetadata(
     token: string,
@@ -520,7 +550,14 @@ export class GmailTools {
       },
     );
     if (!response.ok) {
-      await discardBody(response);
+      const refused =
+        response.status === 403
+          ? (
+              await readBody(response, 65_536).catch(() => Buffer.alloc(0))
+            ).toString("utf8")
+          : (await discardBody(response), "");
+      if (rateLimited(response.status, refused))
+        throw new RateLimitedError(RATE_LIMITED);
       throw new Error(`Gmail batch request failed (${response.status})`);
     }
     const reply = /boundary="?([^";\s]+)"?/i.exec(
@@ -533,18 +570,24 @@ export class GmailTools {
     const text = (
       await readBody(response, 2_000_000, () => new ResponseTooLarge())
     ).toString("utf8");
-    const found = new Map<number, z.infer<typeof metadataSchema>>();
+    const found = new Map<
+      number,
+      z.infer<typeof metadataSchema> | "rate limited"
+    >();
     for (const part of text.split(`--${reply}`)) {
       const index = Number(
         /Content-ID:\s*<response-item(\d+)>/i.exec(part)?.[1],
       );
       const status = /HTTP\/1\.1 (\d{3})/.exec(part);
       if (!Number.isInteger(index) || index >= hits.length || !status) continue;
-      if (status[1] !== "200") continue;
       // The JSON body follows the inner response's headers and a blank line.
       const after = part.slice(status.index);
       const gap = after.search(/\r?\n\r?\n/);
-      if (gap < 0) continue;
+      if (rateLimited(Number(status[1]), gap < 0 ? "" : after.slice(gap))) {
+        found.set(index, "rate limited");
+        continue;
+      }
+      if (status[1] !== "200" || gap < 0) continue;
       try {
         found.set(index, metadataSchema.parse(JSON.parse(after.slice(gap))));
       } catch {
@@ -554,13 +597,13 @@ export class GmailTools {
     return found;
   }
   /**
-   * Rows for a page of hits: one batch request, then single fetches for any hit the
-   * batch did not answer. One failed or unaffordable hit degrades that row only.
+   * Rows for a page of hits: batch requests of at most BATCH_MAX, then one single fetch
+   * for each hit a batch did not answer. A rate-limited part is not fetched again at
+   * once; it and any failed hit degrade their own row only.
    */
   private async hitRows(
     token: string,
     hits: { id: string; threadId: string }[],
-    run: string | undefined,
   ) {
     const results: Record<string, unknown>[] = new Array(hits.length);
     let degraded = false;
@@ -571,24 +614,23 @@ export class GmailTools {
     const missing: number[] = [];
     for (let start = 0; start < hits.length; start += BATCH_MAX) {
       const chunk = hits.slice(start, start + BATCH_MAX);
-      if (!this.charge(run, false)) {
-        chunk.forEach((m, i) => {
-          results[start + i] = skipped(
-            m,
-            "not retrieved: turn request budget reached",
-          );
-        });
-        continue;
-      }
-      let found = new Map<number, z.infer<typeof metadataSchema>>();
+      let found: Awaited<ReturnType<GmailTools["batchMetadata"]>> | undefined;
       try {
         found = await this.batchMetadata(token, chunk);
-      } catch {
-        // A failed batch falls back to fetching each hit on its own.
+      } catch (error) {
+        if (error instanceof RateLimitedError) {
+          chunk.forEach((m, i) => {
+            results[start + i] = skipped(m, RATE_LIMITED_ROW);
+          });
+          continue;
+        }
+        // Any other failed batch falls back to fetching each hit on its own.
       }
       chunk.forEach((m, i) => {
-        const meta = found.get(i);
-        if (meta) results[start + i] = this.row(m, meta);
+        const part = found?.get(i);
+        if (part === "rate limited")
+          results[start + i] = skipped(m, RATE_LIMITED_ROW);
+        else if (part) results[start + i] = this.row(m, part);
         else missing.push(start + i);
       });
     }
@@ -597,21 +639,21 @@ export class GmailTools {
       for (let k = next++; k < missing.length; k = next++) {
         const i = missing[k]!;
         const m = hits[i]!;
-        if (!this.charge(run, false)) {
-          results[i] = skipped(m, "not retrieved: turn request budget reached");
-          continue;
-        }
         try {
           results[i] = await this.metadata(token, m);
-        } catch {
-          results[i] = skipped(m, "not retrieved: unavailable");
+        } catch (error) {
+          results[i] = skipped(
+            m,
+            error instanceof RateLimitedError
+              ? RATE_LIMITED_ROW
+              : "not retrieved: unavailable",
+          );
         }
       }
     };
     await Promise.all(
-      Array.from(
-        { length: Math.min(METADATA_CONCURRENCY, missing.length) },
-        () => worker(),
+      Array.from({ length: Math.min(READ_CONCURRENCY, missing.length) }, () =>
+        worker(),
       ),
     );
     return { results, degraded };
@@ -621,7 +663,6 @@ export class GmailTools {
     user: string,
     query: string,
     pageToken: string | undefined,
-    run: string | undefined,
     pageSize: number,
     rewriteDates = true,
   ) {
@@ -637,7 +678,6 @@ export class GmailTools {
     const key = `${user}|${sent}|${pageToken ?? ""}|${pageSize}`;
     const hit = this.cached(key);
     if (hit) return hit;
-    this.charge(run);
     const url = new URL(
       "https://gmail.googleapis.com/gmail/v1/users/me/messages",
     );
@@ -657,7 +697,7 @@ export class GmailTools {
     const hits = listed.messages
       .filter((m) => ID.test(m.id) && ID.test(m.threadId))
       .slice(0, pageSize);
-    const { results, degraded } = await this.hitRows(token, hits, run);
+    const { results, degraded } = await this.hitRows(token, hits);
     // Warning and hint lead so they survive if a projection ever excerpts this.
     const result = fit(
       {
@@ -674,12 +714,15 @@ export class GmailTools {
           : {}),
         results,
         omitted: 0,
-        nextPageToken: listed.nextPageToken?.slice(0, 1000),
+        nextPageToken:
+          listed.nextPageToken === undefined
+            ? undefined
+            : cut(listed.nextPageToken, 1000),
         resultSizeEstimate: listed.resultSizeEstimate,
       },
       results,
     );
-    // A partial page must not be served to a later turn that can afford the rest.
+    // A partial page must not be served to a later call that could fetch the rest.
     if (!degraded) this.remember(key, structuredClone(result));
     return result;
   }
@@ -687,8 +730,7 @@ export class GmailTools {
    * One conversation, oldest first. Body text is shared fairly between the messages
    * up to the total, and every message costs at least one character of it.
    */
-  private async thread(token: string, id: string, run: string | undefined) {
-    this.charge(run);
+  private async thread(token: string, id: string) {
     const url = new URL(
       `https://gmail.googleapis.com/gmail/v1/users/me/threads/${id}`,
     );
@@ -698,7 +740,7 @@ export class GmailTools {
       parsed = threadSchema.parse(await this.get(token, url));
     } catch (error) {
       if (!(error instanceof ResponseTooLarge)) throw error;
-      return this.threadIndex(token, id, run);
+      return this.threadIndex(token, id);
     }
     const ordered = [...parsed.messages].sort(
       (a, b) => Number(a.internalDate ?? 0) - Number(b.internalDate ?? 0),
@@ -722,10 +764,11 @@ export class GmailTools {
       fitText(
         {
           warning: UNTRUSTED,
-          note: `Ordered oldest first, at most ${THREAD_MAX_MESSAGES} messages. For a message marked truncated, gmail_read with its id and nextOffset returns the rest; read an omitted one with gmail_read. fromHtml means the text was converted from the HTML part.`,
+          note: `Ordered oldest first, at most ${THREAD_MAX_MESSAGES} messages. For a message marked truncated, gmail_read with its id and nextOffset returns the rest. Later messages are listed in omittedMessages; read them with gmail_read messageIds. fromHtml means the text was converted from the HTML part.`,
           threadId: parsed.id,
           messages,
           omitted: ordered.length - shown.length,
+          ...omittedList(ordered.slice(THREAD_MAX_MESSAGES)),
         },
         messages,
       ),
@@ -733,12 +776,7 @@ export class GmailTools {
     );
   }
   /** Fallback when a conversation exceeds the response guard: identifiers only. */
-  private async threadIndex(
-    token: string,
-    id: string,
-    run: string | undefined,
-  ) {
-    this.charge(run);
+  private async threadIndex(token: string, id: string) {
     const url = new URL(
       `https://gmail.googleapis.com/gmail/v1/users/me/threads/${id}`,
     );
@@ -758,10 +796,11 @@ export class GmailTools {
     return fit(
       {
         warning: UNTRUSTED,
-        note: "This conversation is too large to return in full. These are its messages, newest last; read individual ones with gmail_read.",
+        note: "This conversation is too large to return in full. These are its messages, newest last, and any later ones are in omittedMessages; read them with gmail_read messageIds.",
         threadId: parsed.id,
         messages: listing,
         omitted: Math.max(0, ordered.length - listing.length),
+        ...omittedList(ordered.slice(THREAD_MAX_MESSAGES)),
         truncated: true,
       },
       listing,
@@ -774,17 +813,11 @@ export class GmailTools {
     url.searchParams.set("format", "full");
     return messageSchema.parse(await this.get(token, url));
   }
-  private async read(
-    token: string,
-    id: string,
-    run: string | undefined,
-    offset = 0,
-  ) {
+  private async read(token: string, id: string, offset = 0) {
     if (!Number.isInteger(offset) || offset < 0)
       throw new ToolValidationError(
         "offset must be a whole number of characters",
       );
-    this.charge(run);
     const m = await this.message(token, id);
     const result: Record<string, unknown> & TextWindow = {
       warning: UNTRUSTED,
@@ -802,19 +835,11 @@ export class GmailTools {
    * Several messages in one call, in request order. Body text is shared fairly up to
    * the total; a message that fails or is unaffordable reports why without failing the rest.
    */
-  private async readMany(
-    token: string,
-    ids: string[],
-    run: string | undefined,
-  ) {
+  private async readMany(token: string, ids: string[]) {
     const fetched: (Message | string)[] = new Array(ids.length);
     let next = 0;
     const worker = async () => {
       for (let i = next++; i < ids.length; i = next++) {
-        if (!this.charge(run, false)) {
-          fetched[i] = "not retrieved: turn request budget reached";
-          continue;
-        }
         try {
           const m = await this.message(token, ids[i]!);
           fetched[i] =
@@ -825,7 +850,9 @@ export class GmailTools {
           fetched[i] =
             error instanceof ResponseTooLarge
               ? "not retrieved: message larger than the response guard"
-              : "not retrieved: unavailable";
+              : error instanceof RateLimitedError
+                ? RATE_LIMITED_ROW
+                : "not retrieved: unavailable";
         }
       }
     };
@@ -869,15 +896,10 @@ export class GmailTools {
       "The selected mailbox is not connected; do not fall back to another mailbox",
     );
   }
-  private async attachmentMessage(
-    user: string,
-    id: string,
-    run: string | undefined,
-  ) {
+  private async attachmentMessage(user: string, id: string) {
     if (!ID.test(id))
       throw new ToolValidationError("Invalid message reference");
     const token = await this.access(user);
-    this.charge(run);
     const url = new URL(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}`,
     );
@@ -917,16 +939,10 @@ export class GmailTools {
     if (message.payload) walk(message.payload, "0", 0);
     return { token, files };
   }
-  async attachmentInfo(
-    user: string,
-    id: string,
-    account: string,
-    run?: string,
-  ) {
+  async attachmentInfo(user: string, id: string, account: string) {
     const { files } = await this.selectAccount(account).attachmentMessage(
       user,
       id,
-      run,
     );
     return files.map(({ body, ...file }) => file);
   }
@@ -935,10 +951,9 @@ export class GmailTools {
     id: string,
     partKey: string,
     account: string,
-    run?: string,
   ) {
     const selected = this.selectAccount(account),
-      { token, files } = await selected.attachmentMessage(user, id, run);
+      { token, files } = await selected.attachmentMessage(user, id);
     const file = files.find((f) => f.partKey === partKey);
     if (!file || file.bytes > 20 * 1024 * 1024)
       throw new ToolValidationError(
@@ -950,7 +965,6 @@ export class GmailTools {
       const attachment = file.body.attachmentId;
       if (!attachment || !/^[A-Za-z0-9_-]{1,512}$/.test(attachment))
         throw new ToolValidationError("Attachment reference is invalid");
-      selected.charge(run);
       const url = new URL(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}/attachments/${encodeURIComponent(attachment)}`,
       );
@@ -977,6 +991,10 @@ export class GmailTools {
     return { name: file.name, data };
   }
 
+  /**
+   * One model-facing Gmail operation. `run` names the calling run for callers that
+   * attribute work; Gmail itself enforces its quota, which surfaces as RATE_LIMITED.
+   */
   async call(
     user: string,
     operation:
@@ -1051,7 +1069,6 @@ export class GmailTools {
           user,
           value,
           pageToken,
-          run,
           options.pageSize ?? SEARCH_PAGE_DEFAULT,
           options.singaporeDates,
         )) as Record<string, unknown>),
@@ -1060,20 +1077,20 @@ export class GmailTools {
     if (operation === "gmail_read" && ids)
       return {
         // Repeated ids are read once.
-        ...(await this.readMany(token, [...new Set(ids)], run)),
+        ...(await this.readMany(token, [...new Set(ids)])),
         ...identity,
       };
     if (!ID.test(value)) throw new Error("Invalid Gmail message id");
     const result =
       operation === "gmail_thread"
-        ? await this.thread(token, value, run)
-        : await this.read(token, value, run, options.offset);
+        ? await this.thread(token, value)
+        : await this.read(token, value, options.offset);
     return { ...result, ...identity };
   }
 
   /**
-   * Mail index (src/mail-recall.ts): one IDs-only page of the primary mailbox. Host-driven
-   * and outside the per-turn request budget; the index bounds its own window and count.
+   * Mail index (src/mail-recall.ts): one IDs-only page of the primary mailbox. Host-driven;
+   * the index bounds its own window and count.
    */
   async indexPage(user: string, query: string, pageToken?: string) {
     const token = await this.access(user);
@@ -1131,7 +1148,6 @@ export class GmailTools {
     email: string,
     query: string,
     pageToken: string | undefined,
-    run: string,
   ) {
     if (user !== this.config.owner)
       throw new ToolValidationError("Gmail owner unavailable");
@@ -1144,7 +1160,6 @@ export class GmailTools {
         "Confirmed Gmail account changed; reconfirm the responsibility",
       );
     const token = await selected.access(user);
-    this.charge(run);
     const url = new URL(
       "https://gmail.googleapis.com/gmail/v1/users/me/messages",
     );

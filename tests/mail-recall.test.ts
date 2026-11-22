@@ -15,6 +15,7 @@ import {
   type Embedder,
 } from "../src/mail-recall.js";
 import { action } from "../src/protocol.js";
+import { RateLimitedError } from "../src/tool-errors.js";
 import { runtimeContext } from "../src/runtime.js";
 import { projectObservation } from "../src/observations.js";
 import { plugins } from "../src/plugin-registry.js";
@@ -777,13 +778,13 @@ test("keyword results are returned while the index builds, and failures are note
   assert.match(early.note!, /1 of 2 keyword searches failed/);
 });
 
-test("keyword searches run on the primary mailbox with the turn's budget", async () => {
+test("keyword searches run on the primary mailbox and name a rate limit", async () => {
   const calls: unknown[][] = [];
   const gmail = {
     async call(...args: unknown[]) {
       calls.push(args);
       if (args[2] === "boom")
-        throw new Error("Gmail request budget for this turn is used");
+        throw new RateLimitedError("Gmail rate limited this request");
       return {
         results: [
           {
@@ -815,7 +816,9 @@ test("keyword searches run on the primary mailbox with the turn's budget", async
     { pageSize: 10 },
   ]);
   assert.equal(result.failed, 1);
-  assert.deepEqual(result.reasons, ["the turn's Gmail request budget is used"]);
+  assert.deepEqual(result.reasons, [
+    "Gmail rate limited the search; retry it shortly",
+  ]);
   assert.deepEqual(result.lists, [
     [
       {

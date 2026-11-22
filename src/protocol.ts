@@ -570,7 +570,7 @@ export const action = z.discriminatedUnion("operation", [
       account: z.string().min(1).max(254).optional(),
       query: z.string().min(1).max(500),
       pageToken: z.string().max(1000).optional(),
-      pageSize: z.number().int().min(1).max(50).optional(),
+      pageSize: z.number().int().min(1).max(100).optional(),
     })
     .strict(),
   z

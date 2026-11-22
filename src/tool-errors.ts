@@ -32,6 +32,8 @@ export class RepeatedFailureError extends Error {
 export class BrowserCommandError extends Error {}
 /** The host has established that this invocation made no domain mutation. */
 export class ToolValidationError extends Error {}
+/** A provider rate limited a read; the message says to wait and retry. */
+export class RateLimitedError extends Error {}
 /** An earlier write's outcome is uncertain, so this write was refused before any mutation. */
 export class WriteBlockedError extends ToolValidationError {}
 /**
@@ -96,6 +98,8 @@ export function toolError(error: unknown) {
     };
   if (error instanceof ToolValidationError)
     return { code: "VALIDATION_FAILED", retryable: false, message };
+  if (error instanceof RateLimitedError)
+    return { code: "RATE_LIMITED", retryable: true, message };
   if (error instanceof ReportRejectedError)
     return { code: "VALIDATION_FAILED", retryable: true, message };
   if (error instanceof RepeatedFailureError)

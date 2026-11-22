@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  GMAIL_RUN_BUDGET,
   GmailTools,
   plainBody,
   singaporeDates,
@@ -50,6 +49,16 @@ const credentials = [
  * Gmail's batch reply for a multipart request body: each inner GET is answered from
  * `answer`, an Error becoming a failed part, as the batch endpoint reports them.
  */
+/** A Gmail error response a route can return: status and JSON body. */
+class Reply {
+  constructor(
+    readonly status: number,
+    readonly body: unknown,
+  ) {}
+}
+const rateLimitBody = (reason = "rateLimitExceeded") => ({
+  error: { code: 403, errors: [{ reason, domain: "usageLimits" }] },
+});
 function batchReply(body: string, answer: (url: URL) => unknown) {
   const parts = [...body.matchAll(/Content-ID: <item(\d+)>\r\n\r\nGET (\S+)/g)];
   const text =
@@ -57,9 +66,17 @@ function batchReply(body: string, answer: (url: URL) => unknown) {
       .map(([, index, path]) => {
         const out = answer(new URL("https://gmail.googleapis.com" + path));
         const status =
-          out instanceof Error ? "500 Internal Server Error" : "200 OK";
+          out instanceof Reply
+            ? `${out.status} Refused`
+            : out instanceof Error
+              ? "500 Internal Server Error"
+              : "200 OK";
         const json = JSON.stringify(
-          out instanceof Error ? { error: { code: 500 } } : out,
+          out instanceof Reply
+            ? out.body
+            : out instanceof Error
+              ? { error: { code: 500 } }
+              : out,
         );
         return `--batch_reply\r\nContent-Type: application/http\r\nContent-ID: <response-item${index}>\r\n\r\nHTTP/1.1 ${status}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${json}\r\n`;
       })
@@ -75,7 +92,7 @@ function batchReply(body: string, answer: (url: URL) => unknown) {
  */
 function routed(
   routes: (url: URL) => unknown,
-  options: { batch?: "ok" | "fail" } = {},
+  options: { batch?: "ok" | "fail" | Reply } = {},
 ) {
   const calls: string[] = [];
   const inner: string[] = [];
@@ -91,18 +108,19 @@ function routed(
       for (const m of body.matchAll(/GET (\S+)/g)) inner.push(m[1]!);
       if (options.batch === "fail")
         return new Response("unavailable", { status: 503 });
+      if (options.batch instanceof Reply)
+        return Response.json(options.batch.body, {
+          status: options.batch.status,
+        });
       return batchReply(body, routes);
     }
     const body = routes(url);
     if (body instanceof Error) throw body;
+    if (body instanceof Reply)
+      return Response.json(body.body, { status: body.status });
     return Response.json(body);
   }) as typeof fetch;
   return { request, calls, inner };
-}
-/** Spends `n` requests of a run's budget with single-message reads. */
-async function spend(g: GmailTools, run: string | undefined, n: number) {
-  for (let i = 0; i < n; i++)
-    await g.call("123", "gmail_read", "abc", undefined, run);
 }
 /** A route table that answers lists with `ids`, metadata by id and reads with plain text. */
 function mailbox(ids: string[], extra: object = {}) {
@@ -341,9 +359,9 @@ test("hints describe an empty and an oversized result set", async () => {
   assert.equal(done.hint, undefined);
 });
 
-test("a full 50-row page of maximal metadata still fits the model projection", async () => {
+test("a full 100-row page of maximal metadata fits the model projection in two batches", async () => {
   const wide = "\u00e9".repeat(500);
-  const ids = Array.from({ length: 50 }, (_, i) =>
+  const ids = Array.from({ length: 100 }, (_, i) =>
     (i.toString(16) + "f".repeat(64)).slice(0, 64),
   );
   const r = routed((url) =>
@@ -367,13 +385,16 @@ test("a full 50-row page of maximal metadata still fits the model projection", a
     undefined,
     undefined,
     undefined,
-    { pageSize: 50 },
+    { pageSize: 100 },
   );
-  assert.equal(out.results.length, 50);
+  assert.equal(out.results.length, 100);
   assert.equal(out.omitted, 0);
   assert.ok(out.results.every((x: any) => x.subject && !x.detail));
   const projected = assertProjects(out, "gmail_search");
-  assert.equal(projected.results.length, 50);
+  assert.equal(projected.results.length, 100);
+  // Batches hold at most 50 parts.
+  assert.equal(r.calls.filter((c) => c === "/batch/gmail/v1").length, 2);
+  assert.equal(r.inner.length, 100);
 });
 
 test("an identical search inside the cache window makes no request", async () => {
@@ -581,12 +602,11 @@ test("thread and message ids are validated before any request", async () => {
   assert.ok(!r.calls.some((c) => c.includes("/threads/")));
 });
 
-test("the run request budget is a backstop, counts a batch once and does not cross runs", async () => {
-  assert.equal(GMAIL_RUN_BUDGET, 200);
+test("many searches and reads in one run are never refused", async () => {
   const ids = Array.from({ length: 50 }, (_, i) => `a${i}`);
   const r = routed(mailbox(ids));
   const g = new GmailTools(config, r.request);
-  // A 50-hit page is one list and one batch: two requests, not 51.
+  // A 50-hit page is one list and one batch, not 51 requests.
   const page: any = await g.call(
     "123",
     "gmail_search",
@@ -597,102 +617,94 @@ test("the run request budget is a backstop, counts a batch once and does not cro
     { pageSize: 50 },
   );
   assert.ok(page.results.every((x: any) => x.subject && !x.detail));
-  await spend(g, "run-1", GMAIL_RUN_BUDGET - 2);
-  await assert.rejects(
-    g.call("123", "gmail_read", "abc", undefined, "run-1"),
-    (e: Error) => {
-      assert.equal(toolError(e).retryable, false);
-      assert.equal(toolError(e).code, "VALIDATION_FAILED");
-      assert.match(e.message, /budget for this turn is used \(200 requests\)/);
-      return true;
-    },
+  assert.equal(r.calls.filter((c) => c === "/batch/gmail/v1").length, 1);
+  // Far more than the 40 and 200 requests the removed per-run budget allowed.
+  for (let i = 0; i < 150; i++)
+    await g.call("123", "gmail_search", `query ${i}`, undefined, "run-1");
+  for (let i = 0; i < 250; i++)
+    await g.call("123", "gmail_read", "abc", undefined, "run-1");
+  const last: any = await g.call(
+    "123",
+    "gmail_read",
+    "",
+    undefined,
+    "run-1",
+    undefined,
+    { messageIds: ids.slice(0, 25) },
   );
-  // A fresh run starts with the full budget; an unbudgeted caller is unaffected.
-  await g.call("123", "gmail_read", "abc", undefined, "run-2");
-  await g.call("123", "gmail_read", "abc");
+  assert.ok(last.messages.every((m: any) => m.text === "x"));
 });
 
-test("a search that runs out of budget before its batch still answers with the ids", async () => {
+test("a rate-limited batch degrades its rows without fetching them again", async () => {
   const ids = Array.from({ length: 10 }, (_, i) => `b${i}`);
-  const r = routed(mailbox(ids));
-  const g = new GmailTools(config, r.request);
-  // The list takes the last request, so the metadata batch cannot be afforded.
-  await spend(g, "run-1", GMAIL_RUN_BUDGET - 1);
-  const out: any = await g.call(
+  for (const refusal of [
+    new Reply(429, { error: { code: 429 } }),
+    new Reply(403, rateLimitBody("userRateLimitExceeded")),
+  ]) {
+    const r = routed(mailbox(ids), { batch: refusal });
+    const out: any = await new GmailTools(config, r.request).call(
+      "123",
+      "gmail_search",
+      "final",
+    );
+    assert.deepEqual(
+      out.results.map((x: any) => x.id),
+      ids,
+    );
+    assert.ok(
+      out.results.every((x: any) => /rate limited.*retry/.test(x.detail)),
+    );
+    assert.equal(
+      r.calls.filter((c) => c.includes("format=metadata")).length,
+      0,
+    );
+  }
+});
+
+test("a failed batch falls back to single fetches, four at a time", async () => {
+  const ids = Array.from({ length: 12 }, (_, i) => `b${i}`);
+  let inFlight = 0;
+  let peak = 0;
+  const inner = routed(mailbox(ids), { batch: "fail" });
+  const request = (async (u: unknown, init?: RequestInit) => {
+    const single = String(u).includes("format=metadata");
+    if (single) peak = Math.max(peak, ++inFlight);
+    try {
+      if (single) await new Promise((done) => setTimeout(done, 2));
+      return await inner.request(u as string, init);
+    } finally {
+      if (single) inFlight--;
+    }
+  }) as typeof fetch;
+  const out: any = await new GmailTools(config, request).call(
     "123",
     "gmail_search",
     "final",
-    undefined,
-    "run-1",
   );
   assert.deepEqual(
-    out.results.map((x: any) => x.id),
-    ids,
+    out.results.map((x: any) => x.subject),
+    ids.map((id) => `Subject ${id}`),
   );
-  assert.ok(out.results.every((x: any) => /budget/.test(x.detail)));
-  assert.ok(!r.calls.includes("/batch/gmail/v1"));
+  assert.equal(peak, 4);
 });
 
-test("a failed batch falls back to single fetches, which degrade per row at the budget", async () => {
-  const ids = Array.from({ length: 10 }, (_, i) => `b${i}`);
-  const r = routed(mailbox(ids), { batch: "fail" });
-  const g = new GmailTools(config, r.request);
-  // List and batch leave three requests for the single-fetch fallback.
-  await spend(g, "run-1", GMAIL_RUN_BUDGET - 5);
-  const out: any = await g.call(
-    "123",
-    "gmail_search",
-    "final",
-    undefined,
-    "run-1",
-  );
-  assert.equal(out.results.length, 10);
-  // Every row keeps its own requested identifiers, retrieved or not.
-  assert.deepEqual(
-    out.results.map((x: any) => x.id),
-    ids,
-  );
-  const short = out.results.filter((x: any) => x.detail);
-  assert.equal(short.length, 7);
-  assert.ok(short.every((x: any) => /budget/.test(x.detail)));
-  assert.ok(
-    out.results
-      .filter((x: any) => !x.detail)
-      .every((x: any) => x.subject === `Subject ${x.id}`),
-  );
-});
-
-test("a page degraded by the budget is not cached for a later turn", async () => {
+test("a page degraded by a rate limit is not cached for a later call", async () => {
   const ids = Array.from({ length: 10 }, (_, i) => `c${i}`);
+  let limited = true;
   const r = routed((url) => {
     if (url.pathname.endsWith("/messages"))
-      return {
-        messages: ids.map((id) => ({ id, threadId: `f${id}` })),
-        resultSizeEstimate: 10,
-      };
-    if (url.searchParams.get("format") === "metadata")
-      return metadata(url.pathname.split("/").pop()!, "Complete");
-    return { id: "abc", threadId: "fabc", payload: plain("x") };
+      return { messages: ids.map((id) => ({ id, threadId: `f${id}` })) };
+    if (limited && url.pathname.endsWith("/c3"))
+      return new Reply(429, { error: { code: 429 } });
+    return metadata(url.pathname.split("/").pop()!, "Complete");
   });
   const g = new GmailTools(config, r.request);
-  await spend(g, "run-1", GMAIL_RUN_BUDGET - 1);
-  const partial: any = await g.call(
-    "123",
-    "gmail_search",
-    "deposit",
-    undefined,
-    "run-1",
-  );
-  assert.ok(partial.results.some((x: any) => x.detail));
-  // A fresh turn with full budget must retry rather than inherit the partial page.
-  const complete: any = await g.call(
-    "123",
-    "gmail_search",
-    "deposit",
-    undefined,
-    "run-2",
-  );
-  assert.ok(complete.results.every((x: any) => !x.detail));
+  const partial: any = await g.call("123", "gmail_search", "deposit");
+  assert.match(partial.results[3].detail, /rate limited/);
+  // A rate-limited part is not fetched again within the call.
+  assert.equal(r.calls.filter((c) => c.includes("/c3?")).length, 0);
+  limited = false;
+  const complete: any = await g.call("123", "gmail_search", "deposit");
   assert.ok(complete.results.every((x: any) => x.subject === "Complete"));
 });
 
@@ -830,18 +842,6 @@ test("a message with neither a plain-text nor an HTML body is marked bodyless", 
   assertProjects(out, "gmail_thread");
 });
 
-test("a caller without a run identifier shares one bounded bucket", async () => {
-  const r = routed(mailbox(["a1"]));
-  const g = new GmailTools(config, r.request);
-  await spend(g, undefined, GMAIL_RUN_BUDGET - 2);
-  await g.call("123", "gmail_search", "unattributed");
-  // Two callers without a run share the bucket rather than being exempt.
-  await assert.rejects(
-    g.call("123", "gmail_read", "abc"),
-    /budget for this turn is used/,
-  );
-});
-
 test("a cached page cannot be mutated through a second read", async () => {
   const r = routed((url) =>
     url.pathname.endsWith("/messages")
@@ -881,7 +881,7 @@ test("Gmail tools reject extra fields, arbitrary URLs and write operations", () 
     { operation: "gmail_read", messageId: "abc", offset: -1 },
     { operation: "gmail_read", messageId: "abc", offset: 1.5 },
     { operation: "gmail_search", query: "jobs", pageSize: 0 },
-    { operation: "gmail_search", query: "jobs", pageSize: 51 },
+    { operation: "gmail_search", query: "jobs", pageSize: 101 },
     { operation: "gmail_search", query: "jobs", pageSize: 2.5 },
     { operation: "gmail_search", query: "jobs", user: "456" },
     { operation: "gmail_send", query: "jobs" },
@@ -900,7 +900,7 @@ test("Gmail tool schemas accept the new read and page arguments", () => {
       messageIds: Array.from({ length: 25 }, (_, i) => `a${i}`),
     },
     { operation: "gmail_search", query: "jobs", pageSize: 1 },
-    { operation: "gmail_search", query: "jobs", pageSize: 50 },
+    { operation: "gmail_search", query: "jobs", pageSize: 100 },
   ])
     assert.equal(action.safeParse(a).success, true, JSON.stringify(a));
 });
@@ -1136,23 +1136,65 @@ test("batch read arguments are validated before any request", async () => {
   assert.equal(r.calls.length, 0);
 });
 
-test("a batch read degrades the messages the budget cannot afford", async () => {
-  const r = routed(mailbox([]));
-  const g = new GmailTools(config, r.request);
-  await spend(g, "run-1", GMAIL_RUN_BUDGET - 2);
-  const out: any = await g.call(
+test("a rate-limited message in a batch read says to retry it", async () => {
+  const r = routed((url) => {
+    const id = url.pathname.split("/").pop()!;
+    return id === "a2"
+      ? new Reply(429, { error: { code: 429 } })
+      : { id, threadId: `f${id}`, payload: plain("body " + id) };
+  });
+  const out: any = await new GmailTools(config, r.request).call(
     "123",
     "gmail_read",
     "",
     undefined,
-    "run-1",
+    undefined,
     undefined,
     { messageIds: ["a1", "a2", "a3"] },
   );
   assert.deepEqual(
-    out.messages.map((m: any) => m.detail ?? "read"),
-    ["read", "read", "not retrieved: turn request budget reached"],
+    out.messages.map((m: any) => m.text ?? m.detail),
+    [
+      "body a1",
+      "not retrieved: Gmail rate limited this request; retry it shortly",
+      "body a3",
+    ],
   );
+});
+
+test("a rate limit on a single call is a clear retryable RATE_LIMITED, not a reconnect", async () => {
+  const cases: [Reply, string][] = [
+    [new Reply(429, { error: { code: 429 } }), "RATE_LIMITED"],
+    [new Reply(403, rateLimitBody()), "RATE_LIMITED"],
+    [
+      new Reply(403, rateLimitBody("insufficientPermissions")),
+      "AUTHORIZATION_REQUIRED",
+    ],
+  ];
+  for (const [reply, code] of cases)
+    for (const operation of [
+      "gmail_search",
+      "gmail_thread",
+      "gmail_read",
+    ] as const) {
+      const r = routed(() => reply);
+      await assert.rejects(
+        new GmailTools(config, r.request).call(
+          "123",
+          operation,
+          operation === "gmail_search" ? "x" : "abc",
+        ),
+        (e: Error) => {
+          const err = toolError(e);
+          assert.equal(err.code, code, `${operation} ${reply.status}`);
+          if (code === "RATE_LIMITED") {
+            assert.equal(err.retryable, true);
+            assert.match(err.message, /Wait a few seconds and retry/);
+          }
+          return true;
+        },
+      );
+    }
 });
 
 test("search metadata for a page comes from one batch request", async () => {
@@ -1220,6 +1262,28 @@ test("hits a batch did not answer are fetched on their own; a failed batch falls
       .map((c) => c.split("?")[0]),
     ["/gmail/v1/users/me/messages/a2"],
   );
+  // A rate-limited part is reported, not fetched again; a failed part is fetched once.
+  const mixed = routed((url) =>
+    url.pathname.endsWith("/a1")
+      ? new Reply(403, rateLimitBody())
+      : url.pathname.endsWith("/a2")
+        ? new Error("still failing")
+        : routes(url),
+  );
+  const m: any = await new GmailTools(config, mixed.request).call(
+    "123",
+    "gmail_search",
+    "x",
+  );
+  assert.match(m.results[0].detail, /rate limited/);
+  assert.equal(m.results[1].detail, "not retrieved: unavailable");
+  assert.equal(m.results[2].subject, "Found");
+  assert.deepEqual(
+    mixed.calls
+      .filter((c) => c.includes("format=metadata"))
+      .map((c) => c.split("?")[0]),
+    ["/gmail/v1/users/me/messages/a2"],
+  );
   // The whole batch failing: every hit is fetched on its own and the search answers.
   const failed = routed(routes, { batch: "fail" });
   const b: any = await new GmailTools(config, failed.request).call(
@@ -1249,15 +1313,15 @@ test("pageSize is passed to Gmail and bounded in the adapter", async () => {
         pageSize,
       },
     );
-  await search(50);
-  assert.match(r.calls.at(-1)!, /maxResults=50/);
+  await search(100);
+  assert.match(r.calls.at(-1)!, /maxResults=100/);
   await search(10);
   assert.match(r.calls.at(-1)!, /maxResults=10/);
   const before = r.calls.length;
-  for (const bad of [0, 51, 2.5])
+  for (const bad of [0, 101, 2.5])
     await assert.rejects(
       search(bad),
-      /pageSize must be a whole number from 1 to 50/,
+      /pageSize must be a whole number from 1 to 100/,
     );
   assert.equal(r.calls.length, before);
 });
@@ -1352,4 +1416,170 @@ test("an archived promotion is labelled for the searcher", async () => {
   assert.equal(out.results[0].category, "promotions");
   assert.equal(out.results[0].folder, "archived");
   assert.equal(out.results[0].unread, false);
+});
+
+const emoji = "\u{1F600}";
+/** True when no high surrogate is left without its low half, or the reverse. */
+function wholePairs(text: string) {
+  return !/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(
+    text,
+  );
+}
+test("a read never cuts an emoji in half, and its continuation is exact", async () => {
+  // The emoji's first half sits at index 19,999, so a plain cut at 20,000 would split it.
+  const text = "a".repeat(19_999) + emoji + "b".repeat(30_000);
+  const r = single(plain(text));
+  const g = new GmailTools(config, r.request);
+  const read = (offset?: number) =>
+    g.call("123", "gmail_read", "abc", undefined, undefined, undefined, {
+      offset,
+    }) as Promise<any>;
+  const parts: string[] = [];
+  let offset: number | undefined;
+  for (;;) {
+    const out = await read(offset);
+    assert.ok(wholePairs(out.text), `offset ${offset}`);
+    parts.push(out.text);
+    if (!out.truncated) break;
+    offset = out.nextOffset;
+  }
+  assert.equal(parts[0]!.length, 19_999);
+  assert.equal(parts.join(""), text);
+  // An offset pointing at the emoji's second half starts at its first half instead.
+  const inside = await read(20_000);
+  assert.equal(inside.offset, 19_999);
+  assert.ok(inside.text.startsWith(emoji));
+  assert.ok(wholePairs(inside.text));
+});
+
+test("share boundaries in a batch read and a thread never split an emoji", async () => {
+  // Three bodies share 50,000: 16,666 each, which lands inside the pair below.
+  const body = "c".repeat(16_665) + emoji + "d".repeat(30_000);
+  const r = routed((url) => {
+    const id = url.pathname.split("/").pop()!;
+    if (url.pathname.includes("/threads/"))
+      return {
+        id: "ffa1",
+        messages: ["m1", "m2", "m3"].map((m, i) => ({
+          id: m,
+          threadId: "ffa1",
+          internalDate: String(i),
+          payload: { headers: [], ...plain(body) },
+        })),
+      };
+    return { id, threadId: `f${id}`, payload: plain(body) };
+  });
+  const g = new GmailTools(config, r.request);
+  const batch: any = await g.call(
+    "123",
+    "gmail_read",
+    "",
+    undefined,
+    undefined,
+    undefined,
+    { messageIds: ["a1", "a2", "a3"] },
+  );
+  const thread: any = await g.call("123", "gmail_thread", "ffa1");
+  for (const result of [batch, thread]) {
+    // The first share (16,666) ends inside the pair and steps back before it; the
+    // others (16,667) end just after it.
+    assert.deepEqual(
+      result.messages.map((m: any) => m.text.length),
+      [16_665, 16_667, 16_667],
+    );
+    for (const m of result.messages) {
+      assert.ok(wholePairs(m.text));
+      assert.equal(m.nextOffset, m.text.length);
+    }
+  }
+  // Every result can be stored: no lone surrogate anywhere in it.
+  assert.ok(
+    wholePairs(JSON.stringify(batch)) && wholePairs(JSON.stringify(thread)),
+  );
+});
+
+test("trimming an oversized result to fit never splits an emoji", async () => {
+  // Control characters serialise as six, so 20,000 of them must be trimmed to fit;
+  // emoji are interleaved so any trim point can land inside a pair.
+  const text = ("\u0001".repeat(40) + emoji).repeat(600);
+  const r = single(plain(text));
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_read",
+    "abc",
+  );
+  assert.ok(out.truncated);
+  assert.ok(out.text.length < 20_000);
+  assert.ok(wholePairs(out.text));
+  assert.equal(out.nextOffset, out.text.length);
+  assert.equal(text.slice(0, out.nextOffset), out.text);
+  assertProjects(out, "gmail_read");
+});
+
+test("header and snippet caps never split an emoji", async () => {
+  const r = routed((url) =>
+    url.pathname.endsWith("/messages")
+      ? { messages: [{ id: "a1", threadId: "fa1" }] }
+      : metadata("a1", "s".repeat(159) + emoji, {
+          snippet: "n".repeat(119) + emoji,
+        }),
+  );
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_search",
+    "x",
+  );
+  assert.equal(out.results[0].subject, "s".repeat(159));
+  assert.equal(out.results[0].snippet, "n".repeat(119));
+});
+
+test("a thread past 50 messages lists the omitted ones for a batch read", async () => {
+  const r = routed(() => ({
+    id: "ffa1",
+    messages: Array.from({ length: 60 }, (_, i) => ({
+      id: `a${i}`,
+      threadId: "ffa1",
+      internalDate: String(Date.parse("2026-09-01T00:00:00Z") + i * 60_000),
+      payload: { headers: [], ...plain(`reply ${i}`) },
+    })),
+  }));
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_thread",
+    "ffa1",
+  );
+  assert.equal(out.messages.length, 50);
+  assert.equal(out.omitted, 10);
+  assert.deepEqual(
+    out.omittedMessages.map((m: any) => m.id),
+    Array.from({ length: 10 }, (_, i) => `a${50 + i}`),
+  );
+  assert.equal(out.omittedMessages[0].received, "2026-09-01T08:50:00+08:00");
+  assert.match(
+    out.note,
+    /omittedMessages; read them with gmail_read messageIds/,
+  );
+  assert.ok(
+    action.safeParse({
+      operation: "gmail_read",
+      messageIds: out.omittedMessages.map((m: any) => m.id),
+    }).success,
+  );
+  assertProjects(out, "gmail_thread");
+});
+
+test("only an operator at the start of a token is rewritten, never to a non-positive epoch", () => {
+  const sgt = Date.parse("2026-01-01T00:00:00+08:00") / 1000;
+  for (const q of [
+    "foo-before:2026/01/01",
+    "x:after:2026/01/01",
+    "after:1970/01/01",
+    "before:1969/12/31",
+  ])
+    assert.equal(singaporeDates(q), q);
+  assert.equal(singaporeDates("-before:2026/01/01"), `-before:${sgt}`);
+  assert.equal(singaporeDates("a -after:2026/01/01"), `a -after:${sgt}`);
+  assert.equal(singaporeDates("{-after:2026/01/01}"), `{-after:${sgt}}`);
+  // 2 January 1970 is the first Singapore midnight with a positive epoch.
+  assert.equal(singaporeDates("after:1970/01/02"), "after:57600");
 });

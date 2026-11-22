@@ -123,3 +123,20 @@ test("a long lead never splits a joined emoji such as a family sequence", async 
   assert.ok(lead.endsWith("…"));
   assert.equal(lead.slice(0, -1), family.repeat(299));
 });
+test("the unread digest asks Gmail for the ten-hit page it always used", async () => {
+  const f = await fixture();
+  const args: unknown[][] = [];
+  await buildBriefing(f.job({ include_email: true }), {
+    ...f.deps,
+    gmail: {
+      call: async (...a: unknown[]) => {
+        args.push(a);
+        return { results: [] };
+      },
+    },
+  });
+  assert.equal(args.length, 1);
+  assert.equal(args[0]![1], "gmail_search");
+  assert.equal(args[0]![2], "in:inbox is:unread newer_than:1d");
+  assert.deepEqual(args[0]![6], { pageSize: 10 });
+});

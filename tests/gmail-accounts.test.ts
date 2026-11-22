@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { GmailTools, GMAIL_RUN_BUDGET } from "../src/gmail.js";
+import { GmailTools } from "../src/gmail.js";
 import { action } from "../src/protocol.js";
 const config = {
   owner: "owner",
@@ -38,20 +38,13 @@ function fixture(mismatch = false) {
   }) as typeof fetch;
   return { tools: new GmailTools(config, request), calls };
 }
-test("monitoring polls one IDs-only page in the pinned mailbox, preserves the exact query and uses shared request accounting", async () => {
+test("monitoring polls one IDs-only page in the pinned mailbox and preserves the exact query", async () => {
   const { tools, calls } = fixture();
   await assert.rejects(() =>
-    tools.poll("other", "primary", config.email, "from:x", undefined, "poll"),
+    tools.poll("other", "primary", config.email, "from:x", undefined),
   );
   await assert.rejects(() =>
-    tools.poll(
-      "owner",
-      "secondary",
-      "wrong@example.com",
-      "from:x",
-      undefined,
-      "poll",
-    ),
+    tools.poll("owner", "secondary", "wrong@example.com", "from:x", undefined),
   );
   assert.equal(calls.length, 0);
   const query =
@@ -62,7 +55,6 @@ test("monitoring polls one IDs-only page in the pinned mailbox, preserves the ex
     config.secondary.email,
     query,
     "page",
-    "poll",
   );
   assert.equal(result.nextPageToken, "second-page");
   const listed = calls.filter((c) => c.url.pathname.endsWith("/messages"));
@@ -74,20 +66,6 @@ test("monitoring polls one IDs-only page in the pinned mailbox, preserves the ex
   assert.ok(
     !calls.some((c) => /\/messages\//.test(c.url.pathname)),
     "no metadata or message-body fetch",
-  );
-  for (let i = 1; i < GMAIL_RUN_BUDGET; i++)
-    await tools.poll(
-      "owner",
-      i % 2 ? "primary" : "secondary",
-      i % 2 ? config.email : config.secondary.email,
-      query,
-      undefined,
-      "poll",
-    );
-  await assert.rejects(
-    () =>
-      tools.poll("owner", "primary", config.email, query, undefined, "poll"),
-    /budget/,
   );
 });
 test("accounts are owner-scoped, credential-free and require no Google requests", async () => {
@@ -190,30 +168,6 @@ test("secondary profile mismatch is rejected without reading or switching accoun
     /does not match/,
   );
   assert.equal(calls.length, 2);
-});
-test("request allocation is shared across accounts", async () => {
-  const { tools } = fixture();
-  for (let i = 0; i < GMAIL_RUN_BUDGET; i++)
-    await tools.call(
-      "owner",
-      "gmail_search",
-      String(i),
-      undefined,
-      "run",
-      i % 2 ? "secondary" : "primary",
-    );
-  await assert.rejects(
-    () =>
-      tools.call(
-        "owner",
-        "gmail_search",
-        "over",
-        undefined,
-        "run",
-        "secondary",
-      ),
-    /budget/,
-  );
 });
 test("validated tool schema permits selectors and rejects credential/owner injection and writes", () => {
   for (const operation of ["gmail_search", "gmail_read", "gmail_thread"]) {

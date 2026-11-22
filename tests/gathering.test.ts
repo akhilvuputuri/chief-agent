@@ -516,3 +516,51 @@ test("a match reports the tracked price; only a background pass queues one alert
   );
   await db.query("UPDATE work_tasks SET status='done' WHERE id=$1", [c.taskId]);
 });
+test("gather_search keeps its ten-hit page and its query text unrewritten", async () => {
+  const calls: unknown[][] = [];
+  const gmail = {
+    async call(...a: unknown[]) {
+      calls.push(a);
+      return { results: [] };
+    },
+    async attachmentInfo() {
+      return [];
+    },
+    async attachmentBytes(): Promise<never> {
+      throw new Error("unused");
+    },
+  };
+  const g = new Gathering(db, vault, gmail as any);
+  const run = await turn("alice", "Gather invoices from email");
+  const c = await g.call(
+    "alice",
+    run,
+    action.parse({
+      operation: "gather_start",
+      requestKey: randomUUID(),
+      objective: "Gather the September invoice from email",
+      targets: [{ key: "one", label: "ChatGPT", month: "2026-09" }],
+      sources: ["email"],
+      mailboxes: ["primary"],
+    }),
+  );
+  await g.call(
+    "alice",
+    run,
+    action.parse({
+      operation: "gather_search",
+      id: c.id,
+      targetKey: "one",
+      account: "primary",
+      query: "receipt",
+    }),
+  );
+  assert.equal(calls.length, 1);
+  const [user, operation, query, pageToken, , account, options] = calls[0]!;
+  assert.equal(user, "alice");
+  assert.equal(operation, "gmail_search");
+  assert.match(String(query), /^after:\d+ before:\d+ .*receipt$/);
+  assert.equal(pageToken, undefined);
+  assert.equal(account, "primary");
+  assert.deepEqual(options, { pageSize: 10, singaporeDates: false });
+});

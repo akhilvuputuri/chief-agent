@@ -723,7 +723,6 @@ export class Gathering {
         user,
         a.messageId,
         attempt.account,
-        run,
       );
       const inspectionId = await this.recordAttempt(
         user,
@@ -834,7 +833,6 @@ export class Gathering {
           a.source.messageId,
           a.source.partKey,
           attempt.account,
-          run,
         );
         prepared = await this.vault.prepare(
           user,

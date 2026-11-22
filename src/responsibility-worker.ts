@@ -185,7 +185,6 @@ export class ResponsibilityWorker {
         t.config.email,
         q,
         cursor.pageToken,
-        `responsibility-check:${lease}`,
       );
       changes = result.messages.map((m) => ({
         key: `gmail:${t.config.account}:${m.id}`,

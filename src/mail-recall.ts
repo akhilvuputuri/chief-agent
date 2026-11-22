@@ -13,6 +13,7 @@ import {
   type StoredMessage,
 } from "./mail-index-store.js";
 import { discardBody, readBody } from "./http-body.js";
+import { RateLimitedError } from "./tool-errors.js";
 
 export const MAIL_INDEX_DAYS = 365;
 /** Received Primary-category mail; sent mail, chats, spam and trash are left out. */
@@ -209,7 +210,8 @@ export type KeywordResults = {
 /** A short, fixed reason for a failed keyword search. */
 function failureReason(error: unknown) {
   const message = String((error as Error)?.message ?? error);
-  if (/budget/i.test(message)) return "the turn's Gmail request budget is used";
+  if (error instanceof RateLimitedError)
+    return "Gmail rate limited the search; retry it shortly";
   if (/\((403|429)\)/.test(message))
     return "Gmail refused the request (quota or permission)";
   return "Gmail search failed";
@@ -236,10 +238,7 @@ export function fuse(rankings: string[][]) {
     .map(([id]) => id);
 }
 
-/**
- * Runs the agent's keyword searches on the primary mailbox through the ordinary gmail_search
- * path, so each one counts against the turn's Gmail request budget like any other search.
- */
+/** Runs the agent's keyword searches on the primary mailbox through the ordinary gmail_search path. */
 export async function keywordSearch(
   gmail: Pick<GmailTools, "call">,
   user: string,
