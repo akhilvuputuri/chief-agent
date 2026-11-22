@@ -2119,6 +2119,24 @@ test("spam and trash are included only when the query asks for them", async () =
     false,
   );
   assert.equal(plainSearch.includeSpamTrash, undefined);
+  // Gathering opts out: its model-supplied query cannot bring spam or trash in, and the
+  // model's cached search for the same query is not served to it.
+  const listed = r.calls.length;
+  const gathered: any = await g.call(
+    "123",
+    "gmail_search",
+    "receipt in:anywhere",
+    undefined,
+    undefined,
+    undefined,
+    { spamTrash: false },
+  );
+  assert.equal(r.calls.length, listed + 1);
+  assert.equal(
+    new URL("https://x" + r.calls.at(-1)).searchParams.has("includeSpamTrash"),
+    false,
+  );
+  assert.equal(gathered.includeSpamTrash, undefined);
 });
 
 test("rate-limited batch parts are retried with backoff and filled in order", async () => {

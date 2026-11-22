@@ -612,6 +612,8 @@ export type GmailCallOptions = {
   pageSize?: number;
   /** Send calendar dates in the query as Singapore midnight (default true). */
   singaporeDates?: boolean;
+  /** Include spam and trash when the query asks for them (default true). */
+  spamTrash?: boolean;
   offset?: number;
   messageIds?: string[];
 };
@@ -993,6 +995,7 @@ export class GmailTools {
     pageToken: string | undefined,
     pageSize: number,
     rewriteDates = true,
+    allowSpamTrash = true,
   ) {
     if (
       !Number.isInteger(pageSize) ||
@@ -1003,7 +1006,9 @@ export class GmailTools {
         `pageSize must be a whole number from 1 to ${SEARCH_PAGE_MAX}`,
       );
     const sent = rewriteDates ? singaporeDates(query) : query;
-    const key = `${user}|${sent}|${pageToken ?? ""}|${pageSize}`;
+    // Gmail leaves spam and trash out of a list unless asked, whatever the query says.
+    const spamTrash = allowSpamTrash && searchesSpamOrTrash(sent);
+    const key = `${user}|${sent}|${pageToken ?? ""}|${pageSize}|${spamTrash}`;
     const hit = this.cached(key);
     if (hit) return hit;
     const url = new URL(
@@ -1011,8 +1016,6 @@ export class GmailTools {
     );
     url.searchParams.set("q", sent);
     url.searchParams.set("maxResults", String(pageSize));
-    // Gmail leaves spam and trash out of a list unless asked, whatever the query says.
-    const spamTrash = searchesSpamOrTrash(sent);
     if (spamTrash) url.searchParams.set("includeSpamTrash", "true");
     if (pageToken) url.searchParams.set("pageToken", pageToken);
     const listed = z
@@ -1417,6 +1420,7 @@ export class GmailTools {
           pageToken,
           options.pageSize ?? SEARCH_PAGE_DEFAULT,
           options.singaporeDates,
+          options.spamTrash,
         )) as Record<string, unknown>),
         ...identity,
       };

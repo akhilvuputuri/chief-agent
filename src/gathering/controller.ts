@@ -661,8 +661,9 @@ export class Gathering {
           run,
           a.account,
           // Gathering keeps the ten-hit page and the query text it was built and
-          // tested with; its own bounds are epoch seconds already.
-          { pageSize: 10, singaporeDates: false },
+          // tested with; its own bounds are epoch seconds already. Spam and trash stay
+          // out whatever a model-supplied query says, so they never yield invoice files.
+          { pageSize: 10, singaporeDates: false, spamTrash: false },
         )) as any;
         const results = (result.results ?? []).map((r: any) => ({
           id: r.id,

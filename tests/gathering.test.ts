@@ -562,5 +562,9 @@ test("gather_search keeps its ten-hit page and its query text unrewritten", asyn
   assert.match(String(query), /^after:\d+ before:\d+ .*receipt$/);
   assert.equal(pageToken, undefined);
   assert.equal(account, "primary");
-  assert.deepEqual(options, { pageSize: 10, singaporeDates: false });
+  assert.deepEqual(options, {
+    pageSize: 10,
+    singaporeDates: false,
+    spamTrash: false,
+  });
 });
