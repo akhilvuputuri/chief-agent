@@ -105,6 +105,10 @@ export const readOperations = new Set([
   // In-memory file space; file_send and file_save are writes, to the owner only.
   "file_list",
   "file_zip",
+  "file_merge",
+  // Pages, emails and files opened in an anonymous session holding no account; its outputs
+  // go only to the file space.
+  "browser",
   "job_list",
   "job_analyze",
   "memory_list",

@@ -86,6 +86,63 @@ const monitoringWindow = z
 const text = z.string().min(1).max(20000);
 // A file space handle (src/file-space.ts).
 const fileId = z.string().regex(/^f-[a-f0-9]{12}$/);
+/** The coordinator's browser (src/browser-tool.ts); one tool, its fields by action. */
+export const browserAction = z
+  .object({
+    operation: z.literal("browser"),
+    action: z.enum([
+      "open",
+      "read",
+      "snapshot",
+      "click",
+      "fill",
+      "press",
+      "scroll",
+      "back",
+      "wait",
+      "print",
+      "screenshot",
+      "download",
+      "close",
+    ]),
+    // open: exactly one of url, messageIds (with account), fileId and html.
+    url: z.string().min(1).max(4000).optional(),
+    account: z.string().min(1).max(254).optional(),
+    messageIds: z
+      .array(z.string().regex(/^[a-f0-9]{1,64}$/i))
+      .min(1)
+      .max(25)
+      .optional(),
+    fileId: fileId.optional(),
+    html: z.string().min(1).max(5_000_000).optional(),
+    remoteImages: z.boolean().optional(),
+    offset: z.number().int().min(0).max(200_000).optional(),
+    ref: z
+      .string()
+      .regex(/^@?e\d{1,6}$/)
+      .optional(),
+    text: z.string().max(4000).optional(),
+    key: z
+      .string()
+      .regex(/^[A-Za-z0-9+]{1,30}$/)
+      .optional(),
+    direction: z.enum(["up", "down", "left", "right"]).optional(),
+    pixels: z.number().int().min(1).max(10_000).optional(),
+    ms: z.number().int().min(1).max(10_000).optional(),
+    paper: z.enum(["A4", "Letter", "Legal", "A3", "A5", "Tabloid"]).optional(),
+    landscape: z.boolean().optional(),
+    marginMm: z.number().min(0).max(50).optional(),
+    background: z.boolean().optional(),
+    scale: z.number().min(0.1).max(2).optional(),
+    pageRanges: z
+      .string()
+      .regex(/^[\d\s,-]{1,100}$/)
+      .optional(),
+    headerFooter: z.boolean().optional(),
+    fullPage: z.boolean().optional(),
+    name: z.string().min(1).max(200).optional(),
+  })
+  .strict();
 export const status = z.enum([
   "saved",
   "interested",
@@ -641,6 +698,14 @@ export const action = z.discriminatedUnion("operation", [
       name: z.string().min(1).max(200),
     })
     .strict(),
+  z
+    .object({
+      operation: z.literal("file_merge"),
+      fileIds: z.array(fileId).min(2).max(50),
+      name: z.string().min(1).max(200),
+    })
+    .strict(),
+  browserAction,
   z
     .object({
       operation: z.literal("gmail_thread"),

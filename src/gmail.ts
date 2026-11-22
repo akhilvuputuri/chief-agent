@@ -25,12 +25,17 @@ const part: z.ZodType<Part> = z.lazy(() =>
       })
       .optional(),
     parts: z.array(part).optional(),
+    // A part's own headers, for an inline image's Content-ID.
+    headers: z
+      .array(z.object({ name: z.string(), value: z.string() }))
+      .optional(),
   }),
 );
 type Part = {
   partId?: string;
   mimeType?: string;
   filename?: string;
+  headers?: { name: string; value: string }[];
   body?: { data?: string; attachmentId?: string; size?: number };
   parts?: Part[];
 };
@@ -1665,6 +1670,57 @@ export class GmailTools {
     return {
       name: file.name,
       data: await selected.partBytes(token, id, file.body, file.bytes),
+    };
+  }
+  /**
+   * One message as the browser shows it: its headers, its HTML body (or plain text when it has
+   * none) and the inline images that body names by `cid:`. Read-only, through this client;
+   * the browser container never gets Gmail access.
+   */
+  async printable(user: string, id: string, account: string) {
+    if (!ID.test(id)) throw new ToolValidationError("Invalid Gmail message id");
+    const selected = this.selectAccount(account);
+    const token = await selected.access(user);
+    const url = new URL(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}`,
+    );
+    url.searchParams.set("format", "full");
+    const m = messageSchema
+      .and(z.object({ internalDate: z.string().optional() }))
+      .parse(await selected.get(token, url, ATTACHMENT_RESPONSE));
+    const value = (name: string) =>
+      m.payload?.headers?.find((h) => h.name.toLowerCase() === name)?.value ??
+      "";
+    const html = htmlBody(m.payload);
+    const images: { cid: string; mimeType: string; data: Buffer }[] = [];
+    const walk = async (p: Part) => {
+      const cid = p.headers
+        ?.find((h) => h.name.toLowerCase() === "content-id")
+        ?.value.trim()
+        .replace(/^<|>$/g, "");
+      if (
+        cid &&
+        p.mimeType?.startsWith("image/") &&
+        p.body &&
+        html.includes(`cid:${cid}`)
+      )
+        images.push({
+          cid,
+          mimeType: p.mimeType,
+          data: await selected.partBytes(token, id, p.body, p.body.size ?? 0),
+        });
+      for (const child of p.parts ?? []) await walk(child);
+    };
+    if (html && m.payload) await walk(m.payload);
+    return {
+      subject: value("subject"),
+      from: value("from"),
+      to: value("to"),
+      cc: value("cc"),
+      date: m.internalDate ? new Date(Number(m.internalDate)) : undefined,
+      html,
+      text: html ? "" : plainBody(m.payload),
+      images,
     };
   }
   /**

@@ -1555,6 +1555,8 @@ export class Assistant {
       throw error;
     } finally {
       this.inbox.release(consumedIds);
+      // The coordinator's browser session lasts one run.
+      void this.tools.browser?.release(user, run);
       this.capabilities.delete(capability);
       this.controllers.delete(run);
       if (this.foreground.get(user)?.run === run) this.foreground.delete(user);

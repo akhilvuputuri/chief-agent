@@ -29,6 +29,9 @@ export const CORE_OPERATIONS = new Set([
   "file_send",
   "file_save",
   "file_zip",
+  "file_merge",
+  // The coordinator's browser (src/browser-tool.ts): opens pages, emails and files, makes files.
+  "browser",
 ]);
 
 export const TOOL_DOMAINS = [

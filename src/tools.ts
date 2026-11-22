@@ -39,6 +39,7 @@ import { keywordSearch, type Embedder, type MailIndex } from "./mail-recall.js";
 import { recall } from "./recall.js";
 import { isLearned, MemoryStore } from "./memory.js";
 import { FileSpace, FILE_MAX, describe, spaceName } from "./file-space.js";
+import type { BrowserTool } from "./browser-tool.js";
 import type { MediaOutbox } from "./media-outbox.js";
 import { storedZip } from "./gathering/zip.js";
 import { ToolValidationError } from "./tool-errors.js";
@@ -71,6 +72,8 @@ export class JobTools {
     private media?: MediaOutbox,
     /** The coordinator's per-owner scratch space for files, in memory. */
     readonly files: FileSpace = new FileSpace(),
+    /** The coordinator's browser, in the public-browser container. */
+    readonly browser?: BrowserTool,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -637,6 +640,12 @@ export class JobTools {
     }
     // Handled by the agent loop; it never reaches the domain dispatcher.
     if (a.operation === "tools_load") throw new Error("Operation unavailable");
+    if (a.operation === "browser" || a.operation === "file_merge") {
+      if (!this.browser) throw new Error("The browser is not configured");
+      return a.operation === "browser"
+        ? this.browser.act(user, run, a, this.files, signal)
+        : this.browser.merge(user, a.fileIds, a.name, this.files);
+    }
     if (a.operation === "public_browser") {
       if (!this.publicBrowser)
         throw new Error("The public browser is not configured");
