@@ -1,3 +1,11 @@
+## The image job retries a failed provenance attestation (22 November 2026)
+
+- **Code.** `.github/workflows/ci.yml` only. In `publish gateway image`, the attestation step runs up to three times (again after 20 seconds, then after another 60), each the same pinned action with the same inputs. The job fails only when the third attempt fails. No runtime code, migration or Compose change.
+- **Why.** Twice on 22 November (`checks` runs 45007814059 and 45023086024) the step failed with `error fetching tlog entry - (404) Not Found`: the transparency log had accepted the entry and answered 404 when the action read it back, which the action does not retry. Every test had passed, the release was skipped, and production stayed on the previous commit until the job was rerun. These were the only two such failures in the last 100 main runs. See [journal 207](journey/207-attestation-read-back-404.md).
+- **Unchanged.** The release still verifies the attestation (signer `ci.yml`, `refs/heads/main`, the exact commit) and deploys only the verified digest; the host's checks are the same.
+- **Tested.** The step control flow on a hosted runner, with stand-in steps: a first, second or third success passes the job, and three failures fail it.
+- **Not measured.** The real action failing and a later attempt succeeding.
+
 ## Email tools: attachments, link targets, file space, browser and `file_merge` (22 November 2026)
 
 - **Code.** PR 526: `gmail_read` and `gmail_thread` list attachments by Gmail's part ID; a read-only `gmail_attachment` returns an attachment's text or puts it in the file space; `gmail_read` takes `links: true` for link targets; the routing wording says finding and reading receipts is Gmail work. PR 527: a per-owner file space in gateway memory (gone on restart) with `file_list`, `file_send`, `file_save` and `file_zip`. PR 528: a coordinator `browser` tool in the public-browser container (open pages, emails, files or HTML; read, print, screenshot, download) and `file_merge` (`qpdf`), with a `browsing-and-files` skill. No migration or Compose change; the browser image was refreshed on the host.

@@ -50,6 +50,9 @@ Running TypeScript directly with Node's type stripping was rejected for now. It 
   - The image carries the label `org.opencontainers.image.revision=<sha>` and the build argument `RELEASE_SHA=<sha>`.
   - The job pushes a build-provenance attestation.
   - The release runs only if the whole workflow succeeds, so a failed publish blocks the release.
+
+    > **Update, 22 November 2026 ([journal 207](207-attestation-read-back-404.md)):** the attestation step now gets up to three attempts, because the transparency log twice failed it for a moment and skipped a release. A publish whose three attempts all fail still blocks the release.
+
 - **`release`:** finds the image digest for the commit and verifies the attestation (signer `ci.yml`, ref `refs/heads/main`, source digest = the commit). This step is advisory in this change. The switch-over makes it required and sends the digest.
 - **`scripts/cloud-release.py`:**
   - It accepts `deploy <sha> sha256:<digest>`.
