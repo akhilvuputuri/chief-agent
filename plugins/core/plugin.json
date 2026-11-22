@@ -339,6 +339,10 @@
     {
       "id": "email-search",
       "path": "skills/email-search/SKILL.md"
+    },
+    {
+      "id": "browsing-and-files",
+      "path": "skills/browsing-and-files/SKILL.md"
     }
   ]
 }

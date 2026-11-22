@@ -43,6 +43,8 @@ The file space holds files during a conversation so they can be sent or kept. It
 - `file_save` keeps a PDF in the owner's encrypted vault under a name of your choice, with a note of where it came from. The vault keeps PDFs only.
 - `file_zip` bundles files into one ZIP, a new file in the space.
 
+To see an email as the owner sees it, or save it as a PDF the way they would with Print then Save as PDF, open it in the `browser` tool; skill_read core/browsing-and-files describes the browser and the file tools.
+
 ## gmail_recall
 
 Offered only when the mail index is available. It searches by meaning over the primary mailbox's Primary-category mail received in the last 12 months, optionally fused with one to three keyword searches of that mailbox, and returns up to ten candidates, best first. It suits an email described by what it was about when its wording is unknown; the closest candidate is not necessarily a match, so read it before relying on it. Other mail, other categories and the other mailbox need gmail_search.
