@@ -39,6 +39,8 @@ Tests: `tests/email-eval.test.ts`, with the real `GmailTools` over a fake Gmail 
 
 Independent review: pending.
 
+> **Update, 22 November 2026:** the independent review of `ec53d6e3` requested changes. `gmail_read` falls back to Gmail's whole snippet without a `bodyless` flag, and HTML entities can take a snippet past 200 characters, so a stand-in could count as readable. A task may now give each expected message its true `bodyChars`, which decides readability by how much of the body the model received; without it a tightened heuristic also rejects short text that starts like a snippet the model saw, and each line and the summary say how many messages were scored each way. Search rows without metadata count as `surfacedIdOnly`, not surfaced. Task errors give only the line, field path and issue code. Message IDs are compared in lower case. The model tier now resolves as `runAgentType` resolves it. The design doc lists the differences from a real agent run. Tests were added for each case (tested). Re-review pending.
+
 ## Verification and outcome
 
 Tested only. No run against the real mailbox and no paid model call has been made, so there is no baseline. The eval is a simplified loop, not the runtime; its limits are listed in the design doc.

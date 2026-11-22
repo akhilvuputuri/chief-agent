@@ -9,9 +9,10 @@
 //
 // Each task runs a model in a tool loop over the real Gmail tools (request budget, result
 // fitting and warnings included), each result passing through the real observation projection,
-// so the model sees what Chief's agents see. It ends with an eval-only report tool and is
-// scored deterministically against the expected message IDs. Gmail is only read; nothing is
-// written to the database. It is a simplified loop, not the runtime: see the doc's limits.
+// so each tool result is the one an agent would receive. It ends with an eval-only report tool
+// and is scored deterministically against the expected message IDs. Gmail is only read;
+// nothing is written to the database. It is a simplified loop, not the runtime: see the doc's
+// differences from a real agent run.
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { readConfig } from "./config.js";
@@ -29,7 +30,9 @@ import {
   MODEL_TIERS,
   resolveAgentModel,
   resolveMainModel,
+  readModelPolicy,
   resolvePriceCeilings,
+  type ModelPolicy,
   type ModelTier,
 } from "./model-policy.js";
 import { ModelRouter } from "./model-router.js";
@@ -49,30 +52,65 @@ export const GMAIL_OPERATIONS = [
 type GmailOperation = (typeof GMAIL_OPERATIONS)[number];
 const REPORT = "eval_report";
 /**
- * Gmail's snippet runs to about 200 characters, and both read tools fall back to it when a
- * message has no plain-text part. Text no longer than this may be that stand-in, so it never
- * counts as a readable body.
+ * Heuristic readability, used only when a task gives no bodyChars. Both read tools fall back
+ * to Gmail's snippet for a message without a plain-text part, and gmail_read says nothing when
+ * it does. The snippet is assumed (not verified) to run to about 200 characters, but HTML
+ * entities can lengthen it, so short text that starts like a snippet the model saw is also
+ * treated as the stand-in.
  */
 export const SNIPPET_CHARS = 200;
+export const STAND_IN_CHARS = 400;
+const STAND_IN_PREFIX = 100;
+/** With bodyChars, the model must receive at least half the body, counting at most this much. */
+export const BODY_CAP = 20_000;
 const MODEL_CALL_MS = 180_000;
 const MODEL_RETRIES = 2;
 
+/** Gmail message IDs are hexadecimal; case never distinguishes two messages. */
+const key = (m: { account: string; messageId: string }) =>
+  `${m.account}:${m.messageId.toLowerCase()}`;
+
 const account = z.enum(["primary", "secondary"]);
-const messageRef = z
-  .object({ account, messageId: z.string().regex(/^[a-f0-9]{1,64}$/i) })
-  .strict();
+const messageId = z.string().regex(/^[a-f0-9]{1,64}$/i);
+const messageRef = z.object({ account, messageId }).strict();
 export const taskSchema = z
   .object({
     id: z.string().min(1).max(100),
     kind: z.enum(["collect", "lookup"]),
     request: z.string().min(1).max(4000),
     accounts: z.array(account).min(1).max(2),
-    expected: z.array(messageRef).min(1).max(200),
+    expected: z
+      .array(
+        z
+          .object({
+            account,
+            messageId,
+            /** The true length of the message's body text, from the task builder. */
+            bodyChars: z.number().int().positive().optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(200),
     answerContains: z.array(z.string().min(1).max(200)).max(20).optional(),
   })
   .strict()
-  .refine((t) => t.expected.every((m) => t.accounts.includes(m.account)), {
-    message: "every expected message must be in one of the task's accounts",
+  .superRefine((t, ctx) => {
+    const seen = new Set<string>();
+    for (const [i, m] of t.expected.entries()) {
+      // Each expected message must be in a task mailbox and listed once.
+      if (!t.accounts.includes(m.account))
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["expected", i, "account"],
+        });
+      if (seen.has(key(m)))
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["expected", i, "messageId"],
+        });
+      seen.add(key(m));
+    }
   });
 export type EvalTask = z.infer<typeof taskSchema>;
 const reportSchema = z
@@ -89,7 +127,10 @@ export const reportTool: ToolDefinition = {
 };
 const EVAL_NOTE = `\n\nThis run is an evaluation. agent_report and observation_read are not available. Finish with ${REPORT} instead: list in messageIds every email that answers the brief, and put in answer the report you would give the coordinator.`;
 
-/** Refuses the whole input on the first malformed line, naming the line and the field. */
+/**
+ * Refuses the whole input on the first malformed line. Errors name the line number, the field
+ * path and the issue code only, never a received value, since tasks are private.
+ */
 export function parseTasks(text: string) {
   const tasks: EvalTask[] = [];
   const ids = new Set<string>();
@@ -106,7 +147,7 @@ export function parseTasks(text: string) {
       throw new Error(
         `Task line ${index + 1} is malformed: ` +
           parsed.error.issues
-            .map((i) => `${i.path.join(".") || "task"}: ${i.message}`)
+            .map((i) => `${i.path.join(".") || "task"}: ${i.code}`)
             .join("; "),
       );
     if (ids.has(parsed.data.id))
@@ -118,15 +159,16 @@ export function parseTasks(text: string) {
   return tasks;
 }
 
-const key = (m: { account: string; messageId: string }) =>
-  `${m.account}:${m.messageId}`;
-
 /** What one task's loop saw and did, before scoring. */
 export type TaskRecord = {
-  /** Messages that appeared in a gmail_search result the model received. */
+  /** Messages that appeared with their metadata in a gmail_search result the model received. */
   surfaced: Set<string>;
-  /** Messages whose body the model received as real text (see readableIn). */
-  readable: Set<string>;
+  /** Messages that appeared only as an ID, their metadata not retrieved. */
+  surfacedIdOnly: Set<string>;
+  /** Snippets the model saw in search rows, by message. */
+  snippets: Map<string, Set<string>>;
+  /** Text the model received for each message from reads that were not excerpts or bodyless. */
+  bodies: Map<string, Set<string>>;
   report?: z.infer<typeof reportSchema>;
   ended: "reported" | "step_limit" | "unreported" | "error";
   error?: string;
@@ -142,38 +184,106 @@ export type TaskRecord = {
   wallMs: number;
 };
 
-/** Search hits the model saw, from the projected result. An excerpted page is searched as text. */
-function surfacedIn(projected: any, account: string, out: Set<string>) {
+const add = (map: Map<string, Set<string>>, k: string, value: string) =>
+  map.set(k, (map.get(k) ?? new Set()).add(value));
+
+/**
+ * Search hits the model saw, from the projected result. A row carrying `detail` (metadata not
+ * retrieved) counts as ID-only. An excerpted page is read as text.
+ */
+function surfacedIn(projected: any, account: string, r: TaskRecord) {
+  const hit = (id: string, idOnly: boolean, snippet?: unknown) => {
+    const k = key({ account, messageId: id });
+    (idOnly ? r.surfacedIdOnly : r.surfaced).add(k);
+    if (typeof snippet === "string" && snippet) add(r.snippets, k, snippet);
+  };
   if (typeof projected?.excerpt === "string") {
-    for (const id of projected.excerpt.match(/"id":"([a-f0-9]+)"/gi) ?? [])
-      out.add(`${account}:${id.slice(6, -1)}`);
+    for (const m of projected.excerpt.matchAll(
+      /"id":"([a-f0-9]+)","threadId":"[a-f0-9]+"(,"detail")?/gi,
+    ))
+      hit(m[1]!, !!m[2]);
     return;
   }
   for (const row of projected?.results ?? [])
-    if (typeof row?.id === "string") out.add(`${account}:${row.id}`);
+    if (typeof row?.id === "string")
+      hit(row.id, row.detail !== undefined, row.snippet);
 }
 
-/**
- * A message is readable when the model received a gmail_thread entry or gmail_read result for
- * it, after projection and not reduced to an excerpt, that is not flagged bodyless and whose
- * text is longer than a Gmail snippet. Snippet stand-ins, placeholders, identifier-only thread
- * listings and bodies cut to a snippet's length therefore do not count.
- */
-function readableIn(
+/** Text from a gmail_thread entry or gmail_read result, unless excerpted or flagged bodyless. */
+function bodiesIn(
   operation: string,
   projected: any,
   account: string,
-  out: Set<string>,
+  r: TaskRecord,
 ) {
-  const real = (m: any) =>
-    typeof m?.id === "string" &&
-    !m.bodyless &&
-    typeof m.text === "string" &&
-    m.text.length > SNIPPET_CHARS;
   if (typeof projected?.excerpt === "string") return;
   const entries =
     operation === "gmail_thread" ? (projected?.messages ?? []) : [projected];
-  for (const m of entries) if (real(m)) out.add(`${account}:${m.id}`);
+  for (const m of entries)
+    if (typeof m?.id === "string" && !m.bodyless && typeof m.text === "string")
+      add(r.bodies, key({ account, messageId: m.id }), m.text);
+}
+
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+/** Decodes the common HTML entities Gmail leaves in snippets and collapses whitespace. */
+export function normalise(text: string) {
+  return text
+    .replace(/&(#x[0-9a-f]{1,6}|#[0-9]{1,7}|[a-z]+);/gi, (whole, e: string) => {
+      const lower = e.toLowerCase();
+      if (!lower.startsWith("#")) return ENTITIES[lower] ?? whole;
+      const code = lower.startsWith("#x")
+        ? parseInt(lower.slice(2), 16)
+        : Number(lower.slice(1));
+      return code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Whether the model received a message's body as real text.
+ * - With bodyChars: the distinct texts received for it add up to at least half of
+ *   min(bodyChars, BODY_CAP), so a continuation read counts and a repeated read does not.
+ * - Without (a heuristic): some text is longer than SNIPPET_CHARS and is not a probable snippet
+ *   stand-in: STAND_IN_CHARS or fewer whose first STAND_IN_PREFIX characters, normalised, match
+ *   the start of a snippet the model saw for it in a search row.
+ */
+function readable(
+  m: { account: string; messageId: string; bodyChars?: number },
+  r: TaskRecord,
+) {
+  const k = key(m);
+  const texts = [...(r.bodies.get(k) ?? [])];
+  if (m.bodyChars !== undefined)
+    return (
+      texts
+        // A thread's cut of a body that a later read returned whole is not counted twice.
+        .filter((t) => !texts.some((o) => o !== t && o.startsWith(t)))
+        .reduce((n, t) => n + t.length, 0) >=
+      Math.min(m.bodyChars, BODY_CAP) / 2
+    );
+  // A search row's snippet is cut at a fixed length and may end in half an entity.
+  const snippets = [...(r.snippets.get(k) ?? [])].map((s) =>
+    normalise(s.replace(/&[#a-z0-9]{0,8}$/i, "")),
+  );
+  const standIn = (text: string) => {
+    const head = normalise(text).slice(0, STAND_IN_PREFIX);
+    return snippets.some((s) => {
+      const n = Math.min(STAND_IN_PREFIX, s.length, head.length);
+      return n > 0 && head.slice(0, n) === s.slice(0, n);
+    });
+  };
+  return texts.some(
+    (t) =>
+      t.length > SNIPPET_CHARS && !(t.length <= STAND_IN_CHARS && standIn(t)),
+  );
 }
 
 const usageNumber = (value: unknown) =>
@@ -204,7 +314,9 @@ export async function runTask(
   const run = o.runId ?? `email-eval-${randomUUID()}`;
   const record: TaskRecord = {
     surfaced: new Set(),
-    readable: new Set(),
+    surfacedIdOnly: new Set(),
+    snippets: new Map(),
+    bodies: new Map(),
     ended: "step_limit",
     searches: 0,
     gmailCalls: 0,
@@ -219,7 +331,8 @@ export async function runTask(
   };
   const tools = [...o.tools, reportTool];
   const offeredNames = new Set(tools.map((t) => t.name));
-  // The agent run's shape (src/agents.ts): instructions, runtime context, then the brief.
+  // The parts of an agent run (src/agents.ts), not context()'s assembly: instructions, runtime
+  // context, then the brief.
   const messages: ModelMessage[] = [
     { role: "system", content: o.instructions + EVAL_NOTE },
     {
@@ -341,14 +454,9 @@ export async function runTask(
             const mailbox =
               typeof result?.account === "string" ? result.account : "primary";
             if (a.operation === "gmail_search")
-              surfacedIn(projected.result, mailbox, record.surfaced);
+              surfacedIn(projected.result, mailbox, record);
             else if (a.operation !== "gmail_accounts")
-              readableIn(
-                a.operation,
-                projected.result,
-                mailbox,
-                record.readable,
-              );
+              bodiesIn(a.operation, projected.result, mailbox, record);
             content = projected;
           }
         } catch (error) {
@@ -406,6 +514,16 @@ export function scoreTask(task: EvalTask, r: TaskRecord) {
   const answerHits = (task.answerContains ?? []).filter((s) =>
     answer.includes(s.toLowerCase()),
   ).length;
+  const messages = task.expected.map((m) => ({
+    ...m,
+    found: reported.has(key(m)),
+    surfaced: r.surfaced.has(key(m)),
+    surfacedIdOnly: !r.surfaced.has(key(m)) && r.surfacedIdOnly.has(key(m)),
+    readable: readable(m, r),
+    scoring: m.bodyChars === undefined ? "heuristic" : "bodyChars",
+  }));
+  const count = (f: (m: (typeof messages)[number]) => boolean) =>
+    messages.filter(f).length;
   return {
     id: task.id,
     kind: task.kind,
@@ -413,19 +531,17 @@ export function scoreTask(task: EvalTask, r: TaskRecord) {
     ended: r.ended,
     ...(r.error ? { error: r.error } : {}),
     expected: expected.size,
-    found: [...expected].filter((k) => reported.has(k)).length,
-    surfaced: [...expected].filter((k) => r.surfaced.has(k)).length,
-    readable: [...expected].filter((k) => r.readable.has(k)).length,
+    found: count((m) => m.found),
+    surfaced: count((m) => m.surfaced),
+    surfacedIdOnly: count((m) => m.surfacedIdOnly),
+    readable: count((m) => m.readable),
+    scoredByBodyChars: count((m) => m.scoring === "bodyChars"),
+    scoredByHeuristic: count((m) => m.scoring === "heuristic"),
     extra: [...reported].filter((k) => !expected.has(k)).length,
     ...(task.answerContains
       ? { answerHits, answerChecks: task.answerContains.length }
       : {}),
-    messages: task.expected.map((m) => ({
-      ...m,
-      found: reported.has(key(m)),
-      surfaced: r.surfaced.has(key(m)),
-      readable: r.readable.has(key(m)),
-    })),
+    messages,
     extraIds: [...reported].filter((k) => !expected.has(k)),
     searches: r.searches,
     gmailCalls: r.gmailCalls,
@@ -467,7 +583,10 @@ export function summarise(scores: TaskScore[], arm: Record<string, unknown>) {
     expected,
     found: sum((s) => s.found),
     surfaced: sum((s) => s.surfaced),
+    surfacedIdOnly: sum((s) => s.surfacedIdOnly),
     readable: sum((s) => s.readable),
+    scoredByBodyChars: sum((s) => s.scoredByBodyChars),
+    scoredByHeuristic: sum((s) => s.scoredByHeuristic),
     foundRate: rate(
       sum((s) => s.found),
       expected,
@@ -542,19 +661,28 @@ export function parseFlags(argv: string[]) {
 
 /**
  * The arm's instructions as shipped in the image: an agent's text through the plugin registry
- * (plugins/ beside dist/), or a plugin skill's text under a short base line.
+ * (plugins/ beside dist/), or a plugin skill's text under a short base line. The model is
+ * resolved as runAgentType (src/agents.ts) resolves it, with --model in place of the
+ * coordinator's requested tier: a registry-pinned host model wins, else the tier asked for,
+ * else the agent's own, else the policy default.
  */
-export function resolveArm(flags: ReturnType<typeof parseFlags>) {
+export function resolveArm(
+  flags: ReturnType<typeof parseFlags>,
+  mainModel: string,
+  policy: ModelPolicy = readModelPolicy(),
+) {
   const [kind, name] = flags.instructions.split(/:(.*)/s) as [string, string];
   let instructions: string;
-  let tier: ModelTier;
+  let resolved: { tier: ModelTier | "host"; model: string };
   let maxSteps: number;
   let effort: ReasoningEffort = "medium";
   let version: string;
   if (kind === "agent") {
     const agent = plugins.get(plugins.resolve(name));
     instructions = agent.instructions;
-    tier = flags.model ?? agent.model ?? "standard";
+    resolved = agent.hostModel
+      ? { tier: "host", model: agent.hostModel }
+      : resolveAgentModel(flags.model ?? agent.model, mainModel, policy);
     maxSteps = flags["max-steps"] ?? agent.limits.models;
     effort = agent.effort ?? effort;
     version = `${agent.pluginVersion}:${agent.pluginHash.slice(0, 12)}`;
@@ -564,13 +692,13 @@ export function resolveArm(flags: ReturnType<typeof parseFlags>) {
       .find((s) => s.key === name || s.key === `core/${name}`);
     if (!skill) throw new Error(`No plugin skill ${name}`);
     instructions = `You search and read the owner's Gmail (read-only) to answer the brief. Follow this skill.\n\n${skill.content}`;
-    tier = flags.model ?? "standard";
+    resolved = resolveAgentModel(flags.model, mainModel, policy);
     maxSteps = flags["max-steps"] ?? 40;
     version = skill.version;
   }
   return {
     instructions,
-    tier,
+    ...resolved,
     maxSteps,
     effort,
     arm: {
@@ -580,7 +708,7 @@ export function resolveArm(flags: ReturnType<typeof parseFlags>) {
         .update(instructions)
         .digest("hex")
         .slice(0, 16),
-      tier,
+      ...resolved,
       maxSteps,
       effort,
       ...(flags["max-tasks"] ? { maxTasks: flags["max-tasks"] } : {}),
@@ -596,14 +724,13 @@ async function readStdin() {
 
 async function main() {
   const flags = parseFlags(process.argv.slice(2));
-  const arm = resolveArm(flags);
-  const tasks = parseTasks(await readStdin()).slice(0, flags["max-tasks"]);
   const c = readConfig();
   if (!c.GMAIL_OWNER_USER_ID || !c.GOOGLE_REFRESH_TOKEN)
     throw new Error("Gmail must be configured");
+  const arm = resolveArm(flags, resolveMainModel(c.AGENT_MODEL));
+  const modelId = arm.model;
+  const tasks = parseTasks(await readStdin()).slice(0, flags["max-tasks"]);
   // Built as src/main.ts builds them; no spending ledger, so no database is touched.
-  const mainModel = resolveMainModel(c.AGENT_MODEL);
-  const modelId = resolveAgentModel(arm.tier, mainModel).model;
   const models = new ModelRouter({
     provider: c.MODEL_PROVIDER,
     openRouterKey: c.OPENROUTER_API_KEY,
@@ -652,7 +779,6 @@ async function main() {
     JSON.stringify(
       summarise(scores, {
         ...arm.arm,
-        model: modelId,
         route: models.route(modelId),
       }),
     ),

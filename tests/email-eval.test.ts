@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   gmailToolDefinitions,
+  normalise,
   parseFlags,
   parseTasks,
   resolveArm,
@@ -9,9 +10,16 @@ import {
   scoreTask,
   summarise,
   type EvalTask,
+  type LoopOptions,
 } from "../src/email-eval.js";
 import { GmailTools } from "../src/gmail.js";
-import type { Generation, ModelAdapter, ToolDefinition } from "../src/model.js";
+import {
+  ModelError,
+  type Generation,
+  type ModelAdapter,
+  type ToolDefinition,
+} from "../src/model.js";
+import { resolveAgentModel } from "../src/model-policy.js";
 import { plugins } from "../src/plugin-registry.js";
 
 const config = {
@@ -23,53 +31,73 @@ const config = {
 };
 const BODY = "Your monthly receipt. ".repeat(30);
 const encode = (text: string) => Buffer.from(text).toString("base64url");
-const headers = (subject: string) => [
-  { name: "From", value: "Store <billing@example.com>" },
-  { name: "Subject", value: subject },
-  { name: "Date", value: "Sun, 1 Nov 2026 09:00:00 +0800" },
-];
+type Mail = { html?: boolean; body?: string; snippet?: string };
 /** A message with a plain-text body, or HTML only (which today's read tools cannot show). */
-function message(id: string, html = false) {
+function message(id: string, mail: Mail = {}) {
+  const body = mail.body ?? BODY;
   return {
     id,
     threadId: `b${id}`,
-    snippet: "Your monthly receipt",
+    snippet: mail.snippet ?? "Your monthly receipt",
     internalDate: "1",
     labelIds: [],
     payload: {
-      headers: headers(`Receipt ${id}`),
-      mimeType: html ? "text/html" : "text/plain",
-      body: { data: encode(html ? `<p>${BODY}</p>` : BODY) },
+      headers: [
+        { name: "From", value: "Store <billing@example.com>" },
+        { name: "Subject", value: `Receipt ${id}` },
+        { name: "Date", value: "Sun, 1 Nov 2026 09:00:00 +0800" },
+      ],
+      mimeType: mail.html ? "text/html" : "text/plain",
+      body: { data: encode(mail.html ? `<p>${body}</p>` : body) },
     },
   };
 }
 /** Real GmailTools over a fake Gmail: budget, fitting and warnings are the real ones. */
-function fakeGmail(mail: Record<string, { html?: boolean }>, hits: string[]) {
+function fakeGmail(
+  mail: Record<string, Mail>,
+  hits: string[] | ((query: string) => string[]),
+) {
   const request = (async (u: unknown) => {
     const url = new URL(String(u));
     if (url.hostname === "oauth2.googleapis.com")
       return Response.json({ access_token: "a", expires_in: 3600 });
     if (url.pathname.endsWith("/profile"))
       return Response.json({ emailAddress: config.email });
-    if (url.pathname.endsWith("/messages"))
+    if (url.pathname.endsWith("/messages")) {
+      const ids =
+        typeof hits === "function" ? hits(url.searchParams.get("q")!) : hits;
       return Response.json({
-        messages: hits.map((id) => ({ id, threadId: `b${id}` })),
-        resultSizeEstimate: hits.length,
+        messages: ids.map((id) => ({ id, threadId: `b${id}` })),
+        resultSizeEstimate: ids.length,
       });
+    }
     const thread = /\/threads\/b([a-f0-9]+)$/.exec(url.pathname)?.[1];
     if (thread)
       return Response.json({
         id: `b${thread}`,
-        messages: [message(thread, mail[thread]?.html)],
+        messages: [message(thread, mail[thread])],
       });
     const id = /\/messages\/([a-f0-9]+)$/.exec(url.pathname)![1]!;
-    return Response.json(message(id, mail[id]?.html));
+    return Response.json(message(id, mail[id]));
   }) as typeof fetch;
   return new GmailTools(config, request);
 }
+/** A stand-in for GmailTools.call, for result shapes the real tools cannot produce. */
+function stubGmail(
+  answer: (operation: string, value: string, account?: string) => unknown,
+): LoopOptions["gmail"] {
+  return {
+    call: async (_user, operation, value, _page, _run, account) =>
+      answer(operation, value, account),
+  };
+}
 type Call = { name: string; args: object };
-/** Replays one step of tool calls per model call and records what each call was offered. */
-function scripted(steps: Call[][]) {
+type Step = Call[] | string | Error;
+/**
+ * Replays one step per model call: tool calls, a text reply, or a thrown error. Records what
+ * each call was offered and the messages it received.
+ */
+function scripted(steps: Step[]) {
   const offered: string[][] = [];
   const seen: string[] = [];
   let n = 0;
@@ -79,6 +107,15 @@ function scripted(steps: Call[][]) {
       offered.push(input.tools.map((t: ToolDefinition) => t.name));
       seen.push(JSON.stringify(input.messages));
       const step = steps[Math.min(n++, steps.length - 1)]!;
+      if (step instanceof Error) throw step;
+      const usage = {
+        prompt_tokens: 100,
+        completion_tokens: 10,
+        prompt_tokens_details: { cached_tokens: 40 },
+        cost: 0.001,
+      };
+      if (typeof step === "string")
+        return { message: { role: "assistant", content: step }, usage };
       return {
         message: {
           role: "assistant",
@@ -89,17 +126,22 @@ function scripted(steps: Call[][]) {
             function: { name: c.name, arguments: JSON.stringify(c.args) },
           })),
         },
-        usage: {
-          prompt_tokens: 100,
-          completion_tokens: 10,
-          prompt_tokens_details: { cached_tokens: 40 },
-          cost: 0.001,
-        },
+        usage,
       };
     },
   };
   return { model, offered, seen };
 }
+const ref = (messageId: string, account = "primary") => ({
+  account,
+  messageId,
+});
+const report = (ids: { account: string; messageId: string }[], answer = "") => [
+  { name: "eval_report", args: { messageIds: ids, answer } },
+];
+const search = (query: string, account?: string) => [
+  { name: "gmail_search", args: { query, ...(account ? { account } : {}) } },
+];
 const task: EvalTask = {
   id: "receipts-1",
   kind: "collect",
@@ -111,15 +153,28 @@ const task: EvalTask = {
   })),
   answerContains: ["monthly", "refund"],
 };
-const options = (gmail: GmailTools, model: ModelAdapter, maxSteps = 10) => ({
+const only = (
+  messageId: string,
+  extra: Partial<EvalTask["expected"][number]> = {},
+): EvalTask => ({
+  ...task,
+  expected: [{ account: "primary", messageId, ...extra }],
+});
+const options = (
+  gmail: LoopOptions["gmail"],
+  model: ModelAdapter,
+  maxSteps = 10,
+): LoopOptions => ({
   owner: "123",
   gmail,
   model,
   instructions: "You are the email agent.",
   tools: gmailToolDefinitions(),
   maxSteps,
-  effort: "medium" as const,
+  effort: "medium",
 });
+const run = async (t: EvalTask, gmail: LoopOptions["gmail"], steps: Step[]) =>
+  scoreTask(t, await runTask(t, options(gmail, scripted(steps).model)));
 
 test("found, surfaced, readable and extra follow what the model saw and reported", async () => {
   // a1 has a plain-text body, a2 and a3 are HTML only, a4 is never surfaced.
@@ -129,31 +184,19 @@ test("found, surfaced, readable and extra follow what the model saw and reported
     "a3",
   ]);
   const { model, seen } = scripted([
-    [{ name: "gmail_search", args: { query: "from:store receipt" } }],
+    search("from:store receipt"),
     [
       { name: "gmail_thread", args: { threadId: "ba1" } },
       { name: "gmail_thread", args: { threadId: "ba2" } },
       { name: "gmail_read", args: { messageId: "a3" } },
     ],
-    [
-      {
-        name: "eval_report",
-        args: {
-          messageIds: [
-            { account: "primary", messageId: "a1" },
-            { account: "primary", messageId: "a2" },
-            { account: "primary", messageId: "e9" },
-          ],
-          answer: "Two Monthly receipts.",
-        },
-      },
-    ],
+    report([ref("a1"), ref("a2"), ref("e9")], "Two Monthly receipts."),
   ]);
-  const record = await runTask(task, options(gmail, model));
-  const score = scoreTask(task, record);
+  const score = scoreTask(task, await runTask(task, options(gmail, model)));
   assert.equal(score.ended, "reported");
   assert.equal(score.found, 2);
   assert.equal(score.surfaced, 3);
+  assert.equal(score.surfacedIdOnly, 0);
   // a2's thread entry is bodyless and a3's read falls back to the snippet.
   assert.equal(score.readable, 1);
   assert.deepEqual(
@@ -165,6 +208,8 @@ test("found, surfaced, readable and extra follow what the model saw and reported
       ["a4", false],
     ],
   );
+  assert.equal(score.scoredByHeuristic, 4);
+  assert.equal(score.scoredByBodyChars, 0);
   assert.equal(score.extra, 1);
   assert.deepEqual(score.extraIds, ["primary:e9"]);
   assert.equal(score.answerHits, 1);
@@ -178,30 +223,46 @@ test("found, surfaced, readable and extra follow what the model saw and reported
   assert.match(seen[1]!, /Untrusted email content/);
 });
 
-test("a task that spends the Gmail request budget is called out", async () => {
-  const ids = Array.from({ length: 10 }, (_, i) => `c${i}`);
-  const gmail = fakeGmail({}, ids);
-  const searches = ["one", "two", "three", "four", "five"].map((q) => [
-    { name: "gmail_search", args: { query: q } },
+test("a search refused by the Gmail request budget is called out", async () => {
+  // Nine hits cost ten requests a page, so four pages spend exactly 40 with no partial page.
+  const gmail = fakeGmail({}, (q) =>
+    Array.from({ length: 9 }, (_, i) => `${q}${i}`),
+  );
+  const score = await run(task, gmail, [
+    search("a"),
+    search("b"),
+    search("c"),
+    search("d"),
+    search("e"),
+    report([]),
   ]);
-  const { model } = scripted([
-    ...searches,
-    [{ name: "eval_report", args: { messageIds: [], answer: "none" } }],
-  ]);
-  const score = scoreTask(task, await runTask(task, options(gmail, model)));
-  // Each page costs 11 requests of 40: the fourth is partial, the fifth is refused.
   assert.equal(score.budgetExhausted, true);
   assert.deepEqual(score.toolErrors, { VALIDATION_FAILED: 1 });
   assert.equal(score.searches, 5);
   assert.equal(score.ended, "reported");
-  assert.equal(score.found, 0);
+});
+
+test("a page cut short by the request budget is called out, its bare rows ID-only", async () => {
+  // Each page of ten costs 11: the fourth gets metadata for six rows, the last four are bare.
+  const gmail = fakeGmail({}, (q) =>
+    Array.from({ length: 10 }, (_, i) => `${q}${i}`),
+  );
+  const score = await run(only("d9"), gmail, [
+    search("a"),
+    search("b"),
+    search("c"),
+    search("d"),
+    report([]),
+  ]);
+  assert.equal(score.budgetExhausted, true);
+  assert.deepEqual(score.toolErrors, {});
+  assert.equal(score.surfaced, 0);
+  assert.equal(score.surfacedIdOnly, 1);
 });
 
 test("a model that never reports stops at the step limit; its last call offers only the report", async () => {
   const gmail = fakeGmail({}, ["a1"]);
-  const { model, offered, seen } = scripted([
-    [{ name: "gmail_search", args: { query: "receipt" } }],
-  ]);
+  const { model, offered, seen } = scripted([search("receipt")]);
   const record = await runTask(task, options(gmail, model, 3));
   assert.equal(record.ended, "step_limit");
   assert.equal(record.modelCalls, 3);
@@ -213,7 +274,157 @@ test("a model that never reports stops at the step limit; its last call offers o
   assert.equal(scoreTask(task, record).surfaced, 1);
 });
 
-test("malformed task input is refused with its line and field", () => {
+test("model errors end a task, transient ones are retried, and a text reply is unreported", async () => {
+  const gmail = fakeGmail({}, []);
+  const failed = await run(task, gmail, [new ModelError("refused", false)]);
+  assert.equal(failed.ended, "error");
+  assert.equal(failed.error, "model");
+  assert.equal(failed.modelCalls, 1);
+  const retried = await run(task, gmail, [
+    new ModelError("busy", true),
+    report([ref("a1")]),
+  ]);
+  assert.equal(retried.ended, "reported");
+  assert.equal(retried.modelCalls, 2);
+  assert.equal(retried.found, 1);
+  const unreported = await run(task, gmail, ["Nothing found."]);
+  assert.equal(unreported.ended, "unreported");
+  assert.equal(unreported.found, 0);
+});
+
+test("an invalid eval_report is refused and counts nothing", async () => {
+  const score = await run(task, fakeGmail({}, []), [
+    report([{ account: "primary", messageId: "not-hex" }]),
+    "Giving up.",
+  ]);
+  assert.deepEqual(score.toolErrors, { INVALID_INPUT: 1 });
+  assert.equal(score.ended, "unreported");
+  assert.equal(score.found, 0);
+  assert.equal(score.extra, 0);
+});
+
+test("an excerpted result counts its search rows but no body", async () => {
+  const padding = "x".repeat(13_000);
+  const gmail = stubGmail((operation) =>
+    operation === "gmail_search"
+      ? {
+          results: [
+            { id: "a1", threadId: "ba1", snippet: "Receipt" },
+            { id: "a2", threadId: "ba2", detail: "not retrieved: unavailable" },
+          ],
+          padding,
+          account: "primary",
+        }
+      : {
+          messages: [{ id: "a1", text: BODY }],
+          padding,
+          account: "primary",
+        },
+  );
+  const { model, seen } = scripted([
+    search("receipt"),
+    [{ name: "gmail_thread", args: { threadId: "ba1" } }],
+    report([]),
+  ]);
+  const score = scoreTask(task, await runTask(task, options(gmail, model)));
+  assert.match(seen[1]!, /excerpt/);
+  assert.equal(score.surfaced, 1);
+  assert.equal(score.surfacedIdOnly, 1);
+  assert.equal(score.readable, 0);
+});
+
+test("messages are keyed by account and lowercase ID; duplicate reports count once", async () => {
+  const both: EvalTask = {
+    ...task,
+    accounts: ["primary", "secondary"],
+    expected: [{ account: "primary", messageId: "a1" }],
+  };
+  const gmail = stubGmail((_operation, _value, account) => ({
+    results: [{ id: "A1", threadId: "ba1", snippet: "Receipt" }],
+    account: account ?? "primary",
+  }));
+  const score = await run(both, gmail, [
+    search("receipt", "secondary"),
+    report([ref("a1", "secondary"), ref("A1"), ref("a1"), ref("a1")]),
+  ]);
+  // Seen only in the other mailbox, so not surfaced; reported once in the right one.
+  assert.equal(score.surfaced, 0);
+  assert.equal(score.found, 1);
+  assert.equal(score.extra, 1);
+  assert.deepEqual(score.extraIds, ["secondary:a1"]);
+});
+
+test("a long entity-laden snippet returned by gmail_read is not a readable body", async () => {
+  const snippet =
+    "Receipt &amp; invoice for &#39;Example&#39; &quot;monthly&quot; plan ".repeat(
+      5,
+    );
+  assert.ok(snippet.length > 300);
+  const mail = { a5: { html: true, snippet } };
+  const steps = [
+    search("receipt"),
+    [{ name: "gmail_read", args: { messageId: "a5" } }],
+    report([ref("a5")]),
+  ];
+  const heuristic = await run(only("a5"), fakeGmail(mail, ["a5"]), steps);
+  assert.equal(heuristic.surfaced, 1);
+  assert.equal(heuristic.readable, 0);
+  assert.equal(heuristic.scoredByHeuristic, 1);
+  const measured = await run(
+    only("a5", { bodyChars: 3000 }),
+    fakeGmail(mail, ["a5"]),
+    steps,
+  );
+  assert.equal(measured.readable, 0);
+  assert.equal(measured.scoredByBodyChars, 1);
+});
+
+test("a short plain body is readable only when bodyChars vouches for it", async () => {
+  const mail = { a6: { body: "Your order shipped. ".repeat(7) } };
+  const steps = [
+    [{ name: "gmail_thread", args: { threadId: "ba6" } }],
+    report([ref("a6")]),
+  ];
+  const heuristic = await run(only("a6"), fakeGmail(mail, []), steps);
+  assert.equal(heuristic.readable, 0);
+  const measured = await run(
+    only("a6", { bodyChars: 140 }),
+    fakeGmail(mail, []),
+    steps,
+  );
+  assert.equal(measured.readable, 1);
+});
+
+test("with bodyChars, a continuation read adds up but a repeated read does not", async () => {
+  const parts = ["p".repeat(600), "q".repeat(600)];
+  const steps = [
+    [
+      { name: "gmail_read", args: { messageId: "a7" } },
+      { name: "gmail_read", args: { messageId: "a7" } },
+    ],
+    report([ref("a7")]),
+  ];
+  const reader = (texts: string[]) => {
+    let n = 0;
+    return stubGmail(() => ({
+      id: "a7",
+      text: texts[n++ % texts.length],
+      account: "primary",
+    }));
+  };
+  const t = only("a7", { bodyChars: 2000 });
+  assert.equal((await run(t, reader(parts), steps)).readable, 1);
+  assert.equal((await run(t, reader([parts[0]!]), steps)).readable, 0);
+});
+
+test("the HTML entities in snippets are decoded before comparison", () => {
+  assert.equal(
+    normalise("Tom &amp; Jerry&#39;s&nbsp;  &#x2019;plan&quot;  "),
+    "Tom & Jerry's ’plan\"",
+  );
+});
+
+test("malformed task input is refused with its line, field and code, never its value", () => {
   const good = JSON.stringify(task);
   assert.equal(parseTasks(`${good}\n\n`).length, 1);
   assert.throws(() => parseTasks(`${good}\nnot json`), /line 2 is not valid/);
@@ -222,18 +433,38 @@ test("malformed task input is refused with its line and field", () => {
       parseTasks(
         JSON.stringify({ ...task, expected: [{ account: "primary" }] }),
       ),
-    /line 1 is malformed: expected\.0\.messageId/,
+    /line 1 is malformed: expected\.0\.messageId: invalid_type/,
   );
   assert.throws(
     () =>
       parseTasks(
-        JSON.stringify({
-          ...task,
-          expected: [{ account: "secondary", messageId: "a1" }],
-        }),
+        JSON.stringify({ ...task, expected: [ref("a1", "secondary")] }),
       ),
-    /must be in one of the task's accounts/,
+    /expected\.0\.account: custom/,
   );
+  assert.throws(
+    () =>
+      parseTasks(JSON.stringify({ ...task, expected: [ref("a1"), ref("A1")] })),
+    /expected\.1\.messageId: custom/,
+  );
+  assert.throws(
+    () => parseTasks(JSON.stringify(only("a1", { bodyChars: 0 }))),
+    /expected\.0\.bodyChars: too_small/,
+  );
+  try {
+    parseTasks(
+      JSON.stringify({
+        ...task,
+        kind: "privatekind",
+        expected: [ref("privatevalue")],
+      }),
+    );
+    assert.fail("accepted");
+  } catch (error) {
+    const text = (error as Error).message;
+    assert.match(text, /kind: invalid_enum_value/);
+    assert.equal(/private/.test(text), false, text);
+  }
   assert.throws(() => parseTasks(`${good}\n${good}`), /repeats/);
   assert.throws(() => parseTasks(""), /No tasks/);
   assert.throws(() => parseFlags(["--instructions", "file:-"]), /agent:/);
@@ -241,45 +472,78 @@ test("malformed task input is refused with its line and field", () => {
 });
 
 test("the summary carries aggregates only, without request text or IDs", async () => {
-  const gmail = fakeGmail({}, ["a1"]);
-  const { model } = scripted([
-    [{ name: "gmail_search", args: { query: "receipt" } }],
-    [
-      {
-        name: "eval_report",
-        args: {
-          messageIds: [
-            { account: "primary", messageId: "a1" },
-            { account: "primary", messageId: "e9" },
-          ],
-          answer: "One receipt",
-        },
-      },
-    ],
-  ]);
-  const score = scoreTask(task, await runTask(task, options(gmail, model)));
-  const summary = summarise([score], { instructions: "agent:email" });
+  const tasks: EvalTask[] = [
+    { ...only("a1"), id: "private-one", request: "Private request one" },
+    { ...only("a2"), id: "private-two", request: "Private request two" },
+    {
+      ...only("a3", { bodyChars: 500 }),
+      id: "private-three",
+      request: "Private request three",
+    },
+  ];
+  const gmail = fakeGmail({}, ["a1", "a2", "a3"]);
+  const scores = [
+    await run(tasks[0]!, gmail, [
+      search("receipt"),
+      report([ref("a1"), ref("e9")], "One private answer"),
+    ]),
+    await run(tasks[1]!, gmail, [new ModelError("private failure", false)]),
+    // A validation failure: gmail_search without its query.
+    await run(tasks[2]!, gmail, [
+      [{ name: "gmail_search", args: { account: "primary" } }],
+      "No.",
+    ]),
+  ];
+  const summary = summarise(scores, { instructions: "agent:email" });
   const text = JSON.stringify(summary);
-  for (const secret of [task.id, task.request, "a1", "e9", "receipt"])
+  for (const secret of [
+    "private",
+    "Private",
+    "a1",
+    "a2",
+    "a3",
+    "e9",
+    "receipt",
+  ])
     assert.equal(text.includes(secret), false, secret);
+  assert.equal(summary.tasks, 3);
   assert.equal(summary.found, 1);
   assert.equal(summary.extra, 1);
-  assert.equal(summary.foundRate, 0.25);
-  assert.deepEqual(summary.searchesPerTask, { median: 1, max: 1 });
+  assert.equal(summary.foundRate, 0.333);
+  assert.deepEqual(summary.toolErrors, { INVALID_INPUT: 1 });
+  assert.deepEqual(summary.ended, { reported: 1, error: 1, unreported: 1 });
+  assert.equal(summary.scoredByBodyChars, 1);
+  assert.equal(summary.scoredByHeuristic, 2);
+  assert.deepEqual(summary.searchesPerTask, { median: 0, max: 1 });
 });
 
-test("arms take tools from the runtime and instructions from the shipped plugin", () => {
+test("arms take tools from the runtime and resolve the model as agent runs do", () => {
   assert.deepEqual(
     gmailToolDefinitions().map((t) => t.name),
     ["gmail_accounts", "gmail_search", "gmail_thread", "gmail_read"],
   );
-  const arm = resolveArm(parseFlags(["--instructions", "agent:email"]));
+  const arm = resolveArm(
+    parseFlags(["--instructions", "agent:email"]),
+    "test/main",
+  );
   const agent = plugins.get("core/email");
   assert.equal(arm.instructions, agent.instructions);
   assert.equal(arm.maxSteps, agent.limits.models);
-  assert.equal(arm.tier, agent.model);
+  assert.deepEqual(
+    { tier: arm.tier, model: arm.model },
+    resolveAgentModel(agent.model, "test/main"),
+  );
+  const asked = resolveArm(
+    parseFlags(["--instructions", "agent:email", "--model", "standard"]),
+    "test/main",
+  );
+  assert.deepEqual(
+    { tier: asked.tier, model: asked.model },
+    resolveAgentModel("standard", "test/main"),
+  );
   assert.throws(
-    () => resolveArm(parseFlags(["--instructions", "skill:missing"])),
+    () =>
+      resolveArm(parseFlags(["--instructions", "skill:missing"]), "test/main"),
     /No plugin skill/,
   );
 });
