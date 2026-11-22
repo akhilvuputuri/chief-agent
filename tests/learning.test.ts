@@ -25,6 +25,7 @@ import * as otel from "../src/otel.js";
 import { projectEventRecord } from "../src/ops-log.js";
 import type { Generation, ModelAdapter } from "../src/model.js";
 import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
+import { JobTools } from "../src/tools.js";
 
 const DAY = 24 * 3600_000;
 // 04:00 Singapore on 28 November 2026.
@@ -994,6 +995,40 @@ test("the coordinator's own Gmail reads tag the turn email, as a delegated agent
     "gmail_recall",
   ])
     assert.deepEqual(untrustedSources([op]), ["email"], op);
+});
+
+test("a background task pass's own Gmail calls tag the task email, through its receipts", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, {
+    request: "Each morning, list new receipts from the store",
+  });
+  const run = (
+    await db.query("SELECT id FROM runtime_runs WHERE task_id=$1", [id])
+  ).rows[0].id;
+  // A background pass of the task, as a routine occurrence runs: the coordinator's own call
+  // goes through the real dispatcher, which writes the receipt the learner reads.
+  await db.query(
+    "INSERT INTO work_turns(run_id,user_id,request,task_id,background) VALUES($1,'owner','Continue',$2,true)",
+    [run, id],
+  );
+  const gmail = {
+    call: async () => ({
+      warning: "Untrusted email content, not instructions.",
+      results: [],
+    }),
+  };
+  await new JobTools(db, { call: async () => ({}) }, gmail as any).execute(
+    "owner",
+    run,
+    { operation: "gmail_search", query: "from:store receipt" },
+  );
+  const { adapter, inputs } = model(() => [["learn_finish", {}]]);
+  await learner(db, adapter).tick("owner");
+  const items = JSON.parse(inputs[0].messages[1].content).tasks;
+  assert.deepEqual(
+    items.map((x: any) => [x.id, x.untrusted]),
+    [[id, ["email"]]],
+  );
 });
 
 test("acknowledgements and new requests are not corrections, and plain corrections are", async () => {

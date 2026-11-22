@@ -567,4 +567,43 @@ test("gather_search keeps its ten-hit page and its query text unrewritten", asyn
     singaporeDates: false,
     spamTrash: false,
   });
+  // Spam and trash stay out because the model's words cannot carry an operator: the
+  // schema refuses a colon, so in:spam, in:anywhere and label:trash never reach Gmail.
+  for (const query of ["in:spam", "receipt in:anywhere", "label:trash"])
+    assert.equal(
+      action.safeParse({
+        operation: "gather_search",
+        id: c.id,
+        targetKey: "one",
+        account: "primary",
+        query,
+      }).success,
+      false,
+      query,
+    );
+  // A target label is model-written too, but reaches Gmail only as one quoted phrase.
+  const other = await turn("alice", "Gather invoices from email");
+  const odd = await g.call(
+    "alice",
+    other,
+    action.parse({
+      operation: "gather_start",
+      requestKey: randomUUID(),
+      objective: "Gather the September invoice from email",
+      targets: [{ key: "two", label: 'Acme" in:spam (x', month: "2026-09" }],
+      sources: ["email"],
+      mailboxes: ["primary"],
+    }),
+  );
+  await g.call(
+    "alice",
+    other,
+    action.parse({
+      operation: "gather_search",
+      id: odd.id,
+      targetKey: "two",
+      account: "primary",
+    }),
+  );
+  assert.match(String(calls.at(-1)![2]), /\{"acme in:spam x"\}/);
 });

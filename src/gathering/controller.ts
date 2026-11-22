@@ -661,8 +661,11 @@ export class Gathering {
           run,
           a.account,
           // Gathering keeps the ten-hit page and the query text it was built and
-          // tested with; its own bounds are epoch seconds already. Spam and trash stay
-          // out whatever a model-supplied query says, so they never yield invoice files.
+          // tested with; its own bounds are epoch seconds already. Spam and trash stay out
+          // because the query cannot name them: the model's words admit no colon (the
+          // gather_search schema) and target labels go inside quotes. spamTrash: false only
+          // leaves Gmail's includeSpamTrash unset; Gmail honours in:spam written in a query
+          // either way (measured, journal 204).
           { pageSize: 10, singaporeDates: false, spamTrash: false },
         )) as any;
         const results = (result.results ?? []).map((r: any) => ({

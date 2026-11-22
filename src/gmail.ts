@@ -361,7 +361,7 @@ function fit<T extends { omitted: number; omittedMessages?: Omitted[] }>(
 /** Computed from the result set only; never written by the model. */
 function hintFor(count: number, morePages: boolean) {
   if (!count)
-    return "No matches for this exact query, which does not show the email is absent. Broaden before concluding: drop quoted phrases and rare words, widen or remove the dates, search by a sender fragment alone (from:name), and add in:anywhere to include archived and spam mail.";
+    return "No matches for this exact query, which does not show the email is absent. Broaden before concluding: drop quoted phrases and rare words, widen or remove the dates, search by a sender fragment alone (from:name), or add in:anywhere to include spam and trash (archived mail is already searched).";
   if (morePages)
     return "More matches than this page. Follow nextPageToken to cover the whole period, or narrow with from:, subject: or after:/before: dates.";
   return undefined;
