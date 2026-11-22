@@ -38,6 +38,7 @@ import {
 import { ModelRouter } from "./model-router.js";
 import { projectObservation } from "./observations.js";
 import { plugins } from "./plugin-registry.js";
+import type { PluginRegistry } from "./plugins.js";
 import { action } from "./protocol.js";
 import { jsonSchema, runtimeContext } from "./runtime.js";
 import { toolError } from "./tool-errors.js";
@@ -170,6 +171,8 @@ export type TaskRecord = {
   /** Text the model received for each message from reads that were not excerpts or bodyless. */
   bodies: Map<string, Set<string>>;
   report?: z.infer<typeof reportSchema>;
+  /** Other calls in the step that reported, not dispatched: the model would never see them. */
+  skippedWithReport: number;
   ended: "reported" | "step_limit" | "unreported" | "error";
   error?: string;
   searches: number;
@@ -248,19 +251,32 @@ export function normalise(text: string) {
 }
 
 /**
- * Whether the model received a message's body as real text.
+ * Whether the model received a message's body as real text. A probable snippet stand-in never
+ * counts: text of STAND_IN_CHARS or fewer whose first STAND_IN_PREFIX characters, normalised,
+ * match the start of a snippet the model saw for the message in a search row. gmail_read falls
+ * back to the snippet without saying so, where gmail_thread flags the message bodyless.
  * - With bodyChars: the distinct texts received for it add up to at least half of
  *   min(bodyChars, BODY_CAP), so a continuation read counts and a repeated read does not.
- * - Without (a heuristic): some text is longer than SNIPPET_CHARS and is not a probable snippet
- *   stand-in: STAND_IN_CHARS or fewer whose first STAND_IN_PREFIX characters, normalised, match
- *   the start of a snippet the model saw for it in a search row.
+ * - Without (a heuristic): some text is longer than SNIPPET_CHARS.
  */
 function readable(
   m: { account: string; messageId: string; bodyChars?: number },
   r: TaskRecord,
 ) {
   const k = key(m);
-  const texts = [...(r.bodies.get(k) ?? [])];
+  // A search row's snippet is cut at a fixed length and may end in half an entity.
+  const snippets = [...(r.snippets.get(k) ?? [])].map((s) =>
+    normalise(s.replace(/&[#a-z0-9]{0,8}$/i, "")),
+  );
+  const standIn = (text: string) => {
+    if (text.length > STAND_IN_CHARS) return false;
+    const head = normalise(text).slice(0, STAND_IN_PREFIX);
+    return snippets.some((s) => {
+      const n = Math.min(STAND_IN_PREFIX, s.length, head.length);
+      return n > 0 && head.slice(0, n) === s.slice(0, n);
+    });
+  };
+  const texts = [...(r.bodies.get(k) ?? [])].filter((t) => !standIn(t));
   if (m.bodyChars !== undefined)
     return (
       texts
@@ -269,21 +285,7 @@ function readable(
         .reduce((n, t) => n + t.length, 0) >=
       Math.min(m.bodyChars, BODY_CAP) / 2
     );
-  // A search row's snippet is cut at a fixed length and may end in half an entity.
-  const snippets = [...(r.snippets.get(k) ?? [])].map((s) =>
-    normalise(s.replace(/&[#a-z0-9]{0,8}$/i, "")),
-  );
-  const standIn = (text: string) => {
-    const head = normalise(text).slice(0, STAND_IN_PREFIX);
-    return snippets.some((s) => {
-      const n = Math.min(STAND_IN_PREFIX, s.length, head.length);
-      return n > 0 && head.slice(0, n) === s.slice(0, n);
-    });
-  };
-  return texts.some(
-    (t) =>
-      t.length > SNIPPET_CHARS && !(t.length <= STAND_IN_CHARS && standIn(t)),
-  );
+  return texts.some((t) => t.length > SNIPPET_CHARS);
 }
 
 const usageNumber = (value: unknown) =>
@@ -328,6 +330,7 @@ export async function runTask(
     cachedTokens: 0,
     costUsd: 0,
     wallMs: 0,
+    skippedWithReport: 0,
   };
   const tools = [...o.tools, reportTool];
   const offeredNames = new Set(tools.map((t) => t.name));
@@ -399,6 +402,23 @@ export async function runTask(
         record.ended = "unreported";
         break;
       }
+      // A valid report ends the task now. Its sibling calls are not dispatched, because their
+      // results would never reach the model, so they could not count as surfaced or read.
+      for (const call of calls) {
+        if (call.function.name !== REPORT || record.report) continue;
+        try {
+          record.report = reportSchema.parse(
+            JSON.parse(call.function.arguments || "{}"),
+          );
+        } catch {
+          // Refused in the ordinary dispatch below, where the model sees why.
+        }
+      }
+      if (record.report) {
+        record.skippedWithReport = calls.length - 1;
+        record.ended = "reported";
+        break;
+      }
       for (const call of calls) {
         const name = call.function.name;
         let content: unknown;
@@ -416,8 +436,9 @@ export async function runTask(
             });
           }
           if (name === REPORT) {
-            record.report = reportSchema.parse(args);
-            content = { recorded: true };
+            // Valid reports ended the step above; this one is refused with its reasons.
+            reportSchema.parse(args);
+            throw new Error("Report was not recorded");
           } else {
             const a = action.parse({
               ...(args as object),
@@ -486,10 +507,6 @@ export async function runTask(
           content: JSON.stringify(content),
         });
       }
-      if (record.report) {
-        record.ended = "reported";
-        break;
-      }
     }
   } catch (error) {
     record.ended = "error";
@@ -543,6 +560,7 @@ export function scoreTask(task: EvalTask, r: TaskRecord) {
       : {}),
     messages,
     extraIds: [...reported].filter((k) => !expected.has(k)),
+    skippedWithReport: r.skippedWithReport,
     searches: r.searches,
     gmailCalls: r.gmailCalls,
     toolErrors: r.toolErrors,
@@ -616,6 +634,7 @@ export function summarise(scores: TaskScore[], arm: Record<string, unknown>) {
     outputTokens: sum((s) => s.outputTokens),
     cachedTokens: sum((s) => s.cachedTokens),
     costUsd: Math.round(sum((s) => s.costUsd) * 1e6) / 1e6,
+    skippedWithReport: sum((s) => s.skippedWithReport),
     wallMs: sum((s) => s.wallMs),
   };
 }
@@ -670,6 +689,7 @@ export function resolveArm(
   flags: ReturnType<typeof parseFlags>,
   mainModel: string,
   policy: ModelPolicy = readModelPolicy(),
+  registry: Pick<PluginRegistry, "get" | "resolve" | "skills"> = plugins,
 ) {
   const [kind, name] = flags.instructions.split(/:(.*)/s) as [string, string];
   let instructions: string;
@@ -678,7 +698,7 @@ export function resolveArm(
   let effort: ReasoningEffort = "medium";
   let version: string;
   if (kind === "agent") {
-    const agent = plugins.get(plugins.resolve(name));
+    const agent = registry.get(registry.resolve(name));
     instructions = agent.instructions;
     resolved = agent.hostModel
       ? { tier: "host", model: agent.hostModel }
@@ -687,7 +707,7 @@ export function resolveArm(
     effort = agent.effort ?? effort;
     version = `${agent.pluginVersion}:${agent.pluginHash.slice(0, 12)}`;
   } else {
-    const skill = plugins
+    const skill = registry
       .skills()
       .find((s) => s.key === name || s.key === `core/${name}`);
     if (!skill) throw new Error(`No plugin skill ${name}`);

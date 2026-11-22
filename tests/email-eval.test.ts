@@ -303,6 +303,39 @@ test("an invalid eval_report is refused and counts nothing", async () => {
   assert.equal(score.extra, 0);
 });
 
+test("a report ends its step: sibling calls are not dispatched or scored", async () => {
+  const gmail = fakeGmail({}, ["a1"]);
+  const score = await run(task, gmail, [
+    [
+      { name: "gmail_search", args: { query: "receipt" } },
+      { name: "gmail_thread", args: { threadId: "ba1" } },
+      ...report([ref("a1")]),
+    ],
+  ]);
+  assert.equal(score.ended, "reported");
+  assert.equal(score.found, 1);
+  assert.equal(score.skippedWithReport, 2);
+  // The model never saw these results, so they count for nothing.
+  assert.equal(score.searches, 0);
+  assert.equal(score.gmailCalls, 0);
+  assert.equal(score.surfaced, 0);
+  assert.equal(score.readable, 0);
+});
+
+test("an invalid report beside other calls lets them run and be returned", async () => {
+  const gmail = fakeGmail({}, ["a1"]);
+  const score = await run(task, gmail, [
+    [
+      { name: "gmail_search", args: { query: "receipt" } },
+      ...report([{ account: "primary", messageId: "not-hex" }]),
+    ],
+    report([ref("a1")]),
+  ]);
+  assert.equal(score.skippedWithReport, 0);
+  assert.equal(score.surfaced, 1);
+  assert.deepEqual(score.toolErrors, { INVALID_INPUT: 1 });
+});
+
 test("an excerpted result counts its search rows but no body", async () => {
   const padding = "x".repeat(13_000);
   const gmail = stubGmail((operation) =>
@@ -415,6 +448,61 @@ test("with bodyChars, a continuation read adds up but a repeated read does not",
   const t = only("a7", { bodyChars: 2000 });
   assert.equal((await run(t, reader(parts), steps)).readable, 1);
   assert.equal((await run(t, reader([parts[0]!]), steps)).readable, 0);
+});
+
+test("with bodyChars, a snippet stand-in from gmail_read counts for nothing", async () => {
+  // A short HTML-only email: its snippet alone reaches half of bodyChars.
+  const snippet = "Receipt &amp; invoice for &#39;Example&#39; plan ".repeat(6);
+  const mail = { a8: { html: true, snippet } };
+  const t = only("a8", { bodyChars: 500 });
+  assert.ok(snippet.length >= 250 && snippet.length <= 400);
+  const read = [{ name: "gmail_read", args: { messageId: "a8" } }];
+  const seen = await run(t, fakeGmail(mail, ["a8"]), [
+    search("receipt"),
+    read,
+    report([ref("a8")]),
+  ]);
+  assert.equal(seen.readable, 0);
+  // gmail_thread flags the same message bodyless, so the two tools agree.
+  const thread = await run(t, fakeGmail(mail, ["a8"]), [
+    search("receipt"),
+    [{ name: "gmail_thread", args: { threadId: "ba8" } }],
+    report([ref("a8")]),
+  ]);
+  assert.equal(thread.readable, 0);
+});
+
+test("with bodyChars, a thread's cut of a body read whole later counts once", async () => {
+  const body = "r".repeat(1400);
+  const gmail = stubGmail((operation) =>
+    operation === "gmail_thread"
+      ? {
+          messages: [{ id: "a9", text: body.slice(0, 1000) }],
+          account: "primary",
+        }
+      : { id: "a9", text: body, account: "primary" },
+  );
+  // 1,000 + 1,400 would pass half of 3,000; the body itself, 1,400, does not.
+  const score = await run(only("a9", { bodyChars: 3000 }), gmail, [
+    [
+      { name: "gmail_thread", args: { threadId: "ba9" } },
+      { name: "gmail_read", args: { messageId: "a9" } },
+    ],
+    report([ref("a9")]),
+  ]);
+  assert.equal(score.readable, 0);
+});
+
+test("with bodyChars, a message flagged bodyless counts for nothing", async () => {
+  const gmail = stubGmail(() => ({
+    messages: [{ id: "aa", text: "s".repeat(2000), bodyless: true }],
+    account: "primary",
+  }));
+  const score = await run(only("aa", { bodyChars: 2000 }), gmail, [
+    [{ name: "gmail_thread", args: { threadId: "baa" } }],
+    report([ref("aa")]),
+  ]);
+  assert.equal(score.readable, 0);
 });
 
 test("the HTML entities in snippets are decoded before comparison", () => {
@@ -540,6 +628,21 @@ test("arms take tools from the runtime and resolve the model as agent runs do", 
   assert.deepEqual(
     { tier: asked.tier, model: asked.model },
     resolveAgentModel("standard", "test/main"),
+  );
+  // A registry-pinned host model wins over any tier, as in runAgentType.
+  const pinned = resolveArm(
+    parseFlags(["--instructions", "agent:email", "--model", "standard"]),
+    "test/main",
+    undefined,
+    {
+      get: (id) => ({ ...plugins.get(id), hostModel: "test/pinned" }),
+      resolve: (type) => plugins.resolve(type),
+      skills: () => plugins.skills(),
+    },
+  );
+  assert.deepEqual(
+    { tier: pinned.tier, model: pinned.model },
+    { tier: "host", model: "test/pinned" },
   );
   assert.throws(
     () =>
