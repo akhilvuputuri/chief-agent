@@ -53,8 +53,20 @@ const threadSchema = z.object({
 // Gmail's own default page is 100; 20 keeps an ordinary first look short.
 export const SEARCH_PAGE_DEFAULT = 20;
 export const SEARCH_PAGE_MAX = 100;
-// Gmail's batch endpoint accepts 100 calls; Google advises at most 50 to avoid rate limits.
-const BATCH_MAX = 50;
+// Gmail's batch endpoint accepts 100 calls and Google advises at most 50, but on 22
+// November 2026 50-part batches had parts rate limited even in a fresh quota window
+// (journal 204), so a page is sent as sequential batches of 25.
+const BATCH_MAX = 25;
+// Backoff for Gmail's burst rate limit, as Google's error guide recommends: exponential
+// with jitter, retrying only what was refused, within one window per call.
+const BACKOFF_MS = [500, 1000, 2000, 4000, 8000];
+const RETRY_WINDOW_MS = 15_000;
+// A plain list, thread or read gets two short retries before RATE_LIMITED reaches the model.
+const PLAIN_RETRIES = 2;
+// Row metadata by message, so narrowing searches do not fetch the same rows again; short
+// lived because labels such as unread and folder change.
+const ROW_CACHE_MS = 600_000;
+const ROW_CACHE_MAX = 5_000;
 // Requests in flight at once for single fetches, so one call does not trip Gmail's
 // per-user concurrency limit.
 const READ_CONCURRENCY = 4;
@@ -603,10 +615,35 @@ export type GmailCallOptions = {
   offset?: number;
   messageIds?: string[];
 };
+/** One call's retry window: waits grow exponentially with jitter until the window is used. */
+class Backoff {
+  private attempt = 0;
+  private waited = 0;
+  constructor(
+    private sleep: (ms: number) => Promise<void>,
+    private limit = RETRY_WINDOW_MS,
+  ) {}
+  /** Waits before the next try, or returns false when the window is used. */
+  async wait() {
+    const base = BACKOFF_MS[Math.min(this.attempt, BACKOFF_MS.length - 1)]!;
+    const ms = Math.round(base * (0.75 + Math.random() * 0.5));
+    if (this.waited + ms > this.limit) return false;
+    this.attempt += 1;
+    this.waited += ms;
+    await this.sleep(ms);
+    return true;
+  }
+}
+/** A refusal worth waiting out: Gmail's rate limit, not its daily quota. */
+const retryable = (error: unknown) =>
+  error instanceof RateLimitedError && !error.daily;
+type Row = ReturnType<GmailTools["row"]>;
 export class GmailTools {
   private token = "";
   private expires = 0;
   private searches = new Map<string, { at: number; result: unknown }>();
+  // One instance serves one owner and one mailbox, so rows never cross accounts.
+  private rows = new Map<string, { at: number; row: Row }>();
   private secondary?: GmailTools;
   constructor(
     private config: {
@@ -619,6 +656,8 @@ export class GmailTools {
     },
     private request: typeof fetch = fetch,
     private now: () => number = Date.now,
+    private sleep: (ms: number) => Promise<void> = (ms) =>
+      new Promise((done) => setTimeout(done, ms)),
   ) {
     if (config.secondary) {
       if (
@@ -631,6 +670,7 @@ export class GmailTools {
         { ...config, ...config.secondary, secondary: undefined },
         request,
         now,
+        sleep,
       );
     }
   }
@@ -691,15 +731,55 @@ export class GmailTools {
     this.expires = this.now() + Math.max(0, t.expires_in - 60) * 1000;
     return this.token;
   }
-  private async get(token: string, url: URL, maxBytes = 2_000_000) {
-    return json(
-      await this.request(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(15000),
-        redirect: "error",
-      }),
-      maxBytes,
-    );
+  /** A row seen within ROW_CACHE_MS, as a copy carrying the hit's own identifiers. */
+  private cachedRow(user: string, hit: { id: string; threadId: string }) {
+    const entry = this.rows.get(`${user}|${hit.id}`);
+    if (!entry || this.now() - entry.at >= ROW_CACHE_MS) return undefined;
+    return {
+      ...structuredClone(entry.row),
+      id: hit.id,
+      threadId: hit.threadId,
+    };
+  }
+  private rememberRow(user: string, row: Row) {
+    const key = `${user}|${row.id}`;
+    this.rows.delete(key);
+    if (this.rows.size >= ROW_CACHE_MAX)
+      for (const [k, v] of this.rows)
+        if (
+          this.rows.size >= ROW_CACHE_MAX ||
+          this.now() - v.at >= ROW_CACHE_MS
+        )
+          this.rows.delete(k);
+        else break;
+    this.rows.set(key, { at: this.now(), row: structuredClone(row) });
+  }
+  /**
+   * One GET. A rate-limit refusal is retried `retries` times after a short backoff before
+   * it is raised; a daily-quota refusal is raised at once.
+   */
+  private async get(
+    token: string,
+    url: URL,
+    maxBytes = 2_000_000,
+    retries = PLAIN_RETRIES,
+  ) {
+    const backoff = new Backoff(this.sleep);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await json(
+          await this.request(url, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(15000),
+            redirect: "error",
+          }),
+          maxBytes,
+        );
+      } catch (error) {
+        if (!retryable(error) || attempt >= retries || !(await backoff.wait()))
+          throw error;
+      }
+    }
   }
   /** Sender, subject, date and snippet for one hit, so the model triages without reading bodies. */
   private row(
@@ -727,11 +807,15 @@ export class GmailTools {
       params.append("metadataHeaders", name);
     return `/gmail/v1/users/me/messages/${id}?${params}`;
   }
+  /** One hit's metadata on its own; rate limits are left to the caller's backoff. */
   private async metadata(token: string, hit: { id: string; threadId: string }) {
     const url = new URL(
       "https://gmail.googleapis.com" + this.metadataPath(hit.id),
     );
-    return this.row(hit, metadataSchema.parse(await this.get(token, url)));
+    return this.row(
+      hit,
+      metadataSchema.parse(await this.get(token, url, undefined, 0)),
+    );
   }
   /**
    * Metadata for up to BATCH_MAX hits in one Gmail batch request, keyed by hit index.
@@ -809,57 +893,89 @@ export class GmailTools {
     return found;
   }
   /**
-   * Rows for a page of hits: batch requests of at most BATCH_MAX, then one single fetch
-   * for each hit a batch did not answer. A rate-limited part is not fetched again at
-   * once; it and any failed hit degrade their own row only.
+   * Rows for a page of hits. Rows seen recently come from the row cache; the rest are
+   * fetched in sequential batches of at most BATCH_MAX. Rate-limited parts, or a whole
+   * batch refused for rate, are retried with backoff within one window; a hit a batch
+   * did not otherwise answer is fetched once on its own. A row still refused after the
+   * window, or failed, degrades to its identifiers with a detail and is not cached.
    */
   private async hitRows(
     token: string,
+    user: string,
     hits: { id: string; threadId: string }[],
   ) {
     const results: Record<string, unknown>[] = new Array(hits.length);
     let degraded = false;
-    const skipped = (m: { id: string; threadId: string }, detail: string) => {
+    const skipped = (i: number, detail: string) => {
       degraded = true;
-      return { id: m.id, threadId: m.threadId, detail };
+      results[i] = { id: hits[i]!.id, threadId: hits[i]!.threadId, detail };
     };
+    const filled = (i: number, row: Row) => {
+      results[i] = row;
+      this.rememberRow(user, row);
+    };
+    const backoff = new Backoff(this.sleep);
+    const pending: number[] = [];
+    hits.forEach((hit, i) => {
+      const row = this.cachedRow(user, hit);
+      if (row) results[i] = row;
+      else pending.push(i);
+    });
     const missing: number[] = [];
-    for (let start = 0; start < hits.length; start += BATCH_MAX) {
-      const chunk = hits.slice(start, start + BATCH_MAX);
-      let found: Awaited<ReturnType<GmailTools["batchMetadata"]>> | undefined;
-      try {
-        found = await this.batchMetadata(token, chunk);
-      } catch (error) {
-        if (error instanceof RateLimitedError) {
-          chunk.forEach((m, i) => {
-            results[start + i] = skipped(m, limitedRow(error));
-          });
-          continue;
+    for (let start = 0; start < pending.length; start += BATCH_MAX) {
+      let batch = pending.slice(start, start + BATCH_MAX);
+      while (batch.length) {
+        let found: Awaited<ReturnType<GmailTools["batchMetadata"]>>;
+        try {
+          found = await this.batchMetadata(
+            token,
+            batch.map((i) => hits[i]!),
+          );
+        } catch (error) {
+          if (retryable(error) && (await backoff.wait())) continue;
+          if (error instanceof RateLimitedError)
+            for (const i of batch) skipped(i, limitedRow(error));
+          // Any other failed batch falls back to fetching each hit on its own.
+          else missing.push(...batch);
+          break;
         }
-        // Any other failed batch falls back to fetching each hit on its own.
+        const again: number[] = [];
+        let refusal: RateLimitedError | undefined;
+        batch.forEach((i, k) => {
+          const part = found.get(k);
+          if (part instanceof RateLimitedError) {
+            if (part.daily) skipped(i, limitedRow(part));
+            else {
+              again.push(i);
+              refusal = part;
+            }
+          } else if (part) filled(i, this.row(hits[i]!, part));
+          else missing.push(i);
+        });
+        if (again.length && !(await backoff.wait())) {
+          for (const i of again) skipped(i, limitedRow(refusal!));
+          break;
+        }
+        batch = again;
       }
-      chunk.forEach((m, i) => {
-        const part = found?.get(i);
-        if (part instanceof RateLimitedError)
-          results[start + i] = skipped(m, limitedRow(part));
-        else if (part) results[start + i] = this.row(m, part);
-        else missing.push(start + i);
-      });
     }
     let next = 0;
     const worker = async () => {
       for (let k = next++; k < missing.length; k = next++) {
         const i = missing[k]!;
-        const m = hits[i]!;
-        try {
-          results[i] = await this.metadata(token, m);
-        } catch (error) {
-          results[i] = skipped(
-            m,
-            error instanceof RateLimitedError
-              ? limitedRow(error)
-              : "not retrieved: unavailable",
-          );
+        for (;;) {
+          try {
+            filled(i, await this.metadata(token, hits[i]!));
+          } catch (error) {
+            if (retryable(error) && (await backoff.wait())) continue;
+            skipped(
+              i,
+              error instanceof RateLimitedError
+                ? limitedRow(error)
+                : "not retrieved: unavailable",
+            );
+          }
+          break;
         }
       }
     };
@@ -912,7 +1028,7 @@ export class GmailTools {
     const hits = listed.messages
       .filter((m) => ID.test(m.id) && ID.test(m.threadId))
       .slice(0, pageSize);
-    const { results, degraded } = await this.hitRows(token, hits);
+    const { results, degraded } = await this.hitRows(token, user, hits);
     // Warning and hint lead so they survive if a projection ever excerpts this.
     const result = fit(
       {
@@ -1029,12 +1145,12 @@ export class GmailTools {
       listing,
     );
   }
-  private async message(token: string, id: string) {
+  private async message(token: string, id: string, retries = PLAIN_RETRIES) {
     const url = new URL(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}`,
     );
     url.searchParams.set("format", "full");
-    return messageSchema.parse(await this.get(token, url));
+    return messageSchema.parse(await this.get(token, url, undefined, retries));
   }
   private async read(token: string, id: string, offset = 0) {
     if (!Number.isInteger(offset) || offset < 0)
@@ -1062,24 +1178,29 @@ export class GmailTools {
    */
   private async readMany(token: string, ids: string[]) {
     const fetched: (Message | string)[] = new Array(ids.length);
+    // A rate-limited message waits and is tried again within the call's window.
+    const backoff = new Backoff(this.sleep);
     let next = 0;
     const worker = async () => {
-      for (let i = next++; i < ids.length; i = next++) {
-        try {
-          const m = await this.message(token, ids[i]!);
-          fetched[i] =
-            m.id === ids[i] && ID.test(m.threadId)
-              ? m
-              : "not retrieved: unavailable";
-        } catch (error) {
-          fetched[i] =
-            error instanceof ResponseTooLarge
-              ? "not retrieved: message larger than the response guard"
-              : error instanceof RateLimitedError
-                ? limitedRow(error)
+      for (let i = next++; i < ids.length; i = next++)
+        for (;;) {
+          try {
+            const m = await this.message(token, ids[i]!, 0);
+            fetched[i] =
+              m.id === ids[i] && ID.test(m.threadId)
+                ? m
                 : "not retrieved: unavailable";
+          } catch (error) {
+            if (retryable(error) && (await backoff.wait())) continue;
+            fetched[i] =
+              error instanceof ResponseTooLarge
+                ? "not retrieved: message larger than the response guard"
+                : error instanceof RateLimitedError
+                  ? limitedRow(error)
+                  : "not retrieved: unavailable";
+          }
+          break;
         }
-      }
     };
     await Promise.all(
       Array.from({ length: Math.min(READ_CONCURRENCY, ids.length) }, () =>

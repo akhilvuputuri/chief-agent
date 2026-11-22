@@ -592,7 +592,8 @@ test("a real Gmail 429 on an index read pauses the build and keeps the message q
   // Drives GmailTools itself: its RateLimitedError carries no "(429)" text, which the
   // hand-made refusals above would not notice.
   const ids = ["a0", "a1", "a2"];
-  let refusals = 3;
+  // Each read retries a rate limit twice itself, so six refusals reach the index twice.
+  let refusals = 6;
   const reads: string[] = [];
   const request = (async (u: unknown) => {
     const url = new URL(String(u));
@@ -631,6 +632,8 @@ test("a real Gmail 429 on an index read pauses the build and keeps the message q
       refreshToken: "r",
     },
     request,
+    Date.now,
+    async () => {},
   );
   const index = new MailIndex(
     gmail,
@@ -642,9 +645,9 @@ test("a real Gmail 429 on an index read pauses the build and keeps the message q
   );
   await index.start();
   assert.equal(index.state, "ready");
-  // Three refusals of the same message would have abandoned it after two tries.
+  // Two refused reads of the same message would have abandoned it after two tries.
   assert.equal(index.messages, 3);
-  assert.equal(reads.filter((id) => id === "a0").length, 4);
+  assert.equal(reads.filter((id) => id === "a0").length, 7);
 });
 
 test("a Gmail that keeps refusing fails the build instead of abandoning mail", async (t) => {

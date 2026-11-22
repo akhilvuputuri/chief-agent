@@ -112,7 +112,8 @@ function fakeGmail(
       );
     return Response.json(message(id, mail[id]));
   }) as typeof fetch;
-  return new GmailTools(config, request);
+  // Rate-limit backoff waits are skipped, so refusals are scored without real delays.
+  return new GmailTools(config, request, Date.now, async () => {});
 }
 /**
  * A stand-in for GmailTools.call, for result shapes the real tools cannot produce, such as
