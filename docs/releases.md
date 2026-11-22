@@ -1,3 +1,11 @@
+## The judge is tested on its own verdicts, every night; the learner sees what Chief said before (22 November 2026)
+
+- **Code.** A new judge prompt reads every learned fact again, whatever the old verdict was. A night's planted errors and controls are built only on facts the current prompt has called supported, and the repair gate's record counts a test only when the current prompt had judged its base before the test ran; this applies to results already recorded. The judge's test of itself runs every night there is such a fact, even with no new fact or turn, as two model calls. The learner (`learner-v8`) is shown the end of Chief's reply in the turn before, the text the judge reads, and a note's bracketed detail may rest on it. The report's planted-error query counts what the gate counts. The judge's and the repair's prompts and the gate's thresholds are unchanged.
+- **Why.** Measured on production between 14 and 22 November: the judge faulted 6 of 16 of its own controls, none of the 5 whose base it had judged itself and 6 of the 11 that only the first judge prompt had passed, and the gate closed after one repair night with five overstated facts left in every turn; the judge did not run on five quiet nights; and the learner's one bracketed detail was refused because it quoted Chief's previous message, which its item lacked. Owner approval to build: 22 November. See [journal 205](journey/205-whose-supported-is-it.md) and [learning](learning.md#nightly-judge).
+- **Review.** Independent review (Claude Opus 5.5) approved `6e243ede`, the merged head, with five low findings recorded in journal 205. Hosted CI passed on that head.
+- **Deployment.** Merged as `dfcbadd` (PR 521). Live from 15:32 SGT on 22 November by release run 44998606639; the gateway reported `dfcbadd`, healthy, with no error lines in its first minute. No migration or Compose change.
+- **Not measured.** No night has run with it. The first reads the 14 facts that only `judge-v1` had passed.
+
 ## Worker image with Pi 1.5.2 (17 November 2026)
 
 - **Configuration.** New coding jobs pin worker image `sha256:537f6c79…`, built from `3e1e314` (run 43917426099). It carries [journal 203](journey/203-pi-1-5-2.md): Pi 1.5.2, with undici 8.12.3 and minimatch 11.0.3, and a `grep` whose `glob` is relative to its `path`. No code, migration or Compose change.

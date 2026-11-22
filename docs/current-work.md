@@ -40,6 +40,12 @@ Next: read the next coding job's profile for how often the suite ran. Then measu
 
 > **Update, 16 November 2026:** live in `fb53ba9` (PR 495); the gateway is healthy on it. No coding job has run with it yet.
 
+# The judge is tested on its own verdicts, every night — live, no night measured, 22 November 2026
+
+Issue #326. The first nights of the change below, read on production, showed the judge faulting 6 of 16 of its own controls: none of the 5 whose base it had judged itself, and 6 of the 11 that only the first judge prompt had passed. The repair ran once, on 18 November (4 of 5 facts rewritten, all judged supported the next night), and the gate then closed. Live in `dfcbadd` (PR 521) from 15:32 SGT on 22 November: a new judge prompt reads every fact again, controls and the gate's record use only facts the current prompt has judged, the judge is tested every night there is such a fact, and the learner (`learner-v8`) is shown what Chief said before a turn ([journal 205](journey/205-whose-supported-is-it.md), [learning](learning.md#nightly-judge)).
+
+Next: read the first nights with `scripts/judge-report.sql`: what `judge-v4` says of the 14 facts only `judge-v1` had passed, the rate of faulted controls now, whether the gate opens and what the repair does with the five facts waiting. With the owner: whether to tighten the repair gate, and the rest of the plan from the 13 November research.
+
 # A fact names what the owner pointed at — live, no night measured, 13 November 2026
 
 Issue #326, step 1 of the plan from the 13 November research into other memory systems. A learned fact may name, in square brackets, what the owner only pointed at, backed by exact words of the exchange; only a note may take such a detail from Chief's words. The judge (`judge-v4`) and the repair (`repair-v2`) read Chief's side of each cited exchange and run at high reasoning effort, and the learner (`learner-v7`) is told one request is no trait. Live in `b8fe585` (PR 491) from 20:20 SGT on 13 November ([journal 195](journey/195-what-the-owner-pointed-at.md), [learning](learning.md#host-checks)).
