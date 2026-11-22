@@ -1,8 +1,16 @@
+# Email search redesign, Phase 3, part 1: attachments, link targets and routing — tested, not yet released, 22 November 2026
+
+Branch `feat/email-receipts`. `gmail_read` and `gmail_thread` list attachments; a new read-only `gmail_attachment` returns an attachment's text (PDF, text, CSV, calendar, HTML), reading spam and trash but saving nothing, while gathering still never takes a file from either; `gmail_read` takes `links: true` for link targets, never opened. The collection and Gmail descriptions, cues, catalogue entries and the email-search skill say that finding and reading receipts is Gmail work and a collection saves files (from email, PDF attachments only, until part 3). Coordinator turns and background passes get the new tool; investigations, `parcels` and other agents do not. See [email search, Phase 3, part 1](email-search.md#phase-3-part-1-attachments-link-targets-and-routing) and [journal 204](journey/204-email-search-redesign.md).
+
+Next: independent review and release; then part 2 (the collector stops owning email search) and part 3 (email receipts saved as files).
+
 # Email search redesign, Phase 2 coordinator — tested, not yet released, 22 November 2026
 
 Branch `feat/email-coordinator`. Chief searches and reads Gmail itself: the Gmail tools are no longer delegated, the email agent is retired, and a new `core/email-search` skill describes the tools and the facts a searcher needs. Background task passes get the same five tools they reached through the agent before; investigations, the briefing and other agents gain none. Gathering drops spam and trash rows by folder and never takes files from a message in either. The email eval's default arm is a coordinator turn on the main model, and `retired:email` replays the retired agent. See [email search, Phase 2](email-search.md#phase-2-coordinator) and [journal 204](journey/204-email-search-redesign.md).
 
 Next: independent review; release; run the eval's `skill:email-search` and `retired:email` arms on the private tasks; then Phase 3, invoices.
+
+> **Update, 22 November 2026:** live. PR 525 merged as `bb3c399`; release run 45008299249 succeeded after a rerun of the image-publish job, whose provenance attestation had failed with a 404 from the transparency log. The host reports `bb3c399`, healthy, with the skill present and the email agent gone. On the 15 private tasks the coordinator arm (`claude-opus-5.5`, one run) found 144 of 144 expected emails ([journal 204](journey/204-email-search-redesign.md)).
 
 # Email search redesign, Phases 0 and 1 — live in `4ee82e6`, 22 November 2026
 
