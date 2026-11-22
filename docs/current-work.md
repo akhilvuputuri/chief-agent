@@ -4,6 +4,8 @@ Branch `feat/google-connect`. `/google` in Telegram, or asking Chief, sends a ho
 
 Next: independent review; set `BASE` in `scripts/deploy-google-connect.py` to the live release and merge; run the rollout on the host; the owner creates a "Web application" OAuth client with redirect `https://<public host>/oauth/google/callback` and sets `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`; then a first real connection.
 
+> **Update, 22 November 2026:** live in `c5fa173` (PR 533, reviewed head `63cc336a`), rolled out late on 22 November with migration 37 and the callback route. The line above was wrong about the order: the owner created the web client and saved both settings before the rollout, so the feature was on as soon as the new gateway started. Next: the owner tries `/google` (a real sign-in, the scopes Google reports, the confirmation message); the review notes in [journal 208](journey/208-google-connect-from-chat.md#release-closure--22-november-2026); the deploy script's docstring repeats the "stays off" statement.
+
 # Image job retries a failed attestation — tested, not yet released, 22 November 2026
 
 Branch `ci/attest-retry`. The `publish gateway image` job gives its provenance attestation up to three attempts, after two main merges on 22 November passed their tests and were not released: the transparency log answered 404 for an entry it had just accepted. The job still fails when every attempt fails, and the release's attestation check is unchanged. See [journal 207](journey/207-attestation-read-back-404.md).
