@@ -18,8 +18,6 @@ import { action } from "../src/protocol.js";
 import { RateLimitedError } from "../src/tool-errors.js";
 import { runtimeContext } from "../src/runtime.js";
 import { projectObservation } from "../src/observations.js";
-import { plugins } from "../src/plugin-registry.js";
-import { runFindingsAgent } from "../src/agents.js";
 import { spending, type Spending } from "../src/spending.js";
 
 const DAY = 86_400_000;
@@ -291,30 +289,19 @@ test("gmail_recall takes plain words only and is offered only with the index", (
     runtimeContext(availability, null).tools.map((t) => t.name);
   assert.ok(!names({ gmail: true }).includes("gmail_recall"));
   assert.ok(names({ gmail: true, mailIndex: true }).includes("gmail_recall"));
-  // The email agent stays invocable without the index and gains it with the index.
-  const gmailTools = [
-    "gmail_accounts",
-    "gmail_search",
-    "gmail_thread",
-    "gmail_read",
-    "observation_read",
-  ];
-  const email = (available: string[]) =>
-    plugins.agentCatalogue(new Set(available)).find((a) => a.type === "email");
-  assert.deepEqual(email(gmailTools)?.tools, gmailTools);
+  // The coordinator is offered it directly, only with the index (journal 204, Phase 2).
+  const coordinator = (mailIndex: boolean) =>
+    runtimeContext(
+      { gmail: true, mailIndex },
+      null,
+      undefined,
+      undefined,
+      true,
+    );
+  assert.ok(coordinator(true).tools.some((t) => t.name === "gmail_recall"));
+  assert.ok(!coordinator(false).tools.some((t) => t.name === "gmail_recall"));
   assert.ok(
-    email([...gmailTools, "gmail_recall"])?.tools.includes("gmail_recall"),
-  );
-  assert.equal(email(gmailTools.slice(1)), undefined);
-  const coordinator = runtimeContext(
-    { gmail: true },
-    null,
-    undefined,
-    undefined,
-    true,
-  );
-  assert.ok(
-    JSON.parse(coordinator.context).agentCatalogue.some(
+    !JSON.parse(coordinator(true).context).agentCatalogue?.some(
       (a: { type: string }) => a.type === "email",
     ),
   );
@@ -362,46 +349,6 @@ test("index reads stay in the primary mailbox and check message identity", async
   await assert.rejects(gmail.indexMessage("123", "../x"), /Invalid/);
   await assert.rejects(gmail.indexPage("999", "x"), /not connected/);
   assert.ok(calls.some((c) => c.includes("maxResults=100")));
-});
-
-test("the email agent runs without the index and gains gmail_recall with it", async () => {
-  for (const mailIndex of [false, true]) {
-    const runtime = runtimeContext(
-      { gmail: true, mailIndex },
-      null,
-      undefined,
-      undefined,
-      true,
-    );
-    const definition = plugins.get(plugins.resolve("email"));
-    // Tool validation passes; the run then stops at the allocation check.
-    await assert.rejects(
-      runFindingsAgent(
-        {
-          executeAgent: async () => ({}),
-          execution: {
-            db: {},
-            user: "owner",
-            remaining: async () => ({ models: 1, tools: 1, ms: 1000 }),
-          },
-          signal: new AbortController().signal,
-          runtime,
-        } as any,
-        { type: "email", objective: "find it", context: "" },
-        definition,
-        {} as any,
-        {} as any,
-        async () => ({}) as any,
-      ),
-      /remaining allocation is reserved/,
-    );
-    // The coordinator still delegates Gmail to the email agent instead of losing it.
-    assert.ok(!runtime.tools.some((t) => t.name === "gmail_search"));
-    assert.equal(
-      runtime.allTools!.some((t) => t.name === "gmail_recall"),
-      mailIndex,
-    );
-  }
 });
 
 test("a burst of new mail is indexed over several recalls without gaps", async (t) => {

@@ -299,9 +299,9 @@ test("the host refuses the browser on any run that is not the browser agent", as
     browser.act(user, randomUUID(), parse({ kind: "snapshot" })),
     /only inside the browser agent/,
   );
-  const email = await childRun(db, user, "core/email");
+  const other = await childRun(db, user, "core/parcels");
   await assert.rejects(
-    browser.act(user, email, parse({ kind: "snapshot" })),
+    browser.act(user, other, parse({ kind: "snapshot" })),
     /only inside the browser agent/,
   );
   assert.equal(sent.length, 0);

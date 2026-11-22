@@ -18,7 +18,7 @@ import type { DailyTools, DailyAction } from "./daily.js";
 import { SkillTools } from "./skills.js";
 import { PreparationTools } from "./preparation.js";
 import type { SheetsTools } from "./sheets.js";
-import type { GmailTools } from "./gmail.js";
+import { UNTRUSTED as GMAIL_UNTRUSTED, type GmailTools } from "./gmail.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
@@ -252,13 +252,17 @@ export class JobTools {
     if (a.operation === "observation_read") {
       const found = (
         await db.query(
-          "SELECT c.result FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE c.id=$1 AND r.user_id=$2 AND c.state='success'",
+          "SELECT c.operation,c.result FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE c.id=$1 AND r.user_id=$2 AND c.state='success'",
           [a.id, user],
         )
       ).rows[0];
       if (!found) throw new Error("Observation not found");
       const text = JSON.stringify(found.result);
       return {
+        // A page past the start of a stored email result no longer shows its own warning.
+        ...(String(found.operation).startsWith("gmail_")
+          ? { warning: GMAIL_UNTRUSTED }
+          : {}),
         content: text.slice(a.offset, a.offset + 8000),
         offset: a.offset,
         nextOffset: a.offset + 8000 < text.length ? a.offset + 8000 : null,

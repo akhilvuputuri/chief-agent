@@ -87,7 +87,7 @@ const registrySchema = z
   .object({
     format: z.literal("companion.plugin-registry/v1"),
     researchAgent: z.string().max(100).nullable(),
-    /** Short agent types, such as "email" for "core/email". */
+    /** Short agent types, such as "parcels" for "core/parcels". */
     aliases: z.record(id, z.string().max(100)).optional(),
     /** Operations the coordinator does not get: an agent in the catalogue does that work. */
     delegated: z.array(operation).max(120).optional(),

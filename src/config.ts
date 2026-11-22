@@ -89,7 +89,7 @@ const schema = z.object({
   // every available domain on every call, so the cached tool list never changes (journal 107).
   TOOL_PICKER: z.enum(["jev", "off", "all"]).default("all"),
   // Email memory MVP (docs/mail-recall.md): an in-memory meaning index over the primary
-  // mailbox's last 12 months of Primary mail, offered to the email agent as gmail_recall.
+  // mailbox's last 12 months of Primary mail, offered to the coordinator as gmail_recall.
   MAIL_INDEX: z.enum(["on", "off"]).default("on"),
   /** The nightly learner (docs/learning.md); "off" in config/runtime.json stops it. */
   LEARNING: z.enum(["on", "off"]).default("on"),

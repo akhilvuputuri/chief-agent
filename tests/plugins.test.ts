@@ -159,6 +159,33 @@ test("registry requires content pins and host grants; returns immutable copies a
   }
 });
 
+test("the shipped core package pins the email-search skill and no longer has the email agent", () => {
+  const registry = JSON.parse(readFileSync("plugins/registry.json", "utf8"));
+  const core = registry.enabled.find(
+    (p: { path: string }) => p.path === "core",
+  );
+  assert.equal(contentHash(readBundle("plugins/core")), core.sha256);
+  const skill = plugins.skills().find((s) => s.key === "core/email-search");
+  assert.ok(skill);
+  assert.equal(
+    skill.content,
+    readFileSync("plugins/core/skills/email-search/SKILL.md", "utf8"),
+  );
+  // A plugin skill owned by no agent: the coordinator reads it through skill_read.
+  assert.ok(
+    plugins
+      .catalogue()
+      .every((a) => !a.skills.some((s) => s.key === skill.key)),
+  );
+  assert.equal(core.agents.includes("email"), false);
+  assert.equal("email" in registry.aliases, false);
+  assert.throws(() => plugins.get("core/email"), /not enabled/);
+  assert.equal(
+    registry.delegated.some((op: string) => op.startsWith("gmail_")),
+    false,
+  );
+});
+
 test("package symlinks and executable skill attachments are unsupported", () => {
   const root = temp();
   try {

@@ -965,6 +965,37 @@ test("ordinary conversation turns are labelled, a correction becomes owner evide
   );
 });
 
+test("the coordinator's own Gmail reads tag the turn email, as a delegated agent's did", async (t) => {
+  // Since journal 204's Phase 2 the coordinator searches and reads mail itself, so email text
+  // can reach it directly; the learner must still see the turn as carrying email.
+  const db = await setup(t);
+  const mail = await turn(db, {
+    says: "What did the landlord say about the lease renewal?",
+    reply: "They offered to renew at the same rent.",
+    at: new Date(NIGHT.getTime() - 30 * 3600_000),
+    calls: [
+      ["gmail_search", "success"],
+      ["gmail_read", "success"],
+      ["finish_turn", "success"],
+    ],
+  });
+  const { adapter, inputs } = model(() => [["learn_finish", {}]]);
+  await learner(db, adapter).tick("owner");
+  const items = JSON.parse(inputs[0].messages[1].content).tasks;
+  assert.deepEqual(
+    items.map((x: any) => [x.id, x.untrusted]),
+    [[mail, ["email"]]],
+  );
+  for (const op of [
+    "gmail_accounts",
+    "gmail_search",
+    "gmail_read",
+    "gmail_thread",
+    "gmail_recall",
+  ])
+    assert.deepEqual(untrustedSources([op]), ["email"], op);
+});
+
 test("acknowledgements and new requests are not corrections, and plain corrections are", async () => {
   const { isCorrection } = await import("../src/learning.js");
   for (const text of [

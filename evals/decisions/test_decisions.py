@@ -111,25 +111,25 @@ class Fixtures(unittest.TestCase):
 
 
 class Routing(unittest.TestCase):
-    def call(self, agent, confidence, gold="email", case="a", run=0):
+    def call(self, agent, confidence, gold="parcels", case="a", run=0):
         return {"id": case, "run": run, "gold": gold, "agent": agent, "confidence": confidence}
 
     def test_one_call_routes_only_above_the_threshold(self):
-        self.assertEqual(routing.route(self.call("email", 0.9), 0.8), "email")
-        self.assertEqual(routing.route(self.call("email", 0.6), 0.8), "chief")
+        self.assertEqual(routing.route(self.call("parcels", 0.9), 0.8), "parcels")
+        self.assertEqual(routing.route(self.call("parcels", 0.6), 0.8), "chief")
         self.assertEqual(routing.route(self.call("chief", 0.99), 0.1), "chief")
 
     def test_a_failed_call_goes_to_chief(self):
         calls = routing._calls(
             [{"id": "a", "run": 0, "agent": None, "confidence": None, "error": "HTTP 500"}],
-            [{"id": "a", "gold": "email"}],
+            [{"id": "a", "gold": "parcels"}],
         )
         self.assertEqual(routing.route(calls[0], 0.0), "chief")
 
     def test_tuning_keeps_precision_and_prefers_the_higher_tie(self):
         calls = [
-            self.call("email", 0.9, "email", "a"),
-            self.call("email", 0.6, "chief", "b"),
+            self.call("stocks", 0.9, "stocks", "a"),
+            self.call("stocks", 0.6, "chief", "b"),
             self.call("parcels", 0.7, "parcels", "c"),
         ]
         t = routing._tune(calls, 1.0)
@@ -137,7 +137,8 @@ class Routing(unittest.TestCase):
         self.assertEqual(routing._precision(calls, t), 1.0)
 
     def test_options_come_from_the_core_plugin_plus_chief(self):
-        self.assertIn("email", routing.OPTIONS)
+        self.assertIn("parcels", routing.OPTIONS)
+        self.assertNotIn("email", routing.OPTIONS)
         self.assertIn("research", routing.OPTIONS)
         self.assertIn("chief", routing.OPTIONS)
         gold = {c["gold"] for c in json.loads((HERE / "fixtures" / "routing.json").read_text(encoding="utf-8"))}
