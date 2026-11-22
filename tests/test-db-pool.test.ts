@@ -143,6 +143,49 @@ withReuse(
   },
 );
 
+withReuse(
+  "a reused database is planned as a fresh one, so an unordered read keeps its order",
+  async () => {
+    // Eleven rows, so that index order ('10-…' before '2-…') differs from insertion order.
+    const ids = Array.from({ length: 11 }, (_, i) => `${i}-${"x".repeat(200)}`);
+    const seen = async (db: Awaited<ReturnType<typeof migratedPGlite>>) => {
+      // PGlite plans from the table sizes it read when it first opened a table. A
+      // rolled-back schema change makes it read them again, as an earlier test here does.
+      await db.exec("BEGIN; ALTER TABLE users ADD COLUMN extra int; ROLLBACK");
+      const sizes = (
+        await db.query(
+          `SELECT relname, relpages, reltuples, relallvisible FROM pg_class
+            WHERE relnamespace = 'public'::regnamespace ORDER BY relname`,
+        )
+      ).rows;
+      await db.query("INSERT INTO users(id) SELECT unnest($1::text[])", [ids]);
+      // Without costs: an index keeps the pages earlier tests gave it.
+      const plan = (await db.query("EXPLAIN (COSTS OFF) SELECT id FROM users"))
+        .rows;
+      const rows = (
+        await db.query<{ id: string }>("SELECT id FROM users")
+      ).rows.map((row) => row.id);
+      return { sizes, plan, rows };
+    };
+    process.env.TEST_DB_REUSE = "0";
+    const fresh = await migratedPGlite().finally(
+      () => delete process.env.TEST_DB_REUSE,
+    );
+    const expected = await seen(fresh);
+    await fresh.close();
+    assert.deepEqual(expected.rows, ids);
+
+    // The reset vacuums the tables that held rows, here users.
+    const first = await migratedPGlite();
+    await first.query("INSERT INTO users(id) VALUES('owner')");
+    await first.close();
+    const second = await supplied(() => migratedPGlite());
+    assert.equal(second.reused, 1);
+    assert.deepEqual(await seen(second.value), expected);
+    await second.value.close();
+  },
+);
+
 withReuse("the rows migrations inserted are restored exactly", async () => {
   const dump = async (db: Awaited<ReturnType<typeof migratedPGlite>>) =>
     Promise.all(
@@ -200,6 +243,8 @@ withReuse("state a reset cannot undo is never reused", async () => {
       "SET session_replication_role = replica; CREATE TABLE made_in_replica(a int)",
     "a large object": "SELECT lo_from_bytea(0, 'x')",
     "a role": "CREATE ROLE pool_test_role",
+    "column statistics":
+      "INSERT INTO users(id) VALUES('analysed'); ANALYZE users",
   };
   for (const [name, sql] of Object.entries(cases)) {
     const db = await migratedPGlite();
