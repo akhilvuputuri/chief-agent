@@ -406,7 +406,8 @@ export class JobTools {
       a.operation === "gmail_accounts" ||
       a.operation === "gmail_search" ||
       a.operation === "gmail_read" ||
-      a.operation === "gmail_thread"
+      a.operation === "gmail_thread" ||
+      a.operation === "gmail_attachment"
     ) {
       if (!this.gmail) throw new Error("Gmail is not configured");
       return this.gmail.call(
@@ -425,8 +426,16 @@ export class JobTools {
         a.operation === "gmail_search"
           ? { pageSize: a.pageSize }
           : a.operation === "gmail_read"
-            ? { offset: a.offset, messageIds: a.messageIds }
-            : {},
+            ? {
+                offset: a.offset,
+                messageIds: a.messageIds,
+                links: a.links,
+                linksOffset: a.linksOffset,
+                attachmentsOffset: a.attachmentsOffset,
+              }
+            : a.operation === "gmail_attachment"
+              ? { partId: a.partId, offset: a.offset }
+              : {},
       );
     }
     if (a.operation === "gmail_recall") {

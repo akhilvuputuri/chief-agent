@@ -11,6 +11,7 @@ import { action } from "../src/protocol.js";
 import {
   CORE_OPERATIONS,
   DOMAIN_GUIDANCE,
+  DOMAIN_SUMMARIES,
   domainOf,
   selectDomains,
   TOOL_DOMAINS,
@@ -115,8 +116,9 @@ test("the coordinator gets the Gmail domain under every picker mode, with the em
       .map((t) => t.name)
       .filter((n) => n.startsWith("gmail_"))
       .sort();
-  const five = [
+  const all = [
     "gmail_accounts",
+    "gmail_attachment",
     "gmail_read",
     "gmail_recall",
     "gmail_search",
@@ -128,7 +130,7 @@ test("the coordinator gets the Gmail domain under every picker mode, with the em
     selectDomains({ message: "any new email from the bank?" }),
   ]) {
     const r = coordinator(domains);
-    assert.deepEqual(gmail(r), five);
+    assert.deepEqual(gmail(r), all);
     assert.match(
       JSON.parse(r.context).domainGuidance.gmail,
       /skill_read core\/email-search/,
@@ -322,6 +324,59 @@ test("common phrasings reach their domains", () => {
     ["Did DHL deliver?", "parcels"],
   ] as const)
     assert.ok(pick(message).includes(domain), `${message} -> ${domain}`);
+});
+
+test("finding receipts is Gmail work; saving them also loads gathering", () => {
+  const pick = (message: string) => [...selectDomains({ message })];
+  for (const message of [
+    "what did Apple charge me each month",
+    "find my Apple receipts for the past 11 months",
+    "how much was my last phone invoice?",
+    "list my card statements since March",
+  ]) {
+    assert.ok(pick(message).includes("gmail"), message);
+    assert.ok(!pick(message).includes("gathering"), message);
+  }
+  for (const message of [
+    "save my Apple receipts as PDFs",
+    "download the invoices from the billing portal",
+    "zip up this year's receipts",
+    "gather my Apple receipts for the past 11 months",
+  ])
+    assert.ok(pick(message).includes("gathering"), message);
+  // Loading both is fine: cues only load schemas.
+  assert.ok(pick("save my Apple receipts as PDFs").includes("gmail"));
+  assert.ok(
+    pick("keep the PDFs from these billing emails").includes("gathering"),
+  );
+  // What the model reads: the Gmail summary covers attachments, receipts and invoices.
+  assert.match(DOMAIN_SUMMARIES.gmail, /attachment text/);
+  assert.match(DOMAIN_SUMMARIES.gmail, /receipts and invoices/);
+});
+
+test("the collection and Gmail descriptions route reading to Gmail and saving to a collection", () => {
+  const r = runtimeContext(
+    { web: true, gmail: true, gathering: true },
+    null,
+    undefined,
+    new Set<ToolDomain>(TOOL_DOMAINS),
+    true,
+  );
+  const describe = (name: string) =>
+    r.tools.find((t) => t.name === name)!.description;
+  assert.match(
+    describe("gather_start"),
+    /Finding, listing, counting or reading receipts and invoices is done with the Gmail tools and needs no collection/,
+  );
+  assert.match(describe("gather_start"), /attachments that are PDFs only/);
+  assert.doesNotMatch(describe("gather_start"), /render/i);
+  assert.match(
+    JSON.parse(r.context).gatheringWorkflow,
+    /^Finding and reading receipts or invoices in email is Gmail work/,
+  );
+  assert.match(describe("gmail_attachment"), /PDF's selectable text/);
+  assert.match(describe("gmail_read"), /never opens them/);
+  assert.match(describe("gmail_read"), /only when the owner asks/);
 });
 
 test("loading a domain appends its tools after the existing ones", () => {

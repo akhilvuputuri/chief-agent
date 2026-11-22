@@ -264,7 +264,7 @@
     },
     {
       "id": "gathering",
-      "description": "Gather invoice PDFs for an exact durable collection from its selected sources, match issuer/period clues and verify source coverage, with owner login takeover. Files only; no tracker updates.",
+      "description": "Save invoice files for an exact durable collection from its selected sources (PDF attachments in email, supplied files and billing-portal downloads), match issuer/period clues and verify source coverage, with owner login takeover. Files only; no tracker updates.",
       "instructions": "agents/gathering.md",
       "contract": "findings/v1",
       "tools": [
@@ -290,7 +290,7 @@
     },
     {
       "id": "bills",
-      "description": "Gather invoice PDFs for an exact durable collection, then update the subscription tracker from the matched invoices when the owner asks for both: host-checked amounts and invoice dates, price changes, items the owner names. Owner login takeover; no account changes or payments.",
+      "description": "Save invoice files for an exact durable collection (PDF attachments in email, supplied files and billing-portal downloads), then update the subscription tracker from the matched invoices when the owner asks for both: host-checked amounts and invoice dates, price changes, items the owner names. Owner login takeover; no account changes or payments.",
       "instructions": "agents/bills.md",
       "contract": "findings/v1",
       "tools": [
