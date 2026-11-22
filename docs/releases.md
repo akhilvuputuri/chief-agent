@@ -8,6 +8,8 @@
 
 > **Update, 22 November 2026: live.** [PR 530](https://github.com/akhilvuputuri/chief-agent/pull/530) merged as `7edaa607` after an independent review (Claude Opus 5.5) approved its exact head `1060f39e` with two low findings, recorded in journal 207, and CI was green. Main's checks run 45026992240 passed with the first attestation attempt succeeding and the later ones skipped; release run 45027391952 succeeded and `release:status` reports `7edaa607` deployed, healthy at startup.
 
+> **Update, 22 November 2026: first use (measured).** On the next main build (`checks` run 45027700119, `1c71e667`), the first attestation attempt failed with the same 404 and the second succeeded 20 seconds later. Release run 45028072607 verified the attestation and deployed `1c71e667` with no rerun. See [journal 207](journey/207-attestation-read-back-404.md#release-closure--2026-11-22).
+
 ## Email tools: attachments, link targets, file space, browser and `file_merge` (22 November 2026)
 
 - **Code.** PR 526: `gmail_read` and `gmail_thread` list attachments by Gmail's part ID; a read-only `gmail_attachment` returns an attachment's text or puts it in the file space; `gmail_read` takes `links: true` for link targets; the routing wording says finding and reading receipts is Gmail work. PR 527: a per-owner file space in gateway memory (gone on restart) with `file_list`, `file_send`, `file_save` and `file_zip`. PR 528: a coordinator `browser` tool in the public-browser container (open pages, emails, files or HTML; read, print, screenshot, download) and `file_merge` (`qpdf`), with a `browsing-and-files` skill. No migration or Compose change; the browser image was refreshed on the host.
