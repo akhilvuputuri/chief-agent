@@ -1,7 +1,7 @@
 # 207 — Why did a passing main commit skip its release?
 
 Work date: 22 November 2026. Written: 22 November 2026.
-Status: tested (the step control flow, on a hosted runner); not yet released. The real action recovering from a failed first attempt has not been seen, because it only happens when the public transparency log misbehaves on a main build.
+Status: released 22 November 2026 in `7edaa60`; see Release closure below. As first written: tested (the step control flow, on a hosted runner); not yet released. The real action recovering from a failed first attempt has not been seen, because it only happens when the public transparency log misbehaves on a main build.
 
 ## User-visible problem and preceding iteration
 
@@ -20,7 +20,7 @@ Status: tested (the step control flow, on a hosted runner); not yet released. Th
 **Tested by reading the source** of the pinned action (`actions/attest-build-provenance@e8998f94` runs `actions/attest@ce27ba3b`, version 2.4.0, `dist/index.js`):
 
 - The message `error fetching tlog entry` is raised in one place. The signing client writes the entry to the transparency log (Rekor). If the log answers `409`, "an equivalent entry already exists", the client reads that entry back by the address in the answer, and this message is what a failed read-back produces.
-- The write has a 10-second timeout and three retries. A retry happens on a timeout, `408`, `429` or `5xx`. A `404` is not retried, so one `404` on the read-back fails the action.
+- The write has a 10-second timeout and three retries. A retry happens when the request itself fails (a timeout, a reset connection) or the answer is `408`, `429` or `5xx`. A `404` is not retried, so one `404` on the read-back fails the action. (Corrected 22 November 2026: as first written this listed only a timeout and the three statuses; the review found that any failed request is retried.)
 - Each attempt signs with a new key and certificate. An equivalent entry can therefore only be the client's own earlier write in the same attempt.
 - The latest release, `actions/attest` v4.2.2, has the same code. Upgrading the action would not remove the failure.
 
@@ -53,6 +53,13 @@ Alternatives:
 
 Unchanged: the release workflow's `gh attestation verify` (signer `ci.yml`, `refs/heads/main`, source digest equal to the commit), the digest it sends, and the host's checks in `scripts/cloud-release.py` (pull by digest, revision label and `RELEASE_SHA` equal to the commit). A release still deploys nothing without a verified attestation.
 
+**Independent review (Claude Opus 5.5), 22 November 2026:** approved the exact head `1060f39e` with two low findings.
+
+- The sentence about which failures the client retries was too narrow. Corrected above.
+- The three attempts repeat the same `uses` and `with` block, kept the same only by a comment. Accepted: a copy that signed differently would be caught by the release's check.
+
+Devin Review reported one flag on the same head. It was not posted on the PR and its page asked for acceptance of terms before showing it, so it was not read.
+
 Two effects of signing again:
 
 - A failed attempt can leave its entry in the public log, unused. Rerunning the job did the same.
@@ -74,6 +81,13 @@ In the failing case the step after the attestation was skipped. In the passing c
 **Not tested:** the real action failing and a later attempt succeeding. Whether a second attempt 20 seconds later succeeds as a rerun minutes later did is expected, not measured.
 
 **Cost:** none when the first attempt succeeds. Three failures add 80 seconds of waiting and two more attempts before the job fails.
+
+### Release closure — 2026-11-22
+
+- **Merged:** [PR 530](https://github.com/akhilvuputuri/chief-agent/pull/530), approved head `1060f39e`, squashed to `7edaa607` after hosted checks passed on that head.
+- **Main's checks** (run 45026992240, first attempt): `publish gateway image` passed. The first attestation attempt succeeded, and both waits and both later attempts were skipped.
+- **Release** (run 45027391952): succeeded, including its attestation check. `kite run release:status` reports `7edaa607` deployed with startup health passed at release time.
+- **Still not seen:** a first attempt failing and a later one succeeding.
 
 ## Follow-up and next iteration
 
