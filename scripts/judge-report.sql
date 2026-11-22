@@ -61,7 +61,15 @@ WHERE prompt_version LIKE 'judge-%' ORDER BY started_at DESC LIMIT 14;
 SELECT 'probe' AS row, data->>'mutation' AS mutation, count(*) AS probes,
   count(*) FILTER (WHERE data->>'verdict' NOT IN ('supported','missed')) AS caught,
   count(*) FILTER (WHERE data->>'verdict'='missed') AS missed
-FROM events WHERE type='judge.probe' AND created_at>now()-interval '30 days'
+FROM events p WHERE type='judge.probe' AND created_at>now()-interval '30 days'
+  -- As the repair's gate counts them: only tests built on a fact that the same judge prompt
+  -- had itself called supported. A control an older prompt vouched for measures the two
+  -- prompts' disagreement (6 of 11 such controls were faulted in judge-v4's first four nights).
+  AND (SELECT l.prompt_version FROM events e JOIN learner_runs l ON l.run_id=e.run_id
+    WHERE e.type='judge.fact' AND e.id<p.id AND e.user_id=p.user_id
+    AND e.data->>'revisionId'=p.data->>'baseRevisionId'
+    AND l.prompt_version LIKE 'judge-%' ORDER BY e.id DESC LIMIT 1)
+    =(SELECT prompt_version FROM learner_runs WHERE run_id=p.run_id)
 GROUP BY data->>'mutation' ORDER BY data->>'mutation';
 
 -- 6. Planted decoy memories, last 30 days: judged turns that carried one, and how many times

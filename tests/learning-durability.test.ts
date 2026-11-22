@@ -8,6 +8,7 @@ import {
   contextFlags,
   contextProblem,
   durabilityFlags,
+  fitted,
   Learner,
   LEARNER_PROMPT_VERSION,
   LEARNING_LIMITS,
@@ -941,7 +942,7 @@ test("a note may name what the owner pointed at, backed by Chief's reply, and th
   assert.deepEqual(note.source.context, [{ ...page, from: "chief" }]);
   // The owner's claim is all in the owner's words, so only the context is marked.
   assert.deepEqual(note.flags, ["chief_context"]);
-  assert.equal(note.source.promptVersion, "learner-v7");
+  assert.equal(note.source.promptVersion, LEARNER_PROMPT_VERSION);
   // The wording that stopped one request becoming a preference elsewhere, and the brackets rule.
   const instructions = inputs[0].messages[0].content as string;
   assert.match(
@@ -954,7 +955,7 @@ test("a note may name what the owner pointed at, backed by Chief's reply, and th
   );
   assert.match(
     instructions,
-    /Only a one_off note may take a detail from Chief's reply/,
+    /Only a one_off note may take a detail from Chief's words/,
   );
   // The tool takes the context, and a fact without brackets needs none.
   const tool = inputs[0].tools.find((x: any) => x.name === "learn_fact");
@@ -963,4 +964,84 @@ test("a note may name what the owner pointed at, backed by Chief's reply, and th
     "quote",
   ]);
   assert.ok(!tool.parameters.required.includes("context"));
+});
+
+test("the learner reads what Chief said just before a turn, and a note may bracket what the owner then called it", async (t) => {
+  const db = await setup(t);
+  const offer =
+    "Two of your library books are overdue. Want me to open the renewal form on the tablet?";
+  const earlier = await turn(db, {
+    says: "Are my library books overdue?",
+    reply: offer,
+    at: new Date(NIGHT.getTime() - 51 * HOUR),
+  });
+  const item = await turn(db, {
+    says: "Yes, check if it opens there",
+    reply: "Done, it loaded.",
+    at: new Date(NIGHT.getTime() - 50 * HOUR),
+  });
+  const { adapter, inputs } = model(() => [
+    fact(
+      "tablet_check",
+      "Asked to check that [the renewal form] opens on the tablet",
+      "check if it opens there",
+      "one_off",
+      item,
+      {
+        context: [
+          {
+            detail: "the renewal form",
+            quote: "open the renewal form on the tablet",
+          },
+        ],
+      },
+    ),
+    ["learn_finish", {}],
+  ]);
+  const result = await run(db, adapter);
+  assert.deepEqual([result.notes, result.facts], [1, 0]);
+  // The turn shows the end of Chief's earlier reply; the first turn of the day has none.
+  const items = new Map<string, any>(
+    shown(inputs[0]).tasks.map((x: any) => [x.id, x]),
+  );
+  assert.equal(items.get(item).chiefBefore, offer);
+  assert.equal(items.get(earlier).chiefBefore, undefined);
+  assert.match(
+    inputs[0].messages[0].content,
+    /chiefBefore, when present, is the end of what Chief had said/,
+  );
+  const note = (await head(db, "tablet_check"))!;
+  assert.equal(isNote(note), true);
+  assert.deepEqual(note.source.context, [
+    {
+      detail: "the renewal form",
+      quote: "open the renewal form on the tablet",
+      from: "chief",
+    },
+  ]);
+  assert.ok(note.flags.includes("chief_context"));
+  assert.equal(LEARNER_PROMPT_VERSION, "learner-v8");
+});
+
+test("a period read for procedures leaves out what Chief said before each turn", () => {
+  const { items } = fitted([
+    {
+      id: "a",
+      kind: "turn",
+      label: "success",
+      reasons: [],
+      date: "2026-11-20",
+      request: "Yes, check if it opens there",
+      steps: [],
+      operations: {},
+      ownerMessages: [{ id: "m", text: "Yes, check if it opens there" }],
+      reply: "Done, it loaded.",
+      chiefBefore: "Want me to open the renewal form on the tablet?",
+      untrusted: [],
+      runIds: ["a"],
+    },
+  ]);
+  assert.equal(items.length, 1);
+  assert.equal("chiefBefore" in items[0]!, false);
+  assert.equal(items[0]!.reply, "Done, it loaded.");
 });

@@ -167,46 +167,46 @@ const verdict = (
   { revisionId: fact.id, verdict: v, reason },
 ];
 
-/** The judge's record against planted errors: broken copies caught, controls passed. */
+// A fact the planted errors of these records are built on.
+const BASE = "00000000-0000-4000-8000-00000000ba5e";
+/**
+ * The judge's record against planted errors: broken copies caught, controls passed. Each test
+ * is built on `base`, and with `vouched` the same run first calls that fact supported, as a
+ * night does before it plants anything; the gate counts no test whose base this judge prompt
+ * had not judged.
+ */
 const record = (
   caught: number,
   missed: number,
   passed: number,
   faulted: number,
-): Array<[string, Record<string, unknown>]> => [
-  ...Array.from(
-    { length: caught },
-    () =>
-      ["judge.probe", { mutation: "negated", verdict: "contradicted" }] as [
-        string,
-        Record<string, unknown>,
-      ],
-  ),
-  ...Array.from(
-    { length: missed },
-    () =>
-      ["judge.probe", { mutation: "detail", verdict: "supported" }] as [
-        string,
-        Record<string, unknown>,
-      ],
-  ),
-  ...Array.from(
-    { length: passed },
-    () =>
-      ["judge.probe", { mutation: "control", verdict: "supported" }] as [
-        string,
-        Record<string, unknown>,
-      ],
-  ),
-  ...Array.from(
-    { length: faulted },
-    () =>
-      ["judge.probe", { mutation: "control", verdict: "overstated" }] as [
-        string,
-        Record<string, unknown>,
-      ],
-  ),
-];
+  base: string = BASE,
+  vouched = true,
+): Array<[string, Record<string, unknown>]> => {
+  const probes = (n: number, mutation: string, verdict: string) =>
+    Array.from(
+      { length: n },
+      () =>
+        ["judge.probe", { mutation, verdict, baseRevisionId: base }] as [
+          string,
+          Record<string, unknown>,
+        ],
+    );
+  return [
+    ...(vouched
+      ? [
+          ["judge.fact", { revisionId: base, verdict: "supported" }] as [
+            string,
+            Record<string, unknown>,
+          ],
+        ]
+      : []),
+    ...probes(caught, "negated", "contradicted"),
+    ...probes(missed, "detail", "supported"),
+    ...probes(passed, "control", "supported"),
+    ...probes(faulted, "control", "overstated"),
+  ];
+};
 const good = record(8, 0, 8, 0);
 
 const shown = (input: any) => JSON.parse(input.messages[1].content);
@@ -1316,4 +1316,47 @@ test("a repaired fact stays standing only when messages from separate days each 
   assert.equal((await head(db, "plan_recorded"))!.value, value);
   assert.equal((await head(db, "plan_asked"))!.value, value);
   assert.equal((await head(db, "plan_mixed"))!.value, value);
+});
+
+test("a fact only an older judge prompt called supported is read again, and tests built on it do not count", async (t) => {
+  const db = await setup(t);
+  const seat = await learned(
+    db,
+    "seat",
+    "Prefers aisle seats",
+    "Get me an aisle seat on the Tokyo flight",
+  );
+  const diet = await learned(db, "diet", "Is vegetarian", "I am vegetarian");
+  await judged(db, [verdict(diet, "supported")], 3 * DAY, "judge-v1");
+  const internals = learner(db, model(() => []).adapter) as any;
+  const unread = async () =>
+    (
+      await internals.judgeFactRows(
+        "owner",
+        { at: new Date(NIGHT.getTime() + DAY).toISOString(), id: seat.id },
+        100,
+      )
+    ).map((r: any) => r.key);
+  const bases = async () =>
+    (await internals.probeBaseRows("owner", NIGHT, 10)).map((r: any) => r.key);
+  // The older prompt's "supported" is not this judge's: the fact is read again, and until
+  // then nothing is planted on it.
+  assert.deepEqual(await unread(), ["diet"]);
+  assert.deepEqual(await bases(), []);
+  // A full record under the current prompt, every test of it built on that fact: the
+  // controls it faults would be this prompt disagreeing with the old one.
+  await judged(db, [
+    verdict(seat, "overstated"),
+    ...record(8, 0, 8, 0, diet.id, false),
+  ]);
+  assert.equal(await due(db), false);
+  // Once this prompt has judged the fact itself, it is a base, and tests after that count.
+  await judged(
+    db,
+    [verdict(diet, "supported"), ...record(8, 0, 8, 0, diet.id, false)],
+    DAY / 2,
+  );
+  assert.deepEqual(await unread(), []);
+  assert.deepEqual(await bases(), ["diet"]);
+  assert.equal(await due(db), true);
 });

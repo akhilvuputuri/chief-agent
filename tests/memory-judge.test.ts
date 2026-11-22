@@ -1821,3 +1821,65 @@ test("a planted error never quotes words the owner wrote, and a fact resting on 
     [2, 1, 0],
   );
 });
+
+test("with nothing new to read, the judge is still tested on a fact it has called supported", async (t) => {
+  const db = await setup(t);
+  const source = await turn(db, {
+    says: "I am vegetarian",
+    reply: "Noted.",
+    ago: 3 * DAY,
+    selected: [],
+  });
+  await learned(db, "diet", "Is vegetarian", [source.input]);
+  const answer = (input: any): Call[] =>
+    (shownTo(input).facts ?? []).map((f: any) => [
+      "judge_fact",
+      {
+        fact: f.id,
+        verdict: f.fact === "Is vegetarian" ? "supported" : "contradicted",
+        reason: "Read against the message",
+      },
+    ]);
+  const checked = (adapter: ModelAdapter, now = NIGHT) =>
+    new Learner(db, {
+      model: adapter,
+      modelName: "judge/model",
+      clock: () => now,
+    }) as any;
+  const first = model(answer);
+  // Before the judge has called anything supported there is nothing to plant an error on.
+  assert.equal(
+    (await checked(first.adapter).probeBaseRows("owner", NIGHT, 4)).length,
+    0,
+  );
+  await checked(first.adapter).runJudge("owner", NIGHT);
+  // Nothing is new now. Without its self-checks the judge has no reason to run; with them
+  // it does, so the record the repair's gate reads keeps growing through a quiet week.
+  assert.equal(
+    await (learner(db, first.adapter) as any).judgeDue("owner", NIGHT),
+    false,
+  );
+  assert.equal(await checked(first.adapter).judgeDue("owner", NIGHT), true);
+  const next = new Date(NIGHT.getTime() + DAY);
+  const second = model(answer);
+  const result = (await checked(second.adapter, next).runJudge(
+    "owner",
+    next,
+  )) as Record<string, any>;
+  assert.deepEqual(
+    [
+      result.state,
+      result.judgedFacts,
+      result.turns,
+      result.controls,
+      result.falseAlarms,
+      result.probes,
+      result.caught,
+    ],
+    ["completed", 0, 0, 1, 0, 1, 1],
+  );
+  // One call for the control and one for its broken copy, counted apart from the night's.
+  assert.equal(second.inputs.length, 2);
+  assert.deepEqual([result.modelCalls, result.checkModelCalls], [0, 2]);
+  assert.equal((await events(db, "judge.fact")).length, 1);
+});

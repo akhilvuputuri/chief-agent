@@ -133,6 +133,8 @@ Each task shown to the model is held to about 12,000 characters: steps are dropp
 
 ### Host checks
 
+> **Update, 22 November 2026 ([journal 205](journey/205-whose-supported-is-it.md)):** prompt `learner-v8`. A turn shown to the learner carries `chiefBefore`: the last 1,000 characters of Chief's reply in the turn before it, when that was within six hours, the same text the judge reads. A bracketed detail's quote may be found there as well as in Chief's reply or another of the owner's messages, and such a detail is still accepted on a `one_off` note only. It is dropped from an item that is over its size, after the owner's next message, and the procedure pass is not shown it. Under `learner-v7` the learner's one attempt at a bracket quoted that text and was refused, because its item did not hold it.
+
 > **Update, 13 November 2026 ([journal 195](journey/195-what-the-owner-pointed-at.md)):** prompt `learner-v7`. A fact may name what the owner only pointed at, and the prompt says outright that one request is no trait.
 >
 > - **Brackets and context.** When the owner's words point at something without naming it ("this", "it", "the usual one"), the value may name it in `[square brackets]`, and `learn_fact` then takes `context`: one entry for each bracketed detail, with `detail` (the bracketed words) and `quote` (exact words of the exchange that show it). Up to three.
@@ -197,6 +199,14 @@ Reading one item at a time produced narrow rules overgeneralised from one exampl
 
 ### Nightly judge
 
+> **Update, 22 November 2026 ([journal 205](journey/205-whose-supported-is-it.md)):** three changes to what the judge reads and when it is tested. The prompt is unchanged (`judge-v4`).
+>
+> - **A new prompt reads every fact again.** A fact whose latest verdict is from another judge prompt is judged again whatever that verdict was. Before, only faults were, and 14 facts kept a "supported" that only `judge-v1` had given.
+> - **Controls come from the current prompt's own verdicts.** A night's planted errors and controls are built only on facts the current prompt has called supported. In the first four nights of `judge-v4`, 16 controls were shown and 6 faulted: none of the 5 it had judged itself, and 6 of the 11 that only `judge-v1` had passed.
+> - **The gate's record counts the same way.** A planted-error result counts toward the [repair's gate](#nightly-repair) only when the current prompt had judged the base fact before the test ran. This applies to results already recorded, so earlier sound tests still count.
+> - **Tested every night.** The judge's run now opens on any night there is a fact to build a test on, even with no new fact or turn: two model calls, one batch of controls and one of broken copies. Before, a week with no new work added nothing to a record the gate reads over 14 days. With `judgeChecks` off the run opens only for new work, as before.
+> - **Report.** The planted-error query of [scripts/judge-report.sql](../scripts/judge-report.sql) counts what the gate counts.
+
 > **Update, 13 November 2026 ([journal 195](journey/195-what-the-owner-pointed-at.md)):** prompt `judge-v4`, at `high` reasoning effort (`medium` before).
 >
 > - **Chief's side of the exchange.** Beside a fact's cited message the judge now sees `chiefBefore`, the last 1,000 characters of what Chief said in the turn before it when that was within six hours, and `chiefReply`, the first 2,000 characters of Chief's reply, the cut the learner read. They are on the first cited message of each turn. A tracked task's request has neither.
@@ -248,6 +258,8 @@ A fact whose messages no longer exist is recorded `no_source` without a model ca
 **Reading it.** [scripts/judge-report.sql](../scripts/judge-report.sql) is four read-only queries: current facts by verdict; the facts not found supported, with the reason; each memory key with the judged turns it was in context for, how often it was relevant and how it was used; and the last runs. The output holds keys and reasons, so it stays on the host.
 
 ### Nightly repair
+
+> **Update, 22 November 2026 ([journal 205](journey/205-whose-supported-is-it.md)):** the gate's thresholds are unchanged, but its record now counts only planted-error results built on a fact the current judge prompt had itself called supported ([nightly judge](#nightly-judge)). The repair first ran on 18 November: 4 of 5 candidates rewritten, 3 as notes and 1 standing in the owner's own sentence, with 3 proposals refused by the host; the judge called all 4 supported the next night. The gate then closed on controls an older prompt had vouched for.
 
 > **Update, 13 November 2026 ([journal 195](journey/195-what-the-owner-pointed-at.md)):** prompt `repair-v2`, at `high` reasoning effort (`medium` before). No repair had run before this change.
 >
