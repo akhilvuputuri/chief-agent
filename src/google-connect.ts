@@ -66,16 +66,24 @@ export interface GoogleConnections {
   working(account: GoogleAccount): Promise<void>;
 }
 
-/** Exactly the connection's scopes; Google may report userinfo.email as "email". */
-export function grantedExactly(account: GoogleAccount, scope: unknown) {
-  const got = new Set(
-    String(scope ?? "")
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((s) => (s === "email" ? EMAIL_SCOPE : s)),
-  );
-  const want = GOOGLE_ACCOUNTS[account].scopes;
-  return got.size === want.length && want.every((s) => got.has(s));
+/** The scopes Google granted; it may report userinfo.email as "email". */
+export function grantedScopes(scope: unknown) {
+  return [
+    ...new Set(
+      String(scope ?? "")
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((s) => (s === "email" ? EMAIL_SCOPE : s)),
+    ),
+  ];
+}
+
+/**
+ * Every scope the connection needs was granted. Extras are accepted: Google's web consent can
+ * report scopes not asked for by name (openid, or one the account granted this client earlier).
+ */
+export function grantsNeeded(account: GoogleAccount, granted: string[]) {
+  return GOOGLE_ACCOUNTS[account].scopes.every((s) => granted.includes(s));
 }
 
 const sha256 = (value: string) =>
@@ -229,7 +237,8 @@ export class GoogleConnect implements GoogleConnections {
     )
       return fail("token_incomplete");
     // Not revoked when refused: a revoke ends every connection this account has with the client.
-    if (!grantedExactly(account, body.scope)) return fail("scope_rejected");
+    const granted = grantedScopes(body.scope);
+    if (!grantsNeeded(account, granted)) return fail("scope_rejected");
     let email: string;
     try {
       email = await this.identity(account, body.access_token);
@@ -250,7 +259,7 @@ export class GoogleConnect implements GoogleConnections {
         account,
         user,
         email,
-        GOOGLE_ACCOUNTS[account].scopes,
+        granted,
         seal(this.key, body.refresh_token, `google-connection-v1:${account}`),
         at,
       ],
@@ -398,7 +407,7 @@ function failure(result: Result, expected?: string) {
   if (result.reason === "wrong_account")
     return `${label} was not connected: you chose ${result.email}, but Chief expects ${expected}. Nothing was saved. ${again}`;
   if (result.reason === "scope_rejected")
-    return `${label} was not connected: Google did not grant exactly the access Chief asks for. Leave every box ticked on Google's page. Nothing was saved. ${again}`;
+    return `${label} was not connected: Google did not grant all the access Chief asks for. Leave every box ticked on Google's page. Nothing was saved. ${again}`;
   return `${label} was not connected. Nothing was saved. ${again}`;
 }
 

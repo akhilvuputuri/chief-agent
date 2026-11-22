@@ -228,10 +228,26 @@ test("the callback rejects a wrong or reused state and the wrong account", async
     0,
   );
 
-  // Broader or different access than the connection asks for is refused.
-  g.scope = "https://www.googleapis.com/auth/gmail.modify";
-  assert.equal((await signIn("gmail")).statusCode, 400);
-  assert.equal(await connect.credential("gmail"), undefined);
+  // A missing scope (the owner unticked it) is refused.
+  g.scope = "openid https://www.googleapis.com/auth/userinfo.email";
+  assert.equal((await signIn("calendar")).statusCode, 400);
+  assert.match(sent.at(-1)!.text, /did not grant all the access/);
+
+  // Extras Google reports beside every needed scope are accepted and stored as granted.
+  g.scope = "https://www.googleapis.com/auth/gmail.readonly openid email";
+  assert.equal((await signIn("gmail")).statusCode, 200);
+  assert.deepEqual(
+    (
+      await db.query(
+        "SELECT scopes FROM google_connections WHERE account='gmail'",
+      )
+    ).rows[0].scopes,
+    [
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "openid",
+      "https://www.googleapis.com/auth/userinfo.email",
+    ],
+  );
 });
 
 test("Gmail, Calendar and Sheets use a stored connection, else the .env token", async () => {

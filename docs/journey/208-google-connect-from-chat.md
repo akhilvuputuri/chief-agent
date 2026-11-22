@@ -45,6 +45,8 @@ Not verified: a real Google consent (scope strings Google returns for a web clie
 
 Pending: independent review, merge with `BASE` set to the live release, `scripts/deploy-google-connect.py` on the host, the web client and its settings, and a first real connection.
 
+> **Update, 22 November 2026:** the callback's scope check now accepts a sign-in when Google grants every scope the connection needs, extras included, and stores the scopes Google actually granted; it still refuses one with a needed scope missing. Google's web consent can report scopes the request did not name (`openid`, or one the same account granted this client earlier), and the exact match written first would have refused a good sign-in. Tested locally with a fake Google; still unmeasured against a real consent.
+
 ## Follow-up and next iteration
 
 Once a first connection works, the desktop client's `.env` tokens can be retired connection by connection.
