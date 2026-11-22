@@ -60,6 +60,16 @@ Tested only. Unmeasured until production nights:
 
 Not released. Pending: independent review, merge, the automatic release, and the first nights.
 
+> **Update, 22 November 2026:** [PR 521](https://github.com/akhilvuputuri/chief-agent/pull/521) merged at the approved head `6e243ede` as `dfcbadd`, after hosted CI passed. Release run 44998606639 finished at 15:32 SGT on 22 November; the gateway reported `RELEASE_SHA` `dfcbadd`, healthy, with no error lines in its first minute. The independent review (Claude Opus 5.5) approved that head with no blocking or should-fix finding. It drove a night with only the judge's self-test through the nightly tick in a throwaway test, and showed that the gate's new condition can only lower its counts. Its five low findings are left open:
+>
+> - the gate checks which judge prompt last judged a test's base, not that the verdict was "supported"; normal code cannot produce the other case, since bases are chosen from current "supported" verdicts and nothing judges between that choice and the test;
+> - a note that brackets a detail from Chief's previous message does not inherit that earlier turn's untrusted-source tags; notes are in no turn's context, and the repair has had the same gap since journal 195;
+> - a supported fact whose messages are gone opens a judge run each night that makes no model call;
+> - after a judge prompt change, old facts are read again before new ones, 40 a night;
+> - no test pins the event order the gate's condition relies on, and an owner turn during the self-test still settles the judge for that night with nothing recorded.
+>
+> One unrelated test, of the test-database pool, failed once in a local full run made while other test processes were running, passed three times alone and passed in hosted CI.
+
 ## Follow-up and next iteration
 
 - The repair gate's thresholds are unchanged. Eight tests bound the catch rate loosely; whether to pool more nights before the repair may act is the owner's decision and is still open.
