@@ -10,7 +10,7 @@ import {
   unreadDigest,
 } from "../src/gmail.js";
 import { action } from "../src/protocol.js";
-import { toolError } from "../src/tool-errors.js";
+import { SpamOrTrashMessage, toolError } from "../src/tool-errors.js";
 import { projectionLimits, projectObservation } from "../src/observations.js";
 /**
  * Results must survive the model-facing projection intact: above the operation's
@@ -1485,6 +1485,38 @@ test("briefing lines and attachment names are cut on code points", async () => {
     instant,
   ).attachmentInfo("123", "abc", "primary");
   assert.equal(file!.name, "n".repeat(119));
+});
+
+test("gathering's attachment reads refuse a message in spam or trash, by its own labels", async () => {
+  for (const [label, folder] of [
+    ["SPAM", "spam"],
+    ["TRASH", "trash"],
+  ]) {
+    const r = routed(() => ({
+      id: "abc",
+      threadId: "fabc",
+      labelIds: [label],
+      payload: {
+        mimeType: "multipart/mixed",
+        parts: [
+          {
+            mimeType: "application/pdf",
+            filename: "invoice.pdf",
+            body: { attachmentId: "att1", size: 10 },
+          },
+        ],
+      },
+    }));
+    const g = new GmailTools(config, r.request, Date.now, instant);
+    await assert.rejects(
+      g.attachmentInfo("123", "abc", "primary"),
+      (e: unknown) => e instanceof SpamOrTrashMessage && e.folder === folder,
+    );
+    await assert.rejects(
+      g.attachmentBytes("123", "abc", "0.0", "primary"),
+      SpamOrTrashMessage,
+    );
+  }
 });
 
 test("search metadata for a page comes from sequential batches of at most 25", async () => {

@@ -6,6 +6,7 @@ import { migratedPGlite } from "./helpers/pglite.js";
 import { Gathering } from "../src/gathering/controller.js";
 import { FileVault } from "../src/gathering/vault.js";
 import { action } from "../src/gathering/schema.js";
+import { SpamOrTrashMessage } from "../src/tool-errors.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { WorkTools } from "../src/work.js";
 import { collectionZip, crc32 } from "../src/gathering/zip.js";
@@ -516,6 +517,137 @@ test("a match reports the tracked price; only a background pass queues one alert
   );
   await db.query("UPDATE work_tasks SET status='done' WHERE id=$1", [c.taskId]);
 });
+test("gathering never takes spam or trash: rows are dropped, a metadata-less row is checked at inspection, coverage and pages still hold", async () => {
+  // Gmail honours in:spam in a query even inside quotes (measured, journal 204), so a
+  // target label can pull spam in; the host filters by folder instead.
+  const searched: unknown[] = [];
+  const gmail = {
+    async call(...a: unknown[]) {
+      searched.push(a[2]);
+      return a[3] === "p2"
+        ? { results: [{ id: "e2", threadId: "f2", folder: "spam" }] }
+        : {
+            results: [
+              { id: "a1", threadId: "f1", folder: "inbox", subject: "Invoice" },
+              { id: "b1", threadId: "f1", folder: "spam", subject: "Invoice" },
+              { id: "c1", threadId: "f1", folder: "trash", subject: "Invoice" },
+              {
+                id: "d1",
+                threadId: "f1",
+                detail: "not retrieved: unavailable",
+              },
+            ],
+            nextPageToken: "p2",
+          };
+    },
+    async attachmentInfo(_user: string, id: string) {
+      // d1's folder was unknown from the search; the message itself says spam.
+      if (id === "d1") throw new SpamOrTrashMessage("spam");
+      return [];
+    },
+    async attachmentBytes(_user: string, id: string): Promise<never> {
+      throw id === "d1" ? new SpamOrTrashMessage("spam") : new Error("unused");
+    },
+  };
+  const g = new Gathering(db, vault, gmail as any);
+  const run = await turn("alice", "Gather invoices from email");
+  const c = await g.call(
+    "alice",
+    run,
+    action.parse({
+      operation: "gather_start",
+      requestKey: randomUUID(),
+      objective: "Gather the September invoice from email",
+      targets: [{ key: "one", label: "Acme in:spam", month: "2026-09" }],
+      sources: ["email"],
+      mailboxes: ["primary"],
+    }),
+  );
+  const search = (pageToken?: string) =>
+    g.call(
+      "alice",
+      run,
+      action.parse({
+        operation: "gather_search",
+        id: c.id,
+        targetKey: "one",
+        account: "primary",
+        ...(pageToken ? { pageToken } : {}),
+      }),
+    );
+  const first = await search();
+  assert.match(String(searched[0]), /in:spam/);
+  assert.deepEqual(
+    first.results.map((r: any) => r.id),
+    ["a1", "d1"],
+  );
+  assert.match(first.notice, /2 spam or trash messages were left out/);
+  const recorded = (
+    await db.query("SELECT metadata FROM gather_attempts WHERE id=$1", [
+      first.attemptId,
+    ])
+  ).rows[0].metadata;
+  assert.deepEqual(recorded.messageIds, ["a1", "d1"]);
+  assert.equal(recorded.excludedSpamTrash, 2);
+  assert.equal(recorded.nextPageToken, "p2");
+  const files = (messageId: string) =>
+    g.call(
+      "alice",
+      run,
+      action.parse({
+        operation: "gather_email_files",
+        id: c.id,
+        targetKey: "one",
+        searchId: first.attemptId,
+        messageId,
+      }),
+    );
+  // A dropped row is not a result of the search, so it cannot be inspected or captured.
+  await assert.rejects(files("b1"), /not a result of an authorized search/);
+  const capture = (messageId: string) =>
+    g.call(
+      "alice",
+      run,
+      action.parse({
+        operation: "gather_capture",
+        id: c.id,
+        targetKey: "one",
+        requestKey: randomUUID(),
+        source: {
+          kind: "email",
+          searchId: first.attemptId,
+          messageId,
+          partKey: "0.1",
+        },
+      }),
+    );
+  await assert.rejects(capture("c1"), /not a result of an authorized search/);
+  // The metadata-less row turns out to be spam: inspected with no files, never captured.
+  const unknown = await files("d1");
+  assert.deepEqual(unknown.files, []);
+  assert.match(unknown.notice, /in spam/);
+  await assert.rejects(capture("d1"), /spam or trash/);
+  await files("a1");
+  const check = () =>
+    g.call(
+      "alice",
+      run,
+      action.parse({
+        operation: "gather_check",
+        id: c.id,
+        targetKey: "one",
+        requestKey: randomUUID(),
+        source: "email",
+      }),
+    );
+  // Pagination still has to be followed, though page 2 holds only spam.
+  await assert.rejects(check(), /remaining scoped email pages/);
+  const second = await search("p2");
+  assert.deepEqual(second.results, []);
+  assert.match(second.notice, /1 spam or trash message was left out/);
+  assert.equal((await check()).checked, true);
+});
+
 test("gather_search keeps its ten-hit page and its query text unrewritten", async () => {
   const calls: unknown[][] = [];
   const gmail = {
@@ -567,8 +699,8 @@ test("gather_search keeps its ten-hit page and its query text unrewritten", asyn
     singaporeDates: false,
     spamTrash: false,
   });
-  // Spam and trash stay out because the model's words cannot carry an operator: the
-  // schema refuses a colon, so in:spam, in:anywhere and label:trash never reach Gmail.
+  // The model's own words cannot carry an operator: the schema refuses a colon. (A target
+  // label can, which is why the host filters spam and trash rows by folder.)
   for (const query of ["in:spam", "receipt in:anywhere", "label:trash"])
     assert.equal(
       action.safeParse({
@@ -581,7 +713,8 @@ test("gather_search keeps its ten-hit page and its query text unrewritten", asyn
       false,
       query,
     );
-  // A target label is model-written too, but reaches Gmail only as one quoted phrase.
+  // A target label is model-written too; it reaches Gmail as one quoted phrase, which
+  // Gmail still reads operators inside (measured), so quoting is not the spam guard.
   const other = await turn("alice", "Gather invoices from email");
   const odd = await g.call(
     "alice",

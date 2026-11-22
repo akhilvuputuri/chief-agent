@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { RateLimitedError, ToolValidationError } from "./tool-errors.js";
+import {
+  RateLimitedError,
+  SpamOrTrashMessage,
+  ToolValidationError,
+} from "./tool-errors.js";
 import { cleanText, decodeEntities } from "./news-feed.js";
 import { discardBody, readBody } from "./http-body.js";
 import { projectionLimits } from "./observations.js";
@@ -1255,9 +1259,16 @@ export class GmailTools {
     url.searchParams.set("format", "full");
     // Gathering needs the MIME tree, never a persisted email body. This separate bounded
     // path accommodates inline PDF data without changing ordinary Gmail read limits.
-    const message = messageSchema.parse(await this.get(token, url, 29_000_000));
+    const message = messageSchema
+      .and(z.object({ labelIds: z.array(z.string()).default([]) }))
+      .parse(await this.get(token, url, 29_000_000));
     if (message.id !== id)
       throw new ToolValidationError("Message identity did not match");
+    // Gathering never takes files from spam or trash, whichever search or attempt named the
+    // message: the folder is read from the message itself at inspection and capture.
+    if (message.labelIds.includes("SPAM")) throw new SpamOrTrashMessage("spam");
+    if (message.labelIds.includes("TRASH"))
+      throw new SpamOrTrashMessage("trash");
     const files: {
       partKey: string;
       name: string;

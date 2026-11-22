@@ -32,6 +32,14 @@ export class RepeatedFailureError extends Error {
 export class BrowserCommandError extends Error {}
 /** The host has established that this invocation made no domain mutation. */
 export class ToolValidationError extends Error {}
+/** A message gathering must not take files from: it is in spam or trash now. */
+export class SpamOrTrashMessage extends ToolValidationError {
+  constructor(readonly folder: "spam" | "trash") {
+    super(
+      `This message is in ${folder}; files are never taken from spam or trash`,
+    );
+  }
+}
 /**
  * A provider rate limited a read, or its daily quota is used; the message says when
  * to retry. `status` is the HTTP status the provider returned.
