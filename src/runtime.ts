@@ -405,7 +405,7 @@ export function runtimeContext(
               file_send:
                 "Send 1 to 10 files from the file space to the owner as Telegram documents, in this chat and thread, right after your reply (in order; the optional caption goes on the first). They go only to the owner. A run that ends without a reply sends nothing, and at most 20 items follow one reply.",
               file_save:
-                "Keep a PDF from the file space in the owner's encrypted vault, where it stays after the file space is gone. name sets its file name (it is given a .pdf ending); otherwise the file's own name is used. The vault keeps PDFs only, so other files are refused; send those with file_send.",
+                "Keep a PDF from the file space in the owner's encrypted vault, where it stays after the file space is gone. name sets its file name (it is given a .pdf ending); otherwise the file's own name is used. A password-protected or damaged PDF is kept too, marked textUnreadable. The vault keeps PDFs only, so other files are refused; send those with file_send.",
               file_zip:
                 "Bundle 2 to 50 files from the file space into one ZIP, stored as a new file in the space under name (.zip added if missing). Entries keep the files' names, with a number added to repeats. The ZIP must fit the 20 MiB per-file bound.",
               subscription_record:

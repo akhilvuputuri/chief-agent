@@ -38,7 +38,7 @@ export type PreparedFile = {
   name: string;
   bytes: number;
   encrypted: Buffer;
-  facts: InvoiceFacts & { savedFrom?: string };
+  facts: InvoiceFacts & { savedFrom?: string; textUnreadable?: boolean };
 };
 export class FileVault {
   constructor(
@@ -52,6 +52,8 @@ export class FileVault {
     name: string,
     bytes: Uint8Array,
     labels: string[] = [],
+    /** Keep a PDF whose text cannot be extracted (protected or damaged), without text facts. */
+    unreadable = false,
   ): Promise<PreparedFile> {
     if (
       !bytes.length ||
@@ -59,19 +61,26 @@ export class FileVault {
       !Buffer.from(bytes.subarray(0, 1024)).includes(Buffer.from("%PDF-"))
     )
       throw new Error("Use a PDF up to 20 MB");
-    const extracted = await extractPdfText(bytes);
+    let facts: PreparedFile["facts"];
+    try {
+      const extracted = await extractPdfText(bytes);
+      facts = invoiceFacts(
+        extracted.text,
+        extracted.pages,
+        extracted.truncated,
+        labels,
+      );
+    } catch (error) {
+      if (!unreadable) throw error;
+      facts = { ...invoiceFacts("", 0, false, labels), textUnreadable: true };
+    }
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     return {
       sha256,
       name: `invoice-${sha256.slice(0, 16)}.pdf`,
       bytes: bytes.length,
       encrypted: encryptBytes(this.key, bytes, `file-v1:${user}:${sha256}`),
-      facts: invoiceFacts(
-        extracted.text,
-        extracted.pages,
-        extracted.truncated,
-        labels,
-      ),
+      facts,
     };
   }
   async put(user: string, file: PreparedFile, inputId?: string) {
@@ -113,9 +122,11 @@ export class FileVault {
   /**
    * file_save: keeps a PDF from the file space under its own name (not invoice-<sha>.pdf),
    * with a note of where it came from in its facts. The same PDF kept twice is one file.
+   * A PDF whose text cannot be read (password-protected or damaged) is still kept, with
+   * textUnreadable in its facts instead of text-derived facts.
    */
   async keep(user: string, name: string, bytes: Uint8Array, source: string) {
-    const file = await this.prepare(user, name, bytes);
+    const file = await this.prepare(user, name, bytes, [], true);
     return this.put(user, {
       ...file,
       name: fileName(name),

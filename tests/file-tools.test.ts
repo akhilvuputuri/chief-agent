@@ -9,6 +9,7 @@ import { FileSpace, IDLE_MS } from "../src/file-space.js";
 import { GmailTools } from "../src/gmail.js";
 import { Gathering } from "../src/gathering/controller.js";
 import { FileVault } from "../src/gathering/vault.js";
+import { extractPdfText } from "../src/attachments.js";
 import { MediaOutbox } from "../src/media-outbox.js";
 import { sendRunMedia } from "../src/telegram-media.js";
 import { JobTools } from "../src/tools.js";
@@ -298,6 +299,35 @@ test("an attachment taken to the file space can be zipped, sent to the owner's t
     await assert.rejects(
       call({ operation: "file_save", fileId: image.fileId }),
       /vault keeps PDFs only/,
+    );
+    // A PDF the reader cannot open (a password-protected statement, say) is still kept,
+    // without text facts, and the call is not left uncertain.
+    const locked = Buffer.from(
+      "%PDF-1.7\n1 0 obj\n<< /Encrypt broken >>\nendobj\nnot a readable PDF",
+    );
+    await assert.rejects(extractPdfText(locked));
+    const lockedFile = space.put("123", {
+      name: "statement.pdf",
+      mimeType: "application/pdf",
+      bytes: locked,
+      source: "gmail:primary:abc:3",
+    });
+    const keptLocked = await call({
+      operation: "file_save",
+      fileId: lockedFile.fileId,
+    });
+    assert.equal(keptLocked.name, "statement.pdf");
+    assert.equal(keptLocked.textUnreadable, true);
+    const storedLocked = await vault.read("123", keptLocked.id);
+    assert.deepEqual(storedLocked.data, locked);
+    assert.equal((storedLocked.facts as any).textUnreadable, true);
+    assert.equal(
+      (
+        await db.query(
+          "SELECT count(*)::int AS n FROM tool_receipts WHERE operation='file_save' AND status='failed'",
+        )
+      ).rows[0].n,
+      1, // the PNG refusal only
     );
   } finally {
     await pg.close();

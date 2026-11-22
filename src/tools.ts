@@ -511,6 +511,7 @@ export class JobTools {
         name: saved.name,
         bytes: saved.bytes,
         savedFrom: file.source,
+        ...(saved.facts?.textUnreadable ? { textUnreadable: true } : {}),
         note: "Kept in the owner's encrypted vault. The same PDF kept twice is one vault file, under its first name.",
       };
     }
