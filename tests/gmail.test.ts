@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   GmailTools,
+  indexBody,
+  readerText,
+  searchesSpamOrTrash,
   plainBody,
   singaporeDates,
   unreadDigest,
@@ -961,9 +964,12 @@ test("an HTML-only message is read as converted text, never executed or followed
     "gmail_read",
     "abc",
   );
-  assert.match(out.text, /Your receipt for Example Cloud : SGD 4\.98/);
-  assert.match(out.text, /Manage/);
-  assert.doesNotMatch(out.text, /steal|color:red|Earlier quoted/);
+  // Blocks are lines; the link keeps its text; quoted content is part of what a reader gets.
+  assert.equal(
+    out.text,
+    "Your receipt for Example Cloud: SGD 4.98\nManage\nEarlier quoted message",
+  );
+  assert.doesNotMatch(out.text, /steal|color:red|https:/);
   assert.equal(out.fromHtml, true);
   assert.equal(out.bodyless, undefined);
   assert.match(out.warning, /HTML is converted to text only/);
@@ -1915,4 +1921,156 @@ test("ordinary long recipient lists are returned uncut", async () => {
   assert.equal(out.headers.find((h: any) => h.name === "to").value, to);
   assert.equal(out.headers.find((h: any) => h.name === "cc").value, to);
   assert.equal(out.text.length, 20_000);
+});
+
+const htmlPart = (text: string) => ({
+  mimeType: "text/html",
+  body: { data: Buffer.from(text).toString("base64url") },
+});
+const RECEIPT =
+  "<html><head><title>Receipt</title><style>td{padding:4px}</style></head><body>" +
+  "<p>Thanks for your order from <b>Example Store</b> &lt;billing@example.com&gt;.</p>" +
+  "<table><tr><th>Item</th><th>Qty</th><th>Price</th></tr>" +
+  "<tr><td>Monthly plan</td><td>1</td><td>SGD&nbsp;4.98</td></tr>" +
+  "<tr>\n  <td>Storage add-on</td>\n  <td>2</td><td>SGD 1.00</td></tr>" +
+  '<tr><td colspan="2"><b>Total</b></td><td>SGD 6.98</td></tr></table>' +
+  "<!-- tracking pixel follows --><script>steal()</script><noscript>hidden</noscript>" +
+  "</body></html>";
+
+test("reading text keeps escaped addresses, one line per table row and no hidden content", () => {
+  assert.equal(
+    readerText(RECEIPT, 20_000),
+    [
+      "Thanks for your order from Example Store <billing@example.com>.",
+      "Item\tQty\tPrice",
+      "Monthly plan\t1\tSGD 4.98",
+      "Storage add-on\t2\tSGD 1.00",
+      "Total\tSGD 6.98",
+    ].join("\n"),
+  );
+  for (const hidden of ["steal", "padding", "tracking", "hidden", "Receipt"])
+    assert.ok(!readerText(RECEIPT, 20_000).includes(hidden), hidden);
+  // "<header>" is not "<head>", and an unclosed script keeps the rest for the tag stripper.
+  assert.equal(readerText("<header>Shop</header><p>Hi</p>", 100), "Shop\nHi");
+  assert.equal(readerText("<script>x <p>after</p>", 100), "x\nafter");
+  // An unterminated comment hides the rest, as in a browser.
+  assert.equal(readerText("<p>kept</p><!-- open", 100), "kept");
+});
+
+test("a forwarded message and a reply after a quote are both read", async () => {
+  const forwarded =
+    "<div>FYI, see below.</div>" +
+    '<div class="gmail_quote">---------- Forwarded message ---------<br>' +
+    "From: Shop &lt;shop@example.com&gt;<br>Your order 1234 has shipped.</div>";
+  const reply =
+    "<blockquote>On Monday you wrote: when will it ship?</blockquote>" +
+    "<p>It ships on Tuesday.</p><p>-- <br>Example Support</p>";
+  for (const [body, expected] of [
+    [
+      forwarded,
+      /FYI, see below\.\n-+ Forwarded message -+\nFrom: Shop <shop@example\.com>\nYour order 1234 has shipped\./,
+    ],
+    [reply, /when will it ship\?\nIt ships on Tuesday\.\n--\nExample Support/],
+  ] as const) {
+    const r = single(htmlPart(body));
+    const out: any = await new GmailTools(config, r.request).call(
+      "123",
+      "gmail_read",
+      "abc",
+    );
+    assert.match(out.text, expected);
+    assert.equal(out.fromHtml, true);
+  }
+});
+
+test("the mail index keeps its quote cut and its exact earlier output", () => {
+  // Byte-identical to the index text from f008b49, checked against that commit's code.
+  assert.equal(
+    indexBody(htmlPart(RECEIPT) as any),
+    "Receipt Thanks for your order from Example Store . Item Qty Price Monthly plan 1 SGD 4.98 Storage add-on 2 SGD 1.00 Total SGD 6.98 hidden",
+  );
+  assert.equal(
+    indexBody(
+      htmlPart(
+        '<p>New text</p><div class="gmail_quote">Old quoted text</div>',
+      ) as any,
+    ),
+    "New text",
+  );
+});
+
+test("hostile markup converts in bounded time", () => {
+  for (const hostile of [
+    "<".repeat(2_000_000),
+    "<a ".repeat(700_000),
+    "<script".repeat(300_000),
+    "<!--".repeat(500_000),
+    "<td".repeat(600_000) + ">",
+  ]) {
+    const started = Date.now();
+    const text = readerText(hostile, 20_000);
+    assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
+    assert.ok(text.length <= 20_000);
+  }
+});
+
+test("offsets and fair shares work over multi-line reading text", async () => {
+  const rows = Array.from(
+    { length: 3000 },
+    (_, i) => `<tr><td>Item ${i}</td><td>SGD ${i}.00</td></tr>`,
+  ).join("");
+  const r = single(htmlPart(`<table>${rows}</table>`));
+  const g = new GmailTools(config, r.request);
+  const first: any = await g.call("123", "gmail_read", "abc");
+  assert.equal(first.text.length, 20_000);
+  assert.ok(first.truncated && first.totalChars > 40_000);
+  const second: any = await g.call(
+    "123",
+    "gmail_read",
+    "abc",
+    undefined,
+    undefined,
+    undefined,
+    { offset: first.nextOffset },
+  );
+  assert.equal(second.offset, 20_000);
+  const whole = readerText(`<table>${rows}</table>`, 2_000_000);
+  assert.equal(first.text + second.text, whole.slice(0, 40_000));
+  assert.equal(whole.split("\n")[1], "Item 1\tSGD 1.00");
+});
+
+test("spam and trash are included only when the query asks for them", async () => {
+  for (const q of [
+    "in:anywhere receipt",
+    "IN:SPAM",
+    "(in:trash OR from:shop)",
+    "{label:spam label:trash}",
+    'subject:"x" in:anywhere',
+  ])
+    assert.equal(searchesSpamOrTrash(q), true, q);
+  for (const q of [
+    "receipt",
+    "-in:spam receipt",
+    "-label:trash",
+    '"in:anywhere"',
+    'subject:"in:spam"',
+    "xin:anywhere",
+    "in:anywherex",
+    "in:inbox",
+  ])
+    assert.equal(searchesSpamOrTrash(q), false, q);
+  const r = routed(mailbox([]));
+  const g = new GmailTools(config, r.request);
+  const asked: any = await g.call("123", "gmail_search", "receipt in:anywhere");
+  assert.equal(
+    new URL("https://x" + r.calls.at(-1)).searchParams.get("includeSpamTrash"),
+    "true",
+  );
+  assert.equal(asked.includeSpamTrash, true);
+  const plainSearch: any = await g.call("123", "gmail_search", "receipt");
+  assert.equal(
+    new URL("https://x" + r.calls.at(-1)).searchParams.has("includeSpamTrash"),
+    false,
+  );
+  assert.equal(plainSearch.includeSpamTrash, undefined);
 });

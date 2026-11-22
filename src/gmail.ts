@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { RateLimitedError, ToolValidationError } from "./tool-errors.js";
-import { cleanText } from "./news-feed.js";
+import { cleanText, decodeEntities } from "./news-feed.js";
 import { discardBody, readBody } from "./http-body.js";
 import { projectionLimits } from "./observations.js";
 const tokenSchema = z.object({
@@ -156,12 +156,13 @@ function htmlBody(p?: Part): string {
 const QUOTED_HTML =
   /<blockquote\b|class=["']?gmail_quote|id=["']?(?:divRplyFwdMsg|appendonsend)/i;
 /**
- * Readable body text: the plain-text part when it has content, else the HTML part
- * converted to display text (never executed, fetched or followed).
+ * Text the mail index embeds: the plain-text part when it has content, else the HTML
+ * part as display text, cut at the start of quoted history, since the index wants only
+ * what the message itself adds.
  */
-function bodyText(p: Part | undefined, max: number) {
+export function indexBody(p?: Part, max = 12_000) {
   const plain = plainBody(p);
-  if (plain.trim()) return { text: plain.slice(0, max), html: false };
+  if (plain.trim()) return plain.slice(0, max);
   // Quoted history in HTML replies starts at the client's quote container; display text
   // collapses lines, so the line-based quote rules cannot find it afterwards.
   const full = htmlBody(p);
@@ -169,12 +170,107 @@ function bodyText(p: Part | undefined, max: number) {
   // Cut at the start of the tag that carries the marker, so no half tag remains.
   const tag = quote < 0 ? -1 : full.lastIndexOf("<", quote);
   const html = quote < 0 ? full : full.slice(0, tag < 0 ? quote : tag);
-  const text = html ? cleanText(html, max) : "";
+  return html ? cleanText(html, max) : "";
+}
+/**
+ * Readable body text for gmail_read and gmail_thread: the plain-text part when it has
+ * content, else the whole HTML part as reading text, quoted and forwarded content
+ * included (never executed, fetched or followed).
+ */
+function bodyText(p: Part | undefined, max: number) {
+  const plain = plainBody(p);
+  if (plain.trim()) return { text: plain.slice(0, max), html: false };
+  const full = htmlBody(p);
+  const text = full ? readerText(full, max) : "";
   return { text, html: !!text };
 }
-/** Text the mail index embeds: the plain-text part, else the HTML part as display text. */
-export function indexBody(p?: Part, max = 12_000) {
-  return bodyText(p, max).text;
+const LONE_SURROGATE =
+  /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+// Zero-width and bidirectional-override characters can disguise text.
+const INVISIBLE = /[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g;
+/** Lower case for ASCII letters only, so every index still lines up with the source. */
+const asciiLower = (s: string) => s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+/**
+ * Removes HTML comments and whole script, style, head, title and noscript elements in
+ * forward-only passes. An element without its closing tag keeps the rest of the text
+ * for the tag stripper; an unterminated comment hides the rest, as in a browser.
+ */
+function stripHidden(html: string) {
+  let out = "";
+  let pos = 0;
+  for (;;) {
+    const at = html.indexOf("<!--", pos);
+    if (at < 0) {
+      out += html.slice(pos);
+      break;
+    }
+    out += html.slice(pos, at);
+    const end = html.indexOf("-->", at + 4);
+    if (end < 0) break;
+    pos = end + 3;
+  }
+  for (const name of ["script", "style", "head", "title", "noscript"]) {
+    const lower = asciiLower(out);
+    let kept = "";
+    let from = 0;
+    for (let open = lower.indexOf("<" + name, 0); open >= 0;) {
+      const after = lower.charCodeAt(open + name.length + 1);
+      // Only the element itself: "<head" is not "<header".
+      if (!(
+        after === 62 ||
+        after === 47 ||
+        after === 32 ||
+        (after >= 9 && after <= 13)
+      )) {
+        open = lower.indexOf("<" + name, open + 1);
+        continue;
+      }
+      const close = lower.indexOf("</" + name, open);
+      const gt = close < 0 ? -1 : lower.indexOf(">", close);
+      if (gt < 0) break;
+      kept += out.slice(from, open) + " ";
+      from = gt + 1;
+      open = lower.indexOf("<" + name, from);
+    }
+    out = kept + out.slice(from);
+  }
+  return out;
+}
+const BLOCK =
+  /<\/?(?:br|p|div|tr|li|ul|ol|dl|dt|dd|h[1-6]|table|thead|tbody|tfoot|caption|blockquote|pre|section|article|header|footer|address|hr|center)\b[^<>]*>/gi;
+const CELL = /<(?:td|th)\b[^<>]*>/gi;
+/**
+ * HTML as reading text, for gmail_read and gmail_thread only: hidden content dropped,
+ * tags stripped before entities are decoded (so an escaped "&lt;name@example.com&gt;"
+ * stays text), block boundaries kept as line breaks and table cells as tabs, runs of
+ * spaces and of line breaks collapsed, invisible characters and lone surrogates removed.
+ * Every step is a forward scan or a local [^<>] match over bounded input, so hostile
+ * markup stays linear; nothing is fetched or followed, and links keep their text only.
+ */
+export function readerText(html: string, max: number) {
+  let s = stripHidden(html.slice(0, BODY_MAX).replace(LONE_SURROGATE, ""));
+  s = s
+    .replace(/\s+/g, " ")
+    .replace(BLOCK, "\n")
+    .replace(CELL, "\t")
+    .replace(/<[^<>]*>/g, "");
+  s = decodeEntities(s)
+    .replace(LONE_SURROGATE, "")
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, " ")
+    .replace(INVISIBLE, "")
+    .replace(/\u00a0/g, " ");
+  const lines = s.split("\n").map((line) =>
+    line
+      .replace(/ {2,}/g, " ")
+      .replace(/ *\t[\t ]*/g, "\t")
+      .replace(/^[\t ]+|[\t ]+$/g, ""),
+  );
+  const text = lines
+    .join("\n")
+    // Adjacent block boundaries (a row's close and the next one's open) are one break.
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+  return text.length <= max ? text : cut(text, max);
 }
 const isHigh = (code: number) => code >= 0xd800 && code <= 0xdbff;
 const isLow = (code: number) => code >= 0xdc00 && code <= 0xdfff;
@@ -259,6 +355,15 @@ function hintFor(count: number, morePages: boolean) {
   return undefined;
 }
 const SGT_OFFSET_MS = 8 * 3_600_000;
+// An operator that asks for spam or trash, at the start of a token and not negated.
+const SPAM_TRASH =
+  /(?<=^|[\s({])(?:in:(?:anywhere|spam|trash)|label:(?:spam|trash))(?=$|[\s(){}])/i;
+/** Whether a query, outside double-quoted text, asks for spam or trash. */
+export function searchesSpamOrTrash(query: string) {
+  return query
+    .split('"')
+    .some((segment, i) => i % 2 === 0 && SPAM_TRASH.test(segment));
+}
 // A date operand at the start of a token (start of query, after whitespace, "(" or
 // "{", optionally negated with "-"), year first (2026/09/01, 2026-09-01) or in Gmail's
 // month-first form (09/01/2026). Relative forms and epoch seconds do not match.
@@ -397,15 +502,16 @@ type TextWindow = {
   totalChars?: number;
 };
 /**
- * Serialised room a single read's headers always keep when a result is too large; beyond
+ * Serialised room a single read's headers aim to keep when a result is too large; beyond
  * it the body has priority, so real headers never crowd out its full 20,000 characters.
+ * The cut converts by an average escaping ratio, so escape-dense headers can end shorter.
  */
 const HEADER_SHARE = 40_000;
 /**
  * Sender-controlled headers can be long and escape-dense. When a single read would not
  * fit the projection, the headers are levelled down, longest first with escaping counted
- * and cuts on code points, to whatever room the rest of the result leaves, but never
- * below HEADER_SHARE; the body is shortened after that. Shortened headers are named in
+ * and cuts on code points, to whatever room the rest of the result leaves, aiming for no
+ * less than HEADER_SHARE; the body is shortened after that. Shortened headers are named in
  * headersTruncated, so the warning stays the first key whatever the headers contain.
  */
 function fitHeaders(
@@ -789,6 +895,9 @@ export class GmailTools {
     );
     url.searchParams.set("q", sent);
     url.searchParams.set("maxResults", String(pageSize));
+    // Gmail leaves spam and trash out of a list unless asked, whatever the query says.
+    const spamTrash = searchesSpamOrTrash(sent);
+    if (spamTrash) url.searchParams.set("includeSpamTrash", "true");
     if (pageToken) url.searchParams.set("pageToken", pageToken);
     const listed = z
       .object({
@@ -818,6 +927,7 @@ export class GmailTools {
                 "Calendar dates were sent as epoch seconds at Singapore midnight; Gmail would otherwise read them as Pacific time.",
             }
           : {}),
+        ...(spamTrash ? { includeSpamTrash: true } : {}),
         results,
         omitted: 0,
         nextPageToken:
