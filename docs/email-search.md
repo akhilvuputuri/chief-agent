@@ -32,6 +32,64 @@ Each phase is measured with the [eval](#eval) below, on the same private tasks, 
 3. **Invoices.** The invoice collector stops owning email search and can save HTML receipts as files (owner approved, 22 November 2026).
 4. **Recall.** `gmail_recall` is judged on the same eval.
 
+> **Update, 22 November 2026 ([journal 204](journey/204-email-search-redesign.md)):** the owner's direction for every phase: assume the model is capable and do not restrict it. The tools offer capability; a limit stays only for safety or to shape one result when the model can fetch the rest. Under it, Phase 1 removed the request budget rather than keeping it as a backstop. Phase 1 is described below.
+
+## Phase 1: tools
+
+Written 22 November 2026 ([journal 204](journey/204-email-search-redesign.md)). Code: `src/gmail.ts`, `src/observations.ts`, `src/protocol.ts`, `src/tool-errors.ts`, the tool descriptions in `src/runtime.ts`, and `plugins/core/agents/email.md`.
+
+### What changed
+
+- **Readable bodies.** `gmail_read` and `gmail_thread` return the `text/plain` part when it has content, otherwise the HTML part converted to text by the mail index's own conversion (`cleanText`, including the quoted-reply cut), marked `fromHtml`. HTML is converted to text only: never executed, and no link, image or attachment is fetched. `bodyless` now means a message has neither part; its snippet (at most 200 characters) stands in, and `fromHtml` is never set on it.
+- **Sizes.** `gmail_read` shows 20,000 characters of one message and continues with `offset`; a cut result carries `truncated`, `nextOffset` and `totalChars`. `gmail_read` with `messageIds` reads 1 to 25 messages in one call, sharing 50,000 characters fairly, each with its own `truncated` and `nextOffset`; a message that fails or is rate limited carries a `detail` instead of text. A `messageId` read keeps its earlier result shape, with optional new fields only. `gmail_thread` shows up to 50 messages, 20,000 characters each and 50,000 in total, shared fairly, and lists later messages by ID and received time in `omittedMessages`. Every cut, `nextOffset` and header cap lands on a code-point boundary, and an `offset` inside a surrogate pair starts at its first half, because Postgres refuses lone surrogates in stored results.
+- **Projection.** `src/observations.ts` has per-operation limits. For `gmail_search`, `gmail_thread` and `gmail_read` a field may be 20,000 characters and a result 110,000 before it is excerpted; every other tool keeps 8,000 and 12,000. The adapter shortens the longest text, then drops trailing entries, until a result serialises below 108,000, so the untrusted-content warning stays the first field; dropped search rows and thread messages are listed in `omittedMessages`, and the search hint says to read them with `messageIds`.
+- **Search.** `pageSize` defaults to 20 and goes up to 100, Gmail's own default page. A page's metadata comes from Gmail batch requests of at most 50 parts, so a page costs two requests (one list, one batch) instead of 1 + N; a failed batch or a part it did not answer is fetched once on its own, four at a time. Each row adds `received` (Gmail's `internalDate`, ISO in Singapore time), `category` (primary, social, promotions, updates, forums) and `folder` (inbox, archived, sent, spam, trash). A maximal 100-row page serialises to about 88,000 characters (measured, synthetic). An empty page returns a `hint` saying the result does not show the email is absent and how to broaden; a page with `nextPageToken` says to follow it.
+- **Dates.** Gmail reads a calendar date in `after:`, `before:`, `older:` and `newer:` as midnight Pacific time. An operator at the start of a token (optionally negated) has its date sent as epoch seconds at Singapore midnight, `older:`/`newer:` as `before:`/`after:`; relative forms, numeric values, quoted text and dates that would give a non-positive epoch are left alone. The result echoes the query sent and, when it differs, `requestedQuery`. Gathering opts out to keep its query text.
+- **Request budget removed.** The per-run Gmail budget (40 requests) is gone for model tools and host callers alike. Journal 23 added it as the host-enforced form of "stop after about three searches", to steer rather than for safety; runs are bounded by their own tool, model and time allocations, and Gmail enforces its quota.
+- **Rate limits.** A 429, or a 403 whose reason is a rate or quota limit (`rateLimitExceeded`, `userRateLimitExceeded`, `quotaExceeded`, the ErrorInfo reason `RATE_LIMIT_EXCEEDED`), is `RATE_LIMITED`, retryable, "Wait a few seconds and retry". `dailyLimitExceeded` is `RATE_LIMITED` but not retryable, and says Google's daily quotas reset at midnight Pacific time. Before, both read as "reconnect if authorization expired" and mapped to `AUTHORIZATION_REQUIRED`. Missing scopes and other 403s still do. A rate-limited batch part or batch-read message degrades its own row and is not fetched again at once. The mail index pauses on the new error as it did on a "(403)"/"(429)" message.
+- **Instructions.** The email agent prompt, the personal-assistance skill (version 6) and the tool descriptions state what the tools do and the facts a searcher needs: operators, Singapore dates, readable HTML, paging, batch reads, and that an empty narrow search does not prove absence. "At most three searches" and "anchor on an exact quoted phrase" are gone.
+- **Internal callers.** Gathering, mail recall's keyword searches, the daily briefing and the mail-recall eval pass `pageSize: 10`, as before.
+- **Unchanged safety.** Gmail stays read-only (the strict schema test stands), owner-only, identity-checked per mailbox with no fallback to the other one; IDs are validated before any URL; requests refuse redirects; the response guards and MIME limits stand; the untrusted-content warning leads every result; responsibility investigations still read one confirmed message per call.
+
+### Remaining limits
+
+| Limit                     | Value                                                        | Class                                                                                     |
+| ------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| Response guards           | 2 MB per response, 29 MB for attachment messages             | Safety                                                                                    |
+| Attachments               | 20 MB file, 28,000,000 encoded characters                    | Safety                                                                                    |
+| MIME walk                 | 200 parts, depth 16                                          | Safety                                                                                    |
+| ID format                 | hexadecimal, up to 64 characters                             | Safety                                                                                    |
+| Request timeout           | 15 s                                                         | Safety                                                                                    |
+| Error body read           | 65,536 bytes, only for 403/429, to classify the refusal      | Safety                                                                                    |
+| Concurrent single fetches | 4                                                            | Other: Gmail's per-user concurrency                                                       |
+| Batch size                | 50 parts                                                     | Other: Google's advice                                                                    |
+| Search cache              | 5 minutes, 50 entries                                        | Other: repeated queries                                                                   |
+| Page size                 | 20 default, 100 max                                          | Result size; next page via `nextPageToken`                                                |
+| Single read               | 20,000 characters                                            | Result size; rest via `offset`/`nextOffset`                                               |
+| Batch read                | 25 IDs sharing 50,000 characters                             | Result size; rest per message via `nextOffset`, more IDs in another call                  |
+| Thread                    | 20,000 per message, 50,000 total, 50 messages                | Result size; rest via `nextOffset`, later messages via `omittedMessages`                  |
+| Header and snippet caps   | from/to 120, subject 160, snippet 120, date 40               | Result size; full headers via `gmail_read`                                                |
+| Briefing digest lines     | subject 160, sender 80                                       | Result size: a briefing line, not a tool result                                           |
+| Attachment name           | 120 characters                                               | Result size: a display name                                                               |
+| Page token                | 1,000 characters                                             | Result size                                                                               |
+| Snippet stand-in          | 200 characters                                               | Result size: Gmail's whole snippet                                                        |
+| Projection                | 20,000 per field, 110,000 total; the adapter fits to 108,000 | Result size; dropped entries in `omittedMessages`, the full result via `observation_read` |
+| Body conversion bound     | 2,000,000                                                    | Result size: the response guard                                                           |
+| Mail index                | 100 IDs per page, 12,000 characters of text                  | Result size: the host-driven index                                                        |
+| Mail index quota pause    | 60 s, up to 5 consecutive pauses                             | Other: Gmail quota handling, unchanged                                                    |
+| Mail recall               | 1 to 3 keyword searches, 10-hit page                         | Other: the fusion was measured with these                                                 |
+| Gathering, briefing, eval | 10-hit page                                                  | Other: unchanged by design in this phase                                                  |
+
+The email agent's own allocation (24 tool calls, 10 model calls, 150 seconds) is a routing setting for Phase 2, not part of the tools.
+
+### Tested and not measured
+
+Tested with mocked Gmail (`tests/gmail.test.ts` and the caller suites): HTML-only reads and threads; offset continuation reassembling the exact text, including across an emoji; batch reads with a failing, rate-limited or over-sized message and fair shares; batched search metadata, a failed batch and failed or rate-limited parts; 100-row pages in two batches inside the projection with the warning first; rows the fit drops listed in `omittedMessages`; the date rewrite and its token rule; the empty-page hint; every rate-limit and permission 403 shape for search, thread and read; the mail index pausing on a real 429; internal callers' page sizes; no request refused across 150 searches and 250 reads in one run.
+
+Measured, tools only, read-only against the real mailbox on 22 November 2026 (run by the coordinator on the reviewed builds): on `03b028a`, a 50-row search returned 50 rows with metadata in two requests and a 12-message batch read returned 12 HTML-converted bodies; on `2907c5a`, a 100-per-page search, twelve more searches and a 12-message batch read ran with nothing refused, HTML bodies came back converted, no result held a lone surrogate, and offset continuation worked.
+
+Not measured: whether the email agent now finds the 13 receipts or how the eval scores move (no baseline or Phase 1 run of the eval yet); Gmail's per-user quota under heavy paging; whether Gmail threads ever exceed 100 messages, which the `omittedMessages` list assumes; model token cost per email task.
+
 ## Eval
 
 `src/email-eval.ts` is an operator-run script, following [the mail recall eval](mail-recall.md#eval). It runs inside the production gateway container, reads the private tasks from standard input, and prints one private line per task and a summary line.
@@ -43,6 +101,8 @@ For each task it runs a model in a tool loop over the real Gmail tools: `GmailTo
 `gmail_recall` is not offered. Its mail index tops itself up and prunes old messages on every call, both database writes, so a `--recall` flag was not cheap without one.
 
 Each task runs under its own run ID, so the 40-request Gmail budget applies per task as it does per agent run. Each task also gets a fresh Gmail client, so the five-minute search cache does not carry from one task to the next; in the gateway that cache is shared by every run.
+
+> **Update, 22 November 2026 ([journal 204](journey/204-email-search-redesign.md), Phase 1):** the per-run Gmail request budget no longer exists, so a task's run ID now only names it. The eval passes `pageSize`, `messageIds` and `offset` to `GmailTools.call` exactly as `src/tools.ts` does, after the runtime's own schema validates them.
 
 The messages borrow the parts of an agent run (`src/agents.ts`) but not its assembly by `context()`: the instructions, a runtime-context system message with the Singapore time, and a brief `{objective, context, references}` whose objective is the task's request and whose context names the task's mailboxes. A note after the instructions replaces `agent_report` with `eval_report`. The step before the last and the last step get the host's own budget notices (`budgetNotice` in `src/custom-agent.ts`), and the last step offers only `eval_report`, as the agent loop does with `agent_report`.
 
@@ -82,6 +142,8 @@ One JSON object per line on standard input. Synthetic example:
 
 `kind` is `collect` (find all of a set) or `lookup` (find one fact). `expected` lists at least one message, each once and in one of the task's `accounts`. `bodyChars`, optional, is the true length of the message's body text as the task builder measured it; `htmlOnly`, optional, is `true` when the message has no `text/plain` part. A malformed line, a repeated task ID or an empty input refuses the whole run. The error gives the line number, the field path and the issue code only (for example `expected.0.messageId: invalid_string`), never a received value.
 
+> **Update, 22 November 2026 ([journal 204](journey/204-email-search-redesign.md), Phase 1):** `htmlOnly` means the message has no non-empty `text/plain` part, which is what the read tools test; an empty plain part would otherwise have let a snippet stand-in be credited. The current tools flag every stand-in `bodyless` themselves, so `htmlOnly` matters only when scoring results from tool versions before Phase 1.
+
 ### Scoring
 
 Deterministic; no judge model. Keys are account plus lowercased message ID, and a thread ID is not a message ID.
@@ -101,6 +163,9 @@ Deterministic; no judge model. Keys are account plus lowercased message ID, and 
   - Give both `htmlOnly` and `bodyChars` where they matter: together they decide every case from the builder's facts, and `htmlOnly: false` with `bodyChars` makes a short genuine email readable.
   - Ceiling with today's tools: the observation projection cuts a `gmail_read` text to 8,000 characters, so the model receives at most 8,000 characters of a body, and a message whose `bodyChars` is over 16,000 cannot count as readable until the tools change.
   - Each task line and the summary report how many expected messages were scored by each length rule (`scoredByBodyChars`, `scoredByHeuristic`) and by whose signal the body was decided (`bodyByBuilder` with `htmlOnly`, `bodyByGuess` without).
+
+> **Update, 22 November 2026 ([journal 204](journey/204-email-search-redesign.md), Phase 1):** scoring follows the Phase 1 result shapes. **surfacedIdOnly** also counts IDs listed in a search's or a thread's `omittedMessages`, which the model saw without metadata. **readable** reads a batch `gmail_read` result's `messages[]` as well as single reads and thread entries; an entry carrying `detail` (not retrieved) or flagged `bodyless` is never a body, and `fromHtml` is now set by the tools. Under `bodyChars`, a text from a current tool result is placed at its `offset` (0 when the result carries the `truncated` flag without one), so offset continuations add up and overlapping texts, such as one shortened by the adapter's fit and its continuation, count once; a text with no position, from an older or hand-made result, keeps the prefix de-duplication. The 8,000-character projection ceiling is gone: the model now receives up to 20,000 characters of a read, so any `bodyChars` can count as readable. `budgetExhausted` is removed; each task and the summary report `rateLimitedCalls` (results with code `RATE_LIMITED`) and `rateLimitedRows` (search rows and batch-read messages Gmail's rate or daily limit left unretrieved), and the summary `rateLimitedTasks`.
+
 - **extra**: reported messages that were not expected.
 - **answerHits**: `answerContains` strings found in `eval_report.answer`, case-insensitive.
 - Per task also: searches, Gmail tool calls, tool errors by code, `budgetExhausted` (a call refused by the Gmail request budget, or a search row left unretrieved by it), model calls, input, output and cached tokens, cost when the provider reports it, wall time, and calls skipped beside a report (`skippedWithReport`), and why the task ended: `reported`, `step_limit`, `unreported` (the model answered without a tool call) or `error` (class only, never provider text).
@@ -140,5 +205,8 @@ The eval reproduces the tool results an agent receives, not the whole run. Known
 
 - Because of the differences above, absolute numbers are not those of a live conversation. Arms are comparable with each other only under the same flags, on the same tasks, and only for what the eval reproduces: the tools, their results and the instructions.
 - `readable` keys on `gmail_thread` and `gmail_read` result shapes. A new reading tool or result shape in Phase 1 needs the scoring updated in the same change.
+
+> **Update, 22 November 2026 ([journal 204](journey/204-email-search-redesign.md), Phase 1):** the scoring was updated with the Phase 1 tools for batch reads, `omittedMessages`, offsets and rate limits (see the scoring note above). The snippet-stand-in guess and `htmlOnly` now matter only for results from earlier tool versions. Any later result shape still needs the scoring updated in the same change.
+
 - `found` needs the exact message ID; a reported thread ID does not count.
 - Expected IDs come from the operator. A message missing from `expected` counts as extra when reported.

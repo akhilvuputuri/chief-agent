@@ -1,7 +1,7 @@
 # 204 — Why did Chief miss most of a set of receipt emails, and how will a redesign be measured?
 
 Work date: 2026-11-22. Written: 2026-11-22.
-Status: in progress. Phase 0, the eval, is written and tested with a fake Gmail and a scripted model; it has not been run against the real mailbox, so there is no baseline yet. Phases 1 to 4 are planned. Design: [email search](../email-search.md).
+Status: in progress. Phase 0, the eval, is written and tested with a fake Gmail and a scripted model; it has not been run against the real mailbox, so there is no baseline yet. Phases 1 to 4 are planned. (Updated 22 November 2026: Phase 1, the tools, is reviewed and tested, not released; see the last update below.) Design: [email search](../email-search.md).
 
 ## User-visible problem and preceding iteration
 
@@ -53,3 +53,17 @@ Tested only. No run against the real mailbox and no paid model call has been mad
 
 - Write the private task set (the receipts request and others) in the operations folder and run the baseline with `--instructions agent:email`.
 - Phase 1 tool changes, re-run on the same tasks. If Phase 1 adds a reading tool or changes result shapes, the `readable` scoring changes with it.
+
+> **Update, 22 November 2026 — Phase 1, tools (branch `fix/gmail-tools`):** implemented, independently reviewed through three rounds, tested; not released, and the eval has not been run on it. Design and the full list of remaining limits: [email search, Phase 1](../email-search.md#phase-1-tools).
+>
+> **What changed.** `gmail_read` and `gmail_thread` read HTML-only mail as converted text (`fromHtml`), with `bodyless` only for a message with neither part. `gmail_read` shows 20,000 characters and continues with `offset`, or reads 1 to 25 `messageIds` sharing 50,000; threads show 20,000 per message, 50,000 in total and 50 messages, listing later ones in `omittedMessages`. Email results get their own projection limits (20,000 per field, 110,000 per result), which also fixes `gmail_read` advertising 16,000 characters while the projection cut it to 8,000. Search pages default to 20 and go up to 100, with metadata from Gmail batch requests (two requests a page instead of 1 + N), received time, category and folder per row, calendar dates sent as Singapore midnight, and guidance on an empty page. The email agent prompt and the skill describe capabilities instead of "at most three searches" and "anchor on an exact quoted phrase". Internal callers keep ten-hit pages.
+>
+> **The owner's direction (22 November 2026).** Assume the model is capable; limits stay only for safety or to shape one result when the model can fetch the rest. Under it the per-run Gmail request budget was removed rather than kept as a 200-request backstop: journal 23 added it to steer, runs are already bounded by their allocations, and Gmail enforces its own quota.
+>
+> **What review found.** The first review of `03b028a` found that cuts at 20,000 characters, share boundaries and the size fit could split a surrogate pair, which Postgres refuses in stored results, so one emoji would fail a whole read, batch or thread on every retry; every cut now lands on a code-point boundary. It also found that a Gmail 429, or a rate-limit 403, reached the model as "reconnect if authorization expired" (`AUTHORIZATION_REQUIRED`); it is now `RATE_LIMITED` with a wait-and-retry message, and a daily quota says when it resets. The second review of `fbdeeb4` found a regression the new error type caused: the mail index recognised a quota refusal only by "(403)"/"(429)" in the message, so a rate-limited index read would have counted as the message's own failure and abandoned it after two tries instead of pausing; the index now recognises the error type, with a test that drives the real `GmailTools` with a 429. The same round added the daily and ErrorInfo rate-limit shapes, listed rows the size fit drops, and found that the search description had been trimmed to fit a 56,000-character test fixture; the description was restored and the fixture, a padding target rather than a limit, raised to 64,000. The third review approved `2907c5a`.
+>
+> **Measured, tools only.** On 22 November the coordinator ran the reviewed builds read-only against the real mailbox: a 50-row search returned 50 rows with metadata in two requests and a 12-message batch read returned 12 HTML-converted bodies (`03b028a`); a 100-per-page search, twelve more searches and a 12-message batch read ran with nothing refused, HTML converted, no lone surrogates, and offset continuation working (`2907c5a`). This shows the tools work on real mail; it is not an eval result.
+>
+> **Eval.** `src/email-eval.ts` now passes `pageSize`, `messageIds` and `offset` through as `src/tools.ts` does and scores the Phase 1 shapes: batch-read `messages[]`, `detail` entries as not read, `omittedMessages` as ID-only, offset continuations placed by offset, and rate-limited calls and rows in place of `budgetExhausted` (tested).
+>
+> **Not measured.** Whether Chief now finds the 13 receipts, and how found, surfaced and readable move: the eval has run neither the baseline nor Phase 1. Gmail's quota under heavy paging, thread sizes over 100 messages, and token cost per email task.
