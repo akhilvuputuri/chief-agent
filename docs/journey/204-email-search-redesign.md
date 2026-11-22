@@ -1,7 +1,7 @@
 # 204 — Why did Chief miss most of a set of receipt emails, and how will a redesign be measured?
 
 Work date: 2026-11-22. Written: 2026-11-22.
-Status: in progress. Phase 0, the eval, is written and tested with a fake Gmail and a scripted model; it has not been run against the real mailbox, so there is no baseline yet. Phases 1 to 4 are planned. (Updated 22 November 2026: Phase 1, the tools, is reviewed and tested, not released; see the last update below.) (Updated 22 November 2026: Phases 0 and 1 are live in `4ee82e6`, with the eval run before and after Phase 1; see the release closure below.) (Updated 22 November 2026: Phase 2 is live in `bb3c399` and measured on the eval; Phase 3, part 1 is tested, not reviewed or released; see the last update below.) Design: [email search](../email-search.md).
+Status: in progress. Phase 0, the eval, is written and tested with a fake Gmail and a scripted model; it has not been run against the real mailbox, so there is no baseline yet. Phases 1 to 4 are planned. (Updated 22 November 2026: Phase 1, the tools, is reviewed and tested, not released; see the last update below.) (Updated 22 November 2026: Phases 0 and 1 are live in `4ee82e6`, with the eval run before and after Phase 1; see the release closure below.) (Updated 22 November 2026: Phase 2 is live in `bb3c399` and measured on the eval; Phase 3, part 1 is tested, not reviewed or released; see the last update below.) (Updated 22 November 2026: Phase 3, part 1, the file tools and the browser are live; see the last release closure below.) Design: [email search](../email-search.md).
 
 ## User-visible problem and preceding iteration
 
@@ -168,3 +168,41 @@ Production mailbox, 22 November 2026: 15 private tasks with 144 expected emails,
 > **Update, 22 November 2026 — file space and file tools (branch `feat/file-tools`).** Implemented and tested; not reviewed or released. The coordinator gets a temporary, per-owner, in-memory file space (20 MiB per file, 100 MiB per owner, an hour after last use, gone on restart) and four general tools: `file_list`, `file_send` (documents to the owner's own chat and thread after the reply), `file_save` (a PDF into the encrypted vault under its own name, with its source) and `file_zip`. `gmail_attachment` with `toFile: true` puts an attachment of any type into the space. Bytes never reach the model; no tool names a recipient; plugin agents cannot be granted the tools. Details in [the design doc](../email-search.md#file-space-and-file-tools). Not measured: real use and host memory.
 
 > **Update, 22 November 2026 — browser and `file_merge` (branch `feat/browser`).** Implemented and tested; not reviewed or released. The coordinator gets a general `browser` tool in the existing public-browser container: it opens public pages, 1 to 25 of the owner's emails (composed by the gateway from read-only Gmail as Gmail's print view lays them out, each email in its own shadow root and on its own page, inline images made local), file-space files or supplied HTML; reads text and links; and prints, screenshots or downloads into the file space. `file_merge` joins PDFs with `qpdf` in the same container. The tools appear only when the sidecar's health answer lists `documents`, so they wait for the operator's `refresh-public-browser.py`. A `browsing-and-files` skill describes the capabilities. Tested with a fake sidecar and an extended real-Chromium probe for CI; the probe was not run locally (no Docker daemon). Owner-accepted: email content passes through the browser container, and loading an email's images tells its sender. [Design](../email-search.md#browser-and-file_merge).
+
+## Release closure — attachments, file tools and browser — 2026-11-22
+
+All three changes are live (measured from GitHub and the production host on 22 November 2026). Independent review was by Claude Opus 5.5.
+
+| Change                                              | PR  | Merged as | Release run | Review                                                            |
+| --------------------------------------------------- | --- | --------- | ----------- | ----------------------------------------------------------------- |
+| Phase 3, part 1: attachments, link targets, routing | 526 | `76eb6c4` | 45017094530 | Changes requested on `2196e3a9`, approved `8fb2c41b`              |
+| File space and file tools                           | 527 | `cd051c5` | 45019003251 | Changes requested on `48cd5110`, approved `c5449786`              |
+| Browser and `file_merge`                            | 528 | `6fbf927` | 45021770197 | Approved `c418c8bc`, then `f706bf18` after two ordinary-use fixes |
+
+**What review changed.** On PR 526, a link's reported address could be taken from another attribute; fixed before approval. On PR 527, `file_save` on a PDF whose text cannot be read left an uncertain write that blocked the owner's later writes; such PDFs are now kept and marked `textUnreadable`. On PR 528, an open no longer fails when one image is slow, and the coordinator's browser session is released before the research browser agent's first call (this corrects the "busy" note in [public browser](../public-browser.md#the-coordinators-browser)).
+
+**Accepted as known, not fixed (owner's direction, 22 November 2026: stop engineering for hypothetical hostile inputs).** From the PR 526 review: the PDF reader's time limit is checked only between pages; two parts could share an ID if Gmail sent a malformed one; attachment paging can shrink to one entry behind oversized headers; some invisible characters are not stripped from names; a quoted `>` inside a tag hides that link.
+
+**Sidecar refresh (measured on the host).** `scripts/refresh-public-browser.py` refreshed the browser and its probe passed: Chromium 156.0.8078.79, the proof's memory peak 640 MiB, browser image 2.02 GB (previously 1.74 GB), host disk 82% used afterwards (11 GB free). The gateway then reported the sidecar as supporting documents. In CI, the real-Chromium probe passed all 42 checks on the browser image with a peak of 362 MiB.
+
+**Measured on the production mailbox, read-only on Gmail, by the lead.**
+
+- Attachments: PDF attachments from 16 different senders across both mailboxes; 14 read as text and 2 were reported unreadable (consistent with password-protected files, not confirmed). Gmail's own part IDs were in use, and link targets were returned.
+- Browser, inside the gateway container on the released code: twelve HTML receipt emails opened as one document in 13.2 s and printed in 2.9 s to one PDF of 24 pages and 400 KB, with every receipt's text present; a screenshot took 0.3 s; merging two PDFs gave the expected page count; the browser container used 231 MiB afterwards. The first page, checked by eye, matches Gmail's view (header block, logo and item images, layout).
+
+**Not measured.** A real Telegram turn using any of these tools; `download`, and opening a PDF in the browser, on a real Chromium; memory for 25 large emails in one document.
+
+### Direction changes (owner, 22 November 2026)
+
+- The planned collector changes for email receipts (a fixed text-PDF renderer, stated-fact matching, coverage states) were dropped before being built, in favour of general tools the model combines itself: Gmail reads, attachments, the file space, the browser and `file_merge`.
+- The invoice collector is unchanged apart from Phase 2's spam and trash filter. Whether it still needs its own email source is open.
+- A model-operated shell workspace on an isolated box was designed and parked.
+- The file space is deliberately not durable: files live in gateway memory and are gone on restart.
+- Reviews now look for defects in ordinary use and breaks of stated boundaries, with one round per change.
+
+### Follow-ups
+
+- Try the receipts request in a real Telegram conversation.
+- Host disk is at 82% used after the larger browser image.
+- The accepted low items above.
+- Decide whether the invoice collector still needs its email source.

@@ -376,3 +376,20 @@ The eval reproduces the tool results an agent receives, not the whole run. Known
 
 - `found` needs the exact message ID; a reported thread ID does not count.
 - Expected IDs come from the operator. A message missing from `expected` counts as extra when reported.
+
+## What shipped on 22 November 2026
+
+Written 22 November 2026 ([journal 204](journey/204-email-search-redesign.md#release-closure--attachments-file-tools-and-browser--2026-11-22)). Live: the three sections above marked "not reviewed or released" were reviewed, merged and released the same day, and the browser sidecar was refreshed on the host.
+
+| Tool                                              | What it does                                                                                                 | PR  |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | --- |
+| `gmail_read`, `gmail_thread` (attachment list)    | List each message's attachments by Gmail's part ID, name, type and size                                      | 526 |
+| `gmail_attachment`                                | Read an attachment's text, or with `toFile: true` put its bytes in the file space                            | 526 |
+| `gmail_read` with `links: true`                   | Return the HTML part's link targets, never opened                                                            | 526 |
+| `file_list`, `file_send`, `file_save`, `file_zip` | List files, send them to the owner's chat, keep a PDF in the vault, zip several                              | 527 |
+| `browser`                                         | Open public pages, the owner's emails as Gmail prints them, files or HTML; read, print, screenshot, download | 528 |
+| `file_merge`                                      | Join PDFs into one with `qpdf` in the browser container                                                      | 528 |
+
+Changes from the sections above made in review: a PDF whose text cannot be read is now kept by `file_save` and marked `textUnreadable`; an open no longer fails when one image is slow; the coordinator's browser session is released before the research browser agent's first call. The file space stays in memory and is gone on restart, by the owner's choice.
+
+Measured on the production mailbox, read-only (counts and timings only): 14 of 16 senders' PDF attachments read as text, 2 reported unreadable; twelve HTML receipts opened as one document in 13.2 s and printed in 2.9 s to one 24-page, 400 KB PDF with every receipt's text present. Not measured: a real Telegram turn with these tools, `download` and PDF opening on a real Chromium, and memory for 25 large emails in one document.

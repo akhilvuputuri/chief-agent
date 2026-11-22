@@ -1,3 +1,11 @@
+# Email tools: attachments, file space, browser and `file_merge` — live in `6fbf927`, 22 November 2026
+
+PR 526 (`76eb6c4`, attachments, link targets and routing wording), PR 527 (`cd051c5`, file space and file tools) and PR 528 (`6fbf927`, `browser` and `file_merge`) are released, and the browser sidecar was refreshed on the host. Measured read-only on the production mailbox: twelve HTML receipts opened as one document and printed to one 24-page PDF (13.2 s to open, 2.9 s to print), with every receipt's text present ([journal 204](journey/204-email-search-redesign.md#release-closure--attachments-file-tools-and-browser--2026-11-22), [email search](email-search.md#what-shipped-on-22-november-2026)).
+
+Direction (owner, 22 November 2026): the planned receipt-collector changes were dropped in favour of these general tools; a model-operated shell workspace was designed and parked; reviews look for ordinary-use defects and boundary breaks, one round per change.
+
+Next: try the receipts request in a real Telegram conversation; host disk is at 82% used; the accepted low items in journal 204; decide whether the invoice collector still needs its email source.
+
 # Browser and file_merge — tested, not yet released, 22 November 2026
 
 Branch `feat/browser`, on top of the file-tools branch. The coordinator gets a general `browser` tool running in the public-browser container (open public pages, the owner's emails as Gmail prints them, file-space files or HTML; read; print to PDF, screenshot, download into the file space) and `file_merge`, which joins PDFs with `qpdf` there. A `browsing-and-files` skill describes them. The tools are offered only once the running sidecar reports support ([journal 204](journey/204-email-search-redesign.md), [design](email-search.md#browser-and-file_merge)).
