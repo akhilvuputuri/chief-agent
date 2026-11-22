@@ -4,6 +4,8 @@ Status (1 November 2026): live with a 12-month window, quota-paced builds and fu
 
 ## What it does
 
+> **Update, 22 November 2026 ([journal 204](journey/204-email-search-redesign.md)):** the email agent is retired; the coordinator is offered `gmail_recall` directly when the index is available, and the `core/email-search` skill describes it. `gmail_recall` is no longer delegated, and no shipped agent lists it, so `OPTIONAL_OPERATIONS` currently has no user.
+
 The email agent gets one more tool, `gmail_recall(query, keywords?, limit?)`. It finds emails the owner half-remembers ("the one where they apologised for the late delivery").
 
 - `query` describes what the email was about, in plain words, for meaning search over the index.

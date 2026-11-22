@@ -21,6 +21,8 @@ In the six days of production logs before this change, Chief made about 190 tool
 
 With agents, Chief is offered 34 tools (about 22,000 characters) before domain selection, and the domain agents run on Gemini 3.8 Flash by default. These are offline counts from `runtimeContext`; production numbers belong in the journal once measured.
 
+> **Update, 22 November 2026 ([journal 204](journey/204-email-search-redesign.md), [email search, Phase 2](email-search.md#phase-2-coordinator)):** email is no longer delegated. The coordinator searches and reads Gmail itself with `gmail_accounts`, `gmail_search`, `gmail_thread`, `gmail_read` and, with the mail index, `gmail_recall`, guided by the `core/email-search` skill, and the `email` agent is retired. The owner approved email text in the coordinator's context. With every integration on, the coordinator's instructions, tools and stable configuration measure 78,699 characters, up from 74,345.
+
 > **Update, 11 November 2026 ([journal 164](journey/164-claude-models-everywhere.md)):** the default tier is Claude Haiku 5.5, not Gemini 3.8 Flash.
 
 ## The tool
@@ -52,6 +54,8 @@ An ID the owner does not own stays plain text: it never becomes a target. The re
 ## Agent definitions
 
 Every agent is a plugin agent, including the built-in ones. The built-ins live in the `core` plugin (`plugins/core/`), in the same format as any other package:
+
+> **Update, 22 November 2026 ([journal 204](journey/204-email-search-redesign.md)):** the `email` row below is historical: that agent is retired and an `agent_run` for it is refused with a message naming the Gmail tools. `parcels` keeps its Gmail tools.
 
 | Type            | Does                                                                                                                                     | Tools                                                            |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -88,6 +92,8 @@ The host registry (`plugins/registry.json`) pins each package's content hash and
 
 - `aliases`: short types such as `email` → `core/email`;
 - `delegated`: operations Chief is not offered because an agent does that work. An operation is withheld only while an agent that uses it is in the catalogue, so a disconnected integration never strands its tools.
+
+> **Update, 22 November 2026 ([journal 204](journey/204-email-search-redesign.md)):** the `email` alias is gone, and `delegated` no longer lists the Gmail operations, which are the coordinator's own.
 
 ## Contracts
 

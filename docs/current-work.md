@@ -1,3 +1,9 @@
+# Email search redesign, Phase 2 coordinator — tested, not yet released, 22 November 2026
+
+Branch `feat/email-coordinator`. Chief searches and reads Gmail itself: the Gmail tools are no longer delegated, the email agent is retired, and a new `core/email-search` skill describes the tools and the facts a searcher needs. Background task passes get the same five tools they reached through the agent before; investigations, the briefing and other agents gain none. Gathering's searches never include spam or trash. The email eval's default arm is a coordinator turn on the main model, and `retired:email` replays the retired agent. See [email search, Phase 2](email-search.md#phase-2-coordinator) and [journal 204](journey/204-email-search-redesign.md).
+
+Next: independent review; release; run the eval's `skill:email-search` and `retired:email` arms on the private tasks; then Phase 3, invoices.
+
 # Email search redesign, Phases 0 and 1 — live in `4ee82e6`, 22 November 2026
 
 Phase 0 (the eval, PR 519, `4586732`) and Phase 1 (the Gmail tools, PR 520, `4ee82e6`) are live; the gateway is healthy on `4ee82e6` and the mail index loaded 1,499 messages. Measured on 15 private tasks, the same email-agent arm before and after Phase 1 found 115 and then 131 of 144 expected emails, and surfaced 120 and then 144 in search results; the receipts task went from 1 to 12 of 12 ([journal 204](journey/204-email-search-redesign.md#release-closure--2026-11-22)).

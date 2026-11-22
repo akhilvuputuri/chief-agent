@@ -112,3 +112,15 @@ Production mailbox, 22 November 2026: 15 private tasks with 144 expected emails,
 - An unclosed `<script>` or `<style>` element in HTML mail leaks its contents into the converted text.
 - Rate-limit retry waits cannot be interrupted by a cancelled turn.
 - The header fit shortens escape-dense headers more than needed (see the `9f0758b` update above).
+
+> **Update, 22 November 2026 — Phase 2, the coordinator (branch `feat/email-coordinator`):** implemented and tested; not reviewed or released, and the eval has not been run on it. Design, the run-kind table, the safety and context analysis: [email search, Phase 2](../email-search.md#phase-2-coordinator).
+>
+> **What changed.** The Gmail tools are no longer delegated, so Chief searches and reads mail itself (`gmail_recall` with the mail index), under every picker mode. The email agent, its alias, its prompt and the grants only it used are gone; `parcels` keeps its Gmail tools, and an `agent_run` for `email` is refused with a message naming the Gmail tools. A new plugin skill, `core/email-search`, describes the tools and the facts a searcher needs; the Gmail domain guidance and one line of the instructions point to it. `observation_read` of a stored Gmail result leads with the untrusted-content warning on every page. Two low items from the Phase 1 review are fixed: gathering's searches never include spam or trash, and the search description says how old a row's flags can be (up to fifteen minutes, not the ten of the review note: rows are reused for ten minutes and whole searches for five). The routing decision eval labels email messages `chief`.
+>
+> **Run kinds.** Foreground turns and background task passes (continuations and routine occurrences) now call the Gmail tools directly; before, they reached the same five through the email agent. Responsibility investigations still get only `gmail_read` within a confirmed scope, the daily briefing reads its digest in host code, and no other agent gained Gmail tools (tested for investigations and background passes).
+>
+> **Context.** The coordinator's fixed instructions, tools and configuration grow from 74,345 to 78,699 characters with every integration on. Within a turn, earlier results stay whole until about 1,080,000 characters, roughly eight maximal Gmail results; then all of them become excerpts with their `observationId` at once. Nothing is dropped silently, but the cut is abrupt; whether real turns reach it is not measured.
+>
+> **Eval.** The default arm is now `skill:email-search`: a coordinator turn assembled by `context()` on the main model, with the skill offered through `skill_read`. `retired:email` replays the retired agent from instructions frozen in `src/email-eval.ts`, whose hash matches the `agent:email` arm of the Phase 1 runs, so the earlier result stays comparable at the cost of 3,019 characters of text in the eval module. `docs/email-search.md` lists what still differs from a real coordinator turn.
+>
+> **Not measured.** The `skill:email-search` arm on the private tasks; a real Telegram turn; token cost of email turns.
