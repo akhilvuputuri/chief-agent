@@ -14,6 +14,7 @@ const tokenSchema = z.object({
 });
 const part: z.ZodType<Part> = z.lazy(() =>
   z.object({
+    partId: z.string().optional(),
     mimeType: z.string().optional(),
     filename: z.string().optional(),
     body: z
@@ -27,6 +28,7 @@ const part: z.ZodType<Part> = z.lazy(() =>
   }),
 );
 type Part = {
+  partId?: string;
   mimeType?: string;
   filename?: string;
   body?: { data?: string; attachmentId?: string; size?: number };
@@ -94,26 +96,33 @@ const TOTAL_CHARS = 50_000;
 // Bounds per-message header overhead in a thread so the result fits the projection.
 const THREAD_MAX_MESSAGES = 50;
 // A body never exceeds its response, which the two-megabyte guard bounds already.
-const BODY_MAX = 2_000_000;
+export const BODY_MAX = 2_000_000;
 const ID = /^[a-f0-9]{1,64}$/i;
-// Attachments listed per message in a read or thread; the rest are counted.
-const ATTACHMENTS_LISTED = 20;
+// Attachment names in batch-read and thread entries, like their headers; a single read
+// gives each name whole.
 const ATTACHMENT_NAME = 120;
-// A part's MIME type is written by the sender, so it is shortened like a name.
-const ATTACHMENT_TYPE = 100;
+// Safety bound on a sender-written name: no real filename comes near it (common file
+// systems allow 255 bytes), and it keeps one name from crowding out the warning.
+const NAME_BOUND = 8_000;
+// RFC 6838 allows 127 characters each for a type and its subtype.
+const ATTACHMENT_TYPE = 255;
 // Gathering and gmail_attachment read at most 20 MB of one part.
-const ATTACHMENT_MAX = 20 * 1024 * 1024;
+export const ATTACHMENT_MAX = 20 * 1024 * 1024;
 // A message carrying an attachment inline can exceed the ordinary response guard.
 const ATTACHMENT_RESPONSE = 29_000_000;
-// Link targets for one read with links: true; the rest are counted.
-const LINKS_LISTED = 100;
-const LINK_URL = 500;
+// Link text is the start of what the body already shows in full.
 const LINK_TEXT = 120;
+// Safety bound on one link target: common servers refuse a request line of about 8 KB
+// (nginx's default header buffers, Apache's LimitRequestLine of 8,190), so no working
+// link needs more. A longer target is listed without its URL, marked and counted.
+const LINK_URL_BOUND = 8_000;
+// The MIME walk's depth, as gathering's: it bounds recursion on a sender-built tree.
+const MIME_DEPTH = 16;
 /**
- * A part number as gmail_read lists it: a child's index under its parent, joined by dots
- * ("1", "0.2"), within the MIME walk's depth.
+ * A part ID as Gmail gives it and gmail_read lists it: "" for the message's top-level
+ * part, then each child's index under its parent joined by dots ("1", "0.2").
  */
-export const PART_ID = /^\d{1,3}(?:\.\d{1,3}){0,16}$/;
+export const PART_ID = /^(?:\d{1,5}(?:\.\d{1,5}){0,15})?$/;
 // A MIME type as RFC 6838 names one, safe to repeat in an error message.
 const MIME_TOKEN =
   /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/;
@@ -364,49 +373,78 @@ function display(value: string, max: number) {
 }
 type Attachment = {
   partId: string;
-  name: string;
-  mimeType: string;
-  bytes: number;
+  name?: string;
+  nameTruncated?: true;
+  mimeType?: string;
+  bytes?: number;
 };
-type Attachments = { attachments?: Attachment[]; attachmentsOmitted?: number };
+type Attachments = {
+  attachments?: Attachment[];
+  attachmentsTotal?: number;
+  attachmentsOffset?: number;
+  nextAttachmentsOffset?: number;
+};
 /**
- * Every part below the top level that Gmail gives a filename and a body (inline data or an
- * attachment ID), in MIME order, numbered as PART_ID describes. An inline image counts only
- * when it carries a filename. The walk stops at 200 parts or depth 16, as gathering's does.
+ * Every part, the top-level one included, that Gmail gives a filename and a body (inline
+ * data or an attachment ID), in MIME order, with Gmail's own partId; the index path is a
+ * fallback for a part without a usable one. An inline image counts only when it carries a
+ * filename. The walk stops at depth 16, as gathering's does; the response guard bounds the
+ * number of parts.
  */
 function attachmentParts(payload: Part | undefined) {
   const found: { partId: string; part: Part }[] = [];
-  let parts = 0;
   const walk = (p: Part, path: string, depth: number) => {
-    if (++parts > 200 || depth > 16) return;
-    if (path && p.filename && (p.body?.data || p.body?.attachmentId))
-      found.push({ partId: path, part: p });
+    if (depth > MIME_DEPTH) return;
+    const id =
+      p.partId !== undefined && PART_ID.test(p.partId) ? p.partId : path;
+    if (p.filename && (p.body?.data || p.body?.attachmentId))
+      found.push({ partId: id, part: p });
     for (const [i, child] of (p.parts ?? []).entries())
       walk(child, path ? `${path}.${i}` : String(i), depth + 1);
   };
   if (payload) walk(payload, "", 0);
   return found;
 }
-const attachmentOf = ({ partId, part }: { partId: string; part: Part }) => ({
-  partId,
-  name: display(part.filename ?? "", ATTACHMENT_NAME),
-  mimeType: display((part.mimeType ?? "").toLowerCase(), ATTACHMENT_TYPE),
-  bytes: part.body?.size ?? 0,
-});
-/** A read or thread entry's attachments, listed from the payload already fetched; nothing when there are none. */
-function attachmentFields(payload: Part | undefined): Attachments {
+/** One attachment's entry: its name whole up to NAME_BOUND, or shortened for a batch or thread entry. */
+function attachmentOf(
+  { partId, part }: { partId: string; part: Part },
+  nameMax = NAME_BOUND,
+): Attachment {
+  const clean = display(part.filename ?? "", Infinity);
+  const name = cut(clean, nameMax);
+  return {
+    partId,
+    name,
+    // Only a name past the safety bound is marked; a short form in a list is the listing's own.
+    ...(nameMax === NAME_BOUND && name.length < clean.length
+      ? { nameTruncated: true as const }
+      : {}),
+    mimeType: display((part.mimeType ?? "").toLowerCase(), ATTACHMENT_TYPE),
+    bytes: part.body?.size ?? 0,
+  };
+}
+/**
+ * A read or thread entry's attachments, listed from the payload already fetched, from
+ * `offset` on; nothing when the message has none. Every one is listed: the fit shortens
+ * later entries to their partId, then pages the rest with nextAttachmentsOffset.
+ */
+function attachmentFields(
+  payload: Part | undefined,
+  nameMax: number,
+  offset = 0,
+): Attachments {
   const all = attachmentParts(payload);
   if (!all.length) return {};
   return {
-    attachments: all.slice(0, ATTACHMENTS_LISTED).map(attachmentOf),
-    ...(all.length > ATTACHMENTS_LISTED
-      ? { attachmentsOmitted: all.length - ATTACHMENTS_LISTED }
+    attachments: all.slice(offset).map((a) => attachmentOf(a, nameMax)),
+    ...(offset
+      ? { attachmentsOffset: offset, attachmentsTotal: all.length }
       : {}),
   };
 }
 const ANCHOR = /<a\b[^<>]*>|<\/a\s*>/gi;
 const HREF = /[\s"'/]href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>`]+))/i;
-type Link = { text: string; url: string; urlTruncated?: true };
+type Link = { text: string; url?: string; urlOverBound?: number };
 /** An anchor's target if it is an absolute http, https or mailto URL, as the URL parser normalises it. */
 function linkUrl(raw: string | undefined) {
   if (!raw) return undefined;
@@ -425,35 +463,35 @@ function linkUrl(raw: string | undefined) {
   }
 }
 /**
- * Link targets from the HTML's anchors, for gmail_read with links: true: only absolute
+ * Every link target in the HTML's anchors, for gmail_read with links: true: only absolute
  * http, https and mailto URLs, entities decoded, deduplicated by URL in document order,
- * each with its anchor's text. Hidden content is dropped as in readerText. One forward
- * pass of local patterns over bounded input, and each anchor's text is its own stretch of
- * the input, so hostile markup stays linear. Nothing is fetched or followed.
+ * each with the start of its anchor's text. A URL is never cut: one past LINK_URL_BOUND is
+ * listed in its place without the URL, with its length in urlOverBound. Hidden content is
+ * dropped as in readerText. One forward pass of local patterns over bounded input, and each
+ * anchor's text is its own stretch of the input, so hostile markup stays linear. Nothing is
+ * fetched or followed.
  */
 export function linkTargets(html: string) {
   const s = stripHidden(html.slice(0, BODY_MAX).replace(LONE_SURROGATE, ""));
   const seen = new Set<string>();
   const links: Link[] = [];
-  let omitted = 0;
   let open: { href?: string; from: number } | undefined;
   const close = (end: number) => {
     if (!open) return;
     const url = linkUrl(open.href);
     if (url && !seen.has(url)) {
       seen.add(url);
-      if (links.length >= LINKS_LISTED) omitted += 1;
-      else
-        links.push({
-          text: display(
-            decodeEntities(s.slice(open.from, end).replace(/<[^<>]*>/g, " "))
-              .replace(/\s+/g, " ")
-              .trim(),
-            LINK_TEXT,
-          ).trim(),
-          url: cut(url, LINK_URL),
-          ...(url.length > LINK_URL ? { urlTruncated: true as const } : {}),
-        });
+      links.push({
+        text: display(
+          decodeEntities(s.slice(open.from, end).replace(/<[^<>]*>/g, " "))
+            .replace(/\s+/g, " ")
+            .trim(),
+          LINK_TEXT,
+        ).trim(),
+        ...(url.length > LINK_URL_BOUND
+          ? { urlOverBound: url.length }
+          : { url }),
+      });
     }
     open = undefined;
   };
@@ -469,15 +507,29 @@ export function linkTargets(html: string) {
     }
   }
   close(s.length);
-  return { links, omitted };
+  return links;
 }
-/** links: true on a single read: the HTML part's link targets, an empty list for a message without one. */
-function linkFields(payload: Part | undefined) {
+type Links = {
+  links?: Link[];
+  linksTotal?: number;
+  linksOffset?: number;
+  nextLinksOffset?: number;
+  linksOverBound?: number;
+};
+/**
+ * links: true on a single read: the HTML part's link targets from `offset` on (an empty
+ * list for a message without one); the fit pages the rest with nextLinksOffset.
+ */
+function linkFields(payload: Part | undefined, offset = 0): Links {
   const html = htmlBody(payload);
-  const { links, omitted } = html
-    ? linkTargets(html)
-    : { links: [] as Link[], omitted: 0 };
-  return { links, ...(omitted ? { linksOmitted: omitted } : {}) };
+  const all = html ? linkTargets(html) : [];
+  const over = all.filter((l) => l.urlOverBound !== undefined).length;
+  return {
+    links: all.slice(offset),
+    linksTotal: all.length,
+    ...(offset ? { linksOffset: offset } : {}),
+    ...(over ? { linksOverBound: over } : {}),
+  };
 }
 function header(
   list: { name: string; value: string }[] | undefined,
@@ -762,34 +814,69 @@ function fitText<T extends object>(result: T, messages: TextWindow[]) {
     longest.totalChars = total;
   }
 }
+/** How far the serialised result is over the projection limit. */
+const excess = (result: object) =>
+  JSON.stringify(result).length - SERIALISED_LIMIT;
 /**
- * After the texts are shortened, drops trailing attachments from the entry listing the
- * most until the serialised result fits, counting them in that entry's
- * attachmentsOmitted. Only escape-dense, sender-written names and types get this far.
+ * Shortens attachment entries to their partId, last ones first and from the message with
+ * the most detailed entries left, until the result fits; the first `keep` entries of each
+ * list stay whole. A shortened entry's details come back with gmail_read on its message
+ * and attachmentsOffset at its position.
  */
-function fitAttachments(result: object, entries: Attachments[]) {
-  let over = JSON.stringify(result).length - SERIALISED_LIMIT;
+function stripAttachments(result: object, entries: Attachments[], keep = 0) {
+  const next = entries.map((e) => (e.attachments?.length ?? 0) - 1);
+  let over = excess(result);
   while (over > 0) {
-    const most = entries.reduce<Attachments | undefined>(
-      (a, e) =>
-        (e.attachments?.length ?? 0) > (a?.attachments?.length ?? 0) ? e : a,
-      undefined,
-    );
-    if (!most?.attachments?.length) return;
-    const dropped = most.attachments.pop()!;
-    over -= JSON.stringify(dropped).length + 1;
-    most.attachmentsOmitted = (most.attachmentsOmitted ?? 0) + 1;
-    // The estimate ignores the count's own key; measure again before stopping.
-    if (over <= 0) over = JSON.stringify(result).length - SERIALISED_LIMIT;
+    let pick = -1;
+    next.forEach((n, i) => {
+      if (n >= keep && (pick < 0 || n > next[pick]!)) pick = i;
+    });
+    if (pick < 0) return;
+    const list = entries[pick]!.attachments!;
+    const at = next[pick]!;
+    const before = JSON.stringify(list[at]).length;
+    list[at] = { partId: list[at]!.partId };
+    next[pick] = at - 1;
+    over -= before - JSON.stringify(list[at]).length;
+    if (over <= 0) over = excess(result);
   }
 }
-/** Drops trailing link targets of a single read until it fits, counting them in linksOmitted. */
-function fitLinks(result: { links?: Link[]; linksOmitted?: number }) {
-  let over = JSON.stringify(result).length - SERIALISED_LIMIT;
-  while (over > 0 && result.links?.length) {
-    over -= JSON.stringify(result.links.pop()).length + 1;
-    result.linksOmitted = (result.linksOmitted ?? 0) + 1;
-    if (over <= 0) over = JSON.stringify(result).length - SERIALISED_LIMIT;
+/**
+ * Moves trailing attachment entries, from the longest list first, to a later page until
+ * the result fits, keeping the first `keep` of each list: the entry says where the next
+ * page starts (nextAttachmentsOffset, for gmail_read with attachmentsOffset) and how many
+ * there are.
+ */
+function pageAttachments(result: object, entries: Attachments[], keep = 0) {
+  let over = excess(result);
+  while (over > 0) {
+    const e = entries.reduce<Attachments | undefined>(
+      (a, x) =>
+        (x.attachments?.length ?? 0) >
+        Math.max(keep, a?.attachments?.length ?? 0)
+          ? x
+          : a,
+      undefined,
+    );
+    if (!e) return;
+    const offset = e.attachmentsOffset ?? 0;
+    e.attachmentsTotal ??= offset + e.attachments!.length;
+    over -= JSON.stringify(e.attachments!.pop()).length + 1;
+    e.nextAttachmentsOffset = offset + e.attachments!.length;
+    // The estimate ignores the new keys; measure again before stopping.
+    if (over <= 0) over = excess(result);
+  }
+}
+/**
+ * Moves trailing link targets of a single read to a later page until it fits, keeping the
+ * first `keep`; nextLinksOffset says where gmail_read with linksOffset continues.
+ */
+function pageLinks(result: Links, keep = 0) {
+  let over = excess(result);
+  while (over > 0 && (result.links?.length ?? 0) > keep) {
+    over -= JSON.stringify(result.links!.pop()).length + 1;
+    result.nextLinksOffset = (result.linksOffset ?? 0) + result.links!.length;
+    if (over <= 0) over = excess(result);
   }
 }
 /**
@@ -819,6 +906,10 @@ export type GmailCallOptions = {
   messageIds?: string[];
   /** A single read also returns the HTML part's link targets. */
   links?: boolean;
+  /** A single read's link targets from this position. */
+  linksOffset?: number;
+  /** A single read's attachment list from this position. */
+  attachmentsOffset?: number;
   /** gmail_attachment: the part to read, as gmail_read lists it. */
   partId?: string;
 };
@@ -1305,21 +1396,21 @@ export class GmailTools {
       subject: header(m.payload?.headers, "subject", SUBJECT),
       date: header(m.payload?.headers, "date", DATE),
       ...bodyWindow(m, 0, sizes[i]!, bodies[i]),
-      ...attachmentFields(m.payload),
+      ...attachmentFields(m.payload, ATTACHMENT_NAME),
     }));
-    const result = fitText(
-      {
-        warning: UNTRUSTED,
-        note: `Ordered oldest first, at most ${THREAD_MAX_MESSAGES} messages. For a message marked truncated, gmail_read with its id and nextOffset returns the rest. Later messages are listed in omittedMessages; read them with gmail_read messageIds. fromHtml means the text was converted from the HTML part. Sender and subject are shortened here; gmail_read with one messageId returns the full headers. attachments lists a message's files; gmail_attachment with its id and a partId reads one as text.`,
-        threadId: parsed.id,
-        messages,
-        omitted: ordered.length - shown.length,
-        ...omittedList(ordered.slice(THREAD_MAX_MESSAGES)),
-      },
+    const result = {
+      warning: UNTRUSTED,
+      note: `Ordered oldest first, at most ${THREAD_MAX_MESSAGES} messages. For a message marked truncated, gmail_read with its id and nextOffset returns the rest. Later messages are listed in omittedMessages; read them with gmail_read messageIds. fromHtml means the text was converted from the HTML part. Sender and subject are shortened here; gmail_read with one messageId returns the full headers. attachments lists every file of a message by partId, with its name (shortened here), type and size; gmail_attachment with the message id and a partId reads one as text. An entry with only a partId, or a message with nextAttachmentsOffset, has the rest in gmail_read with that messageId and attachmentsOffset.`,
+      threadId: parsed.id,
       messages,
-    );
-    // Shorten texts first, then attachment lists; dropping whole messages is the last resort.
-    fitAttachments(result, messages);
+      omitted: ordered.length - shown.length,
+      ...omittedList(ordered.slice(THREAD_MAX_MESSAGES)),
+    };
+    // Each step leaves a way to fetch what it moves: attachment details, then texts, then
+    // later attachment entries; dropping whole messages is the last resort.
+    stripAttachments(result, messages);
+    fitText(result, messages);
+    pageAttachments(result, messages);
     return fit(result, messages);
   }
   /** Fallback when a conversation exceeds the response guard: identifiers only. */
@@ -1360,31 +1451,57 @@ export class GmailTools {
     url.searchParams.set("format", "full");
     return messageSchema.parse(await this.get(token, url, undefined, retries));
   }
-  private async read(token: string, id: string, offset = 0, links = false) {
-    if (!Number.isInteger(offset) || offset < 0)
-      throw new ToolValidationError(
-        "offset must be a whole number of characters",
-      );
+  private async read(
+    token: string,
+    id: string,
+    offset = 0,
+    links = false,
+    attachmentsOffset = 0,
+    linksOffset = 0,
+  ) {
+    for (const [name, value] of [
+      ["offset", offset],
+      ["attachmentsOffset", attachmentsOffset],
+      ["linksOffset", linksOffset],
+    ] as const)
+      if (!Number.isInteger(value) || value < 0)
+        throw new ToolValidationError(`${name} must be a whole number`);
     const m = await this.message(token, id);
     const headers = fullHeaders(m.payload?.headers);
-    const result: Record<string, unknown> &
-      TextWindow &
-      Attachments & { links?: Link[]; linksOmitted?: number } = {
+    const result: Record<string, unknown> & TextWindow & Attachments & Links = {
       warning: UNTRUSTED,
       id: m.id,
       threadId: m.threadId,
       headers,
       ...bodyWindow(m, offset, MESSAGE_CHARS),
-      ...attachmentFields(m.payload),
-      ...(links ? linkFields(m.payload) : {}),
+      ...attachmentFields(m.payload, NAME_BOUND, attachmentsOffset),
+      ...(links ? linkFields(m.payload, linksOffset) : {}),
     };
-    // Headers, then the body (the rest follows with offset), then links, then attachments.
+    // Links and attachments page first (keeping one of each, so paging always advances),
+    // then sender-written headers are levelled, then the body is shortened (the rest
+    // follows with offset), and only then do the lists give way entirely. Every list
+    // entry moved out of this result is reachable with linksOffset or attachmentsOffset.
+    pageLinks(result, 1);
+    stripAttachments(result, [result], 1);
+    pageAttachments(result, [result], 1);
     fitHeaders(result, headers);
     fitText(result, [result]);
-    fitLinks(result);
-    fitAttachments(result, [result]);
-    if (result.truncated)
-      result.note = `Text continues: call gmail_read with this messageId and offset ${result.nextOffset} for the rest.`;
+    pageLinks(result);
+    stripAttachments(result, [result]);
+    pageAttachments(result, [result]);
+    const notes = [
+      result.truncated
+        ? `Text continues: call gmail_read with this messageId and offset ${result.nextOffset} for the rest.`
+        : "",
+      result.nextLinksOffset !== undefined
+        ? `More link targets: call gmail_read with this messageId, links: true and linksOffset ${result.nextLinksOffset}.`
+        : "",
+      result.nextAttachmentsOffset !== undefined ||
+      result.attachments?.some((a) => a.name === undefined)
+        ? "More attachment details: call gmail_read with this messageId and attachmentsOffset at the first entry that has only a partId, or at nextAttachmentsOffset."
+        : "",
+    ].filter(Boolean);
+    if (notes.length) result.note = notes.join(" ");
     return result;
   }
   /**
@@ -1439,18 +1556,18 @@ export class GmailTools {
               threadId: m.threadId,
               headers: kept(m.payload?.headers),
               ...bodyWindow(m, 0, sizes[i]!, bodies[i]),
-              ...attachmentFields(m.payload),
+              ...attachmentFields(m.payload, ATTACHMENT_NAME),
             },
       );
-    const result = fitText(
-      {
-        warning: UNTRUSTED,
-        note: "Messages in request order. For one marked truncated, gmail_read with its messageId and nextOffset returns the rest. fromHtml means the text was converted from the HTML part. Headers are shortened here; gmail_read with one messageId returns them in full. attachments lists a message's files; gmail_attachment with its messageId and a partId reads one as text.",
-        messages,
-      },
+    const result = {
+      warning: UNTRUSTED,
+      note: "Messages in request order. For one marked truncated, gmail_read with its messageId and nextOffset returns the rest. fromHtml means the text was converted from the HTML part. Headers are shortened here; gmail_read with one messageId returns them in full. attachments lists every file of a message by partId, with its name (shortened here), type and size; gmail_attachment with the message id and a partId reads one as text. An entry with only a partId, or a message with nextAttachmentsOffset, has the rest in gmail_read with that messageId and attachmentsOffset.",
       messages,
-    );
-    fitAttachments(result, messages);
+    };
+    // Attachment details, then texts, then later attachment entries, each fetchable again.
+    stripAttachments(result, messages);
+    fitText(result, messages);
+    pageAttachments(result, messages);
     return result;
   }
   private selectAccount(account: string) {
@@ -1606,16 +1723,16 @@ export class GmailTools {
       throw new ToolValidationError(
         `This message has no attachment with partId ${partId}; gmail_read lists a message's attachments with their partId.`,
       );
-    const { name, mimeType } = attachmentOf(found);
+    const { name, nameTruncated, mimeType } = attachmentOf(found);
     const listed = found.part.body?.size ?? 0;
     if (listed > ATTACHMENT_MAX)
       throw new ToolValidationError(
         "This attachment is larger than 20 MB, so it is not read",
       );
-    const kind = readableKind(mimeType, found.part.filename ?? "");
+    const kind = readableKind(mimeType!, found.part.filename ?? "");
     if (!kind)
       throw new ToolValidationError(
-        `This attachment's type is ${MIME_TOKEN.test(mimeType) ? mimeType : "not one Gmail names clearly"}, which has no text to read here. gmail_attachment reads PDF, plain-text, CSV, calendar and HTML attachments.`,
+        `This attachment's type is ${MIME_TOKEN.test(mimeType!) ? mimeType : "not one Gmail names clearly"}, which has no text to read here. gmail_attachment reads PDF, plain-text, CSV, calendar and HTML attachments.`,
       );
     const data = await this.partBytes(token, id, found.part.body!, listed);
     const notes: string[] = [];
@@ -1666,6 +1783,7 @@ export class GmailTools {
       messageId: id,
       partId,
       name,
+      ...(nameTruncated ? { nameTruncated } : {}),
       mimeType,
       bytes: data.length,
       folder: folder(m.labelIds),
@@ -1733,15 +1851,22 @@ export class GmailTools {
       if (!ids.every((id) => ID.test(id)))
         throw new Error("Invalid Gmail message id");
     }
-    if (options.links && (operation !== "gmail_read" || ids))
+    if (
+      (options.links ||
+        options.linksOffset !== undefined ||
+        options.attachmentsOffset !== undefined) &&
+      (operation !== "gmail_read" || ids)
+    )
       throw new ToolValidationError(
-        "links works with gmail_read and a single messageId",
+        "links, linksOffset and attachmentsOffset work with gmail_read and a single messageId",
       );
+    if (options.linksOffset !== undefined && !options.links)
+      throw new ToolValidationError("linksOffset needs links: true");
     if (operation === "gmail_attachment") {
       if (!ID.test(value)) throw new Error("Invalid Gmail message id");
-      if (!options.partId || !PART_ID.test(options.partId))
+      if (options.partId === undefined || !PART_ID.test(options.partId))
         throw new ToolValidationError(
-          "partId must be a part number as gmail_read lists it, such as 1 or 0.2",
+          'partId must be a part ID as gmail_read lists it, such as "1", "0.2" or "" for the top-level part',
         );
     }
     const selected = account?.toLowerCase() ?? "primary";
@@ -1796,7 +1921,14 @@ export class GmailTools {
         ? await this.thread(token, value)
         : operation === "gmail_attachment"
           ? await this.attachment(token, value, options.partId!, options.offset)
-          : await this.read(token, value, options.offset, options.links);
+          : await this.read(
+              token,
+              value,
+              options.offset,
+              options.links,
+              options.attachmentsOffset,
+              options.linksOffset,
+            );
     return { ...result, ...identity };
   }
 

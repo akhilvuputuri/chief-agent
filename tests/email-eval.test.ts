@@ -938,12 +938,24 @@ test("pageSize, messageIds and offset reach GmailTools as src/tools.ts passes th
     [
       "gmail_read",
       "",
-      { offset: undefined, messageIds: ["a1", "a2"], links: undefined },
+      {
+        offset: undefined,
+        messageIds: ["a1", "a2"],
+        links: undefined,
+        linksOffset: undefined,
+        attachmentsOffset: undefined,
+      },
     ],
     [
       "gmail_read",
       "a1",
-      { offset: 20000, messageIds: undefined, links: undefined },
+      {
+        offset: 20000,
+        messageIds: undefined,
+        links: undefined,
+        linksOffset: undefined,
+        attachmentsOffset: undefined,
+      },
     ],
     ["gmail_thread", "ba1", {}],
   ]);
@@ -990,10 +1002,17 @@ test("a coordinator turn can read an attachment and link targets; neither scores
     [
       "gmail_read",
       "a1",
-      { offset: undefined, messageIds: undefined, links: true },
+      {
+        offset: undefined,
+        messageIds: undefined,
+        links: true,
+        linksOffset: undefined,
+        attachmentsOffset: undefined,
+      },
     ],
   ]);
   assert.equal(score.readable, 0);
+  // Both calls count in gmailCalls, the attachment read included.
   assert.equal(score.gmailCalls, 2);
 });
 

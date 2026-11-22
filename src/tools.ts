@@ -426,7 +426,13 @@ export class JobTools {
         a.operation === "gmail_search"
           ? { pageSize: a.pageSize }
           : a.operation === "gmail_read"
-            ? { offset: a.offset, messageIds: a.messageIds, links: a.links }
+            ? {
+                offset: a.offset,
+                messageIds: a.messageIds,
+                links: a.links,
+                linksOffset: a.linksOffset,
+                attachmentsOffset: a.attachmentsOffset,
+              }
             : a.operation === "gmail_attachment"
               ? { partId: a.partId, offset: a.offset }
               : {},

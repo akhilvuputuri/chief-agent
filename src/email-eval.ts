@@ -654,6 +654,8 @@ export async function runTask(
                       offset: a.offset,
                       messageIds: a.messageIds,
                       links: a.links,
+                      linksOffset: a.linksOffset,
+                      attachmentsOffset: a.attachmentsOffset,
                     }
                   : a.operation === "gmail_attachment"
                     ? { partId: a.partId, offset: a.offset }

@@ -582,14 +582,19 @@ export const action = z.discriminatedUnion("operation", [
         .string()
         .regex(/^[a-f0-9]{1,64}$/i)
         .optional(),
+      // Bounded by the longest text a read can return (BODY_MAX in src/gmail.ts).
       offset: z.number().int().min(0).max(2_000_000).optional(),
       messageIds: z
         .array(z.string().regex(/^[a-f0-9]{1,64}$/i))
         .min(1)
         .max(25)
         .optional(),
-      // With a single messageId only; the Gmail adapter rejects it with messageIds.
+      // With a single messageId only; the Gmail adapter rejects them with messageIds.
       links: z.boolean().optional(),
+      // Positions in the link and attachment lists; neither list can be longer than the
+      // response it comes from (2 MB), so that bounds them.
+      linksOffset: z.number().int().min(0).max(2_000_000).optional(),
+      attachmentsOffset: z.number().int().min(0).max(2_000_000).optional(),
     })
     .strict(),
   z
@@ -597,9 +602,11 @@ export const action = z.discriminatedUnion("operation", [
       operation: z.literal("gmail_attachment"),
       account: z.string().min(1).max(254).optional(),
       messageId: z.string().regex(/^[a-f0-9]{1,64}$/i),
-      // A part number as gmail_read lists it (PART_ID in src/gmail.ts).
-      partId: z.string().regex(/^\d{1,3}(?:\.\d{1,3}){0,16}$/),
-      // A text file can be as long as its 20 MB.
+      // A part ID as Gmail gives it and gmail_read lists it, "" for the top-level part
+      // (PART_ID in src/gmail.ts).
+      partId: z.string().regex(/^(?:\d{1,5}(?:\.\d{1,5}){0,15})?$/),
+      // Bounded, as gmail_read's offset is, by the longest text the tool can return: a
+      // 20 MB text file (ATTACHMENT_MAX in src/gmail.ts) decodes to at most that many.
       offset: z
         .number()
         .int()
