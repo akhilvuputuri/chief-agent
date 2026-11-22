@@ -3,6 +3,8 @@
 Work date: 22 November 2026. Written: 22 November 2026.
 Status: tested locally; not yet released. Tests only.
 
+> **Update, 22 November 2026:** live in `2abfda6`; see Release closure below.
+
 ## User-visible problem and preceding iteration
 
 [Journal 158](158-reused-test-databases.md) made a closed test database reusable: its reset deletes the rows, vacuums the emptied tables and hands the database to the next caller. `tests/test-db-pool.test.ts` holds it to behaving as a fresh database does, including the order an unordered `SELECT` returns.
@@ -54,11 +56,13 @@ Reuse changed behaviour: the reset left planner statistics that a fresh database
 - **Why PGlite misses its own catalog changes** was observed, not traced into PGlite.
 - **System catalogs.** A test that runs `ANALYZE` or `VACUUM` on one of Postgres's own tables changes sizes the restore does not cover and adds no `pg_statistic` row, so the database is reused with them (review finding, below). No test does.
 
-**Review (Claude Opus 5.5), `3fd736b6`: approved, three low findings.** The reviewer reproduced the chain on a bare PGlite with its own scripts, confirmed that both new tests fail against the earlier helper, and found no difference in `pg_class` sizes after a large fill with toasted values, with a partial schema up to the pgvector migration, or over 1,500 reuses.
+**Review (Claude Opus 5.5), `3fd736b6`: approved, three low findings.** The reviewer reproduced the chain on a bare PGlite with its own scripts, confirmed that both new tests fail against the earlier helper, and found no difference in the planner's sizes after a large fill with toasted values or with a partial schema up to the pgvector migration; over 1,500 reuses it measured that `pg_class` itself stayed at 28 pages. (Corrected 22 November: as first written this said the sizes were compared over the 1,500 reuses too, which the reviewer had not done.)
 
 - **System catalogs.** `ANALYZE pg_class` left `pg_class.reltuples` at 976 against 415 in the next lease, undetected. Recorded above as a known limit.
 - **"Forbids sequential scans" overstated it.** The setting makes such a scan very expensive, not impossible. The wording here and in the helper's comment is corrected.
 - **The new test's size comparison partly repeats the restore.** An index's `relpages` matches a fresh database's because the restore wrote it; the file is larger. The plan and row-order assertions in the same test do not depend on the restore.
+
+**Review closure:** the same reviewer approved `4ce7fe6c`, which changed only that wording and added this record.
 
 ## Verification and outcome
 
@@ -70,6 +74,12 @@ Reuse changed behaviour: the reset left planner statistics that a fresh database
 **Measured, same Mac:** one lease, two inserts and a close took a median of 9.5 ms before and 10.3 ms after, over ten samples of 200 each way, so the restore adds about 1 ms a reuse against about 156 ms to restore a snapshot. `pg_class` stayed at 28 pages over 3,000 reuses.
 
 **Not measured:** a full run's time, a coding box, and more than one Mac.
+
+### Release closure — 22 November 2026
+
+- **Merged:** [PR 523](https://github.com/akhilvuputuri/chief-agent/pull/523), approved head `4ce7fe6c`, as `2abfda6d`. Hosted CI and Devin Review passed on that head.
+- **Deployed:** tests only, so nothing in the running application changed. Main's checks (run 45002622350) and release run 45002901284 succeeded, and `release:status` reports `2abfda6d` deployed with startup health passed at 16:28 SGT.
+- **Seen in passing, not part of this change:** in the one full run on unchanged main, `tests/coding-one-session.test.ts` also failed once in the shared process (`Indexed file is not exact UTF-8`) and passed alone. It did not recur in the full check of this change. Not investigated.
 
 ## Follow-up and next iteration
 
