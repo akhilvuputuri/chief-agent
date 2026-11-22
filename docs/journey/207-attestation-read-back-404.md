@@ -89,6 +89,8 @@ In the failing case the step after the attestation was skipped. In the passing c
 - **Release** (run 45027391952): succeeded, including its attestation check. `kite run release:status` reports `7edaa607` deployed with startup health passed at release time.
 - **Still not seen:** a first attempt failing and a later one succeeding.
 
+> **Update, 22 November 2026: the retry was needed on the next main build, and worked (measured).** `checks` run 45027700119 for `1c71e667` (PR 531, the docs change above), first attempt of the run: the first attestation attempt failed at 13:29:28 UTC with the same `error fetching tlog entry - (404) Not Found`; the wait printed its warning; the second attempt created and uploaded the attestation by 13:30:04; the third was skipped and the job passed. Release run 45028072607 then verified that attestation and deployed `1c71e667`, with startup health passed, and nobody reran anything. That is one recovery, on the second attempt after 20 seconds. It is also the third such failure on 22 November, in 13 main builds that day, against none in the 89 main builds from 2 to 21 November counted above.
+
 ## Follow-up and next iteration
 
 - Look for the warning annotation on `publish gateway image` runs to count how often a retry was needed and whether the second attempt was enough.

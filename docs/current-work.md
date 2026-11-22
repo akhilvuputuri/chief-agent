@@ -6,6 +6,8 @@ Next: independent review and release; then watch for the retry warning on main's
 
 > **Update, 22 November 2026:** live. PR 530 merged as `7edaa607`; main's image job passed on its first attestation attempt and release run 45027391952 succeeded. The retry itself has not yet been needed.
 
+> **Update, 22 November 2026:** the retry was needed on the next main build (`1c71e667`, run 45027700119): the first attempt failed with the same 404, the second succeeded, and release run 45028072607 deployed without a rerun. Three such failures in 13 main builds on 22 November; worth watching whether the log settles.
+
 # Email tools: attachments, file space, browser and `file_merge` — live in `6fbf927`, 22 November 2026
 
 PR 526 (`76eb6c4`, attachments, link targets and routing wording), PR 527 (`cd051c5`, file space and file tools) and PR 528 (`6fbf927`, `browser` and `file_merge`) are released, and the browser sidecar was refreshed on the host. Measured read-only on the production mailbox: twelve HTML receipts opened as one document and printed to one 24-page PDF (13.2 s to open, 2.9 s to print), with every receipt's text present ([journal 204](journey/204-email-search-redesign.md#release-closure--attachments-file-tools-and-browser--2026-11-22), [email search](email-search.md#what-shipped-on-22-november-2026)).
