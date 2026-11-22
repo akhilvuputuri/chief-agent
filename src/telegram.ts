@@ -837,6 +837,44 @@ export function telegram(
       }
       return;
     }
+    if (/^\/google$/i.test(command ?? "")) {
+      await ensureUser(db, user);
+      const claimed = await db.query(
+        "INSERT INTO inbound_updates(update_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING update_id",
+        [ctx.update.update_id, user],
+      );
+      if (!claimed.rows.length) return;
+      try {
+        const google = assistant.tools.google;
+        if (!google) {
+          await ctx.reply(
+            "Google sign-in from chat is not set up on this server yet.",
+          );
+        } else {
+          // Host-built links: the sign-in state never passes through the model.
+          const result = await google.command(user);
+          await ctx.reply(result.text, {
+            link_preview_options: { is_disabled: true },
+            reply_markup: {
+              inline_keyboard: result.buttons.map((b) => [b]),
+            },
+          });
+        }
+        await db.query(
+          "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+      } catch {
+        await db.query(
+          "UPDATE inbound_updates SET status='failed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+        await ctx.reply(
+          "Could not show the Google connections. Send /google to try again.",
+        );
+      }
+      return;
+    }
     if (command === "/canvases" || command === "/app") {
       await ensureUser(db, user);
       const claimed = await db.query(

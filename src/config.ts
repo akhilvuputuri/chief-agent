@@ -144,6 +144,11 @@ const schema = z.object({
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
   GOOGLE_REFRESH_TOKEN: z.string().default(""),
+  // Google sign-in from the Telegram chat (docs/google-integrations.md): a "Web application"
+  // OAuth client in the same Google Cloud project. Off unless both are set; needs migration 037
+  // and MINIAPP_ORIGIN (the callback is served on that origin).
+  GOOGLE_OAUTH_CLIENT_ID: z.string().default(""),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.string().default(""),
   DATABASE_URL: z.string().url(),
   TELEGRAM_BOT_TOKEN: z.string().min(10),
   TELEGRAM_ALLOWED_USER_IDS: z.string().regex(/^\d+(,\d+)*$/),

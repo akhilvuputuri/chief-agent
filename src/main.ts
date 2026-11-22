@@ -84,6 +84,11 @@ import { CalendarTools } from "./calendar.js";
 import { DailySheet } from "./daily-sheet.js";
 import { SheetsTools } from "./sheets.js";
 import { GmailTools } from "./gmail.js";
+import {
+  GOOGLE_CALLBACK_PATH,
+  GoogleConnect,
+  googleRoutes,
+} from "./google-connect.js";
 import { MailIndex, OpenRouterEmbedder } from "./mail-recall.js";
 import { MailIndexStore } from "./mail-index-store.js";
 import { buildBriefing } from "./daily-briefing.js";
@@ -284,15 +289,56 @@ if (libraryReady) {
   )
     opsLog("library.disabled_with_identity_present", "warn");
 }
+// Google sign-in from the chat (docs/google-integrations.md): off unless the web client is set.
+let googleConnect: GoogleConnect | undefined;
+if (c.GOOGLE_OAUTH_CLIENT_ID && c.GOOGLE_OAUTH_CLIENT_SECRET) {
+  if (
+    !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=37")).rows
+      .length
+  )
+    throw startupError(
+      "STARTUP_MIGRATION_037",
+      "Google connections migration 037 must be installed before setting the Google web client",
+    );
+  if (!c.MINIAPP_ORIGIN)
+    throw startupError(
+      "STARTUP_GOOGLE_CONFIG",
+      "The Google web client requires MINIAPP_ORIGIN",
+    );
+  googleConnect = new GoogleConnect(
+    db,
+    c.GMAIL_OWNER_USER_ID || c.TELEGRAM_ALLOWED_USER_IDS.split(",")[0]!,
+    { id: c.GOOGLE_OAUTH_CLIENT_ID, secret: c.GOOGLE_OAUTH_CLIENT_SECRET },
+    c.MINIAPP_ORIGIN + GOOGLE_CALLBACK_PATH,
+    {
+      gmail: {
+        email: c.GMAIL_EMAIL || undefined,
+        envToken: !!c.GOOGLE_REFRESH_TOKEN,
+      },
+      gmail_secondary: {
+        email: c.GMAIL_SECONDARY_EMAIL || undefined,
+        envToken: !!c.GMAIL_SECONDARY_REFRESH_TOKEN,
+      },
+      // CalendarTools checks the calendar token against GMAIL_EMAIL.
+      calendar: {
+        email: c.GMAIL_EMAIL || undefined,
+        envToken: !!c.CALENDAR_REFRESH_TOKEN,
+      },
+      sheets: { envToken: !!c.SHEETS_REFRESH_TOKEN },
+    },
+  );
+}
 const google = {
   owner: c.GMAIL_OWNER_USER_ID,
   email: c.GMAIL_EMAIL,
   clientId: c.GOOGLE_CLIENT_ID,
   clientSecret: c.GOOGLE_CLIENT_SECRET,
   refreshToken: c.GOOGLE_REFRESH_TOKEN,
+  connections: googleConnect,
 };
 const gmail = new GmailTools({
   ...google,
+  account: "gmail",
   ...(c.GMAIL_SECONDARY_EMAIL || c.GMAIL_SECONDARY_REFRESH_TOKEN
     ? {
         secondary: {
@@ -322,11 +368,13 @@ const mailIndex =
 const calendar = new CalendarTools({
   ...google,
   refreshToken: c.CALENDAR_REFRESH_TOKEN,
+  account: "calendar",
 });
 const mirror = new DailySheet(db, {
   ...google,
   owner: c.SHEETS_OWNER_USER_ID,
   refreshToken: c.SHEETS_REFRESH_TOKEN,
+  account: "sheets",
   spreadsheetId: c.DAILY_SPREADSHEET_ID,
 });
 const shutdown = new AbortController();
@@ -858,15 +906,23 @@ const availability: Record<string, boolean> = {
   mcp: !!mcp?.configured,
   canvases: !!c.MINIAPP_ORIGIN,
   web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),
-  gmail: !!c.GOOGLE_REFRESH_TOKEN,
+  // With Google sign-in from chat, a tool without a connection says so and the owner is offered a button.
+  gmail: !!(c.GOOGLE_REFRESH_TOKEN || googleConnect),
   mailIndex: !!mailIndex,
-  calendar: !!c.CALENDAR_REFRESH_TOKEN,
+  calendar: !!(c.CALENDAR_REFRESH_TOKEN || googleConnect),
+  googleConnect: !!googleConnect,
   subscriptions: true,
   parcels: true,
   library: true,
   libraryAccount: !!libraryIdentity,
-  preparationSheet: !!(c.SHEETS_REFRESH_TOKEN && c.SHEETS_SPREADSHEET_ID),
-  dailySheet: !!(c.SHEETS_REFRESH_TOKEN && c.DAILY_SPREADSHEET_ID),
+  preparationSheet: !!(
+    (c.SHEETS_REFRESH_TOKEN || googleConnect) &&
+    c.SHEETS_SPREADSHEET_ID
+  ),
+  dailySheet: !!(
+    (c.SHEETS_REFRESH_TOKEN || googleConnect) &&
+    c.DAILY_SPREADSHEET_ID
+  ),
   stocks: !!stockProvider,
   news: true,
   singapore: true,
@@ -899,6 +955,7 @@ const assistant = new Assistant(
       clientSecret: c.GOOGLE_CLIENT_SECRET,
       refreshToken: c.SHEETS_REFRESH_TOKEN,
       spreadsheetId: c.SHEETS_SPREADSHEET_ID,
+      connections: googleConnect,
     }),
     daily,
     new CalendarActions(db, calendar, c.GMAIL_OWNER_USER_ID),
@@ -921,6 +978,7 @@ const assistant = new Assistant(
     media,
     undefined,
     browserTool,
+    googleConnect,
   ),
   availability,
   {
@@ -985,6 +1043,15 @@ if (portfolio) {
     });
   };
   ibkrRoutes(app, portfolio, (user, text) => notifyUser(user, text));
+}
+if (googleConnect) {
+  googleConnect.send = async (user, text, button) => {
+    await bot.api.sendMessage(user, text, {
+      link_preview_options: { is_disabled: true },
+      ...(button ? { reply_markup: { inline_keyboard: [[button]] } } : {}),
+    });
+  };
+  googleRoutes(app, googleConnect);
 }
 // Scheduled output goes to its own topic when threaded mode is on; otherwise to General.
 const topics = bot.topics;

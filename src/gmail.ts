@@ -8,10 +8,8 @@ import { cleanText, decodeEntities } from "./news-feed.js";
 import { discardBody, readBody } from "./http-body.js";
 import { projectionLimits } from "./observations.js";
 import { extractPdfText, hasText } from "./attachments.js";
-const tokenSchema = z.object({
-  access_token: z.string().min(1),
-  expires_in: z.number().positive(),
-});
+import { googleGrant } from "./calendar.js";
+import type { GoogleAccount, GoogleConnections } from "./google-connect.js";
 const part: z.ZodType<Part> = z.lazy(() =>
   z.object({
     partId: z.string().optional(),
@@ -971,6 +969,9 @@ export class GmailTools {
       clientSecret: string;
       refreshToken: string;
       secondary?: { email: string; refreshToken: string };
+      /** Chat-made connections (src/google-connect.ts); absent when that feature is off. */
+      connections?: GoogleConnections;
+      account?: GoogleAccount;
     },
     private request: typeof fetch = fetch,
     private now: () => number = Date.now,
@@ -980,12 +981,18 @@ export class GmailTools {
     if (config.secondary) {
       if (
         !config.secondary.email ||
-        !config.secondary.refreshToken ||
+        // A chat-made connection can supply the token instead of .env.
+        (!config.secondary.refreshToken && !config.connections) ||
         config.secondary.email.toLowerCase() === config.email.toLowerCase()
       )
         throw new Error("Invalid secondary Gmail configuration");
       this.secondary = new GmailTools(
-        { ...config, ...config.secondary, secondary: undefined },
+        {
+          ...config,
+          ...config.secondary,
+          secondary: undefined,
+          account: "gmail_secondary",
+        },
         request,
         now,
         sleep,
@@ -1010,23 +1017,16 @@ export class GmailTools {
     const c = this.config;
     if (!c.owner || user !== c.owner)
       throw new Error("Gmail is not connected for this user");
-    if (!c.email || !c.clientId || !c.clientSecret || !c.refreshToken)
+    if (
+      !c.email ||
+      ((!c.clientId || !c.clientSecret || !c.refreshToken) && !c.connections)
+    )
       throw new Error("Gmail is not configured");
     if (this.now() < this.expires) return this.token;
-    const t = tokenSchema.parse(
-      await json(
-        await this.request("https://oauth2.googleapis.com/token", {
-          method: "POST",
-          body: new URLSearchParams({
-            client_id: c.clientId,
-            client_secret: c.clientSecret,
-            refresh_token: c.refreshToken,
-            grant_type: "refresh_token",
-          }),
-          signal: AbortSignal.timeout(15000),
-          redirect: "error",
-        }),
-      ),
+    // The stored chat connection when there is one, else the .env token.
+    const t = await googleGrant(
+      { ...c, account: c.account ?? "gmail" },
+      this.request,
     );
     // Verify the connected mailbox every time credentials are refreshed.
     const profile = z.object({ emailAddress: z.string() }).parse(
@@ -1034,19 +1034,19 @@ export class GmailTools {
         await this.request(
           "https://gmail.googleapis.com/gmail/v1/users/me/profile",
           {
-            headers: { Authorization: `Bearer ${t.access_token}` },
+            headers: { Authorization: `Bearer ${t.access}` },
             signal: AbortSignal.timeout(15000),
             redirect: "error",
           },
         ),
       ),
     );
-    if (profile.emailAddress.toLowerCase() !== c.email.toLowerCase())
+    if (profile.emailAddress.toLowerCase() !== t.email.toLowerCase())
       throw new Error(
         "Connected Gmail account does not match configured account",
       );
-    this.token = t.access_token;
-    this.expires = this.now() + Math.max(0, t.expires_in - 60) * 1000;
+    this.token = t.access;
+    this.expires = this.now() + Math.max(0, t.expiresIn - 60) * 1000;
     return this.token;
   }
   /** A row seen within ROW_CACHE_MS, as a copy carrying the hit's own identifiers. */

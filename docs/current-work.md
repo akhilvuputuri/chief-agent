@@ -1,3 +1,9 @@
+# Google connect from chat — tested, not yet released, 22 November 2026
+
+Branch `feat/google-connect`. `/google` in Telegram, or asking Chief, sends a host-built button that opens Google's account picker in the phone's browser; the callback stores the sealed refresh token and Chief confirms. Gmail, Calendar and Sheets prefer a stored connection over the `.env` token, and a broken grant sends the owner one reconnect button ([journal 208](journey/208-google-connect-from-chat.md), [design](google-integrations.md#connecting-from-the-chat-22-november-2026)).
+
+Next: independent review; set `BASE` in `scripts/deploy-google-connect.py` to the live release and merge; run the rollout on the host; the owner creates a "Web application" OAuth client with redirect `https://<public host>/oauth/google/callback` and sets `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`; then a first real connection.
+
 # Image job retries a failed attestation — tested, not yet released, 22 November 2026
 
 Branch `ci/attest-retry`. The `publish gateway image` job gives its provenance attestation up to three attempts, after two main merges on 22 November passed their tests and were not released: the transparency log answered 404 for an entry it had just accepted. The job still fails when every attempt fails, and the release's attestation check is unchanged. See [journal 207](journey/207-attestation-read-back-404.md).

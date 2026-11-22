@@ -23,6 +23,11 @@ companion.52-77-47-24.sslip.io {
   handle @ibkr {
     reverse_proxy 127.0.0.1:3000
   }
+  # Google sign-in from the chat (docs/google-integrations.md); the gateway validates single-use state.
+  @google path /oauth/google/callback
+  handle @google {
+    reverse_proxy 127.0.0.1:3000
+  }
   handle / {
     redir * /miniapp/ 302
   }

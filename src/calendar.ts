@@ -5,6 +5,11 @@ import {
   validateDraft,
 } from "./calendar-draft.js";
 import { boundedBytes } from "./providers.js";
+import {
+  GOOGLE_ACCOUNTS,
+  type GoogleAccount,
+  type GoogleConnections,
+} from "./google-connect.js";
 import { z } from "zod";
 const localDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
 const calendarTime = z
@@ -137,6 +142,8 @@ export class GoogleAuthError extends Error {
   constructor(
     readonly kind: "authorization" | "configuration",
     message: string,
+    /** The owner was already sent a reconnect button (src/google-connect.ts). */
+    readonly reconnectSent = false,
   ) {
     super(message);
   }
@@ -177,12 +184,25 @@ export type GoogleConfig = {
   clientId: string;
   clientSecret: string;
   refreshToken: string;
+  /** Which connection this is, and the chat-made connections (absent when that feature is off). */
+  account?: GoogleAccount;
+  connections?: GoogleConnections;
 };
-export async function googleToken(
+/**
+ * An access token from the stored connection's refresh token when there is one (refreshed with
+ * the web client), else from the .env token and its client, exactly as before. `email` is the
+ * address the token must belong to.
+ */
+export async function googleGrant(
   c: GoogleConfig,
   request: typeof fetch = fetch,
-) {
-  if (!c.refreshToken)
+): Promise<{ access: string; expiresIn: number; email: string }> {
+  const connected = c.account && c.connections ? c : undefined;
+  const stored = connected
+    ? await connected.connections!.credential(connected.account!)
+    : undefined;
+  const source = stored ?? c;
+  if (!source.refreshToken)
     throw new GoogleAuthError(
       "configuration",
       "Google connection is not configured",
@@ -190,9 +210,9 @@ export async function googleToken(
   const r = await request("https://oauth2.googleapis.com/token", {
     method: "POST",
     body: new URLSearchParams({
-      client_id: c.clientId,
-      client_secret: c.clientSecret,
-      refresh_token: c.refreshToken,
+      client_id: source.clientId,
+      client_secret: source.clientSecret,
+      refresh_token: source.refreshToken,
       grant_type: "refresh_token",
     }),
     redirect: "error",
@@ -201,6 +221,22 @@ export async function googleToken(
   if (r.status === 400 || r.status === 401) {
     // Only invalid_grant (expired/revoked refresh token) is fixed by reconnecting; other codes are client settings.
     const code = await oauthErrorCode(r);
+    if (code === "invalid_grant" && connected) {
+      const label = GOOGLE_ACCOUNTS[connected.account!].label;
+      try {
+        await connected.connections!.broken(connected.account!);
+      } catch {
+        throw new GoogleAuthError(
+          "authorization",
+          `Google authorization for ${label} expired or was revoked (invalid_grant); the owner can send /google to reconnect`,
+        );
+      }
+      throw new GoogleAuthError(
+        "authorization",
+        `Google authorization for ${label} expired or was revoked (invalid_grant). A reconnect button was sent to the owner in Telegram.`,
+        true,
+      );
+    }
     throw code === "invalid_grant"
       ? new GoogleAuthError(
           "authorization",
@@ -214,7 +250,19 @@ export async function googleToken(
   const t = await googleJson(r);
   if (typeof t.access_token !== "string")
     throw new Error("Invalid access token");
-  return t.access_token as string;
+  if (connected && !stored)
+    await connected.connections!.working(connected.account!);
+  return {
+    access: t.access_token,
+    expiresIn: Number(t.expires_in) > 0 ? Number(t.expires_in) : 3600,
+    email: stored?.email ?? c.email,
+  };
+}
+export async function googleToken(
+  c: GoogleConfig,
+  request: typeof fetch = fetch,
+) {
+  return (await googleGrant(c, request)).access;
 }
 export class CalendarTools {
   constructor(
@@ -224,9 +272,9 @@ export class CalendarTools {
   private async headers(user: string) {
     if (!this.c.owner || user !== this.c.owner)
       throw new Error("Calendar is not connected for this user");
-    const token = await googleToken(this.c, this.request);
+    const grant = await googleGrant(this.c, this.request);
     const headers = {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${grant.access}`,
       "Content-Type": "application/json",
     };
     const response = await this.request(
@@ -239,7 +287,7 @@ export class CalendarTools {
         `Google authorization rejected (${response.status}); reconnect required`,
       );
     const profile = await googleJson(response);
-    if (profile.email?.toLowerCase() !== this.c.email.toLowerCase())
+    if (profile.email?.toLowerCase() !== grant.email.toLowerCase())
       throw new GoogleAuthError("authorization", "Wrong Google account");
     return headers;
   }

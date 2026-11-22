@@ -130,6 +130,7 @@ export function runtimeContext(
     (op.startsWith("watchlist_") && !availability.stocks) ||
     (op.startsWith("stock_") && !availability.stocks) ||
     (op.startsWith("portfolio_") && !availability.portfolio) ||
+    (op === "google_connect" && !availability.googleConnect) ||
     ([
       "portfolio_ibkr_query",
       "portfolio_order_draft",
@@ -330,6 +331,8 @@ export function runtimeContext(
                 "Read the owner's IBKR holdings (read-only): each position's quantity, IBKR mark price, market value, average cost, cost basis and unrealized P&L, per-currency totals, account net liquidation and cash, with asOf, ageMinutes and freshness. Holdings older than 15 minutes are re-synced first; if that fails the last successful snapshot is returned with lastAttempt. Prices are IBKR marks at sync time, not live quotes. Never trading advice; Chief cannot place or change trades.",
               portfolio_connect:
                 "Only when the owner explicitly asks to connect IBKR: queue a Telegram card with an 'Open IBKR (read-only)' button. Nothing is connected until the owner opens it, logs in on IBKR's site and approves read-only access; never say it is connected. Refused while already connected.",
+              google_connect:
+                "Send the owner a Telegram button to connect or reconnect a Google account: gmail (primary mailbox), gmail_secondary, calendar or sheets. Use it when the owner asks to connect or reconnect one, or when a Gmail, Calendar or Sheets tool says that connection is not configured. Nothing is connected until the owner opens the button and finishes on Google's page; never say it is connected. When a tool error says a reconnect button was already sent, do not call this again.",
               portfolio_disconnect:
                 "Only when the owner explicitly asks to stop Chief reading IBKR: queue a Telegram confirmation card. Nothing is disconnected until the owner taps Disconnect; never say it is done.",
               portfolio_status:
