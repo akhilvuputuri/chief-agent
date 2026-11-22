@@ -3209,6 +3209,35 @@ test("300 link targets page to the end with nothing lost or repeated, even besid
   assert.equal(linkTargets(html + html).length, 300);
 });
 
+test("a link reports the href a browser follows, not one inside another attribute", () => {
+  const urls = (html: string) => linkTargets(html).map((l) => l.url);
+  // "href=" inside a quoted title is not the link's target.
+  assert.deepEqual(
+    urls(
+      `<a title="x href='https://decoy.example/'" href="https://real.example/">Pay</a>`,
+    ),
+    ["https://real.example/"],
+  );
+  assert.deepEqual(
+    urls(
+      `<a data-x='href="https://decoy.example/"' href=https://real.example/u>x</a>`,
+    ),
+    ["https://real.example/u"],
+  );
+  // Duplicated attributes: the first wins, as in a browser.
+  assert.deepEqual(
+    urls(
+      `<a href="https://first.example/" href="https://second.example/">x</a>`,
+    ),
+    ["https://first.example/"],
+  );
+  // Unquoted values, mixed case and line breaks inside the tag.
+  assert.deepEqual(
+    urls(`<A\n  class=btn\n  HREF = "https://mixed.example/a"\n>x</A>`),
+    ["https://mixed.example/a"],
+  );
+});
+
 test("link extraction is linear on hostile markup and never fetches", () => {
   const unique = Array.from(
     { length: 60_000 },

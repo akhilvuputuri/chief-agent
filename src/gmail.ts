@@ -443,7 +443,18 @@ function attachmentFields(
   };
 }
 const ANCHOR = /<a\b[^<>]*>|<\/a\s*>/gi;
-const HREF = /[\s"'/]href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>`]+))/i;
+// One attribute of a tag: a name, then optionally "=" and a quoted or unquoted value.
+const ATTRIBUTE =
+  /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>`]+)))?/g;
+/**
+ * An anchor tag's href as a browser reads it: attributes in order, quoted values skipped
+ * whole (so "href=" inside another attribute's value is not one), the first href winning.
+ */
+function hrefOf(tag: string) {
+  for (const m of tag.slice(2).matchAll(ATTRIBUTE))
+    if (m[1]!.toLowerCase() === "href") return m[2] ?? m[3] ?? m[4] ?? "";
+  return undefined;
+}
 type Link = { text: string; url?: string; urlOverBound?: number };
 /** An anchor's target if it is an absolute http, https or mailto URL, as the URL parser normalises it. */
 function linkUrl(raw: string | undefined) {
@@ -499,9 +510,8 @@ export function linkTargets(html: string) {
     // A closing tag or a new anchor ends the open one.
     close(m.index);
     if (m[0][1] !== "/") {
-      const href = HREF.exec(m[0]);
       open = {
-        href: href ? (href[1] ?? href[2] ?? href[3]) : undefined,
+        href: hrefOf(m[0]),
         from: m.index + m[0].length,
       };
     }
