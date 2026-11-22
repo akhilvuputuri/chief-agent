@@ -1,8 +1,14 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { z } from "zod";
-import { publicBrowserCommand } from "./commands.js";
 import {
+  CAPABILITIES,
+  documentCommand,
+  publicBrowserCommand,
+  REQUEST_BYTES,
+} from "./commands.js";
+import {
+  mergePdfs,
   PublicBrowserBusy,
   PublicBrowserCleanupFailure,
   PublicBrowserEngine,
@@ -35,7 +41,7 @@ const app = createServer(async (req, res) => {
   res.setHeader("content-type", "application/json");
   res.setHeader("cache-control", "no-store");
   if (req.url === "/healthz" && req.method === "GET") {
-    res.end('{"ready":true}');
+    res.end(JSON.stringify({ ready: true, capabilities: CAPABILITIES }));
     return;
   }
   if (req.url !== "/rpc" || req.method !== "POST") {
@@ -48,7 +54,8 @@ const app = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
       size += chunk.length;
-      if (size > 64_000) throw new Error("Request too large");
+      // Documents carry an email's HTML with its inline images.
+      if (size > REQUEST_BYTES) throw new Error("Request too large");
       chunks.push(Buffer.from(chunk));
     }
     const body = Buffer.concat(chunks).toString("utf8"),
@@ -75,16 +82,14 @@ const app = createServer(async (req, res) => {
       .object({
         user: z.string().min(1).max(100),
         session: z.string().uuid(),
-        command: publicBrowserCommand,
+        command: z.union([publicBrowserCommand, documentCommand]),
       })
       .strict()
       .parse(JSON.parse(body));
-    const output = await engine.call(
-      input.user,
-      input.session,
-      input.command,
-      signal,
-    );
+    const output =
+      input.command.kind === "merge"
+        ? await mergePdfs(input.command.files)
+        : await engine.call(input.user, input.session, input.command, signal);
     res.end(JSON.stringify({ ok: true, result: output }));
   } catch (error) {
     if (!authorized) {
