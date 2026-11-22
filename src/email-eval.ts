@@ -88,6 +88,8 @@ export const taskSchema = z
             messageId,
             /** The true length of the message's body text, from the task builder. */
             bodyChars: z.number().int().positive().optional(),
+            /** True when the message has no text/plain part, from the task builder. */
+            htmlOnly: z.boolean().optional(),
           })
           .strict(),
       )
@@ -168,8 +170,11 @@ export type TaskRecord = {
   surfacedIdOnly: Set<string>;
   /** Snippets the model saw in search rows, by message. */
   snippets: Map<string, Set<string>>;
-  /** Text the model received for each message from reads that were not excerpts or bodyless. */
-  bodies: Map<string, Set<string>>;
+  /**
+   * Text the model received for each message from reads that were not excerpts or bodyless,
+   * with whether a tool flagged it converted from HTML (fromHtml).
+   */
+  bodies: Map<string, Map<string, boolean>>;
   report?: z.infer<typeof reportSchema>;
   /** Other calls in the step that reported, not dispatched: the model would never see them. */
   skippedWithReport: number;
@@ -223,8 +228,16 @@ function bodiesIn(
   const entries =
     operation === "gmail_thread" ? (projected?.messages ?? []) : [projected];
   for (const m of entries)
-    if (typeof m?.id === "string" && !m.bodyless && typeof m.text === "string")
-      add(r.bodies, key({ account, messageId: m.id }), m.text);
+    if (
+      typeof m?.id === "string" &&
+      !m.bodyless &&
+      typeof m.text === "string"
+    ) {
+      const k = key({ account, messageId: m.id });
+      const texts = r.bodies.get(k) ?? new Map<string, boolean>();
+      texts.set(m.text, texts.get(m.text) || m.fromHtml === true);
+      r.bodies.set(k, texts);
+    }
 }
 
 const ENTITIES: Record<string, string> = {
@@ -251,16 +264,26 @@ export function normalise(text: string) {
 }
 
 /**
- * Whether the model received a message's body as real text. A probable snippet stand-in never
- * counts: text of STAND_IN_CHARS or fewer whose first STAND_IN_PREFIX characters, normalised,
- * match the start of a snippet the model saw for the message in a search row. gmail_read falls
- * back to the snippet without saying so, where gmail_thread flags the message bodyless.
- * - With bodyChars: the distinct texts received for it add up to at least half of
- *   min(bodyChars, BODY_CAP), so a continuation read counts and a repeated read does not.
- * - Without (a heuristic): some text is longer than SNIPPET_CHARS.
+ * Whether the model received a message's body as real text. First, which received texts are
+ * the body (texts flagged bodyless or excerpted were never recorded):
+ * - a text flagged fromHtml counts (a tool converted the body; today's tools never flag it);
+ * - with htmlOnly from the task builder: true means an unflagged text is a snippet stand-in,
+ *   since a plain-text-only tool cannot have returned the body; false means it counts;
+ * - without htmlOnly (a guess): a text counts unless it is a probable snippet stand-in, that is
+ *   STAND_IN_CHARS or fewer whose first STAND_IN_PREFIX characters, normalised, match the start
+ *   of a snippet the model saw for the message in a search row.
+ * Then the length rule over those texts:
+ * - with bodyChars: the distinct texts add up to at least half of min(bodyChars, BODY_CAP), so
+ *   a continuation read counts and a repeated read does not;
+ * - without: some text is longer than SNIPPET_CHARS.
  */
 function readable(
-  m: { account: string; messageId: string; bodyChars?: number },
+  m: {
+    account: string;
+    messageId: string;
+    bodyChars?: number;
+    htmlOnly?: boolean;
+  },
   r: TaskRecord,
 ) {
   const k = key(m);
@@ -276,7 +299,11 @@ function readable(
       return n > 0 && head.slice(0, n) === s.slice(0, n);
     });
   };
-  const texts = [...(r.bodies.get(k) ?? [])].filter((t) => !standIn(t));
+  const texts = [...(r.bodies.get(k) ?? [])]
+    .filter(([text, fromHtml]) =>
+      fromHtml ? true : m.htmlOnly !== undefined ? !m.htmlOnly : !standIn(text),
+    )
+    .map(([text]) => text);
   if (m.bodyChars !== undefined)
     return (
       texts
@@ -538,6 +565,7 @@ export function scoreTask(task: EvalTask, r: TaskRecord) {
     surfacedIdOnly: !r.surfaced.has(key(m)) && r.surfacedIdOnly.has(key(m)),
     readable: readable(m, r),
     scoring: m.bodyChars === undefined ? "heuristic" : "bodyChars",
+    bodyDecidedBy: m.htmlOnly === undefined ? "guess" : "builder",
   }));
   const count = (f: (m: (typeof messages)[number]) => boolean) =>
     messages.filter(f).length;
@@ -554,6 +582,8 @@ export function scoreTask(task: EvalTask, r: TaskRecord) {
     readable: count((m) => m.readable),
     scoredByBodyChars: count((m) => m.scoring === "bodyChars"),
     scoredByHeuristic: count((m) => m.scoring === "heuristic"),
+    bodyByBuilder: count((m) => m.bodyDecidedBy === "builder"),
+    bodyByGuess: count((m) => m.bodyDecidedBy === "guess"),
     extra: [...reported].filter((k) => !expected.has(k)).length,
     ...(task.answerContains
       ? { answerHits, answerChecks: task.answerContains.length }
@@ -605,6 +635,8 @@ export function summarise(scores: TaskScore[], arm: Record<string, unknown>) {
     readable: sum((s) => s.readable),
     scoredByBodyChars: sum((s) => s.scoredByBodyChars),
     scoredByHeuristic: sum((s) => s.scoredByHeuristic),
+    bodyByBuilder: sum((s) => s.bodyByBuilder),
+    bodyByGuess: sum((s) => s.bodyByGuess),
     foundRate: rate(
       sum((s) => s.found),
       expected,

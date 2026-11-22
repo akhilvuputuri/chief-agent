@@ -505,6 +505,87 @@ test("with bodyChars, a message flagged bodyless counts for nothing", async () =
   assert.equal(score.readable, 0);
 });
 
+test("htmlOnly false makes a short plain-text email readable that the guess rejects", async () => {
+  // The reviewer's probe: 321 characters of plain text, searched, then read as a thread.
+  const body =
+    "Your order of the monthly plan has shipped and will arrive soon. "
+      .repeat(5)
+      .slice(0, 321);
+  assert.equal(body.length, 321);
+  const mail = { ab: { body, snippet: body.slice(0, 200) } };
+  const steps = [
+    search("order"),
+    [{ name: "gmail_thread", args: { threadId: "bab" } }],
+    report([ref("ab")]),
+  ];
+  const told = await run(
+    only("ab", { bodyChars: 321, htmlOnly: false }),
+    fakeGmail(mail, ["ab"]),
+    steps,
+  );
+  assert.equal(told.readable, 1);
+  assert.equal(told.bodyByBuilder, 1);
+  // Without htmlOnly the documented guess takes it for its snippet.
+  const guessed = await run(
+    only("ab", { bodyChars: 321 }),
+    fakeGmail(mail, ["ab"]),
+    steps,
+  );
+  assert.equal(guessed.readable, 0);
+  assert.equal(guessed.bodyByGuess, 1);
+});
+
+test("htmlOnly true makes a long snippet from gmail_read unreadable", async () => {
+  // Over 400 characters, the snippet escapes the guess.
+  const snippet = "Thank you for your payment for the monthly plan. ".repeat(
+    10,
+  );
+  assert.ok(snippet.length > 400);
+  const mail = { ac: { html: true, snippet } };
+  const steps = [
+    search("payment"),
+    [{ name: "gmail_read", args: { messageId: "ac" } }],
+    report([ref("ac")]),
+  ];
+  const told = await run(
+    only("ac", { htmlOnly: true }),
+    fakeGmail(mail, ["ac"]),
+    steps,
+  );
+  assert.equal(told.readable, 0);
+  const guessed = await run(only("ac"), fakeGmail(mail, ["ac"]), steps);
+  assert.equal(guessed.readable, 1);
+});
+
+test("a text flagged fromHtml is the body even when htmlOnly is true", async () => {
+  const gmail = stubGmail(() => ({
+    id: "ad",
+    text: "Converted receipt text. ".repeat(20),
+    fromHtml: true,
+    account: "primary",
+  }));
+  const score = await run(
+    only("ad", { htmlOnly: true, bodyChars: 600 }),
+    gmail,
+    [[{ name: "gmail_read", args: { messageId: "ad" } }], report([ref("ad")])],
+  );
+  assert.equal(score.readable, 1);
+});
+
+test("a search row's snippet cut inside an entity still matches its stand-in", async () => {
+  // Gmail's row snippet is cut at 120 characters, here in the middle of "&amp;".
+  const snippet = "a" + "b&amp;".repeat(60);
+  assert.equal(snippet.slice(115, 120), "b&amp");
+  const mail = { ae: { html: true, snippet } };
+  const score = await run(only("ae"), fakeGmail(mail, ["ae"]), [
+    search("receipt"),
+    [{ name: "gmail_read", args: { messageId: "ae" } }],
+    report([ref("ae")]),
+  ]);
+  // Without the strip, the cut "&amp" would not match and the stand-in would count.
+  assert.equal(score.readable, 0);
+});
+
 test("the HTML entities in snippets are decoded before comparison", () => {
   assert.equal(
     normalise("Tom &amp; Jerry&#39;s&nbsp;  &#x2019;plan&quot;  "),

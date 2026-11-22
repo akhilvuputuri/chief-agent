@@ -43,6 +43,8 @@ Independent review: pending.
 
 > **Update, 22 November 2026:** two automated-review findings on `81aa9c57`, both affecting baseline numbers. Gmail calls made in the same step as `eval_report` were scored as surfaced or read although their results never reached the model; a valid report now ends the task before its sibling calls are dispatched, and they are counted as `skippedWithReport`. Under `bodyChars`, Gmail's snippet returned by `gmail_read` for a short HTML-only email could reach half the body length and count as readable, while `gmail_thread` flags the same message `bodyless`; a probable snippet stand-in now counts for nothing in either rule. Tests were added for both and for the prefix de-duplication, `bodyless` under `bodyChars` and a registry-pinned host model (tested).
 
+> **Update, 22 November 2026:** the delta review of `24d67347` requested changes: checking for a snippet stand-in before the length rule made a genuine plain-text email of 400 characters or fewer, found by search and then read, unreadable even when `bodyChars` vouched for it, and a stand-in and a short real email cannot be told apart from the text. A task may now give each message `htmlOnly` from the builder: `true` makes an unflagged text a stand-in, `false` makes it count, and the snippet guess is used only without it; a text a tool flags `fromHtml` (Phase 1) counts. Lines and the summary report `bodyByBuilder` and `bodyByGuess`. Tested, with the reviewer's 321-character probe.
+
 ## Verification and outcome
 
 Tested only. No run against the real mailbox and no paid model call has been made, so there is no baseline. The eval is a simplified loop, not the runtime; its limits are listed in the design doc.

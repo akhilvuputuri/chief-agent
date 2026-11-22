@@ -69,13 +69,18 @@ One JSON object per line on standard input. Synthetic example:
   "request": "Find every monthly receipt from Example Store this year",
   "accounts": ["primary"],
   "expected": [
-    { "account": "primary", "messageId": "18c0ffee0000a001", "bodyChars": 2400 }
+    {
+      "account": "primary",
+      "messageId": "18c0ffee0000a001",
+      "bodyChars": 2400,
+      "htmlOnly": true
+    }
   ],
   "answerContains": ["monthly"]
 }
 ```
 
-`kind` is `collect` (find all of a set) or `lookup` (find one fact). `expected` lists at least one message, each once and in one of the task's `accounts`. `bodyChars`, optional, is the true length of the message's body text as the task builder measured it. A malformed line, a repeated task ID or an empty input refuses the whole run. The error gives the line number, the field path and the issue code only (for example `expected.0.messageId: invalid_string`), never a received value.
+`kind` is `collect` (find all of a set) or `lookup` (find one fact). `expected` lists at least one message, each once and in one of the task's `accounts`. `bodyChars`, optional, is the true length of the message's body text as the task builder measured it; `htmlOnly`, optional, is `true` when the message has no `text/plain` part. A malformed line, a repeated task ID or an empty input refuses the whole run. The error gives the line number, the field path and the issue code only (for example `expected.0.messageId: invalid_string`), never a received value.
 
 ### Scoring
 
@@ -84,17 +89,23 @@ Deterministic; no judge model. Keys are account plus lowercased message ID, and 
 - **found**: expected messages listed in `eval_report.messageIds`.
 - **surfaced**: expected messages that appeared, with their metadata, as a row of any `gmail_search` result the model received (after projection; if projection ever reduces a page to an excerpt, rows are read from the excerpt text).
 - **surfacedIdOnly**: expected messages that appeared only as rows without metadata (rows carrying `detail`, such as one the request budget left unretrieved), counted separately and not as surfaced.
-- **readable**: expected messages whose body the model received as real text. Only text from `gmail_thread` entries and `gmail_read` results for that message ID counts, after projection, not reduced to an excerpt and not flagged `bodyless`. Two rules decide, per message:
-  - In both rules a probable snippet stand-in counts for nothing: text of 400 characters or fewer whose first 100 characters, after decoding the common HTML entities and collapsing whitespace, match the start of a snippet the model saw for that message in a search row. This keeps the two read tools consistent: `gmail_thread` flags a message without a plain-text part `bodyless`, while `gmail_read` returns Gmail's snippet in its place without saying so.
-  - **With `bodyChars`** (measured): the remaining distinct texts the model received for the message add up to at least half of `min(bodyChars, 20000)`. A continuation read adds to the total; a repeated read of the same text does not, and a thread's cut of a body that a later read returned whole counts once.
-  - **Without `bodyChars`** (heuristic): some remaining text is longer than 200 characters. This rule rests on an unverified assumption that Gmail's snippet runs to about 200 characters before entities. It misjudges a genuine plain-text email of 200 characters or fewer (and one of 400 or fewer that starts with its own snippet) as not readable, and misses a stand-in for a message the model read without first seeing it in a search. Give `bodyChars` where it matters.
+- **readable**: expected messages whose body the model received as real text. Only text from `gmail_thread` entries and `gmail_read` results for that message ID is considered, after projection, not reduced to an excerpt. Two steps decide, per message.
+  - **Which received texts are the body**, in this order:
+    - a result flagged `bodyless` never counts;
+    - a text flagged `fromHtml` counts: a tool converted the body from HTML (Phase 1 adds the flag; today's tools never set it);
+    - when the task gives `htmlOnly` (from the builder): with `true`, an unflagged text is Gmail's snippet stand-in and does not count, since a plain-text-only tool cannot have returned that body; with `false`, it counts. The snippet guess below is not used;
+    - only when `htmlOnly` is absent, a guess: a text does not count when it is a probable snippet stand-in, that is, text of 400 characters or fewer whose first 100 characters, after decoding the common HTML entities and collapsing whitespace (and dropping a half entity at the end of the search row's snippet), match the start of a snippet the model saw for that message in a search row. `gmail_thread` flags a message without a plain-text part `bodyless`, while `gmail_read` returns Gmail's snippet in its place without saying so; the guess is what tells them apart without the builder. It rests on an unverified assumption that Gmail's snippet runs to about 200 characters before entities. It cannot tell a stand-in from a genuine plain-text email of 400 characters or fewer that starts with its own snippet, so it counts that email as not readable even with `bodyChars`; and it misses a stand-in longer than 400 characters, or for a message the model read without first seeing it in a search.
+  - **Then the length rule** over the texts that count:
+    - with `bodyChars` (measured): the distinct texts add up to at least half of `min(bodyChars, 20000)`. A continuation read adds to the total; a repeated read of the same text does not, and a thread's cut of a body that a later read returned whole counts once;
+    - without `bodyChars`: some text is longer than 200 characters, so a genuine email of 200 characters or fewer is not readable.
+  - Give both `htmlOnly` and `bodyChars` where they matter: together they decide every case from the builder's facts, and `htmlOnly: false` with `bodyChars` makes a short genuine email readable.
   - Ceiling with today's tools: the observation projection cuts a `gmail_read` text to 8,000 characters, so the model receives at most 8,000 characters of a body, and a message whose `bodyChars` is over 16,000 cannot count as readable until the tools change.
-  - Each task line and the summary report how many expected messages were scored each way (`scoredByBodyChars`, `scoredByHeuristic`).
+  - Each task line and the summary report how many expected messages were scored by each length rule (`scoredByBodyChars`, `scoredByHeuristic`) and by whose signal the body was decided (`bodyByBuilder` with `htmlOnly`, `bodyByGuess` without).
 - **extra**: reported messages that were not expected.
 - **answerHits**: `answerContains` strings found in `eval_report.answer`, case-insensitive.
 - Per task also: searches, Gmail tool calls, tool errors by code, `budgetExhausted` (a call refused by the Gmail request budget, or a search row left unretrieved by it), model calls, input, output and cached tokens, cost when the provider reports it, wall time, and calls skipped beside a report (`skippedWithReport`), and why the task ended: `reported`, `step_limit`, `unreported` (the model answered without a tool call) or `error` (class only, never provider text).
 
-The summary line has aggregates only: tasks, total expected, found, surfaced and readable totals and rates, ID-only surfaced, messages scored by `bodyChars` and by the heuristic, tasks fully found, extras, answer hits, searches per task (median, max), Gmail calls, tool errors by code, budget-exhausted tasks, calls skipped beside a report, endings, model calls, tokens, cost, wall time and the arm: flags, plugin or skill version, a short hash of the instruction text, model ID and route.
+The summary line has aggregates only: tasks, total expected, found, surfaced and readable totals and rates, ID-only surfaced, messages scored by `bodyChars` and by the heuristic, messages whose body was decided by the builder's `htmlOnly` and by the guess, tasks fully found, extras, answer hits, searches per task (median, max), Gmail calls, tool errors by code, budget-exhausted tasks, calls skipped beside a report, endings, model calls, tokens, cost, wall time and the arm: flags, plugin or skill version, a short hash of the instruction text, model ID and route.
 
 ### How to run
 
@@ -118,7 +129,7 @@ It makes paid model calls: up to `--max-steps` model calls per task (10 for the 
 The eval reproduces the tool results an agent receives, not the whole run. Known differences:
 
 - **Message assembly.** A real run's messages come from `context()` in `src/context.ts`: the instructions followed by an "Explicit memories" line and stable configuration in the opening system message, the runtime state as a trailing system message rebuilt on every call (with the Singapore time and a count of omitted or compacted results), and older tool results compacted to source-linked excerpts as the turn grows. The eval sends its fixed opening messages and every tool result in full.
-- **Report contract.** A real run appends `FINDINGS_CONTRACT` to the instructions and ends with `agent_report`, which the host checks. The eval replaces that with a note and `eval_report`, which it checks only against its schema.
+- **Report contract.** A real run appends `FINDINGS_CONTRACT` to the instructions and ends with `agent_report`, which the host checks. The eval replaces that with a note and `eval_report`, which it checks only against its schema. A real agent loop would still dispatch the sibling calls the model makes alongside its final report, and their results go into the run's records; the eval does not dispatch them (`skippedWithReport`), because the model never sees their results.
 - **Tools.** `finish_turn` and `observation_read` are not offered. `gmail_recall` is not offered, although real runs offer it when the mail index is on. Any agent type gets only the four Gmail tools.
 - **Retries and allocations.** A real run retries a transient Gmail read failure; the eval reports it as a tool error. A real run consumes one model call of its allocation per attempt, retries included; the eval's step count ignores retries. There is no time allocation, no tool-call allocation (the email agent's is 24) and no repeated-failure refusal.
 - **Search cache.** A fresh cache per task, against the gateway's shared five-minute cache.
