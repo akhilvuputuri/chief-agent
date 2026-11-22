@@ -15,6 +15,7 @@ import {
   type Embedder,
 } from "../src/mail-recall.js";
 import { action } from "../src/protocol.js";
+import { RateLimitedError } from "../src/tool-errors.js";
 import { runtimeContext } from "../src/runtime.js";
 import { projectObservation } from "../src/observations.js";
 import { plugins } from "../src/plugin-registry.js";
@@ -587,6 +588,68 @@ test("a Gmail quota refusal pauses reading without leaving mail out", async (t) 
   assert.equal(index.messages, 6);
 });
 
+test("a real Gmail 429 on an index read pauses the build and keeps the message queued", async (t) => {
+  // Drives GmailTools itself: its RateLimitedError carries no "(429)" text, which the
+  // hand-made refusals above would not notice.
+  const ids = ["a0", "a1", "a2"];
+  // Each read retries a rate limit twice itself, so six refusals reach the index twice.
+  let refusals = 6;
+  const reads: string[] = [];
+  const request = (async (u: unknown) => {
+    const url = new URL(String(u));
+    if (url.hostname === "oauth2.googleapis.com")
+      return Response.json({ access_token: "a", expires_in: 3600 });
+    if (url.pathname.endsWith("/profile"))
+      return Response.json({ emailAddress: "owner@example.com" });
+    if (url.pathname.endsWith("/messages"))
+      return Response.json({
+        messages: ids.map((id) => ({ id, threadId: "f" + id })),
+      });
+    const id = url.pathname.split("/").pop()!;
+    reads.push(id);
+    if (id === "a0" && refusals-- > 0)
+      return Response.json(
+        { error: { code: 429, status: "RESOURCE_EXHAUSTED" } },
+        { status: 429 },
+      );
+    return Response.json({
+      id,
+      threadId: "f" + id,
+      internalDate: String(NOW),
+      payload: {
+        headers: [{ name: "Subject", value: "Subject " + id }],
+        mimeType: "text/plain",
+        body: { data: Buffer.from("rate body " + id).toString("base64url") },
+      },
+    });
+  }) as typeof fetch;
+  const gmail = new GmailTools(
+    {
+      owner: "owner",
+      email: "owner@example.com",
+      clientId: "c",
+      clientSecret: "s",
+      refreshToken: "r",
+    },
+    request,
+    Date.now,
+    async () => {},
+  );
+  const index = new MailIndex(
+    gmail,
+    words,
+    await store(t),
+    "owner",
+    () => NOW,
+    FAST,
+  );
+  await index.start();
+  assert.equal(index.state, "ready");
+  // Two refused reads of the same message would have abandoned it after two tries.
+  assert.equal(index.messages, 3);
+  assert.equal(reads.filter((id) => id === "a0").length, 7);
+});
+
 test("a Gmail that keeps refusing fails the build instead of abandoning mail", async (t) => {
   const box = mailbox([{ id: "q1", at: NOW, subject: "s", text: "body" }]);
   let reads = 0;
@@ -777,13 +840,13 @@ test("keyword results are returned while the index builds, and failures are note
   assert.match(early.note!, /1 of 2 keyword searches failed/);
 });
 
-test("keyword searches run on the primary mailbox with the turn's budget", async () => {
+test("keyword searches run on the primary mailbox and name a rate limit", async () => {
   const calls: unknown[][] = [];
   const gmail = {
     async call(...args: unknown[]) {
       calls.push(args);
       if (args[2] === "boom")
-        throw new Error("Gmail request budget for this turn is used");
+        throw new RateLimitedError("Gmail rate limited this request");
       return {
         results: [
           {
@@ -811,9 +874,13 @@ test("keyword searches run on the primary mailbox with the turn's budget", async
     undefined,
     "run-1",
     "primary",
+    // The fusion keeps the ten-hit page it was measured with.
+    { pageSize: 10 },
   ]);
   assert.equal(result.failed, 1);
-  assert.deepEqual(result.reasons, ["the turn's Gmail request budget is used"]);
+  assert.deepEqual(result.reasons, [
+    "Gmail rate limited the search; retry it shortly",
+  ]);
   assert.deepEqual(result.lists, [
     [
       {

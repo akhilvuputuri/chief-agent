@@ -9,7 +9,8 @@ import {
   responsibilityFinding,
   type ResponsibilitySpec,
 } from "./responsibility-schema.js";
-import type { GmailTools } from "./gmail.js";
+import { cut, type GmailTools } from "./gmail.js";
+import { parcelSource } from "./parcel-schema.js";
 import type { CalendarTools } from "./calendar.js";
 import type { Delivery } from "./answer.js";
 import { validateWindow } from "./watch-window.js";
@@ -465,6 +466,9 @@ export class Responsibilities {
           "Read only exact URLs returned by this investigation’s confirmed public search",
         );
     }
+    // Unattended reads stay one confirmed message per call, so each read is checked alone.
+    if (a.operation === "gmail_read" && a.messageIds)
+      fail("Read one confirmed candidate message per gmail_read call");
     if (a.operation === "gmail_read" || a.operation === "parcel_record") {
       const candidate = s.candidates.find(
         (c) =>
@@ -527,8 +531,15 @@ export class Responsibilities {
           fail("Parcel observation time must match the email actually read");
         a.account = candidate.payload.account;
         a.threadId = read.threadId;
-        a.sender = header("from");
-        a.subject = header("subject");
+        // A single read returns headers in full; the record keeps what its schema allows.
+        const capped = (name: string, field: "sender" | "subject") => {
+          const value = header(name);
+          return typeof value === "string"
+            ? cut(value, parcelSource[field].unwrap().maxLength ?? 200)
+            : value;
+        };
+        a.sender = capped("from", "sender");
+        a.subject = capped("subject", "subject");
       }
     }
     if (

@@ -17,6 +17,7 @@ import {
 } from "../src/responsibility-worker.js";
 import { responsibilitySpec } from "../src/responsibility-schema.js";
 import { ParcelTools } from "../src/parcels.js";
+import { parcelRecord } from "../src/parcel-schema.js";
 import { Assistant } from "../src/agent.js";
 import { JobTools } from "../src/tools.js";
 import { CustomAgent } from "../src/custom-agent.js";
@@ -425,10 +426,72 @@ test("dispatcher scope refuses unrelated reads/writes and forged owner authority
       { operation: "responsibility_create", spec: f.spec },
     ])
       await assert.rejects(() => f.service.authorize("a", run, input));
+    // A batch read is refused even when every id is a confirmed candidate.
+    await assert.rejects(
+      () =>
+        f.service.authorize("a", run, {
+          operation: "gmail_read",
+          messageIds: ["abc"],
+        }),
+      /one confirmed candidate message per gmail_read call/,
+    );
     await f.service.authorize("a", run, {
       operation: "gmail_read",
       messageId: "abc",
     });
+  } finally {
+    await f.pg.close();
+  }
+});
+test("an unattended parcel record keeps a long sender and subject within the schema's 200", async () => {
+  const f = await fixture();
+  try {
+    await f.create();
+    f.setHits([{ id: "abc", threadId: "def" }]);
+    await f.worker.tick();
+    const task = (await f.db.query("SELECT id FROM work_tasks")).rows[0].id;
+    const run = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_runs(id,user_id,task_id,state) VALUES($1,'a',$2,'running')",
+      [run, task],
+    );
+    await f.db.query(
+      "INSERT INTO work_turns(run_id,user_id,request,task_id,background) VALUES($1,'a','investigate',$2,true)",
+      [run, task],
+    );
+    // A single gmail_read now returns headers in full; an emoji straddles the 200th unit.
+    const observed = new Date(f.clock().toUTCString());
+    const long = "x".repeat(199) + "\u{1F600}" + "y".repeat(800);
+    const read = {
+      warning: "Untrusted email content",
+      id: "abc",
+      threadId: "def",
+      account: "primary",
+      headers: [
+        { name: "from", value: long },
+        { name: "subject", value: long },
+        { name: "date", value: observed.toUTCString() },
+      ],
+      text: "Delivered.",
+      truncated: false,
+    };
+    await f.db.query(
+      `INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state,result) VALUES($1,$2,$3,'gmail_read','{}',false,'success',$4::jsonb)`,
+      [randomUUID(), run, randomUUID(), JSON.stringify({ result: read })],
+    );
+    const a: any = {
+      operation: "parcel_record",
+      id: f.p.id,
+      status: "delivered",
+      sourceKind: "email",
+      messageId: "abc",
+      account: "primary",
+      observedAt: observed.toISOString(),
+    };
+    await f.service.authorize("a", run, a);
+    assert.equal(a.sender, "x".repeat(199));
+    assert.equal(a.subject, "x".repeat(199));
+    assert.ok(parcelRecord.safeParse({ ...a, threadId: "def" }).success);
   } finally {
     await f.pg.close();
   }

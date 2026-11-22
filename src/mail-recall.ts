@@ -13,6 +13,7 @@ import {
   type StoredMessage,
 } from "./mail-index-store.js";
 import { discardBody, readBody } from "./http-body.js";
+import { RateLimitedError } from "./tool-errors.js";
 
 export const MAIL_INDEX_DAYS = 365;
 /** Received Primary-category mail; sent mail, chats, spam and trash are left out. */
@@ -42,6 +43,13 @@ const QUOTA_PAUSE_MS = 60_000;
 /** Consecutive quota pauses without a successful read before the build fails. */
 const QUOTA_PAUSES = 5;
 const QUOTA_REFUSED = /\((403|429)\)/;
+/**
+ * Gmail's rate or quota refusal: the adapter's RateLimitedError, or a "(403)"/"(429)"
+ * status in the message, which other 403s and the embedding provider still produce.
+ */
+const quotaRefused = (error: unknown) =>
+  error instanceof RateLimitedError ||
+  QUOTA_REFUSED.test(String((error as Error)?.message));
 const TOP_UP_LIMIT = 50;
 const TOP_UP_MS = 10_000;
 const RETRY_MS = 300_000;
@@ -209,7 +217,10 @@ export type KeywordResults = {
 /** A short, fixed reason for a failed keyword search. */
 function failureReason(error: unknown) {
   const message = String((error as Error)?.message ?? error);
-  if (/budget/i.test(message)) return "the turn's Gmail request budget is used";
+  if (error instanceof RateLimitedError)
+    return error.daily
+      ? "Gmail's daily quota is used; it resets later"
+      : "Gmail rate limited the search; retry it shortly";
   if (/\((403|429)\)/.test(message))
     return "Gmail refused the request (quota or permission)";
   return "Gmail search failed";
@@ -236,10 +247,7 @@ export function fuse(rankings: string[][]) {
     .map(([id]) => id);
 }
 
-/**
- * Runs the agent's keyword searches on the primary mailbox through the ordinary gmail_search
- * path, so each one counts against the turn's Gmail request budget like any other search.
- */
+/** Runs the agent's keyword searches on the primary mailbox through the ordinary gmail_search path. */
 export async function keywordSearch(
   gmail: Pick<GmailTools, "call">,
   user: string,
@@ -258,6 +266,8 @@ export async function keywordSearch(
         undefined,
         run,
         "primary",
+        // The fusion and its eval were measured on ten keyword hits per search.
+        { pageSize: 10 },
       )) as { results?: Record<string, unknown>[] };
       const text = (v: unknown) => (typeof v === "string" ? v : undefined);
       lists.push(
@@ -292,11 +302,12 @@ export type MailIndexState = "idle" | "building" | "ready" | "failed";
 class DependencyError extends Error {
   constructor(
     readonly dependency: "gmail" | "openrouter" | "postgres",
-    cause: unknown,
+    readonly cause: unknown,
   ) {
     super(cause instanceof Error ? cause.message : String(cause));
   }
   get httpStatus() {
+    if (this.cause instanceof RateLimitedError) return this.cause.status;
     const status = this.message.match(/\((\d{3})\)/)?.[1];
     return status ? Number(status) : undefined;
   }
@@ -482,7 +493,7 @@ export class MailIndex {
           fetched.push(await this.gmail.indexMessage(this.owner, id));
           this.quotaPauses = 0;
         } catch (error) {
-          if (QUOTA_REFUSED.test(String((error as Error)?.message))) {
+          if (quotaRefused(error)) {
             if (++this.quotaPauses > QUOTA_PAUSES)
               throw new DependencyError("gmail", error);
             await pause(this.pace.quotaPauseMs, signal);

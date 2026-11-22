@@ -13,6 +13,9 @@ This page is the design record for that split: why it exists, how an agent is de
 In the six days of production logs before this change, Chief made about 190 tool calls itself and delegated 2 (both to the media reader). Email reads, parcel hunts and calendar lookups all ran on the main model inside Chief's own context. That had three costs:
 
 - **Context.** A `gmail_thread` result is up to 16,000 characters, and a parcel hunt is 10 to 25 calls. Long email tasks were what pushed a turn over its limit in [issue #77](https://github.com/akhilvuputuri/chief-agent/issues/77).
+
+> **Update, 22 November 2026 ([journal 204](journey/204-email-search-redesign.md), [Google integrations](google-integrations.md#read-only-gmail-and-calendar)):** correction and change. When this was written, `gmail_thread` already returned at most 6,000 characters of body text (12 messages, 2,500 each), not 16,000; 16,000 was `gmail_read`'s figure, and the model-facing projection cut that to 8,000. From the email-search redesign (Phase 1), `gmail_thread` returns up to 20,000 characters per message and 50,000 in total, `gmail_read` returns 20,000 per message (continued with `offset`) or up to 25 messages sharing 50,000, and HTML-only mail is readable. Search pages default to 20 hits (up to 100), the per-run Gmail request budget is removed, and the email agent prompt no longer limits it to three searches.
+
 - **Fixed prompt.** Every call carried domain tool schemas. With every domain connected, Chief was offered 76 tools, about 43,000 characters of schema.
 - **Model cost.** Every step of every domain task ran on the main model.
 

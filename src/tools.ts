@@ -414,10 +414,15 @@ export class JobTools {
             ? a.query
             : a.operation === "gmail_thread"
               ? a.threadId
-              : a.messageId,
+              : (a.messageId ?? ""),
         a.operation === "gmail_search" ? a.pageToken : undefined,
         run,
         a.operation === "gmail_accounts" ? undefined : a.account,
+        a.operation === "gmail_search"
+          ? { pageSize: a.pageSize }
+          : a.operation === "gmail_read"
+            ? { offset: a.offset, messageIds: a.messageIds }
+            : {},
       );
     }
     if (a.operation === "gmail_recall") {

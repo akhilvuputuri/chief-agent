@@ -570,13 +570,24 @@ export const action = z.discriminatedUnion("operation", [
       account: z.string().min(1).max(254).optional(),
       query: z.string().min(1).max(500),
       pageToken: z.string().max(1000).optional(),
+      pageSize: z.number().int().min(1).max(100).optional(),
     })
     .strict(),
   z
     .object({
       operation: z.literal("gmail_read"),
       account: z.string().min(1).max(254).optional(),
-      messageId: z.string().regex(/^[a-f0-9]{1,64}$/i),
+      // Exactly one of messageId and messageIds; the Gmail adapter rejects both or neither.
+      messageId: z
+        .string()
+        .regex(/^[a-f0-9]{1,64}$/i)
+        .optional(),
+      offset: z.number().int().min(0).max(2_000_000).optional(),
+      messageIds: z
+        .array(z.string().regex(/^[a-f0-9]{1,64}$/i))
+        .min(1)
+        .max(25)
+        .optional(),
     })
     .strict(),
   z

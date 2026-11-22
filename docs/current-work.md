@@ -1,3 +1,9 @@
+# Email search redesign, Phase 1 tools — tested, not yet released, 22 November 2026
+
+Branch `fix/gmail-tools`. `gmail_read` and `gmail_thread` read HTML-only mail as converted text; `gmail_read` shows 20,000 characters with `offset` continuation or reads up to 25 `messageIds` at once; threads show up to 50 messages; search pages go up to 100 with batched metadata, Singapore dates and empty-result guidance; Gmail rate limits are reported as `RATE_LIMITED`; the per-run Gmail request budget is removed under the owner's direction that limits stay only for safety or result size. The email eval scores the new shapes. Three independent review rounds; the last approved `2907c5a`. Tools checked read-only on real mail; the eval has not been run. See [email search, Phase 1](email-search.md#phase-1-tools) and [journal 204](journey/204-email-search-redesign.md).
+
+Next: review of the rebased branch with its eval and docs commit, release; run the eval baseline (Phase 0 tools, from `4668853`) and Phase 1 on the same private tasks; then Phase 2, the coordinator.
+
 # Email search redesign, Phase 0 eval — tested, not yet released, 22 November 2026
 
 Branch `eval/email-search`. Chief reported 4 of 13 existing monthly receipt emails from one primary-mailbox search. `src/email-eval.ts` is an operator-run eval that replays private tasks through the real Gmail tools and observation projection, with the email agent's shipped instructions or a plugin skill, and scores found, surfaced, readable and extra messages deterministically. Tested with a fake Gmail and a scripted model; no baseline run yet. See [email search](email-search.md) and [journal 204](journey/204-email-search-redesign.md).

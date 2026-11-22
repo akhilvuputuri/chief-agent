@@ -32,6 +32,19 @@ export class RepeatedFailureError extends Error {
 export class BrowserCommandError extends Error {}
 /** The host has established that this invocation made no domain mutation. */
 export class ToolValidationError extends Error {}
+/**
+ * A provider rate limited a read, or its daily quota is used; the message says when
+ * to retry. `status` is the HTTP status the provider returned.
+ */
+export class RateLimitedError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly daily = false,
+  ) {
+    super(message);
+  }
+}
 /** An earlier write's outcome is uncertain, so this write was refused before any mutation. */
 export class WriteBlockedError extends ToolValidationError {}
 /**
@@ -96,6 +109,8 @@ export function toolError(error: unknown) {
     };
   if (error instanceof ToolValidationError)
     return { code: "VALIDATION_FAILED", retryable: false, message };
+  if (error instanceof RateLimitedError)
+    return { code: "RATE_LIMITED", retryable: !error.daily, message };
   if (error instanceof ReportRejectedError)
     return { code: "VALIDATION_FAILED", retryable: true, message };
   if (error instanceof RepeatedFailureError)

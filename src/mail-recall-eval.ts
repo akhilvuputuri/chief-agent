@@ -187,6 +187,8 @@ async function main() {
           query,
           undefined,
           `mail-eval-${totals.questions}-${i}`,
+          undefined,
+          { pageSize: 10 },
         )) as { results?: Record<string, string | undefined>[] };
         const ids = (result.results ?? []).flatMap((r) => (r.id ? [r.id] : []));
         // A hit whose metadata fetch failed arrives ID-only; a later search may fill it in.

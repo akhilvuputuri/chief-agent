@@ -51,9 +51,10 @@ function toolGroup(name: string, result: unknown, id = name): Message[] {
 
 // The incident these tests come from had 54,264 characters of fixed context. The coordinator's
 // own schemas and instructions have since grown past that (55,014 with memory_forget, 13
-// November 2026), so the fixture pads to a round size above them; the tests need a fixed
-// context of this order, not that exact figure.
-const FIXED_SIZE = 56000;
+// November 2026; 55,998 with the complete Gmail tool descriptions, 22 November 2026), so the
+// fixture pads to a round size above them with room for the tool descriptions to keep
+// growing; the tests need a fixed context of this order, not that exact figure.
+const FIXED_SIZE = 64000;
 
 /** Real coordinator schemas plus owner memory/state, padded to the incident's order of size. */
 function request(
