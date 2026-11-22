@@ -1,3 +1,10 @@
+## Google accounts connect from the chat (22 November 2026)
+
+- **Code.** `/google` and a `google_connect` tool send the owner a host-built button for Gmail, the second Gmail mailbox, Calendar or Sheets; a standard web-client OAuth flow with PKCE and single-use state, callback at `/oauth/google/callback`, stores the refresh token sealed. Gmail, Calendar and both Sheets prefer a stored connection, refreshed with the web client, over the `.env` token. On `invalid_grant` the connection is marked disconnected and the owner gets one reconnect button. Scopes are unchanged; Gmail stays read-only.
+- **Migration, Compose and Caddy.** `db/037_google_connections.sql` adds two tables and changes no existing one; Compose gains its migration line and `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`; `ops/oauth-site/Caddyfile` gains the callback route. Installed by the reviewed operator rollout `scripts/deploy-google-connect.py`.
+- **Why.** Google connections could only be made or repaired by an operator with a computer and a server edit. See [journal 208](journey/208-google-connect-from-chat.md) and [Google integrations](google-integrations.md#connecting-from-the-chat-22-november-2026).
+- **Deployment.** Not yet recorded as live; off until the web client's two settings are set after the rollout. Update this entry on release.
+
 ## The image job retries a failed provenance attestation (22 November 2026)
 
 - **Code.** `.github/workflows/ci.yml` only. In `publish gateway image`, the attestation step runs up to three times (again after 20 seconds, then after another 60), each the same pinned action with the same inputs. The job fails only when the third attempt fails. No runtime code, migration or Compose change.
