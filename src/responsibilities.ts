@@ -465,6 +465,9 @@ export class Responsibilities {
           "Read only exact URLs returned by this investigation’s confirmed public search",
         );
     }
+    // Unattended reads stay one confirmed message per call, so each read is checked alone.
+    if (a.operation === "gmail_read" && a.messageIds)
+      fail("Read one confirmed candidate message per gmail_read call");
     if (a.operation === "gmail_read" || a.operation === "parcel_record") {
       const candidate = s.candidates.find(
         (c) =>

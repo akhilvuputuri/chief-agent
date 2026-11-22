@@ -23,6 +23,8 @@ type Deps = {
       query: string,
       account: undefined,
       key: string,
+      selected?: undefined,
+      options?: { pageSize: number },
     ): Promise<unknown>;
   };
   now?: () => Date;
@@ -96,6 +98,9 @@ export async function buildBriefing(
         "in:inbox is:unread newer_than:1d",
         undefined,
         `briefing:${j.id}:${now.getTime()}`,
+        undefined,
+        // The digest shows five; it has always fetched one ten-hit page.
+        { pageSize: 10 },
       );
       const lines = unreadDigest(r);
       sections.push({

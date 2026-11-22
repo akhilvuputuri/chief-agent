@@ -660,6 +660,9 @@ export class Gathering {
           a.pageToken,
           run,
           a.account,
+          // Gathering keeps the ten-hit page and the query text it was built and
+          // tested with; its own bounds are epoch seconds already.
+          { pageSize: 10, singaporeDates: false },
         )) as any;
         const results = (result.results ?? []).map((r: any) => ({
           id: r.id,

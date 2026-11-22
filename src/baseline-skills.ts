@@ -12,7 +12,7 @@ export const baselineSkills = [
     key,
     version: `repo:${key}:${
       key === "personal-assistance"
-        ? 5
+        ? 6
         : ["task-execution", "job-alignment"].includes(key)
           ? 2
           : 1

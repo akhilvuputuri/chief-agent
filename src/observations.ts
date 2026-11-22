@@ -1,3 +1,16 @@
+const DEFAULT_LIMITS = { field: 8000, total: 12000 };
+// Email reads return whole messages and a full search page by design (src/gmail.ts
+// bounds each result below `total`); every other tool keeps the default limits.
+const EMAIL_LIMITS = { field: 20_000, total: 110_000 };
+const LIMITS: Record<string, { field: number; total: number }> = {
+  gmail_search: EMAIL_LIMITS,
+  gmail_thread: EMAIL_LIMITS,
+  gmail_read: EMAIL_LIMITS,
+};
+/** Longest payload field and serialised result an operation's projection keeps whole. */
+export function projectionLimits(operation: string) {
+  return LIMITS[operation] ?? DEFAULT_LIMITS;
+}
 /** Model-facing projections; complete results remain in runtime_calls. */
 export function projectObservation(
   operation: string,
@@ -27,18 +40,22 @@ export function projectObservation(
         "These are analysis inputs, not a completed assessment. Use explicit memories from current context; retrieve the full observation if needed.",
     };
   }
+  const limits = projectionLimits(operation);
   // Trim payload fields before serialization so identifiers at the end survive.
   if (projected && !Array.isArray(projected) && typeof projected === "object") {
     projected = { ...projected };
     for (const key of ["content", "description", "text"]) {
-      if (typeof projected[key] === "string" && projected[key].length > 8000) {
-        projected[key] = projected[key].slice(0, 8000);
+      if (
+        typeof projected[key] === "string" &&
+        projected[key].length > limits.field
+      ) {
+        projected[key] = projected[key].slice(0, limits.field);
         projected.truncated = true;
       }
     }
   }
   const serialized = JSON.stringify(projected);
-  if (serialized && serialized.length > 12000)
+  if (serialized && serialized.length > limits.total)
     projected = {
       ...(projected && !Array.isArray(projected)
         ? Object.fromEntries(

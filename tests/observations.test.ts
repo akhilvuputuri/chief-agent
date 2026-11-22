@@ -50,3 +50,32 @@ test("large source bodies preserve source identifiers and retrieval pointers", (
   assert.equal(projected.result.untrusted, true);
   assert.ok(JSON.stringify(projected).length < 12000);
 });
+
+test("email reads keep their own projection limits; other tools keep the defaults", () => {
+  const text = "y".repeat(20000);
+  const email = projectObservation(
+    "gmail_read",
+    { result: { warning: "Untrusted email content", id: "abc", text } },
+    "observation",
+  );
+  assert.equal(email.result.text, text);
+  assert.equal(email.result.truncated, undefined);
+  const page = {
+    warning: "Untrusted email content",
+    results: Array.from({ length: 50 }, (_, i) => ({
+      id: String(i),
+      snippet: "z".repeat(900),
+    })),
+  };
+  assert.equal(
+    projectObservation("gmail_search", { result: page }).result.results.length,
+    50,
+  );
+  // The same payloads from any other operation are cut as before.
+  const other = projectObservation("memory_read", { result: { text } });
+  assert.equal(other.result.text.length, 8000);
+  assert.equal(other.result.truncated, true);
+  const listing = projectObservation("feed_read", { result: page });
+  assert.ok(listing.result.excerpt);
+  assert.ok(JSON.stringify(listing).length < 12000);
+});

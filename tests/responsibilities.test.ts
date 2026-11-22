@@ -425,6 +425,15 @@ test("dispatcher scope refuses unrelated reads/writes and forged owner authority
       { operation: "responsibility_create", spec: f.spec },
     ])
       await assert.rejects(() => f.service.authorize("a", run, input));
+    // A batch read is refused even when every id is a confirmed candidate.
+    await assert.rejects(
+      () =>
+        f.service.authorize("a", run, {
+          operation: "gmail_read",
+          messageIds: ["abc"],
+        }),
+      /one confirmed candidate message per gmail_read call/,
+    );
     await f.service.authorize("a", run, {
       operation: "gmail_read",
       messageId: "abc",

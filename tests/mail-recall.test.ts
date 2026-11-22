@@ -811,6 +811,8 @@ test("keyword searches run on the primary mailbox with the turn's budget", async
     undefined,
     "run-1",
     "primary",
+    // The fusion keeps the ten-hit page it was measured with.
+    { pageSize: 10 },
   ]);
   assert.equal(result.failed, 1);
   assert.deepEqual(result.reasons, ["the turn's Gmail request budget is used"]);

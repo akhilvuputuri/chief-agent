@@ -258,6 +258,8 @@ export async function keywordSearch(
         undefined,
         run,
         "primary",
+        // The fusion and its eval were measured on ten keyword hits per search.
+        { pageSize: 10 },
       )) as { results?: Record<string, unknown>[] };
       const text = (v: unknown) => (typeof v === "string" ? v : undefined);
       lists.push(
