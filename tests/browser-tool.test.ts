@@ -118,6 +118,7 @@ test("an email opens laid out as Gmail prints it, with its cid: image made local
   );
   assert.equal(Object.keys(opened)[0], "untrusted");
   assert.equal(opened.title, "Your receipt 1");
+  assert.equal((opened as any).note, undefined);
   const sent = calls[0]!.command as any;
   assert.equal(sent.kind, "document");
   assert.equal(sent.type, "html");
@@ -154,6 +155,28 @@ test("an email opens laid out as Gmail prints it, with its cid: image made local
     space,
   );
   assert.equal((calls[1]!.command as any).remoteImages, false);
+});
+
+test("an open whose images are still loading succeeds and says so", async () => {
+  const note =
+    "Some images or other resources were still loading after 10 seconds.";
+  const browser = new BrowserTool(
+    {
+      call: async () => ({
+        ok: true,
+        result: { opened: true, title: "Slow", note },
+      }),
+    },
+    async () => ({}),
+  );
+  const opened: any = await browser.act(
+    "123",
+    randomUUID(),
+    { operation: "browser", action: "open", html: "<p>x</p>" },
+    new FileSpace(),
+  );
+  assert.equal(opened.opened, true);
+  assert.equal(opened.note, note);
 });
 
 test("several emails are one document, each in its own shadow root and starting on a new page", async () => {

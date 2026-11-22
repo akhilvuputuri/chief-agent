@@ -19,6 +19,7 @@ export type EngineCommand =
   PublicBrowserCommand | Exclude<DocumentCommand, { kind: "merge" }>;
 const FILE_BYTES = 20 * 1024 * 1024;
 const LOAD_MS = 30_000;
+const IMAGES_MS = 10_000;
 
 export const SESSION_IDLE_MS = 3 * 60 * 1000;
 export const SESSION_MAX_MS = 10 * 60 * 1000;
@@ -249,17 +250,32 @@ export class PublicBrowserEngine {
     return this.withPage(session, async (page) => {
       try {
         await page.goto(pathToFileURL(file).href, {
-          waitUntil: "load",
+          waitUntil: "domcontentloaded",
           timeout: LOAD_MS,
         });
       } catch {
         throw new Error(
           command.type === "pdf"
             ? "Chromium did not show this PDF"
-            : "The document did not finish loading",
+            : "The document did not open",
         );
       }
-      return { opened: true, title: await page.title() };
+      // The content is there; one slow image host must not fail the open.
+      const loaded = await page
+        .waitForLoadState("load", { timeout: IMAGES_MS })
+        .then(
+          () => true,
+          () => false,
+        );
+      return {
+        opened: true,
+        title: await page.title(),
+        ...(loaded
+          ? {}
+          : {
+              note: "Some images or other resources were still loading after 10 seconds; they may be missing from the page and from a print made now.",
+            }),
+      };
     });
   }
   private async print(

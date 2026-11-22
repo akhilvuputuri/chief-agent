@@ -18,7 +18,7 @@ The `browser` tool is a Chromium browser on the always-on server, in the same co
 
 Email, file and supplied-HTML pages run with scripts off, as Gmail does not run scripts in mail. Their remote images load, as they do in Gmail when images are shown; `remoteImages: false` leaves them out. Loading an email's remote images tells its sender that the email was opened. Inline images travel with the email and load either way.
 
-A session holds one page at a time: opening something replaces what was open. It lasts until the run ends or `close`.
+A session holds one page at a time: opening something replaces what was open. It lasts until the run ends or `close`. The container is shared with the research browser agent: one session at a time, so `close` frees it, and delegating to that agent closes yours.
 
 ## Reading and acting
 

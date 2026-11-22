@@ -318,6 +318,7 @@ export class BrowserTool {
       untrusted: UNTRUSTED,
       opened: true,
       title: String(opened.title ?? "").slice(0, 300),
+      ...(typeof opened.note === "string" ? { note: opened.note } : {}),
     };
   }
   /** PDFs from the file space joined in order into a new one, by qpdf in the browser container. */
