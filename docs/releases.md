@@ -1,3 +1,9 @@
+## A reused test database is planned as a fresh one (22 November 2026)
+
+- **Code.** Tests only. The test database pool's reset (`tests/helpers/pglite.ts`) puts back the table sizes the planner reads from `pg_class`, which its vacuum had changed, and no longer reuses a database a test has run `ANALYZE` in. Two regression tests. No runtime code, migration, Compose change or worker image.
+- **Why.** `tests/test-db-pool.test.ts` failed in a full local run at `reuse 6`: a reused database returned an unordered read in index order. Measured: the vacuum marked emptied tables as vacuumed, Postgres then planned them at their real size, and with PGlite's sequential scans off the plan became an index-only scan once a rolled-back `ALTER TABLE` made PGlite read the new numbers. The files that share a process decide whether it shows; the 20-file group concerned failed 2 of 2 runs before and passed 3 of 3 after. See [journal 206](journey/206-reused-database-planned-differently.md).
+- **Not measured.** A full run's time and a coding box. The restore adds about 1 ms a reuse on a Mac.
+
 ## The judge is tested on its own verdicts, every night; the learner sees what Chief said before (22 November 2026)
 
 - **Code.** A new judge prompt reads every learned fact again, whatever the old verdict was. A night's planted errors and controls are built only on facts the current prompt has called supported, and the repair gate's record counts a test only when the current prompt had judged its base before the test ran; this applies to results already recorded. The judge's test of itself runs every night there is such a fact, even with no new fact or turn, as two model calls. The learner (`learner-v8`) is shown the end of Chief's reply in the turn before, the text the judge reads, and a note's bracketed detail may rest on it. The report's planted-error query counts what the gate counts. The judge's and the repair's prompts and the gate's thresholds are unchanged.

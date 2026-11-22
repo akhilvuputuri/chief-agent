@@ -51,6 +51,8 @@ type Pooled = {
   seeds: { table: string; insert: string; rows: string }[];
   /** Role count at the start: event triggers do not see roles being created. */
   roles: number;
+  /** Column statistics at the start: ANALYZE is not a schema change either. */
+  analysed: number;
 };
 const idle = new Map<string, Pooled[]>();
 const stats = { created: 0, reused: 0, discarded: 0 };
@@ -59,10 +61,25 @@ export const databaseStats = () => ({ ...stats });
 
 const USER_TABLES = `SELECT format('%I.%I', schemaname, tablename) AS name FROM pg_tables
   WHERE schemaname !~ '^pg_' AND schemaname NOT IN ('information_schema', 'test_pool')`;
-// What a reset cannot undo: schema changes, roles and large objects.
+// What a reset cannot undo: schema changes, roles, large objects and the column statistics
+// ANALYZE gathers.
 const UNCLEAN = `SELECT (SELECT count(*) FROM test_pool.changes)::int AS changes,
   (SELECT count(*) FROM pg_roles)::int AS roles,
-  (SELECT count(*) FROM pg_largeobject_metadata)::int AS large_objects`;
+  (SELECT count(*) FROM pg_largeobject_metadata)::int AS large_objects,
+  (SELECT count(*) FROM pg_statistic)::int AS analysed`;
+// The sizes the planner assumes for everything the migrations created: object ids below
+// 16384 belong to Postgres itself. A table that was never vacuumed says so (reltuples is
+// -1) and is planned as ten pages; the reset's VACUUM would leave it marked as vacuumed and
+// planned at its real size. PGlite forbids sequential scans, so with rows in one page that
+// difference alone turned an unordered read of a table into an index scan, in index order.
+// PGlite goes on planning from the numbers it read before the VACUUM until something makes
+// it open the table again, such as a rolled-back ALTER TABLE, so the change showed only
+// in a database that an earlier test had filled and a later one reopened (journal 206).
+const RESTORE_SIZES = `UPDATE pg_class c
+  SET relpages = s.relpages, reltuples = s.reltuples, relallvisible = s.relallvisible
+  FROM test_pool.sizes s
+  WHERE c.oid = s.oid AND (c.relpages, c.reltuples, c.relallvisible)
+    IS DISTINCT FROM (s.relpages, s.reltuples, s.relallvisible)`;
 
 async function pooled(pg: PGlite): Promise<Pooled> {
   // Event triggers record every schema change in a table, so a rolled-back change is
@@ -77,6 +94,8 @@ async function pooled(pg: PGlite): Promise<Pooled> {
     CREATE EVENT TRIGGER test_pool_drop ON sql_drop EXECUTE FUNCTION test_pool.mark();
     ALTER EVENT TRIGGER test_pool_ddl ENABLE ALWAYS;
     ALTER EVENT TRIGGER test_pool_drop ENABLE ALWAYS;
+    CREATE TABLE test_pool.sizes AS
+      SELECT oid, relpages, reltuples, relallvisible FROM pg_class WHERE oid >= 16384;
     DELETE FROM test_pool.changes;`);
   const tables = (await pg.query<{ name: string }>(USER_TABLES)).rows.map(
     (row) => row.name,
@@ -111,19 +130,35 @@ async function pooled(pg: PGlite): Promise<Pooled> {
       rows,
     });
   }
-  const { roles } = (await pg.query<{ roles: number }>(UNCLEAN)).rows[0]!;
-  return { pg, probe, seeds, roles };
+  const { roles, analysed } = (
+    await pg.query<{ roles: number; analysed: number }>(UNCLEAN)
+  ).rows[0]!;
+  return { pg, probe, seeds, roles, analysed };
 }
 
 /** Empties a returned database. False means it cannot be reused and must be closed. */
-async function reset({ pg, probe, seeds, roles }: Pooled): Promise<boolean> {
+async function reset({
+  pg,
+  probe,
+  seeds,
+  roles,
+  analysed,
+}: Pooled): Promise<boolean> {
   await pg.exec("ROLLBACK");
   const unclean = (
-    await pg.query<{ changes: number; roles: number; large_objects: number }>(
-      UNCLEAN,
-    )
+    await pg.query<{
+      changes: number;
+      roles: number;
+      large_objects: number;
+      analysed: number;
+    }>(UNCLEAN)
   ).rows[0]!;
-  if (unclean.changes || unclean.large_objects || unclean.roles !== roles)
+  if (
+    unclean.changes ||
+    unclean.large_objects ||
+    unclean.roles !== roles ||
+    unclean.analysed !== analysed
+  )
     return false;
   const filled = [
     ...new Set([
@@ -155,6 +190,11 @@ async function reset({ pg, probe, seeds, roles }: Pooled): Promise<boolean> {
     if (size) return false;
     for (const seed of seeds) await pg.query(seed.insert, [seed.rows]);
   }
+  // After the vacuum, and on every reset: a test may vacuum a table itself. In a
+  // transaction of its own, because PGlite does not apply a catalog change made by the last
+  // statement of a simple query to its own cache: sent alone, this left the next ALTER
+  // TABLE failing with "tuple concurrently updated".
+  await pg.exec(`BEGIN; ${RESTORE_SIZES}; COMMIT`);
   // Every sequence, since one moved with setval(..., false) reports no last value.
   await pg.query(
     `SELECT setval(format('%I.%I', schemaname, sequencename)::regclass, start_value, false)

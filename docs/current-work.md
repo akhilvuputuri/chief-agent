@@ -1,3 +1,9 @@
+# A reused test database is planned as a fresh one — tested, not yet released, 22 November 2026
+
+Tests only. `tests/test-db-pool.test.ts` failed in a full local run because a reused database returned an unordered read in index order. The reset's vacuum had left tables marked as vacuumed, which changes the plan under PGlite's disabled sequential scans; which files shared a process decided whether it showed, not load. The reset now restores the planner's sizes, at about 1 ms a reuse ([journal 206](journey/206-reused-database-planned-differently.md)).
+
+Next: review and merge.
+
 # Email search redesign, Phase 1 tools — tested, not yet released, 22 November 2026
 
 Branch `fix/gmail-tools`. `gmail_read` and `gmail_thread` read HTML-only mail as converted text; `gmail_read` shows 20,000 characters with `offset` continuation or reads up to 25 `messageIds` at once; threads show up to 50 messages; search pages go up to 100 with batched metadata, Singapore dates and empty-result guidance; Gmail rate limits are reported as `RATE_LIMITED`; the per-run Gmail request budget is removed under the owner's direction that limits stay only for safety or result size. The email eval scores the new shapes. Three independent review rounds; the last approved `2907c5a`. Tools checked read-only on real mail; the eval has not been run. See [email search, Phase 1](email-search.md#phase-1-tools) and [journal 204](journey/204-email-search-redesign.md).

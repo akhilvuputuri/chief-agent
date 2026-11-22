@@ -76,6 +76,10 @@ Most of a test's time goes to restoring a database snapshot into PGlite's in-mem
 - **Deployed:** tests only, so nothing in the running application changed. A read-only host check after the next release showed the gateway on `b2cb9e4`, which contains it, and healthy.
 - **Flaky test:** [PR 438](https://github.com/akhilvuputuri/chief-agent/pull/438) merged as `ed4801e`.
 
+### A reused database was planned differently — 22 November 2026
+
+**Measured:** the reset's vacuum left each emptied table marked as vacuumed, which a fresh database's tables are not, and Postgres then planned it at its real size. With PGlite's sequential scans off, an unordered read came back in index order once something made PGlite read the new numbers. The reset now restores the planner's sizes, and a database a test has run `ANALYZE` in is not reused. See [journal 206](206-reused-database-planned-differently.md).
+
 ## Follow-up and next iteration
 
 - Re-record the shard weights, which the change has made stale.
