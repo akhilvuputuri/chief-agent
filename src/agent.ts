@@ -1141,6 +1141,10 @@ export class Assistant {
           const granted: unknown = child.rows[0]?.tools;
           if (!Array.isArray(granted) || !granted.includes(op))
             throw new Error("Operation unavailable to this agent");
+          // The container runs one session at a time: the research browser takes it over
+          // from the coordinator's own browser.
+          if (op === "public_browser")
+            await this.tools.browser?.release(user, run);
           return this.call(capability, input, childRun);
         },
         releaseAgent: async (childRun) => {
@@ -1555,6 +1559,8 @@ export class Assistant {
       throw error;
     } finally {
       this.inbox.release(consumedIds);
+      // The coordinator's browser session lasts one run.
+      void this.tools.browser?.release(user, run);
       this.capabilities.delete(capability);
       this.controllers.delete(run);
       if (this.foreground.get(user)?.run === run) this.foreground.delete(user);

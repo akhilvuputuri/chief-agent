@@ -40,6 +40,7 @@ function callForm(op: string, raw: string) {
     const args = JSON.parse(raw);
     // One tool with many commands: a failing open must not use up snapshot's attempts.
     if (op === "public_browser") return `${op}(${args?.command?.kind ?? "?"})`;
+    if (op === "browser") return `${op}(${args?.action ?? "?"})`;
     const target =
       !readOperations.has(op) &&
       args &&
@@ -754,6 +755,7 @@ export class CustomAgent implements Agent {
                     op === "agent_run" ||
                     // Its error text is page-controlled, and the call may be a click.
                     op === "public_browser" ||
+                    op === "browser" ||
                     op.startsWith("job_alignment_") ||
                     attempt >= 2 ||
                     !(
@@ -784,7 +786,8 @@ export class CustomAgent implements Agent {
             if (
               !readOperations.has(op) ||
               op === "agent_run" ||
-              op === "public_browser"
+              op === "public_browser" ||
+              op === "browser"
             )
               refusals.clear();
             if (candidate) {

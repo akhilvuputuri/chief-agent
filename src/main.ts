@@ -6,6 +6,7 @@ import { selectCodingBackend } from "./coding/backend.js";
 import { randomUUID } from "node:crypto";
 import { LinkResolver, postEvidenceSchema } from "./link-resolution.js";
 import { PublicBrowser } from "./public-browser/client.js";
+import { BrowserTool } from "./browser-tool.js";
 import { McpTools, loadMcpRegistry, parseMcpCredentials } from "./mcp.js";
 import { Gathering } from "./gathering/controller.js";
 import { FileVault } from "./gathering/vault.js";
@@ -761,13 +762,24 @@ if (c.PUBLIC_BROWSER === "on" && !c.PUBLIC_BROWSER_KEY)
     "STARTUP_PUBLIC_BROWSER_CONFIG",
     "Public browser control is not configured",
   );
-const publicBrowser =
+const publicBrowserRpc =
   c.PUBLIC_BROWSER === "on"
-    ? new PublicBrowser(
-        db,
-        new BrowserRpc("http://public-browser:3001", c.PUBLIC_BROWSER_KEY),
-      )
+    ? new BrowserRpc("http://public-browser:3001", c.PUBLIC_BROWSER_KEY)
     : undefined;
+const publicBrowser = publicBrowserRpc
+  ? new PublicBrowser(db, publicBrowserRpc)
+  : undefined;
+// The coordinator's browser shares the container (docs/public-browser.md).
+const browserTool = publicBrowserRpc
+  ? new BrowserTool(
+      publicBrowserRpc,
+      () =>
+        fetch("http://public-browser:3001/healthz", {
+          signal: AbortSignal.timeout(5000),
+        }).then((r) => r.json()),
+      gmail,
+    )
+  : undefined;
 const linksMigrated = !!(
   await db.query("SELECT 1 FROM runtime_migrations WHERE version=31")
 ).rows.length;
@@ -838,6 +850,33 @@ const linkTools = studyMigrated
       mcp: () => mcp,
     })
   : undefined;
+// Mutable: the coordinator's browser tools appear once the running sidecar supports them.
+const availability: Record<string, boolean> = {
+  links: !!links,
+  studyList: !!linkTools,
+  publicBrowser: !!publicBrowser,
+  mcp: !!mcp?.configured,
+  canvases: !!c.MINIAPP_ORIGIN,
+  web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),
+  gmail: !!c.GOOGLE_REFRESH_TOKEN,
+  mailIndex: !!mailIndex,
+  calendar: !!c.CALENDAR_REFRESH_TOKEN,
+  subscriptions: true,
+  parcels: true,
+  library: true,
+  libraryAccount: !!libraryIdentity,
+  preparationSheet: !!(c.SHEETS_REFRESH_TOKEN && c.SHEETS_SPREADSHEET_ID),
+  dailySheet: !!(c.SHEETS_REFRESH_TOKEN && c.DAILY_SPREADSHEET_ID),
+  stocks: !!stockProvider,
+  news: true,
+  singapore: true,
+  ltaDataMall: singapore.dataMallConfigured,
+  ...(responsibilities ? { responsibilities: true } : {}),
+  ...(coding ? { coding: true } : {}),
+  ...(portfolio ? { portfolio: true } : {}),
+  ...(portfolio?.orders ? { portfolioDrafts: true } : {}),
+  ...(gathering ? { gathering: true } : {}),
+};
 const assistant = new Assistant(
   db,
   new CustomAgent(
@@ -880,33 +919,10 @@ const assistant = new Assistant(
     publicBrowser,
     linkTools,
     media,
+    undefined,
+    browserTool,
   ),
-  {
-    links: !!links,
-    studyList: !!linkTools,
-    publicBrowser: !!publicBrowser,
-    mcp: !!mcp?.configured,
-    canvases: !!c.MINIAPP_ORIGIN,
-    web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),
-    gmail: !!c.GOOGLE_REFRESH_TOKEN,
-    mailIndex: !!mailIndex,
-    calendar: !!c.CALENDAR_REFRESH_TOKEN,
-    subscriptions: true,
-    parcels: true,
-    library: true,
-    libraryAccount: !!libraryIdentity,
-    preparationSheet: !!(c.SHEETS_REFRESH_TOKEN && c.SHEETS_SPREADSHEET_ID),
-    dailySheet: !!(c.SHEETS_REFRESH_TOKEN && c.DAILY_SPREADSHEET_ID),
-    stocks: !!stockProvider,
-    news: true,
-    singapore: true,
-    ltaDataMall: singapore.dataMallConfigured,
-    ...(responsibilities ? { responsibilities: true } : {}),
-    ...(coding ? { coding: true } : {}),
-    ...(portfolio ? { portfolio: true } : {}),
-    ...(portfolio?.orders ? { portfolioDrafts: true } : {}),
-    ...(gathering ? { gathering: true } : {}),
-  },
+  availability,
   {
     ms: c.AGENT_BUDGET_MS,
     models: c.AGENT_BUDGET_MODEL_CALLS,
@@ -935,6 +951,14 @@ const assistant = new Assistant(
   // A fixed tool list keeps the cached prompt prefix stable (journal 107).
   c.TOOL_PICKER === "all",
 );
+if (browserTool) {
+  // The sidecar is refreshed separately from gateway releases, so ask it now and then.
+  const check = async () => {
+    availability.browser = await browserTool.supported();
+  };
+  void check();
+  setInterval(() => void check(), 5 * 60_000).unref();
+}
 if (responsibilities)
   responsibilities.onInactive = (user, id) =>
     assistant.interruptResponsibility(user, id);

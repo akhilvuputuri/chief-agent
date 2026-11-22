@@ -1,3 +1,9 @@
+# Browser and file_merge — tested, not yet released, 22 November 2026
+
+Branch `feat/browser`, on top of the file-tools branch. The coordinator gets a general `browser` tool running in the public-browser container (open public pages, the owner's emails as Gmail prints them, file-space files or HTML; read; print to PDF, screenshot, download into the file space) and `file_merge`, which joins PDFs with `qpdf` there. A `browsing-and-files` skill describes them. The tools are offered only once the running sidecar reports support ([journal 204](journey/204-email-search-redesign.md), [design](email-search.md#browser-and-file_merge)).
+
+Next: independent review; rebase after the file-tools PR merges; release the gateway; then run `scripts/refresh-public-browser.py` on the host to make the tools live.
+
 # File space and file tools — tested, not yet released, 22 November 2026
 
 Branch `feat/file-tools`, on top of the Phase 3, part 1 branch. The coordinator has a temporary per-owner file space in memory (20 MiB per file, 100 MiB per owner, an hour after last use, gone on restart) with `file_list`, `file_send` (Telegram documents to the owner after the reply), `file_save` (a PDF into the encrypted vault) and `file_zip`; `gmail_attachment` takes `toFile: true` to put an attachment there ([journal 204](journey/204-email-search-redesign.md), [design](email-search.md#file-space-and-file-tools)).

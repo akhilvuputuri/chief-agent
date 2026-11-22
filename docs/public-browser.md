@@ -123,3 +123,12 @@ docker compose --project-directory /opt/hermes-companion -p hermes-companion --p
 The schedule covers age only. A merge that changes what these images hold still needs a manual refresh, as above.
 
 **To turn it off:** set `PUBLIC_BROWSER=off` in `.env`, recreate the gateway and stop the two services.
+
+## The coordinator's browser
+
+> **Update, 22 November 2026 ([journal 204](journey/204-email-search-redesign.md), branch `feat/browser`, tested, not released):** the coordinator gets its own `browser` tool, which uses this container. It is a separate tool from `public_browser`, whose commands, schema and "alone" rule for `core/browser` are unchanged; the design is in [email search](email-search.md#browser-and-file_merge).
+>
+> - **Same container, same confinement.** The coordinator's session is one more session in this service: the same Chromium launch, sandbox, proxy and cleanup, one session at a time (a research agent waiting on it gets "busy"), ending when the coordinator's run ends, after 3 idle minutes or 10 in all.
+> - **What the sidecar gains.** `document` (opens HTML or a PDF the gateway sends, from the session's folder; HTML gets a Content-Security-Policy with scripts off and remote loads only when `remoteImages` is on), `text` (title, text and links, including text inside shadow roots), `print` and `screenshot` (Playwright on the session's debug port), `download` (by ref or a public address) and `merge` (`qpdf`, no session). The request bound rises from 64 KB to 40 MB for documents. `/healthz` now answers `capabilities: ["documents"]`, which is how the gateway knows to offer the tool. The image adds `qpdf`, `fontconfig` and the Liberation, Noto core, Noto CJK and Noto colour emoji fonts.
+> - **What is sent to it.** Public addresses, as before; for an email, the composed HTML document (headers, body and inline images) built by the gateway from its read-only Gmail client; for a file, the file's bytes; for `file_merge`, the PDFs. It never receives a Gmail token, a key other than its control key, or anything from the database. What it sends back is page text, or file bytes that the gateway puts in the file space without showing them to the model.
+> - **Rollout.** The gateway can be released first and stays quiet. The sidecar change goes live only with `sudo python3 /opt/hermes-companion/scripts/refresh-public-browser.py` on the host, which runs the extended probe before swapping. The scheduled refresh waits for a 28-day-old image, so run it by hand after merging.

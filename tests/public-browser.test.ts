@@ -569,6 +569,7 @@ async function runAgentTurn(
   steps: unknown[],
   rpc: (command: { kind: string }) => Record<string, unknown>,
   seed?: (db: any) => Promise<void>,
+  setup?: (tools: JobTools, sent: string[]) => void,
 ) {
   const pg = await migratedPGlite();
   const db = pg as any;
@@ -582,6 +583,7 @@ async function runAgentTurn(
       return rpc(command);
     },
   });
+  setup?.(tools, sent);
   let agentCalls = 0,
     chiefCalls = 0,
     offered: string[] = [],
@@ -660,6 +662,28 @@ test("through the real loop: page errors are not retried, one command's failures
   assert.equal(sent.filter((k) => k === "open").length, 3);
   assert.equal(sent.filter((k) => k === "snapshot").length, 1);
   assert.equal(sent.at(-1), "close", "the slot is freed when the agent ends");
+});
+
+test("the research agent takes the browser over from the coordinator's own session", async () => {
+  const released: string[] = [];
+  const { sent } = await runAgentTurn(
+    "browser",
+    "You are the public browser agent",
+    [browse({ kind: "open", url: "https://a.example/" }), report],
+    () => ({ ok: true, result: { url: "https://a.example/" } }),
+    undefined,
+    (tools, sent) => {
+      (tools as any).browser = {
+        release: async (_user: string, run: string) => {
+          released.push(run);
+          sent.push("coordinator-release");
+        },
+      };
+    },
+  );
+  assert.ok(released.length >= 1);
+  assert.equal(sent.indexOf("coordinator-release"), 0, String(sent));
+  assert.ok(sent.indexOf("open") > 0);
 });
 
 test("a command refused for failing works again once the page has changed", async () => {

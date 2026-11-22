@@ -7,9 +7,17 @@
 //
 // The second decoy is what can falsify the proxy's HTTPS policy: a dotted name resolving to a
 // private address, with something listening on 443, so a broken policy really connects.
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, readlinkSync } from "node:fs";
-import { PublicBrowserEngine } from "./dist/public-browser/engine.js";
-import { publicBrowserCommand as schema } from "./dist/public-browser/commands.js";
+import { extractText, getDocumentProxy } from "unpdf";
+import {
+  mergePdfs,
+  PublicBrowserEngine,
+} from "./dist/public-browser/engine.js";
+import {
+  documentCommand,
+  publicBrowserCommand as schema,
+} from "./dist/public-browser/commands.js";
 
 const proxy = process.env.BROWSER_PROXY ?? "http://public-browser-proxy:3002";
 const decoy = process.argv[2];
@@ -202,6 +210,95 @@ const memory = () =>
     Number(readFileSync("/sys/fs/cgroup/memory.peak", "utf8")) / 1048576,
   );
 console.log(`memory peak so far: ${memory()} MiB`);
+
+// The coordinator's browser tool: documents the gateway supplies, printed, captured and joined.
+const doc = (command) =>
+  engine.call("probe", session, documentCommand.parse(command));
+// A 1x1 PNG, as an email's inline cid: image arrives once the gateway has made it local.
+const pixel =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+const email = (n, style) =>
+  `<section class="email"><template shadowrootmode="open"><style>${style}</style><div class="subject">Synthetic receipt ${n}</div><p>Order ${n} total SGD ${n}.50</p><img src="data:image/png;base64,${pixel}"></template></section>`;
+const emails = `<!doctype html><html><head><meta charset="utf-8"><title>2 emails</title><style>body{margin:0}section.email+section.email{break-before:page}</style><script>document.title="scripted"</script></head><body>${email(1, "p{color:rgb(204,0,0)}")}${email(2, "")}</body></html>`;
+const pdfText = async (base64) => {
+  const pdf = await getDocumentProxy(
+    new Uint8Array(Buffer.from(base64, "base64")),
+  );
+  return (await extractText(pdf, { mergePages: false })).text;
+};
+try {
+  const opened = await doc({
+    kind: "document",
+    type: "html",
+    data: emails,
+    remoteImages: true,
+  });
+  check(
+    "a supplied email document opens with scripts off",
+    opened.title === "2 emails",
+  );
+  const text = await doc({ kind: "text" });
+  check(
+    "its text is read from both emails, once each",
+    String(text.text).split("Order 1 total").length === 2 &&
+      String(text.text).split("Order 2 total").length === 2,
+    String(text.text).slice(0, 80),
+  );
+  const colour = await evaluate(
+    `getComputedStyle(document.querySelectorAll("section")[1].shadowRoot.querySelector("p")).color`,
+  );
+  check(
+    "one email's styles do not reach another",
+    colour !== "rgb(204, 0, 0)",
+    colour,
+  );
+  const printed = await doc({
+    kind: "print",
+    paper: "A4",
+    landscape: false,
+    marginMm: 10,
+    background: false,
+    scale: 1,
+    headerFooter: false,
+  });
+  const pages = await pdfText(printed.data);
+  check(
+    "print gives a real PDF, one email per page",
+    Buffer.from(printed.data, "base64").subarray(0, 5).toString() === "%PDF-" &&
+      printed.pages === 2 &&
+      pages.length === 2 &&
+      pages[0].includes("Synthetic receipt 1") &&
+      pages[1].includes("Synthetic receipt 2") &&
+      pages[1].includes("Order 2 total SGD 2.50"),
+    `${printed.pages} pages: ${pages.map((p) => p.slice(0, 30)).join(" | ")}`,
+  );
+  const shot = await doc({ kind: "screenshot", fullPage: true });
+  check(
+    "a screenshot is a PNG",
+    Buffer.from(shot.data, "base64").subarray(1, 4).toString() === "PNG",
+  );
+  const merged = await mergePdfs([printed.data, printed.data]);
+  check(
+    "qpdf joins two PDFs into one",
+    merged.pages === 4 && (await pdfText(merged.data)).length === 4,
+  );
+} catch (error) {
+  check(
+    "the document commands work",
+    false,
+    String(error.message).slice(0, 80),
+  );
+}
+const fonts = execFileSync("fc-list", [":", "family"], { encoding: "utf8" });
+for (const family of [
+  "Liberation Sans",
+  "Liberation Serif",
+  "Liberation Mono",
+  "Noto Sans",
+  "Noto Sans CJK",
+  "Noto Color Emoji",
+])
+  check(`font installed: ${family}`, fonts.includes(family));
 
 await call({ kind: "close" });
 await new Promise((resolve) => setTimeout(resolve, 1500));

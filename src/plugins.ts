@@ -155,6 +155,8 @@ export const NEVER_GRANTED = new Set([
   "file_send",
   "file_save",
   "file_zip",
+  "file_merge",
+  "browser",
 ]);
 const OPERATIONS = new Set(
   action.options.map((o) => o.shape.operation.value as string),
