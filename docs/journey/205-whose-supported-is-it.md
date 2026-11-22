@@ -66,7 +66,7 @@ Not released. Pending: independent review, merge, the automatic release, and the
 > - a note that brackets a detail from Chief's previous message does not inherit that earlier turn's untrusted-source tags; notes are in no turn's context, and the repair has had the same gap since journal 195;
 > - a supported fact whose messages are gone opens a judge run each night that makes no model call;
 > - after a judge prompt change, old facts are read again before new ones, 40 a night;
-> - no test pins the event order the gate's condition relies on, and an owner turn during the self-test still settles the judge for that night with nothing recorded.
+> - no test pins the event order the gate's condition relies on, and an owner turn during the self-test still settles the judge for that night, with the rest of the self-test not recorded.
 >
 > One unrelated test, of the test-database pool, failed once in a local full run made while other test processes were running, passed three times alone and passed in hosted CI.
 
