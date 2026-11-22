@@ -38,6 +38,10 @@ import { isSingaporeAction } from "./singapore/schema.js";
 import { keywordSearch, type Embedder, type MailIndex } from "./mail-recall.js";
 import { recall } from "./recall.js";
 import { isLearned, MemoryStore } from "./memory.js";
+import { FileSpace, FILE_MAX, describe, spaceName } from "./file-space.js";
+import type { MediaOutbox } from "./media-outbox.js";
+import { storedZip } from "./gathering/zip.js";
+import { ToolValidationError } from "./tool-errors.js";
 export class JobTools {
   constructor(
     private db: Database,
@@ -63,6 +67,10 @@ export class JobTools {
     private recallEmbedder?: Embedder,
     readonly publicBrowser?: PublicBrowser,
     readonly linkTools?: LinkTools,
+    /** Where file_send queues documents to follow the run's reply. */
+    private media?: MediaOutbox,
+    /** The coordinator's per-owner scratch space for files, in memory. */
+    readonly files: FileSpace = new FileSpace(),
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -410,6 +418,29 @@ export class JobTools {
       a.operation === "gmail_attachment"
     ) {
       if (!this.gmail) throw new Error("Gmail is not configured");
+      if (a.operation === "gmail_attachment" && a.toFile) {
+        const { data, ...facts } = (await this.gmail.call(
+          user,
+          a.operation,
+          a.messageId,
+          undefined,
+          run,
+          a.account,
+          { partId: a.partId, toFile: true },
+        )) as Record<string, unknown> & { data: Buffer };
+        const file = this.files.put(user, {
+          name: String(facts.name),
+          mimeType: String(facts.mimeType),
+          bytes: data,
+          source: `gmail:${facts.account}:${a.messageId}:${a.partId}`,
+        });
+        return {
+          ...facts,
+          fileId: file.fileId,
+          name: file.name,
+          note: "The attachment is in the file space as fileId (its bytes are not shown here). file_send sends it to the owner, file_save keeps a PDF in the vault, file_zip bundles files.",
+        };
+      }
       return this.gmail.call(
         user,
         a.operation,
@@ -437,6 +468,84 @@ export class JobTools {
               ? { partId: a.partId, offset: a.offset }
               : {},
       );
+    }
+    if (a.operation === "file_list")
+      return {
+        files: this.files.list(user),
+        note: "Files stay an hour after last use and are gone after a restart.",
+      };
+    if (a.operation === "file_send") {
+      if (!this.media) throw new Error("Sending files is not configured");
+      const files = [...new Set(a.fileIds)].map((id) =>
+        this.files.get(user, id),
+      );
+      files.forEach((file, i) =>
+        this.media!.put(run, {
+          kind: "document",
+          bytes: file.bytes,
+          filename: file.name,
+          caption: i === 0 ? (a.caption ?? "") : "",
+        }),
+      );
+      return {
+        queued: files.map((f) => describe(f)),
+        note: 'Sent to the owner as documents right after your reply, in this chat and thread. Say only that they follow, for example "The PDFs follow." A run that ends without a reply sends nothing.',
+      };
+    }
+    if (a.operation === "file_save") {
+      const vault = this.gathering?.vault;
+      if (!vault) throw new Error("The vault is not configured");
+      const file = this.files.get(user, a.fileId);
+      if (!file.bytes.subarray(0, 1024).includes("%PDF-"))
+        throw new ToolValidationError(
+          `The vault keeps PDFs only, and ${file.name} (${file.mimeType}) is not a PDF. file_send can send it to the owner instead.`,
+        );
+      const saved = await vault.keep(
+        user,
+        a.name ?? file.name,
+        file.bytes,
+        file.source,
+      );
+      return {
+        id: saved.id,
+        name: saved.name,
+        bytes: saved.bytes,
+        savedFrom: file.source,
+        ...(saved.facts?.textUnreadable ? { textUnreadable: true } : {}),
+        note: "Kept in the owner's encrypted vault. The same PDF kept twice is one vault file, under its first name.",
+      };
+    }
+    if (a.operation === "file_zip") {
+      const files = [...new Set(a.fileIds)].map((id) =>
+        this.files.get(user, id),
+      );
+      const used = new Set<string>();
+      const unique = (name: string) => {
+        let candidate = name;
+        for (let n = 2; used.has(candidate.toLowerCase()); n++)
+          candidate = name.replace(/(\.[^.]*)?$/, ` (${n})$1`);
+        used.add(candidate.toLowerCase());
+        return candidate;
+      };
+      const parts: Buffer[] = [];
+      for await (const part of storedZip(
+        (async function* () {
+          for (const f of files) yield { name: unique(f.name), data: f.bytes };
+        })(),
+      ))
+        parts.push(part);
+      const zip = Buffer.concat(parts);
+      if (zip.length > FILE_MAX)
+        throw new ToolValidationError(
+          "The ZIP would be larger than 20 MiB, the file space's per-file bound; zip fewer files.",
+        );
+      const name = spaceName(a.name);
+      return this.files.put(user, {
+        name: /\.zip$/i.test(name) ? name : `${name}.zip`,
+        mimeType: "application/zip",
+        bytes: zip,
+        source: `zip:${files.map((f) => f.fileId).join(",")}`,
+      });
     }
     if (a.operation === "gmail_recall") {
       if (!this.mailRecall) throw new Error("The mail index is not enabled");

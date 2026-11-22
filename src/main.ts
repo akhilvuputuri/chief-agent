@@ -879,6 +879,7 @@ const assistant = new Assistant(
     recallEmbedder,
     publicBrowser,
     linkTools,
+    media,
   ),
   {
     links: !!links,

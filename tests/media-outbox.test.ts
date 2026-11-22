@@ -17,11 +17,13 @@ const picture = (name: string): OutgoingMedia => ({
 test("the outbox keeps the latest pictures per run, for a while, and hands each out once", () => {
   let now = 0;
   const outbox = new MediaOutbox(() => now);
-  for (const name of ["a", "b", "c", "d"]) outbox.put("run", picture(name));
+  // Twenty items per run since file_send (22 November 2026); three before.
+  const names = Array.from({ length: 21 }, (_, i) => `p${i}`);
+  for (const name of names) outbox.put("run", picture(name));
   outbox.put("other", { ...picture("long"), caption: "x".repeat(2000) });
   assert.deepEqual(
     outbox.take(["run"]).map((m) => m.caption),
-    ["b", "c", "d"],
+    names.slice(1),
   );
   assert.deepEqual(outbox.take(["run"]), []);
   // Pictures from several runs come out in the order they were queued, whatever the run order.
