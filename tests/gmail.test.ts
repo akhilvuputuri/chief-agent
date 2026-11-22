@@ -1162,16 +1162,63 @@ test("a rate-limited message in a batch read says to retry it", async () => {
   );
 });
 
-test("a rate limit on a single call is a clear retryable RATE_LIMITED, not a reconnect", async () => {
-  const cases: [Reply, string][] = [
-    [new Reply(429, { error: { code: 429 } }), "RATE_LIMITED"],
-    [new Reply(403, rateLimitBody()), "RATE_LIMITED"],
+test("Gmail rate and quota refusals are told apart from permission failures", async () => {
+  // The newer error shape names the reason in an ErrorInfo detail.
+  const errorInfo = (reason: string, status = "PERMISSION_DENIED") => ({
+    error: {
+      code: 403,
+      status,
+      details: [
+        { "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason },
+      ],
+    },
+  });
+  const cases: [string, Reply, string, "rate" | "daily" | "auth"][] = [
+    ["429", new Reply(429, { error: { code: 429 } }), "RATE_LIMITED", "rate"],
     [
+      "403 rateLimitExceeded",
+      new Reply(403, rateLimitBody()),
+      "RATE_LIMITED",
+      "rate",
+    ],
+    [
+      "403 userRateLimitExceeded",
+      new Reply(403, rateLimitBody("userRateLimitExceeded")),
+      "RATE_LIMITED",
+      "rate",
+    ],
+    [
+      "403 ErrorInfo RATE_LIMIT_EXCEEDED",
+      new Reply(403, errorInfo("RATE_LIMIT_EXCEEDED")),
+      "RATE_LIMITED",
+      "rate",
+    ],
+    [
+      "403 dailyLimitExceeded",
+      new Reply(403, rateLimitBody("dailyLimitExceeded")),
+      "RATE_LIMITED",
+      "daily",
+    ],
+    [
+      "403 insufficientPermissions",
       new Reply(403, rateLimitBody("insufficientPermissions")),
       "AUTHORIZATION_REQUIRED",
+      "auth",
+    ],
+    [
+      "403 ErrorInfo ACCESS_TOKEN_SCOPE_INSUFFICIENT",
+      new Reply(403, errorInfo("ACCESS_TOKEN_SCOPE_INSUFFICIENT")),
+      "AUTHORIZATION_REQUIRED",
+      "auth",
+    ],
+    [
+      "403 without a body reason",
+      new Reply(403, {}),
+      "AUTHORIZATION_REQUIRED",
+      "auth",
     ],
   ];
-  for (const [reply, code] of cases)
+  for (const [name, reply, code, kind] of cases)
     for (const operation of [
       "gmail_search",
       "gmail_thread",
@@ -1186,15 +1233,127 @@ test("a rate limit on a single call is a clear retryable RATE_LIMITED, not a rec
         ),
         (e: Error) => {
           const err = toolError(e);
-          assert.equal(err.code, code, `${operation} ${reply.status}`);
-          if (code === "RATE_LIMITED") {
+          assert.equal(err.code, code, `${operation} ${name}`);
+          if (kind === "rate") {
             assert.equal(err.retryable, true);
             assert.match(err.message, /Wait a few seconds and retry/);
+          }
+          if (kind === "daily") {
+            assert.equal(err.retryable, false);
+            assert.match(err.message, /daily quota .* is used/);
+            assert.match(err.message, /reset at midnight Pacific time/);
+            assert.doesNotMatch(err.message, /wait a few seconds/i);
           }
           return true;
         },
       );
     }
+});
+
+test("a batch part refused for the daily quota says so and is not fetched again", async () => {
+  const r = routed((url) =>
+    url.pathname.endsWith("/messages")
+      ? {
+          messages: [
+            { id: "a1", threadId: "fa1" },
+            { id: "a2", threadId: "fa2" },
+          ],
+        }
+      : url.pathname.endsWith("/a1")
+        ? new Reply(403, rateLimitBody("dailyLimitExceeded"))
+        : metadata("a2", "Found"),
+  );
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_search",
+    "x",
+  );
+  assert.equal(
+    out.results[0].detail,
+    "not retrieved: Gmail's daily quota is used; it resets later",
+  );
+  assert.equal(out.results[1].subject, "Found");
+  assert.equal(r.calls.filter((c) => c.includes("format=metadata")).length, 0);
+});
+
+test("rows the page fit drops are listed for a batch read and named in the hint", async () => {
+  // Control characters serialise as six, so a full 100-row page cannot fit whole.
+  const dense = "\u0001".repeat(500);
+  const ids = Array.from({ length: 100 }, (_, i) => `d${i}`);
+  const r = routed((url) =>
+    url.pathname.endsWith("/messages")
+      ? {
+          messages: ids.map((id) => ({ id, threadId: `f${id}` })),
+          nextPageToken: "more",
+        }
+      : {
+          id: url.pathname.split("/").pop()!,
+          threadId: "fa1",
+          snippet: dense,
+          labelIds: [],
+          payload: {
+            headers: ["From", "To", "Subject", "Date"].map((name) => ({
+              name,
+              value: dense,
+            })),
+          },
+        },
+  );
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_search",
+    "deposit",
+    undefined,
+    undefined,
+    undefined,
+    { pageSize: 100 },
+  );
+  assert.ok(out.omitted > 0);
+  assert.equal(out.results.length + out.omitted, 100);
+  // The dropped rows are the tail of the page, in order, with their thread ids.
+  assert.deepEqual(
+    out.omittedMessages.map((m: any) => m.id),
+    ids.slice(out.results.length),
+  );
+  assert.ok(out.omittedMessages.every((m: any) => m.threadId === `f${m.id}`));
+  assert.match(
+    out.hint,
+    new RegExp(`^${out.omitted} rows did not fit .*gmail_read with messageIds`),
+  );
+  assert.match(out.hint, /Follow nextPageToken/);
+  assertProjects(out, "gmail_search");
+});
+
+test("briefing lines and attachment names are cut on code points", async () => {
+  const emoji = "\u{1F600}";
+  assert.deepEqual(
+    unreadDigest({
+      results: [
+        { subject: "s".repeat(159) + emoji, from: "f".repeat(79) + emoji },
+      ],
+    }),
+    ["\u2022 " + "s".repeat(159) + " \u2014 " + "f".repeat(79)],
+  );
+  const r = routed(() => ({
+    id: "abc",
+    threadId: "fabc",
+    payload: {
+      mimeType: "multipart/mixed",
+      parts: [
+        {
+          mimeType: "application/pdf",
+          filename: "n".repeat(119) + emoji + ".pdf",
+          body: { attachmentId: "att1", size: 10 },
+        },
+      ],
+    },
+  }));
+  const [file] = await new GmailTools(config, r.request).attachmentInfo(
+    "123",
+    "abc",
+    "primary",
+  );
+  assert.equal(file!.name, "n".repeat(119));
 });
 
 test("search metadata for a page comes from one batch request", async () => {

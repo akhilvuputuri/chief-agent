@@ -588,6 +588,65 @@ test("a Gmail quota refusal pauses reading without leaving mail out", async (t) 
   assert.equal(index.messages, 6);
 });
 
+test("a real Gmail 429 on an index read pauses the build and keeps the message queued", async (t) => {
+  // Drives GmailTools itself: its RateLimitedError carries no "(429)" text, which the
+  // hand-made refusals above would not notice.
+  const ids = ["a0", "a1", "a2"];
+  let refusals = 3;
+  const reads: string[] = [];
+  const request = (async (u: unknown) => {
+    const url = new URL(String(u));
+    if (url.hostname === "oauth2.googleapis.com")
+      return Response.json({ access_token: "a", expires_in: 3600 });
+    if (url.pathname.endsWith("/profile"))
+      return Response.json({ emailAddress: "owner@example.com" });
+    if (url.pathname.endsWith("/messages"))
+      return Response.json({
+        messages: ids.map((id) => ({ id, threadId: "f" + id })),
+      });
+    const id = url.pathname.split("/").pop()!;
+    reads.push(id);
+    if (id === "a0" && refusals-- > 0)
+      return Response.json(
+        { error: { code: 429, status: "RESOURCE_EXHAUSTED" } },
+        { status: 429 },
+      );
+    return Response.json({
+      id,
+      threadId: "f" + id,
+      internalDate: String(NOW),
+      payload: {
+        headers: [{ name: "Subject", value: "Subject " + id }],
+        mimeType: "text/plain",
+        body: { data: Buffer.from("rate body " + id).toString("base64url") },
+      },
+    });
+  }) as typeof fetch;
+  const gmail = new GmailTools(
+    {
+      owner: "owner",
+      email: "owner@example.com",
+      clientId: "c",
+      clientSecret: "s",
+      refreshToken: "r",
+    },
+    request,
+  );
+  const index = new MailIndex(
+    gmail,
+    words,
+    await store(t),
+    "owner",
+    () => NOW,
+    FAST,
+  );
+  await index.start();
+  assert.equal(index.state, "ready");
+  // Three refusals of the same message would have abandoned it after two tries.
+  assert.equal(index.messages, 3);
+  assert.equal(reads.filter((id) => id === "a0").length, 4);
+});
+
 test("a Gmail that keeps refusing fails the build instead of abandoning mail", async (t) => {
   const box = mailbox([{ id: "q1", at: NOW, subject: "s", text: "body" }]);
   let reads = 0;

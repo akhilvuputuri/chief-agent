@@ -87,29 +87,47 @@ export class ResponseTooLarge extends Error {
     super("Gmail response too large");
   }
 }
-const RATE_LIMIT_REASONS =
-  /"(?:rateLimitExceeded|userRateLimitExceeded|quotaExceeded|RESOURCE_EXHAUSTED)"/;
+// Reasons Google puts in error.errors[].reason (classic shape) or as an ErrorInfo
+// reason or status (newer shape).
+const DAILY_REASONS = /"(?:dailyLimitExceeded|dailyLimitExceededUnreg)"/;
+const RATE_REASONS =
+  /"(?:rateLimitExceeded|userRateLimitExceeded|quotaExceeded|RATE_LIMIT_EXCEEDED|RESOURCE_EXHAUSTED)"/;
 const RATE_LIMITED =
   "Gmail rate limited this request (its own per-user quota). Wait a few seconds and retry; the connection is fine.";
-const RATE_LIMITED_ROW =
-  "not retrieved: Gmail rate limited this request; retry it shortly";
+const DAILY_LIMITED =
+  "Gmail's daily quota for this project is used, so retrying now will fail. Google's daily quotas reset at midnight Pacific time; the connection is fine.";
 /**
- * Whether a refused response is Gmail's rate limit: always for 429, and for 403 only
- * when Google's error body names a rate or quota reason (other 403s are permission).
+ * Gmail's rate or quota refusal, or undefined for any other failure: a 429 is always
+ * one, a 403 only when Google's error body names a rate or quota reason, so missing
+ * scopes and other permission 403s stay authorization failures.
  */
-function rateLimited(status: number, body: string) {
-  return status === 429 || (status === 403 && RATE_LIMIT_REASONS.test(body));
+function limited(status: number, body: string) {
+  if ((status === 403 || status === 429) && DAILY_REASONS.test(body))
+    return new RateLimitedError(DAILY_LIMITED, status, true);
+  if (status === 429 || (status === 403 && RATE_REASONS.test(body)))
+    return new RateLimitedError(RATE_LIMITED, status);
+  return undefined;
+}
+/** A search row's or batch-read message's detail for a rate or quota refusal. */
+function limitedRow(error: RateLimitedError) {
+  return error.daily
+    ? "not retrieved: Gmail's daily quota is used; it resets later"
+    : "not retrieved: Gmail rate limited this request; retry it shortly";
+}
+/** The body of a refused response, read only to tell a quota refusal from others. */
+async function refusalBody(response: Response) {
+  if (response.status !== 403 && response.status !== 429) {
+    await discardBody(response);
+    return "";
+  }
+  return (
+    await readBody(response, 65_536).catch(() => Buffer.alloc(0))
+  ).toString("utf8");
 }
 async function json(response: Response, maxBytes = 2_000_000) {
   if (!response.ok) {
-    let body = "";
-    if (response.status === 403)
-      body = (
-        await readBody(response, 65_536).catch(() => Buffer.alloc(0))
-      ).toString("utf8");
-    else await discardBody(response);
-    if (rateLimited(response.status, body))
-      throw new RateLimitedError(RATE_LIMITED);
+    const refusal = limited(response.status, await refusalBody(response));
+    if (refusal) throw refusal;
     throw new Error(
       `Gmail request failed (${response.status}); reconnect if authorization expired`,
     );
@@ -202,13 +220,23 @@ function kept(list: { name: string; value: string }[] | undefined) {
 /**
  * Character caps bound source text, not JSON. Quote- or backslash-dense content can
  * still double under escaping, so trim trailing entries until the serialised result
- * fits below the observation projection limit in src/observations.ts.
+ * fits below the observation projection limit in src/observations.ts. A dropped
+ * entry's ids move to omittedMessages, in order, so gmail_read messageIds can fetch it.
  */
 const SERIALISED_LIMIT = projectionLimits("gmail_search").total - 2_000;
-function fit<T extends { omitted: number }>(result: T, rows: unknown[]) {
+type Omitted = { id: string; threadId?: string; received?: string };
+function fit<T extends { omitted: number; omittedMessages?: Omitted[] }>(
+  result: T,
+  rows: Record<string, unknown>[],
+) {
   while (rows.length && JSON.stringify(result).length > SERIALISED_LIMIT) {
-    rows.pop();
+    const row = rows.pop()!;
     result.omitted += 1;
+    if (typeof row.id === "string" && ID.test(row.id))
+      (result.omittedMessages ??= []).unshift({
+        id: row.id,
+        ...(typeof row.threadId === "string" ? { threadId: row.threadId } : {}),
+      });
   }
   return result;
 }
@@ -300,7 +328,9 @@ function shares(lengths: number[], total: number, cap: number) {
 }
 type Message = z.infer<typeof messageSchema>;
 /** IDs and received times of thread messages past the shown ones, for gmail_read messageIds. */
-function omittedList(rest: { id: string; internalDate?: string }[]) {
+function omittedList(rest: { id: string; internalDate?: string }[]): {
+  omittedMessages?: Omitted[];
+} {
   const ids = rest.filter((m) => ID.test(m.id));
   return ids.length
     ? {
@@ -377,8 +407,8 @@ export function unreadDigest(result: unknown, limit = 5) {
     .map(
       (m) =>
         "• " +
-        (m.subject ?? "(No subject)").slice(0, 160) +
-        (m.from ? ` — ${m.from.slice(0, 80)}` : ""),
+        cut(m.subject ?? "(No subject)", 160) +
+        (m.from ? ` — ${cut(m.from, 80)}` : ""),
     );
 }
 /** Optional arguments: search page size, and a single read's offset or a batch read's ids. */
@@ -550,14 +580,8 @@ export class GmailTools {
       },
     );
     if (!response.ok) {
-      const refused =
-        response.status === 403
-          ? (
-              await readBody(response, 65_536).catch(() => Buffer.alloc(0))
-            ).toString("utf8")
-          : (await discardBody(response), "");
-      if (rateLimited(response.status, refused))
-        throw new RateLimitedError(RATE_LIMITED);
+      const refusal = limited(response.status, await refusalBody(response));
+      if (refusal) throw refusal;
       throw new Error(`Gmail batch request failed (${response.status})`);
     }
     const reply = /boundary="?([^";\s]+)"?/i.exec(
@@ -572,7 +596,7 @@ export class GmailTools {
     ).toString("utf8");
     const found = new Map<
       number,
-      z.infer<typeof metadataSchema> | "rate limited"
+      z.infer<typeof metadataSchema> | RateLimitedError
     >();
     for (const part of text.split(`--${reply}`)) {
       const index = Number(
@@ -583,8 +607,12 @@ export class GmailTools {
       // The JSON body follows the inner response's headers and a blank line.
       const after = part.slice(status.index);
       const gap = after.search(/\r?\n\r?\n/);
-      if (rateLimited(Number(status[1]), gap < 0 ? "" : after.slice(gap))) {
-        found.set(index, "rate limited");
+      const refusal = limited(
+        Number(status[1]),
+        gap < 0 ? "" : after.slice(gap),
+      );
+      if (refusal) {
+        found.set(index, refusal);
         continue;
       }
       if (status[1] !== "200" || gap < 0) continue;
@@ -620,7 +648,7 @@ export class GmailTools {
       } catch (error) {
         if (error instanceof RateLimitedError) {
           chunk.forEach((m, i) => {
-            results[start + i] = skipped(m, RATE_LIMITED_ROW);
+            results[start + i] = skipped(m, limitedRow(error));
           });
           continue;
         }
@@ -628,8 +656,8 @@ export class GmailTools {
       }
       chunk.forEach((m, i) => {
         const part = found?.get(i);
-        if (part === "rate limited")
-          results[start + i] = skipped(m, RATE_LIMITED_ROW);
+        if (part instanceof RateLimitedError)
+          results[start + i] = skipped(m, limitedRow(part));
         else if (part) results[start + i] = this.row(m, part);
         else missing.push(start + i);
       });
@@ -645,7 +673,7 @@ export class GmailTools {
           results[i] = skipped(
             m,
             error instanceof RateLimitedError
-              ? RATE_LIMITED_ROW
+              ? limitedRow(error)
               : "not retrieved: unavailable",
           );
         }
@@ -722,6 +750,13 @@ export class GmailTools {
       },
       results,
     );
+    if (result.omitted)
+      result.hint = [
+        `${result.omitted} rows did not fit in this result; their ids are in omittedMessages, so gmail_read with messageIds reads them.`,
+        result.hint,
+      ]
+        .filter(Boolean)
+        .join(" ");
     // A partial page must not be served to a later call that could fetch the rest.
     if (!degraded) this.remember(key, structuredClone(result));
     return result;
@@ -833,7 +868,7 @@ export class GmailTools {
   }
   /**
    * Several messages in one call, in request order. Body text is shared fairly up to
-   * the total; a message that fails or is unaffordable reports why without failing the rest.
+   * the total; a message that fails or is rate limited reports why without failing the rest.
    */
   private async readMany(token: string, ids: string[]) {
     const fetched: (Message | string)[] = new Array(ids.length);
@@ -851,7 +886,7 @@ export class GmailTools {
             error instanceof ResponseTooLarge
               ? "not retrieved: message larger than the response guard"
               : error instanceof RateLimitedError
-                ? RATE_LIMITED_ROW
+                ? limitedRow(error)
                 : "not retrieved: unavailable";
         }
       }
@@ -928,7 +963,7 @@ export class GmailTools {
       )
         files.push({
           partKey: path,
-          name: p.filename.slice(0, 120),
+          name: cut(p.filename, 120),
           bytes: p.body.size ?? 0,
           mimeType: "application/pdf",
           body: p.body,
