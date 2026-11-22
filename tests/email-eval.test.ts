@@ -31,8 +31,14 @@ const config = {
 };
 const BODY = "Your monthly receipt. ".repeat(30);
 const encode = (text: string) => Buffer.from(text).toString("base64url");
-type Mail = { html?: boolean; body?: string; snippet?: string };
-/** A message with a plain-text body, or HTML only (which today's read tools cannot show). */
+type Mail = {
+  html?: boolean;
+  body?: string;
+  snippet?: string;
+  /** Gmail refuses this message's reads: a rate limit, or the daily quota. */
+  refuse?: "rate" | "daily";
+};
+/** A message with a plain-text body, or HTML only (which the read tools convert since Phase 1). */
 function message(id: string, mail: Mail = {}) {
   const body = mail.body ?? BODY;
   return {
@@ -52,17 +58,25 @@ function message(id: string, mail: Mail = {}) {
     },
   };
 }
-/** Real GmailTools over a fake Gmail: budget, fitting and warnings are the real ones. */
+/**
+ * Real GmailTools over a fake Gmail: fitting, warnings and rate-limit handling are the real
+ * ones. The batch endpoint is refused, so metadata comes from single fetches. `calls` records
+ * every request path.
+ */
 function fakeGmail(
   mail: Record<string, Mail>,
   hits: string[] | ((query: string) => string[]),
+  calls: string[] = [],
 ) {
   const request = (async (u: unknown) => {
     const url = new URL(String(u));
+    calls.push(url.pathname + url.search);
     if (url.hostname === "oauth2.googleapis.com")
       return Response.json({ access_token: "a", expires_in: 3600 });
     if (url.pathname.endsWith("/profile"))
       return Response.json({ emailAddress: config.email });
+    if (url.pathname === "/batch/gmail/v1")
+      return new Response("unavailable", { status: 503 });
     if (url.pathname.endsWith("/messages")) {
       const ids =
         typeof hits === "function" ? hits(url.searchParams.get("q")!) : hits;
@@ -78,17 +92,43 @@ function fakeGmail(
         messages: [message(thread, mail[thread])],
       });
     const id = /\/messages\/([a-f0-9]+)$/.exec(url.pathname)![1]!;
+    const refuse = mail[id]?.refuse;
+    if (refuse)
+      return Response.json(
+        {
+          error: {
+            code: 403,
+            errors: [
+              {
+                reason:
+                  refuse === "daily"
+                    ? "dailyLimitExceeded"
+                    : "rateLimitExceeded",
+              },
+            ],
+          },
+        },
+        { status: 403 },
+      );
     return Response.json(message(id, mail[id]));
   }) as typeof fetch;
   return new GmailTools(config, request);
 }
-/** A stand-in for GmailTools.call, for result shapes the real tools cannot produce. */
+/**
+ * A stand-in for GmailTools.call, for result shapes the real tools cannot produce, such as
+ * those of the tools before Phase 1. `options` is the call's last argument.
+ */
 function stubGmail(
-  answer: (operation: string, value: string, account?: string) => unknown,
+  answer: (
+    operation: string,
+    value: string,
+    account?: string,
+    options?: any,
+  ) => unknown,
 ): LoopOptions["gmail"] {
   return {
-    call: async (_user, operation, value, _page, _run, account) =>
-      answer(operation, value, account),
+    call: async (_user, operation, value, _page, _run, account, options) =>
+      answer(operation, value, account, options),
   };
 }
 type Call = { name: string; args: object };
@@ -177,7 +217,8 @@ const run = async (t: EvalTask, gmail: LoopOptions["gmail"], steps: Step[]) =>
   scoreTask(t, await runTask(t, options(gmail, scripted(steps).model)));
 
 test("found, surfaced, readable and extra follow what the model saw and reported", async () => {
-  // a1 has a plain-text body, a2 and a3 are HTML only, a4 is never surfaced.
+  // a1 has a plain-text body, a2 and a3 are HTML only (read as converted text since Phase 1),
+  // a4 is never surfaced.
   const gmail = fakeGmail({ a2: { html: true }, a3: { html: true } }, [
     "a1",
     "a2",
@@ -197,14 +238,14 @@ test("found, surfaced, readable and extra follow what the model saw and reported
   assert.equal(score.found, 2);
   assert.equal(score.surfaced, 3);
   assert.equal(score.surfacedIdOnly, 0);
-  // a2's thread entry is bodyless and a3's read falls back to the snippet.
-  assert.equal(score.readable, 1);
+  // a2's thread entry and a3's read are the HTML bodies converted to text.
+  assert.equal(score.readable, 3);
   assert.deepEqual(
     score.messages.map((m) => [m.messageId, m.readable]),
     [
       ["a1", true],
-      ["a2", false],
-      ["a3", false],
+      ["a2", true],
+      ["a3", true],
       ["a4", false],
     ],
   );
@@ -223,41 +264,63 @@ test("found, surfaced, readable and extra follow what the model saw and reported
   assert.match(seen[1]!, /Untrusted email content/);
 });
 
-test("a search refused by the Gmail request budget is called out", async () => {
-  // Nine hits cost ten requests a page, so four pages spend exactly 40 with no partial page.
+test("many searches in one task are never refused now that the request budget is gone", async () => {
+  // Under the removed 40-request budget, the fifth of these searches was refused.
   const gmail = fakeGmail({}, (q) =>
     Array.from({ length: 9 }, (_, i) => `${q}${i}`),
   );
-  const score = await run(task, gmail, [
+  const score = await run(only("e8"), gmail, [
     search("a"),
     search("b"),
     search("c"),
     search("d"),
     search("e"),
+    search("f"),
     report([]),
   ]);
-  assert.equal(score.budgetExhausted, true);
-  assert.deepEqual(score.toolErrors, { VALIDATION_FAILED: 1 });
-  assert.equal(score.searches, 5);
-  assert.equal(score.ended, "reported");
+  assert.deepEqual(score.toolErrors, {});
+  assert.equal(score.searches, 6);
+  assert.equal(score.surfaced, 1);
+  assert.equal(score.rateLimitedCalls, 0);
+  assert.equal(score.rateLimitedRows, 0);
+  assert.equal("budgetExhausted" in score, false);
 });
 
-test("a page cut short by the request budget is called out, its bare rows ID-only", async () => {
-  // Each page of ten costs 11: the fourth gets metadata for six rows, the last four are bare.
-  const gmail = fakeGmail({}, (q) =>
-    Array.from({ length: 10 }, (_, i) => `${q}${i}`),
-  );
-  const score = await run(only("d9"), gmail, [
-    search("a"),
-    search("b"),
-    search("c"),
-    search("d"),
+test("Gmail rate limits are counted: refused calls and rows left unretrieved", async () => {
+  const gmail = fakeGmail({ a2: { refuse: "rate" }, a3: { refuse: "daily" } }, [
+    "a1",
+    "a2",
+    "a3",
+  ]);
+  const score = await run(task, gmail, [
+    search("receipt"),
+    [
+      { name: "gmail_read", args: { messageId: "a2" } },
+      { name: "gmail_read", args: { messageIds: ["a1", "a2", "a3"] } },
+    ],
     report([]),
   ]);
-  assert.equal(score.budgetExhausted, true);
-  assert.deepEqual(score.toolErrors, {});
-  assert.equal(score.surfaced, 0);
-  assert.equal(score.surfacedIdOnly, 1);
+  // The single read is one RATE_LIMITED call; two search rows and two batch-read messages
+  // were left out by the rate and daily limits.
+  assert.deepEqual(score.toolErrors, { RATE_LIMITED: 1 });
+  assert.equal(score.rateLimitedCalls, 1);
+  assert.equal(score.rateLimitedRows, 4);
+  assert.equal(score.surfaced, 1);
+  assert.equal(score.surfacedIdOnly, 2);
+  // a1 was read in the batch; the refused messages' detail is not a body.
+  assert.deepEqual(
+    score.messages.map((m) => [m.messageId, m.readable]),
+    [
+      ["a1", true],
+      ["a2", false],
+      ["a3", false],
+      ["a4", false],
+    ],
+  );
+  const summary = summarise([score], {});
+  assert.equal(summary.rateLimitedCalls, 1);
+  assert.equal(summary.rateLimitedRows, 4);
+  assert.equal(summary.rateLimitedTasks, 1);
 });
 
 test("a model that never reports stops at the step limit; its last call offers only the report", async () => {
@@ -337,7 +400,8 @@ test("an invalid report beside other calls lets them run and be returned", async
 });
 
 test("an excerpted result counts its search rows but no body", async () => {
-  const padding = "x".repeat(13_000);
+  // Above the email projection's 110,000-character limit, a result becomes an excerpt.
+  const padding = "x".repeat(120_000);
   const gmail = stubGmail((operation) =>
     operation === "gmail_search"
       ? {
@@ -387,29 +451,53 @@ test("messages are keyed by account and lowercase ID; duplicate reports count on
   assert.deepEqual(score.extraIds, ["secondary:a1"]);
 });
 
+/**
+ * The tools before Phase 1: a search row with a snippet, and a gmail_read that returns that
+ * snippet for an HTML-only message without flagging it.
+ */
+function legacyGmail(id: string, snippet: string) {
+  return stubGmail((operation) =>
+    operation === "gmail_search"
+      ? {
+          results: [{ id, threadId: `b${id}`, snippet: snippet.slice(0, 120) }],
+          account: "primary",
+        }
+      : {
+          id,
+          threadId: `b${id}`,
+          text: snippet,
+          truncated: false,
+          account: "primary",
+        },
+  );
+}
+
 test("a long entity-laden snippet returned by gmail_read is not a readable body", async () => {
   const snippet =
     "Receipt &amp; invoice for &#39;Example&#39; &quot;monthly&quot; plan ".repeat(
       5,
     );
   assert.ok(snippet.length > 300);
-  const mail = { a5: { html: true, snippet } };
   const steps = [
     search("receipt"),
     [{ name: "gmail_read", args: { messageId: "a5" } }],
     report([ref("a5")]),
   ];
-  const heuristic = await run(only("a5"), fakeGmail(mail, ["a5"]), steps);
+  const heuristic = await run(only("a5"), legacyGmail("a5", snippet), steps);
   assert.equal(heuristic.surfaced, 1);
   assert.equal(heuristic.readable, 0);
   assert.equal(heuristic.scoredByHeuristic, 1);
   const measured = await run(
     only("a5", { bodyChars: 3000 }),
-    fakeGmail(mail, ["a5"]),
+    legacyGmail("a5", snippet),
     steps,
   );
   assert.equal(measured.readable, 0);
   assert.equal(measured.scoredByBodyChars, 1);
+  // The current tools read the same HTML-only message as converted text.
+  const mail = { a5: { html: true, snippet } };
+  const current = await run(only("a5"), fakeGmail(mail, ["a5"]), steps);
+  assert.equal(current.readable, 1);
 });
 
 test("a short plain body is readable only when bodyChars vouches for it", async () => {
@@ -453,23 +541,47 @@ test("with bodyChars, a continuation read adds up but a repeated read does not",
 test("with bodyChars, a snippet stand-in from gmail_read counts for nothing", async () => {
   // A short HTML-only email: its snippet alone reaches half of bodyChars.
   const snippet = "Receipt &amp; invoice for &#39;Example&#39; plan ".repeat(6);
-  const mail = { a8: { html: true, snippet } };
   const t = only("a8", { bodyChars: 500 });
   assert.ok(snippet.length >= 250 && snippet.length <= 400);
   const read = [{ name: "gmail_read", args: { messageId: "a8" } }];
-  const seen = await run(t, fakeGmail(mail, ["a8"]), [
+  const legacy = await run(t, legacyGmail("a8", snippet), [
     search("receipt"),
     read,
     report([ref("a8")]),
   ]);
-  assert.equal(seen.readable, 0);
-  // gmail_thread flags the same message bodyless, so the two tools agree.
-  const thread = await run(t, fakeGmail(mail, ["a8"]), [
-    search("receipt"),
+  assert.equal(legacy.readable, 0);
+  // The current tools convert the HTML in both reads, and say so with fromHtml.
+  const mail = { a8: { html: true, snippet } };
+  for (const step of [
+    read,
     [{ name: "gmail_thread", args: { threadId: "ba8" } }],
-    report([ref("a8")]),
-  ]);
-  assert.equal(thread.readable, 0);
+  ]) {
+    const current = await run(t, fakeGmail(mail, ["a8"]), [
+      search("receipt"),
+      step,
+      report([ref("a8")]),
+    ]);
+    assert.equal(current.readable, 1);
+  }
+});
+
+test("a bodyless single read is never a body, and fromHtml is never set on its snippet", async () => {
+  // An HTML part that converts to nothing: the tools return the snippet, flagged bodyless.
+  const mail = {
+    af: { html: true, body: "", snippet: "Your receipt is attached" },
+  };
+  const gmail = fakeGmail(mail, ["af"]);
+  const direct: any = await gmail.call("123", "gmail_read", "af");
+  assert.equal(direct.bodyless, true);
+  assert.equal(direct.fromHtml, undefined);
+  assert.equal(direct.text, "Your receipt is attached");
+  // Even with the builder saying the message has plain text, a bodyless text never counts.
+  const score = await run(
+    only("af", { htmlOnly: false, bodyChars: 20 }),
+    fakeGmail(mail, ["af"]),
+    [[{ name: "gmail_read", args: { messageId: "af" } }], report([ref("af")])],
+  );
+  assert.equal(score.readable, 0);
 });
 
 test("with bodyChars, a thread's cut of a body read whole later counts once", async () => {
@@ -541,7 +653,6 @@ test("htmlOnly true makes a long snippet from gmail_read unreadable", async () =
     10,
   );
   assert.ok(snippet.length > 400);
-  const mail = { ac: { html: true, snippet } };
   const steps = [
     search("payment"),
     [{ name: "gmail_read", args: { messageId: "ac" } }],
@@ -549,11 +660,11 @@ test("htmlOnly true makes a long snippet from gmail_read unreadable", async () =
   ];
   const told = await run(
     only("ac", { htmlOnly: true }),
-    fakeGmail(mail, ["ac"]),
+    legacyGmail("ac", snippet),
     steps,
   );
   assert.equal(told.readable, 0);
-  const guessed = await run(only("ac"), fakeGmail(mail, ["ac"]), steps);
+  const guessed = await run(only("ac"), legacyGmail("ac", snippet), steps);
   assert.equal(guessed.readable, 1);
 });
 
@@ -576,8 +687,7 @@ test("a search row's snippet cut inside an entity still matches its stand-in", a
   // Gmail's row snippet is cut at 120 characters, here in the middle of "&amp;".
   const snippet = "a" + "b&amp;".repeat(60);
   assert.equal(snippet.slice(115, 120), "b&amp");
-  const mail = { ae: { html: true, snippet } };
-  const score = await run(only("ae"), fakeGmail(mail, ["ae"]), [
+  const score = await run(only("ae"), legacyGmail("ae", snippet), [
     search("receipt"),
     [{ name: "gmail_read", args: { messageId: "ae" } }],
     report([ref("ae")]),
@@ -729,5 +839,198 @@ test("arms take tools from the runtime and resolve the model as agent runs do", 
     () =>
       resolveArm(parseFlags(["--instructions", "skill:missing"]), "test/main"),
     /No plugin skill/,
+  );
+});
+
+test("pageSize, messageIds and offset reach GmailTools as src/tools.ts passes them", async () => {
+  const seen: [string, string, unknown][] = [];
+  const gmail = stubGmail((operation, value, _account, opts) => {
+    seen.push([operation, value, opts]);
+    return { results: [], messages: [], account: "primary" };
+  });
+  const score = await run(task, gmail, [
+    [
+      { name: "gmail_search", args: { query: "receipt", pageSize: 100 } },
+      { name: "gmail_read", args: { messageIds: ["a1", "a2"] } },
+      { name: "gmail_read", args: { messageId: "a1", offset: 20000 } },
+      { name: "gmail_thread", args: { threadId: "ba1" } },
+      // Outside the runtime schema: refused before dispatch.
+      { name: "gmail_search", args: { query: "receipt", pageSize: 101 } },
+    ],
+    report([]),
+  ]);
+  assert.deepEqual(seen, [
+    ["gmail_search", "receipt", { pageSize: 100 }],
+    ["gmail_read", "", { offset: undefined, messageIds: ["a1", "a2"] }],
+    ["gmail_read", "a1", { offset: 20000, messageIds: undefined }],
+    ["gmail_thread", "ba1", {}],
+  ]);
+  assert.deepEqual(score.toolErrors, { INVALID_INPUT: 1 });
+});
+
+test("a batch read's messages are bodies; a failed entry's detail is not", async () => {
+  const gmail = stubGmail(() => ({
+    messages: [
+      {
+        id: "a1",
+        text: "Converted receipt. ".repeat(20),
+        truncated: false,
+        fromHtml: true,
+      },
+      { id: "a2", detail: "not retrieved: unavailable" },
+      { id: "a3", text: "s".repeat(300), truncated: false, bodyless: true },
+    ],
+    account: "primary",
+  }));
+  const score = await run(
+    {
+      ...task,
+      expected: ["a1", "a2", "a3"].map((messageId) => ({
+        account: "primary" as const,
+        messageId,
+        htmlOnly: true,
+      })),
+    },
+    gmail,
+    [
+      [{ name: "gmail_read", args: { messageIds: ["a1", "a2", "a3"] } }],
+      report([]),
+    ],
+  );
+  assert.deepEqual(
+    score.messages.map((m) => [m.messageId, m.readable]),
+    [
+      ["a1", true],
+      ["a2", false],
+      ["a3", false],
+    ],
+  );
+  assert.equal(score.rateLimitedRows, 0);
+});
+
+test("offset continuations are placed by offset: overlaps count once", async () => {
+  // Texts at 0-1,000, 500-1,500 and 1,000-2,000 cover 2,000 characters, not 3,000.
+  const starts = [0, 500, 1000];
+  const overlapping = () => {
+    let n = 0;
+    return stubGmail(() => {
+      const offset = starts[n++ % 3]!;
+      return {
+        id: "b2",
+        text: "x".repeat(1000),
+        truncated: true,
+        ...(offset ? { offset } : {}),
+        nextOffset: offset + 1000,
+        account: "primary",
+      };
+    });
+  };
+  const three = [
+    [0, 1, 2].map(() => ({ name: "gmail_read", args: { messageId: "b2" } })),
+    report([ref("b2")]),
+  ];
+  // Half of 4,000 is 2,000: covered exactly; half of 4,002 is not.
+  assert.equal(
+    (await run(only("b2", { bodyChars: 4000 }), overlapping(), three)).readable,
+    1,
+  );
+  assert.equal(
+    (await run(only("b2", { bodyChars: 4002 }), overlapping(), three)).readable,
+    0,
+  );
+  // Without a start, three equal texts are one text by the prefix rule.
+  const loose = stubGmail(() => ({
+    id: "b2",
+    text: "x".repeat(1000),
+    account: "primary",
+  }));
+  assert.equal(
+    (await run(only("b2", { bodyChars: 4000 }), loose, three)).readable,
+    0,
+  );
+});
+
+test("real offset continuations are placed by offset, and trimmed texts too", async () => {
+  const body = "Receipt line. ".repeat(3000);
+  assert.equal(body.length, 42_000);
+  const steps = [
+    [{ name: "gmail_read", args: { messageId: "c1" } }],
+    [{ name: "gmail_read", args: { messageId: "c1", offset: 20000 } }],
+    report([ref("c1")]),
+  ];
+  // The real tools' results are placed at 0 and 20,000, the second a continuation.
+  const record = await runTask(
+    only("c1", { bodyChars: 42_000 }),
+    options(fakeGmail({ c1: { body } }, []), scripted(steps).model),
+  );
+  assert.deepEqual(
+    [...record.bodies.get("primary:c1")!.values()].map((b) => [
+      b.start,
+      b.text.length,
+    ]),
+    [
+      [0, 20000],
+      [20000, 20000],
+    ],
+  );
+  assert.equal(
+    scoreTask(only("c1", { bodyChars: 42_000 }), record).readable,
+    1,
+  );
+  // A trimmed text (the adapter's fit) is placed by its offset like any other.
+  const trimmed = stubGmail((_op, _value, _account, opts) => ({
+    id: "c2",
+    text: "t".repeat(4000),
+    truncated: true,
+    ...(opts?.offset ? { offset: opts.offset } : {}),
+    nextOffset: (opts?.offset ?? 0) + 4000,
+    account: "primary",
+  }));
+  const pair = [
+    [{ name: "gmail_read", args: { messageId: "c2" } }],
+    [{ name: "gmail_read", args: { messageId: "c2", offset: 4000 } }],
+    report([ref("c2")]),
+  ];
+  assert.equal(
+    (await run(only("c2", { bodyChars: 16_000 }), trimmed, pair)).readable,
+    1,
+  );
+  assert.equal(
+    (await run(only("c2", { bodyChars: 16_002 }), trimmed, pair)).readable,
+    0,
+  );
+});
+
+test("IDs in omittedMessages count as surfaced ID-only, from a search or a thread", async () => {
+  const gmail = stubGmail((operation) =>
+    operation === "gmail_search"
+      ? {
+          results: [{ id: "a1", threadId: "ba1", snippet: "Receipt" }],
+          omittedMessages: [{ id: "a2", threadId: "ba2" }],
+          account: "primary",
+        }
+      : {
+          messages: [{ id: "a1", text: BODY, truncated: false }],
+          omittedMessages: [
+            { id: "a3", received: "2026-11-01T09:00:00+08:00" },
+          ],
+          account: "primary",
+        },
+  );
+  const score = await run(task, gmail, [
+    search("receipt"),
+    [{ name: "gmail_thread", args: { threadId: "ba1" } }],
+    report([]),
+  ]);
+  assert.equal(score.surfaced, 1);
+  assert.equal(score.surfacedIdOnly, 2);
+  assert.deepEqual(
+    score.messages.map((m) => [m.messageId, m.surfaced, m.surfacedIdOnly]),
+    [
+      ["a1", true, false],
+      ["a2", false, true],
+      ["a3", false, true],
+      ["a4", false, false],
+    ],
   );
 });

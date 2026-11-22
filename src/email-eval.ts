@@ -7,8 +7,8 @@
 //   node dist/email-eval.js --instructions agent:email [--model fast|standard]
 //     [--max-steps N] [--max-tasks N] < tasks.jsonl
 //
-// Each task runs a model in a tool loop over the real Gmail tools (request budget, result
-// fitting and warnings included), each result passing through the real observation projection,
+// Each task runs a model in a tool loop over the real Gmail tools (result fitting, warnings and
+// rate-limit handling included), each result passing through the real observation projection,
 // so each tool result is the one an agent would receive. It ends with an eval-only report tool
 // and is scored deterministically against the expected message IDs. Gmail is only read;
 // nothing is written to the database. It is a simplified loop, not the runtime: see the doc's
@@ -53,11 +53,12 @@ export const GMAIL_OPERATIONS = [
 type GmailOperation = (typeof GMAIL_OPERATIONS)[number];
 const REPORT = "eval_report";
 /**
- * Heuristic readability, used only when a task gives no bodyChars. Both read tools fall back
- * to Gmail's snippet for a message without a plain-text part, and gmail_read says nothing when
- * it does. The snippet is assumed (not verified) to run to about 200 characters, but HTML
- * entities can lengthen it, so short text that starts like a snippet the model saw is also
- * treated as the stand-in.
+ * Heuristic readability, used only when a task gives no bodyChars. Before Phase 1 (journal
+ * 204) both read tools fell back to Gmail's snippet for a message without a plain-text part,
+ * and gmail_read said nothing when it did; the current tools flag every stand-in bodyless.
+ * The snippet is assumed (not verified) to run to about 200 characters, but HTML entities can
+ * lengthen it, so short text that starts like a snippet the model saw is also treated as the
+ * stand-in.
  */
 export const SNIPPET_CHARS = 200;
 export const STAND_IN_CHARS = 400;
@@ -88,7 +89,11 @@ export const taskSchema = z
             messageId,
             /** The true length of the message's body text, from the task builder. */
             bodyChars: z.number().int().positive().optional(),
-            /** True when the message has no text/plain part, from the task builder. */
+            /**
+             * True when the message has no non-empty text/plain part, from the task builder.
+             * The current tools flag a snippet stand-in bodyless themselves, so this matters
+             * only for results from tool versions before Phase 1 (journal 204).
+             */
             htmlOnly: z.boolean().optional(),
           })
           .strict(),
@@ -172,9 +177,10 @@ export type TaskRecord = {
   snippets: Map<string, Set<string>>;
   /**
    * Text the model received for each message from reads that were not excerpts or bodyless,
-   * with whether a tool flagged it converted from HTML (fromHtml).
+   * keyed by start and text: whether a tool flagged it converted from HTML (fromHtml), and
+   * where it starts in the body when the result says (a current tool result: offset, or 0).
    */
-  bodies: Map<string, Map<string, boolean>>;
+  bodies: Map<string, Map<string, BodyText>>;
   report?: z.infer<typeof reportSchema>;
   /** Other calls in the step that reported, not dispatched: the model would never see them. */
   skippedWithReport: number;
@@ -183,7 +189,8 @@ export type TaskRecord = {
   searches: number;
   gmailCalls: number;
   toolErrors: Record<string, number>;
-  budgetExhausted: boolean;
+  /** Search rows and batch-read messages Gmail's rate or daily limit left unretrieved. */
+  rateLimitedRows: number;
   modelCalls: number;
   inputTokens: number;
   outputTokens: number;
@@ -192,12 +199,17 @@ export type TaskRecord = {
   wallMs: number;
 };
 
+type BodyText = { text: string; fromHtml: boolean; start?: number };
 const add = (map: Map<string, Set<string>>, k: string, value: string) =>
   map.set(k, (map.get(k) ?? new Set()).add(value));
+/** A row or batch-read message left unretrieved by Gmail's rate or daily limit. */
+const rateLimited = (detail: unknown) =>
+  typeof detail === "string" && /rate limited|daily quota/.test(detail);
 
 /**
  * Search hits the model saw, from the projected result. A row carrying `detail` (metadata not
- * retrieved) counts as ID-only. An excerpted page is read as text.
+ * retrieved) and an entry of omittedMessages (an ID the page fit dropped) count as ID-only.
+ * An excerpted page is read as text.
  */
 function surfacedIn(projected: any, account: string, r: TaskRecord) {
   const hit = (id: string, idOnly: boolean, snippet?: unknown) => {
@@ -206,18 +218,33 @@ function surfacedIn(projected: any, account: string, r: TaskRecord) {
     if (typeof snippet === "string" && snippet) add(r.snippets, k, snippet);
   };
   if (typeof projected?.excerpt === "string") {
+    const omitted = projected.excerpt.indexOf('"omittedMessages":');
     for (const m of projected.excerpt.matchAll(
       /"id":"([a-f0-9]+)","threadId":"[a-f0-9]+"(,"detail")?/gi,
     ))
-      hit(m[1]!, !!m[2]);
+      hit(m[1]!, !!m[2] || (omitted >= 0 && m.index! > omitted));
     return;
   }
   for (const row of projected?.results ?? [])
-    if (typeof row?.id === "string")
+    if (typeof row?.id === "string") {
       hit(row.id, row.detail !== undefined, row.snippet);
+      if (rateLimited(row.detail)) r.rateLimitedRows++;
+    }
+  idsOnly(projected, account, r);
+}
+/** IDs a result listed without metadata (omittedMessages), for gmail_read messageIds. */
+function idsOnly(projected: any, account: string, r: TaskRecord) {
+  for (const m of projected?.omittedMessages ?? [])
+    if (typeof m?.id === "string")
+      r.surfacedIdOnly.add(key({ account, messageId: m.id }));
 }
 
-/** Text from a gmail_thread entry or gmail_read result, unless excerpted or flagged bodyless. */
+/**
+ * Text from a gmail_thread entry, a gmail_read result or a batch gmail_read entry
+ * (`messages[]`), unless excerpted, flagged bodyless or not retrieved (`detail`). A current
+ * tool result says where its text starts: `offset`, or 0 when it carries the `truncated` flag;
+ * an older or hand-made result without either is placed by prefix instead.
+ */
 function bodiesIn(
   operation: string,
   projected: any,
@@ -226,18 +253,47 @@ function bodiesIn(
 ) {
   if (typeof projected?.excerpt === "string") return;
   const entries =
-    operation === "gmail_thread" ? (projected?.messages ?? []) : [projected];
-  for (const m of entries)
+    operation === "gmail_thread" || Array.isArray(projected?.messages)
+      ? (projected?.messages ?? [])
+      : [projected];
+  for (const m of entries) {
+    if (operation === "gmail_read" && rateLimited(m?.detail))
+      r.rateLimitedRows++;
     if (
       typeof m?.id === "string" &&
       !m.bodyless &&
+      m.detail === undefined &&
       typeof m.text === "string"
     ) {
       const k = key({ account, messageId: m.id });
-      const texts = r.bodies.get(k) ?? new Map<string, boolean>();
-      texts.set(m.text, texts.get(m.text) || m.fromHtml === true);
+      const start =
+        typeof m.offset === "number"
+          ? m.offset
+          : typeof m.truncated === "boolean"
+            ? 0
+            : undefined;
+      const texts = r.bodies.get(k) ?? new Map<string, BodyText>();
+      const at = `${start ?? ""}:${m.text}`;
+      texts.set(at, {
+        text: m.text,
+        start,
+        fromHtml: texts.get(at)?.fromHtml || m.fromHtml === true,
+      });
       r.bodies.set(k, texts);
     }
+  }
+  idsOnly(projected, account, r);
+}
+/** Characters covered by texts placed at known starts, overlaps counted once. */
+function covered(pieces: { start: number; length: number }[]) {
+  let total = 0;
+  let reach = 0;
+  for (const p of [...pieces].sort((a, b) => a.start - b.start)) {
+    const end = p.start + p.length;
+    if (end > reach) total += end - Math.max(p.start, reach);
+    reach = Math.max(reach, end);
+  }
+  return total;
 }
 
 const ENTITIES: Record<string, string> = {
@@ -266,15 +322,16 @@ export function normalise(text: string) {
 /**
  * Whether the model received a message's body as real text. First, which received texts are
  * the body (texts flagged bodyless or excerpted were never recorded):
- * - a text flagged fromHtml counts (a tool converted the body; today's tools never flag it);
+ * - a text flagged fromHtml counts (a tool converted the body from HTML, since Phase 1);
  * - with htmlOnly from the task builder: true means an unflagged text is a snippet stand-in,
  *   since a plain-text-only tool cannot have returned the body; false means it counts;
  * - without htmlOnly (a guess): a text counts unless it is a probable snippet stand-in, that is
  *   STAND_IN_CHARS or fewer whose first STAND_IN_PREFIX characters, normalised, match the start
  *   of a snippet the model saw for the message in a search row.
  * Then the length rule over those texts:
- * - with bodyChars: the distinct texts add up to at least half of min(bodyChars, BODY_CAP), so
- *   a continuation read counts and a repeated read does not;
+ * - with bodyChars: the texts cover at least half of min(bodyChars, BODY_CAP). Texts with a
+ *   known start are placed there, so offset continuations add up and overlaps count once;
+ *   others add up unless one is a prefix of another, so a repeated read does not count twice;
  * - without: some text is longer than SNIPPET_CHARS.
  */
 function readable(
@@ -299,20 +356,30 @@ function readable(
       return n > 0 && head.slice(0, n) === s.slice(0, n);
     });
   };
-  const texts = [...(r.bodies.get(k) ?? [])]
-    .filter(([text, fromHtml]) =>
-      fromHtml ? true : m.htmlOnly !== undefined ? !m.htmlOnly : !standIn(text),
-    )
-    .map(([text]) => text);
-  if (m.bodyChars !== undefined)
+  const pieces = [...(r.bodies.get(k)?.values() ?? [])].filter((b) =>
+    b.fromHtml
+      ? true
+      : m.htmlOnly !== undefined
+        ? !m.htmlOnly
+        : !standIn(b.text),
+  );
+  if (m.bodyChars !== undefined) {
+    const placed = pieces.flatMap((b) =>
+      b.start === undefined ? [] : [{ start: b.start, length: b.text.length }],
+    );
+    const loose = pieces.flatMap((b) =>
+      b.start === undefined ? [b.text] : [],
+    );
     return (
-      texts
-        // A thread's cut of a body that a later read returned whole is not counted twice.
-        .filter((t) => !texts.some((o) => o !== t && o.startsWith(t)))
-        .reduce((n, t) => n + t.length, 0) >=
+      covered(placed) +
+        loose
+          // A thread's cut of a body that a later read returned whole is not counted twice.
+          .filter((t) => !loose.some((o) => o !== t && o.startsWith(t)))
+          .reduce((n, t) => n + t.length, 0) >=
       Math.min(m.bodyChars, BODY_CAP) / 2
     );
-  return texts.some((t) => t.length > SNIPPET_CHARS);
+  }
+  return pieces.some((b) => b.text.length > SNIPPET_CHARS);
 }
 
 const usageNumber = (value: unknown) =>
@@ -331,8 +398,8 @@ export type LoopOptions = {
 };
 
 /**
- * One task: the model's tool loop with the real Gmail tools and observation projection. The
- * run ID scopes Gmail's per-run request budget to this task, as it is scoped to one agent run.
+ * One task: the model's tool loop with the real Gmail tools and observation projection, under
+ * its own run ID as one agent run would be.
  */
 export async function runTask(
   task: EvalTask,
@@ -350,7 +417,7 @@ export async function runTask(
     searches: 0,
     gmailCalls: 0,
     toolErrors: {},
-    budgetExhausted: false,
+    rateLimitedRows: 0,
     modelCalls: 0,
     inputTokens: 0,
     outputTokens: 0,
@@ -483,17 +550,16 @@ export async function runTask(
                   ? a.query
                   : a.operation === "gmail_thread"
                     ? a.threadId
-                    : a.messageId,
+                    : (a.messageId ?? ""),
               a.operation === "gmail_search" ? a.pageToken : undefined,
               run,
               a.operation === "gmail_accounts" ? undefined : a.account,
+              a.operation === "gmail_search"
+                ? { pageSize: a.pageSize }
+                : a.operation === "gmail_read"
+                  ? { offset: a.offset, messageIds: a.messageIds }
+                  : {},
             );
-            if (
-              (result?.results ?? []).some((r: any) =>
-                /budget/.test(String(r?.detail)),
-              )
-            )
-              record.budgetExhausted = true;
             const projected = projectObservation(
               a.operation,
               result,
@@ -523,8 +589,6 @@ export async function runTask(
                     message: "Arguments must be a JSON object",
                   }
                 : toolError(error);
-          if (/request budget/.test(shaped.message))
-            record.budgetExhausted = true;
           fail(shaped.code);
           content = { error: shaped };
         }
@@ -594,7 +658,9 @@ export function scoreTask(task: EvalTask, r: TaskRecord) {
     searches: r.searches,
     gmailCalls: r.gmailCalls,
     toolErrors: r.toolErrors,
-    budgetExhausted: r.budgetExhausted,
+    // Calls Gmail refused for its rate or daily limit, and rows or messages it left out.
+    rateLimitedCalls: r.toolErrors.RATE_LIMITED ?? 0,
+    rateLimitedRows: r.rateLimitedRows,
     modelCalls: r.modelCalls,
     inputTokens: r.inputTokens,
     outputTokens: r.outputTokens,
@@ -659,7 +725,11 @@ export function summarise(scores: TaskScore[], arm: Record<string, unknown>) {
     },
     gmailCalls: sum((s) => s.gmailCalls),
     toolErrors,
-    budgetExhaustedTasks: scores.filter((s) => s.budgetExhausted).length,
+    rateLimitedCalls: sum((s) => s.rateLimitedCalls),
+    rateLimitedRows: sum((s) => s.rateLimitedRows),
+    rateLimitedTasks: scores.filter(
+      (s) => s.rateLimitedCalls + s.rateLimitedRows > 0,
+    ).length,
     ended,
     modelCalls: sum((s) => s.modelCalls),
     inputTokens: sum((s) => s.inputTokens),
