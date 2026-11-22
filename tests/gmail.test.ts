@@ -1035,8 +1035,97 @@ test("a long message continues with offset until the whole text is read", async 
   assert.equal(last.truncated, false);
   assert.equal(last.nextOffset, undefined);
   assert.equal(first.text + second.text + last.text, text);
-  const past = await read(90000);
-  assert.match(past.text, /No text at this offset; the body has 45000/);
+  // An offset at or past the end returns no text; the explanation is a note, not text.
+  for (const offset of [45000, 90000]) {
+    const past = await read(offset);
+    assert.equal(past.text, "");
+    assert.equal(past.truncated, false);
+    assert.equal(past.totalChars, 45000);
+    assert.match(past.note, /No text at this offset; the body has 45000/);
+  }
+});
+
+test("a message with no body and no snippet has empty text and a note", async () => {
+  const r = routed(() => ({
+    id: "abc",
+    threadId: "fabc",
+    payload: { headers: [], mimeType: "image/png", body: { data: "AAAA" } },
+  }));
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_read",
+    "abc",
+  );
+  assert.equal(out.text, "");
+  assert.equal(out.bodyless, true);
+  assert.match(out.note, /no readable body or snippet/);
+});
+
+test("a single read returns From, To, Cc, Subject and Date in full", async () => {
+  const subject = "Quarterly statement ".repeat(30) + "\u{1F600}";
+  const to = Array.from(
+    { length: 40 },
+    (_, i) => `Person ${i} <p${i}@example.com>`,
+  ).join(", ");
+  const headers = [
+    {
+      name: "From",
+      value: "Billing Department of Example Store <billing@example.com>",
+    },
+    { name: "To", value: to },
+    { name: "Cc", value: to },
+    { name: "Subject", value: subject },
+    { name: "Date", value: "Sat, 19 Sep 2026 10:00:00 +0800" },
+  ];
+  assert.ok(subject.length > 600 && to.length > 1000);
+  const r = routed((url) =>
+    url.pathname.includes("/threads/")
+      ? {
+          id: "fabc",
+          messages: [
+            {
+              id: "abc",
+              threadId: "fabc",
+              internalDate: "1",
+              payload: { headers, ...plain("x") },
+            },
+          ],
+        }
+      : { id: "abc", threadId: "fabc", payload: { headers, ...plain("x") } },
+  );
+  const g = new GmailTools(config, r.request);
+  const one: any = await g.call("123", "gmail_read", "abc");
+  const value = (name: string) =>
+    one.headers.find((h: any) => h.name === name)?.value;
+  assert.deepEqual(
+    one.headers.map((h: any) => h.name),
+    ["from", "to", "cc", "subject", "date"],
+  );
+  assert.equal(value("subject"), subject);
+  assert.equal(value("to"), to);
+  assert.equal(value("cc"), to);
+  assertProjects(one, "gmail_read");
+  // Batch entries and thread entries keep the short caps and say where the full ones are.
+  const batch: any = await g.call(
+    "123",
+    "gmail_read",
+    "",
+    undefined,
+    undefined,
+    undefined,
+    {
+      messageIds: ["abc"],
+    },
+  );
+  assert.equal(
+    batch.messages[0].headers.find((h: any) => h.name === "subject").value
+      .length,
+    160,
+  );
+  assert.match(batch.note, /one messageId returns them in full/);
+  const thread: any = await g.call("123", "gmail_thread", "fabc");
+  assert.equal(thread.messages[0].subject.length, 160);
+  assert.match(thread.note, /returns the full headers/);
 });
 
 test("a batch read returns many messages in order with a fair shared total", async () => {

@@ -203,7 +203,7 @@ function header(
   const value = list?.find((h) => h.name.toLowerCase() === name)?.value;
   return value === undefined ? undefined : cut(value, cap);
 }
-/** The four retained headers, each bounded, for a message body result. */
+/** The four retained headers, each capped as in a search row, for a batch-read entry. */
 function kept(list: { name: string; value: string }[] | undefined) {
   return [
     ["from", FROM],
@@ -215,6 +215,16 @@ function kept(list: { name: string; value: string }[] | undefined) {
       name: name as string,
       value: header(list, name as string, cap as number),
     }))
+    .filter((h): h is { name: string; value: string } => h.value !== undefined);
+}
+/**
+ * From, To, Cc, Subject and Date in full for a single-message read: the only bound is
+ * the projection's per-field limit, which a real header does not reach.
+ */
+function fullHeaders(list: { name: string; value: string }[] | undefined) {
+  const limit = projectionLimits("gmail_read").field;
+  return ["from", "to", "cc", "subject", "date"]
+    .map((name) => ({ name, value: header(list, name, limit) }))
     .filter((h): h is { name: string; value: string } => h.value !== undefined);
 }
 /**
@@ -356,17 +366,27 @@ function bodyWindow(
     end = start + (isHigh(body.text.charCodeAt(start)) ? 2 : 1);
   const text = body.text.slice(start, end);
   const truncated = end < body.text.length;
+  // A placeholder is never presented as message text: what is missing goes in note.
+  const standIn = body.text ? "" : cut(m.snippet ?? "", SNIPPET_STAND_IN);
   return {
-    text:
-      text ||
-      (!body.text
-        ? cut(m.snippet ?? "", SNIPPET_STAND_IN) || "No readable body"
-        : `No text at this offset; the body has ${body.text.length} characters.`),
+    text: text || standIn,
+    ...(text || standIn
+      ? {}
+      : {
+          note: body.text
+            ? `No text at this offset; the body has ${body.text.length} characters.`
+            : "This message has no readable body or snippet.",
+        }),
     truncated,
     ...(body.html ? { fromHtml: true } : {}),
     ...(body.text ? {} : { bodyless: true }),
     ...(offset ? { offset: start } : {}),
-    ...(truncated ? { nextOffset: end, totalChars: body.text.length } : {}),
+    ...(truncated || (body.text && !text)
+      ? {
+          ...(truncated ? { nextOffset: end } : {}),
+          totalChars: body.text.length,
+        }
+      : {}),
   };
 }
 type TextWindow = {
@@ -799,7 +819,7 @@ export class GmailTools {
       fitText(
         {
           warning: UNTRUSTED,
-          note: `Ordered oldest first, at most ${THREAD_MAX_MESSAGES} messages. For a message marked truncated, gmail_read with its id and nextOffset returns the rest. Later messages are listed in omittedMessages; read them with gmail_read messageIds. fromHtml means the text was converted from the HTML part.`,
+          note: `Ordered oldest first, at most ${THREAD_MAX_MESSAGES} messages. For a message marked truncated, gmail_read with its id and nextOffset returns the rest. Later messages are listed in omittedMessages; read them with gmail_read messageIds. fromHtml means the text was converted from the HTML part. Sender and subject are shortened here; gmail_read with one messageId returns the full headers.`,
           threadId: parsed.id,
           messages,
           omitted: ordered.length - shown.length,
@@ -858,7 +878,7 @@ export class GmailTools {
       warning: UNTRUSTED,
       id: m.id,
       threadId: m.threadId,
-      headers: kept(m.payload?.headers),
+      headers: fullHeaders(m.payload?.headers),
       ...bodyWindow(m, offset, MESSAGE_CHARS),
     };
     fitText(result, [result]);
@@ -918,7 +938,7 @@ export class GmailTools {
     return fitText(
       {
         warning: UNTRUSTED,
-        note: "Messages in request order. For one marked truncated, gmail_read with its messageId and nextOffset returns the rest. fromHtml means the text was converted from the HTML part.",
+        note: "Messages in request order. For one marked truncated, gmail_read with its messageId and nextOffset returns the rest. fromHtml means the text was converted from the HTML part. Headers are shortened here; gmail_read with one messageId returns them in full.",
         messages,
       },
       messages,

@@ -241,9 +241,10 @@ function idsOnly(projected: any, account: string, r: TaskRecord) {
 
 /**
  * Text from a gmail_thread entry, a gmail_read result or a batch gmail_read entry
- * (`messages[]`), unless excerpted, flagged bodyless or not retrieved (`detail`). A current
- * tool result says where its text starts: `offset`, or 0 when it carries the `truncated` flag;
- * an older or hand-made result without either is placed by prefix instead.
+ * (`messages[]`), unless excerpted, flagged bodyless or empty. An entry not retrieved carries
+ * `detail` and no text. Every real tool result, old or current, says where its text starts:
+ * `offset`, or 0 when it carries the `truncated` flag; only a hand-made result has neither,
+ * and is placed by prefix instead.
  */
 function bodiesIn(
   operation: string,
@@ -262,8 +263,8 @@ function bodiesIn(
     if (
       typeof m?.id === "string" &&
       !m.bodyless &&
-      m.detail === undefined &&
-      typeof m.text === "string"
+      typeof m.text === "string" &&
+      m.text
     ) {
       const k = key({ account, messageId: m.id });
       const start =
@@ -364,19 +365,27 @@ function readable(
         : !standIn(b.text),
   );
   if (m.bodyChars !== undefined) {
+    const body = m.bodyChars;
+    // Only text inside the body counts: a piece placed at or past its end is dropped and
+    // the others are clipped at it, so coverage never exceeds the true body.
     const placed = pieces.flatMap((b) =>
-      b.start === undefined ? [] : [{ start: b.start, length: b.text.length }],
+      b.start === undefined || b.start >= body
+        ? []
+        : [{ start: b.start, length: Math.min(b.text.length, body - b.start) }],
     );
     const loose = pieces.flatMap((b) =>
       b.start === undefined ? [b.text] : [],
     );
     return (
-      covered(placed) +
-        loose
-          // A thread's cut of a body that a later read returned whole is not counted twice.
-          .filter((t) => !loose.some((o) => o !== t && o.startsWith(t)))
-          .reduce((n, t) => n + t.length, 0) >=
-      Math.min(m.bodyChars, BODY_CAP) / 2
+      Math.min(
+        body,
+        covered(placed) +
+          loose
+            // A thread's cut of a body that a later read returned whole is not counted twice.
+            .filter((t) => !loose.some((o) => o !== t && o.startsWith(t)))
+            .reduce((n, t) => n + Math.min(t.length, body), 0),
+      ) >=
+      Math.min(body, BODY_CAP) / 2
     );
   }
   return pieces.some((b) => b.text.length > SNIPPET_CHARS);

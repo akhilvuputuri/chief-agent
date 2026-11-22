@@ -1034,3 +1034,66 @@ test("IDs in omittedMessages count as surfaced ID-only, from a search or a threa
     ],
   );
 });
+
+test("text past the end of the body never counts: an offset read past an 88-character email", async () => {
+  // The reviewer's probe. The read at offset 5000 returns no text; even a result that put
+  // text there (a hand-made one below) is outside the body and is dropped.
+  const body =
+    "Your order 1234 has shipped and will arrive on Tuesday. Thank you for shopping.";
+  const mail = { bd: { body: body.padEnd(88, ".") } };
+  const t = only("bd", { bodyChars: 88, htmlOnly: false });
+  const steps = [
+    [{ name: "gmail_read", args: { messageId: "bd", offset: 5000 } }],
+    report([ref("bd")]),
+  ];
+  assert.equal((await run(t, fakeGmail(mail, []), steps)).readable, 0);
+  const placeholder = stubGmail(() => ({
+    id: "bd",
+    text: "No text at this offset; the body has 88 characters.",
+    truncated: false,
+    offset: 5000,
+    account: "primary",
+  }));
+  assert.equal((await run(t, placeholder, steps)).readable, 0);
+  // A piece that runs past the end is clipped there: 40 inside of 88 is not half.
+  const straddling = stubGmail(() => ({
+    id: "bd",
+    text: "z".repeat(500),
+    truncated: false,
+    offset: 48,
+    account: "primary",
+  }));
+  assert.equal((await run(t, straddling, steps)).readable, 0);
+  // The same read from the start is the body.
+  assert.equal(
+    (
+      await run(t, fakeGmail(mail, []), [
+        [{ name: "gmail_read", args: { messageId: "bd" } }],
+        report([ref("bd")]),
+      ])
+    ).readable,
+    1,
+  );
+});
+
+test("IDs in omittedMessages inside an excerpt count as surfaced ID-only", async () => {
+  const gmail = stubGmail(() => ({
+    results: [{ id: "a1", threadId: "ba1", snippet: "Receipt" }],
+    omittedMessages: [{ id: "a2", threadId: "ba2" }],
+    // After the IDs, so the excerpt still holds them.
+    padding: "x".repeat(120_000),
+    account: "primary",
+  }));
+  const { model, seen } = scripted([search("receipt"), report([])]);
+  const score = scoreTask(task, await runTask(task, options(gmail, model)));
+  assert.match(seen[1]!, /excerpt/);
+  assert.deepEqual(
+    score.messages.map((m) => [m.messageId, m.surfaced, m.surfacedIdOnly]),
+    [
+      ["a1", true, false],
+      ["a2", false, true],
+      ["a3", false, false],
+      ["a4", false, false],
+    ],
+  );
+});
