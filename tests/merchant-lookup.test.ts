@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import {
   MerchantLookup,
   pemValue,
+  validVisaSettings,
   type MerchantLookupAction,
   type VisaCredentials,
   type VisaRequest,
   type VisaResponse,
 } from "../src/merchant-lookup.js";
+import { readConfig } from "../src/config.js";
 import { action } from "../src/protocol.js";
 import { readOperations } from "../src/execution.js";
 import { runtimeContext } from "../src/runtime.js";
@@ -424,4 +426,47 @@ test("the coordinator is told that the subscriptions agent answers merchant MCC 
   ).agentCatalogue.find((a: any) => a.type === "subscriptions");
   assert.match(entry.description, /MCC/);
   assert.match(entry.description, /merchant category/i);
+});
+
+test("without a primary code no listed code is promoted, and order alone is not a disagreement", async () => {
+  const noPrimary = (codes: string[]) =>
+    record(
+      "x",
+      {},
+      {
+        primaryMerchantCategoryCode: undefined,
+        merchantCategoryCode: codes,
+      },
+    );
+  const same = make(() =>
+    ok([noPrimary(["5542", "5300"]), noPrimary(["5300", "5542"])]),
+  );
+  const a = await same.tool.call("owner", search());
+  assert(a.status === "ok");
+  assert.equal(a.matches[0].mcc, null);
+  assert.deepEqual(a.matches[0].allMccs, ["5542", "5300"]);
+  assert.equal(a.mccDiffers, false);
+  const diff = make(() => ok([noPrimary(["5542"]), noPrimary(["5300"])]));
+  const b = await diff.tool.call("owner", search());
+  assert(b.status === "ok");
+  assert.equal(b.mccDiffers, true);
+});
+
+test("invalid Visa settings never stop configuration; they are rejected for the tool alone", () => {
+  const base = {
+    DATABASE_URL: "postgres://x:x@localhost/x",
+    TELEGRAM_BOT_TOKEN: "123:test-token",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+  };
+  for (const bad of [
+    { VISA_MERCHANT_ENV: "prod" },
+    { VISA_RESPONSE_GROUP: "bad group!" },
+  ])
+    assert.doesNotThrow(() => readConfig({ ...base, ...bad }, {}));
+  assert(validVisaSettings("sandbox", "GNSTANDARD3"));
+  assert(validVisaSettings("production", "GN_X1"));
+  assert(!validVisaSettings("prod", "GNSTANDARD3"));
+  assert(!validVisaSettings("", "GNSTANDARD3"));
+  assert(!validVisaSettings("sandbox", "bad group!"));
+  assert(!validVisaSettings("sandbox", ""));
 });

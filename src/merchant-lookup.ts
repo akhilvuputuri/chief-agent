@@ -13,6 +13,14 @@ import { ToolValidationError } from "./tool-errors.js";
 
 export type VisaEnvironment = "sandbox" | "production";
 
+/** True for a known environment and a plain response-group name. */
+export function validVisaSettings(environment: string, group: string) {
+  return (
+    (environment === "sandbox" || environment === "production") &&
+    /^[A-Za-z0-9_]{1,40}$/.test(group)
+  );
+}
+
 const BASES: Record<VisaEnvironment, string> = {
   sandbox: "https://sandbox.api.visa.com",
   production: "https://api.visa.com",
@@ -129,7 +137,7 @@ export interface MerchantMatch {
   merchantName: string | null;
   storeName: string | null;
   brandName: string | null;
-  /** The merchant's primary MCC, when Visa gives one. */
+  /** Visa's primary MCC; null when Visa gives none (allMccs then lists the codes unranked). */
   mcc: string | null;
   allMccs: string[];
   /** Visa's descriptions of the MCCs; the API does not pair them with codes one-to-one. */
@@ -220,7 +228,8 @@ function toMatch(
     merchantName: str(values.visaMerchantName),
     storeName: str(values.visaStoreName),
     brandName: str(values.brandName),
-    mcc: primary ?? all[0] ?? null,
+    // Only Visa's own primary code; the list is not ranked, so it is never promoted.
+    mcc: primary,
     allMccs: all,
     mccDescriptions: list(values.merchantCategoryCodeDesc),
     categoryGroup: str(values.primaryMerchantCategoryGroup),
@@ -460,8 +469,14 @@ export class MerchantLookup {
       matched = Math.max(num(header?.numRecordsMatched) ?? 0, matches.length);
     }
     if (!matches.length) return noMatch;
-    const primaries = new Set(matches.map((m) => m.mcc));
-    const mccDiffers = primaries.size > 1;
+    // Compare primaries only when every record has one; otherwise compare the listed code
+    // sets, ignoring order, so a different order alone is not a disagreement.
+    const keys = new Set(
+      matches.every((m) => m.mcc)
+        ? matches.map((m) => m.mcc)
+        : matches.map((m) => [...m.allMccs].sort().join(",")),
+    );
+    const mccDiffers = keys.size > 1;
     return {
       status: "ok",
       environment,

@@ -39,7 +39,11 @@ import { StockMonitor, StockDelivery, WatchlistTools } from "./stocks.js";
 import { TwelveDataProvider } from "./stock-provider.js";
 import { CreditBucket } from "./market-credits.js";
 import { StockLookup } from "./stock-lookup.js";
-import { MerchantLookup, pemValue } from "./merchant-lookup.js";
+import {
+  MerchantLookup,
+  pemValue,
+  validVisaSettings,
+} from "./merchant-lookup.js";
 import { SingaporeTools } from "./singapore/tools.js";
 import { MarketHistory } from "./market-history.js";
 import { RuleDelivery, RuleEngine } from "./stock-rules.js";
@@ -463,9 +467,14 @@ const merchantLookup = (() => {
     opsLog("merchant.visa_disabled", "warn", { reason: "incomplete" });
     return undefined;
   }
+  // An invalid value leaves the tool off; it never falls back to a different Visa endpoint.
+  if (!validVisaSettings(c.VISA_MERCHANT_ENV, c.VISA_RESPONSE_GROUP)) {
+    opsLog("merchant.visa_disabled", "warn", { reason: "invalid_setting" });
+    return undefined;
+  }
   try {
     return new MerchantLookup({
-      environment: c.VISA_MERCHANT_ENV,
+      environment: c.VISA_MERCHANT_ENV as "sandbox" | "production",
       userId: c.VISA_USER_ID,
       password: c.VISA_PASSWORD,
       cert: pemValue(
