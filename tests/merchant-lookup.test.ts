@@ -470,3 +470,23 @@ test("invalid Visa settings never stop configuration; they are rejected for the 
   assert(!validVisaSettings("sandbox", "bad group!"));
   assert(!validVisaSettings("sandbox", ""));
 });
+
+test("a record without a primary cannot hide two different primaries", async () => {
+  const rec = (primary?: string) =>
+    record(
+      "x",
+      {},
+      {
+        primaryMerchantCategoryCode: primary,
+        merchantCategoryCode: ["5814", "5812"],
+      },
+    );
+  const f = make(() => ok([rec("5814"), rec("5812"), rec()]));
+  const r = await f.tool.call("owner", search());
+  assert(r.status === "ok");
+  assert.equal(r.mccDiffers, true);
+  const g = make(() => ok([rec("5814"), rec("5814"), rec()]));
+  const s = await g.tool.call("owner", search());
+  assert(s.status === "ok");
+  assert.equal(s.mccDiffers, false);
+});
