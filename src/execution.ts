@@ -80,6 +80,8 @@ export const readOperations = new Set([
   "portfolio_ibkr_query",
   "portfolio_order_drafts",
   "stock_lookup",
+  // A read of Visa's merchant database; writes nothing to Visa or the owner's data.
+  "merchant_mcc_lookup",
   "stock_rule_list",
   "sg_weather",
   "sg_air",

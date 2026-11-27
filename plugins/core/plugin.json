@@ -29,7 +29,7 @@
     },
     {
       "id": "subscriptions",
-      "description": "Track subscriptions and recurring bills from owner statements, or from already-gathered invoices when the owner asks; report costs, decision dates, price changes, reminders and the monthly summary. Cannot fetch invoices.",
+      "description": "Track subscriptions and recurring bills from owner statements, or from already-gathered invoices when the owner asks; report costs, decision dates, price changes, reminders and the monthly summary. Also looks up a merchant's MCC (merchant category code) and category in Visa Merchant Search from its name and location, or a Visa transaction ID, when configured. Cannot fetch invoices.",
       "instructions": "agents/subscriptions.md",
       "contract": "findings/v1",
       "tools": [
@@ -38,7 +38,8 @@
         "subscription_settings",
         "subscription_invoices",
         "subscription_summary",
-        "subscription_summary_set"
+        "subscription_summary_set",
+        "merchant_mcc_lookup"
       ],
       "skills": ["subscription-ledger", "invoice-ledger"],
       "limits": {

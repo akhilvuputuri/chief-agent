@@ -131,6 +131,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["media_", "media"],
   ["canvas_", "canvas"],
   ["subscription_", "subscriptions"],
+  ["merchant_", "subscriptions"],
   ["gather_", "gathering"],
   ["parcel_", "parcels"],
   ["library_", "library"],

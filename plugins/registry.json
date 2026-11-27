@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "55321e5f99b727143d576828357a55a9f605d1887016a75df4fcb14e1fbda64b",
+      "sha256": "7e9816ec1f83ee6c8e4d0a795c8430c6e78af00e1dbaf484e06595ac7ea83e8b",
       "agents": [
         "parcels",
         "subscriptions",
@@ -51,6 +51,7 @@
         "library_availability",
         "library_check",
         "library_shelf",
+        "merchant_mcc_lookup",
         "news_edition_now",
         "news_settings",
         "news_source_add",
@@ -170,6 +171,7 @@
     "lta_bus_stops",
     "lta_traffic",
     "lta_train_alerts",
+    "merchant_mcc_lookup",
     "news_edition_now",
     "news_settings",
     "news_source_add",

@@ -39,6 +39,11 @@ import { StockMonitor, StockDelivery, WatchlistTools } from "./stocks.js";
 import { TwelveDataProvider } from "./stock-provider.js";
 import { CreditBucket } from "./market-credits.js";
 import { StockLookup } from "./stock-lookup.js";
+import {
+  MerchantLookup,
+  pemValue,
+  validVisaSettings,
+} from "./merchant-lookup.js";
 import { SingaporeTools } from "./singapore/tools.js";
 import { MarketHistory } from "./market-history.js";
 import { RuleDelivery, RuleEngine } from "./stock-rules.js";
@@ -447,6 +452,52 @@ const stockLookup =
         marketHistory,
       )
     : undefined;
+// Visa Merchant Search: offered only when every credential is present and readable. An
+// optional tool never stops the gateway: a partial or unreadable setup is logged once, with
+// a reason code and no value, and the tool stays unavailable.
+const merchantLookup = (() => {
+  const partsSet = [
+    c.VISA_USER_ID,
+    c.VISA_PASSWORD,
+    c.VISA_CLIENT_CERT || c.VISA_CLIENT_CERT_FILE,
+    c.VISA_CLIENT_KEY || c.VISA_CLIENT_KEY_FILE,
+  ];
+  if (!partsSet.some(Boolean)) return undefined;
+  if (!partsSet.every(Boolean)) {
+    opsLog("merchant.visa_disabled", "warn", { reason: "incomplete" });
+    return undefined;
+  }
+  // An invalid value leaves the tool off; it never falls back to a different Visa endpoint.
+  if (!validVisaSettings(c.VISA_MERCHANT_ENV, c.VISA_RESPONSE_GROUP)) {
+    opsLog("merchant.visa_disabled", "warn", { reason: "invalid_setting" });
+    return undefined;
+  }
+  try {
+    return new MerchantLookup({
+      environment: c.VISA_MERCHANT_ENV as "sandbox" | "production",
+      userId: c.VISA_USER_ID,
+      password: c.VISA_PASSWORD,
+      cert: pemValue(
+        c.VISA_CLIENT_CERT,
+        c.VISA_CLIENT_CERT_FILE,
+        "VISA_CLIENT_CERT",
+      ),
+      key: pemValue(
+        c.VISA_CLIENT_KEY,
+        c.VISA_CLIENT_KEY_FILE,
+        "VISA_CLIENT_KEY",
+      ),
+      ca:
+        pemValue(c.VISA_CA_CERT, c.VISA_CA_CERT_FILE, "VISA_CA_CERT") ||
+        undefined,
+      keyPassphrase: c.VISA_KEY_PASSPHRASE || undefined,
+      responseGroup: c.VISA_RESPONSE_GROUP,
+    });
+  } catch (error) {
+    opsLog("merchant.visa_disabled", "warn", { reason: "unreadable" });
+    return undefined;
+  }
+})();
 if (c.MARKET_DATA_PROVIDER === "twelvedata" && !c.TWELVE_DATA_API_KEY)
   throw startupError(
     "STARTUP_MARKET_DATA_KEY",
@@ -924,6 +975,7 @@ const availability: Record<string, boolean> = {
     c.DAILY_SPREADSHEET_ID
   ),
   stocks: !!stockProvider,
+  merchantLookup: !!merchantLookup,
   news: true,
   singapore: true,
   ltaDataMall: singapore.dataMallConfigured,
@@ -979,6 +1031,7 @@ const assistant = new Assistant(
     undefined,
     browserTool,
     googleConnect,
+    merchantLookup,
   ),
   availability,
   {

@@ -176,6 +176,22 @@ const schema = z.object({
   // low rate limits; LTA DataMall tools are offered only with its account key.
   DATAGOVSG_API_KEY: z.string().default(""),
   LTA_DATAMALL_ACCOUNT_KEY: z.string().default(""),
+  // Visa Merchant Search (docs/visa-merchant-lookup.md): MCC lookups. Off unless the user ID,
+  // password, client certificate and key are all set. Certificates may be given inline (PEM,
+  // \n escapes allowed) or as a *_FILE path, never both. Defaults to Visa's sandbox.
+  // Plain strings here: a typo must leave only the optional tool off (validated in main.ts),
+  // not stop the gateway.
+  VISA_MERCHANT_ENV: z.string().default("sandbox"),
+  VISA_USER_ID: z.string().default(""),
+  VISA_PASSWORD: z.string().default(""),
+  VISA_CLIENT_CERT: z.string().default(""),
+  VISA_CLIENT_CERT_FILE: z.string().default(""),
+  VISA_CLIENT_KEY: z.string().default(""),
+  VISA_CLIENT_KEY_FILE: z.string().default(""),
+  VISA_KEY_PASSPHRASE: z.string().default(""),
+  VISA_CA_CERT: z.string().default(""),
+  VISA_CA_CERT_FILE: z.string().default(""),
+  VISA_RESPONSE_GROUP: z.string().default("GNSTANDARD3"),
   STT_MODEL: z.string().default("whisper-1"),
   TTS_MODEL: z.string().default("tts-1"),
   TTS_VOICE: z.string().default("alloy"),
