@@ -469,11 +469,14 @@ export class MerchantLookup {
       matched = Math.max(num(header?.numRecordsMatched) ?? 0, matches.length);
     }
     if (!matches.length) return noMatch;
-    // Two different known primaries are a disagreement whatever the other records say. The
-    // listed code sets are compared too, ignoring order, so order alone is not one.
+    // Different known primaries are a disagreement. The unranked code lists are compared
+    // (ignoring order) only when a primary is missing, so differing secondary codes alone
+    // do not count against matching primaries.
     const primaries = new Set(matches.flatMap((m) => (m.mcc ? [m.mcc] : [])));
-    const sets = new Set(matches.map((m) => [...m.allMccs].sort().join(",")));
-    const mccDiffers = primaries.size > 1 || sets.size > 1;
+    const mccDiffers =
+      primaries.size > 1 ||
+      (matches.some((m) => !m.mcc) &&
+        new Set(matches.map((m) => [...m.allMccs].sort().join(","))).size > 1);
     return {
       status: "ok",
       environment,

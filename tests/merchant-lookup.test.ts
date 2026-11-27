@@ -490,3 +490,12 @@ test("a record without a primary cannot hide two different primaries", async () 
   assert(s.status === "ok");
   assert.equal(s.mccDiffers, false);
 });
+
+test("matching primaries are not a disagreement when only the secondary codes differ", async () => {
+  const rec = (codes: string[]) =>
+    record("5814", {}, { merchantCategoryCode: codes });
+  const f = make(() => ok([rec(["5814", "5812"]), rec(["5814"])]));
+  const r = await f.tool.call("owner", search());
+  assert(r.status === "ok");
+  assert.equal(r.mccDiffers, false);
+});
