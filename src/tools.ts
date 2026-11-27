@@ -32,6 +32,7 @@ import type { LibraryActions } from "./library-actions.js";
 import type { WatchlistTools } from "./stocks.js";
 import type { Portfolio } from "./portfolio.js";
 import type { GoogleConnect } from "./google-connect.js";
+import type { MerchantLookup } from "./merchant-lookup.js";
 import type { StockLookup } from "./stock-lookup.js";
 import { RuleTools } from "./stock-rules.js";
 import type { SingaporeTools } from "./singapore/tools.js";
@@ -77,6 +78,8 @@ export class JobTools {
     readonly browser?: BrowserTool,
     /** Google sign-in from the chat; absent when its web client is not configured. */
     readonly google?: GoogleConnect,
+    /** Visa Merchant Search; absent when its credentials are not configured. */
+    private merchants?: MerchantLookup,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -338,6 +341,11 @@ export class JobTools {
       if (!this.stockLookup)
         throw new Error("Stock market data is not configured");
       return new RuleTools(this.db).call(user, run, a);
+    }
+    if (a.operation === "merchant_mcc_lookup") {
+      if (!this.merchants)
+        throw new Error("Visa Merchant Search is not configured");
+      return this.merchants.call(user, a, signal);
     }
     if (a.operation === "stock_lookup") {
       if (!this.stockLookup)

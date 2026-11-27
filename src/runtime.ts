@@ -127,6 +127,7 @@ export function runtimeContext(
       !availability.calendar) ||
     (op === "sheet_sync" && !availability.preparationSheet) ||
     (op === "daily_sync" && !availability.dailySheet) ||
+    (op === "merchant_mcc_lookup" && !availability.merchantLookup) ||
     (op.startsWith("watchlist_") && !availability.stocks) ||
     (op.startsWith("stock_") && !availability.stocks) ||
     (op.startsWith("portfolio_") && !availability.portfolio) ||
@@ -379,6 +380,8 @@ export function runtimeContext(
                 "Current MRT/LRT service status from LTA: normal or disrupted, affected lines, stations and directions, free bus or shuttle arrangements and the LTA messages.",
               lta_traffic:
                 "Current Singapore traffic incidents from LTA (accidents, breakdowns, roadworks, obstacles), optionally filtered by road or expressway words.",
+              merchant_mcc_lookup:
+                "Look up a merchant's MCC (merchant category code) in Visa's Merchant Search. Give merchantName and always merchantCountryCode with it (Visa can refuse a name without a country), and to sharpen the match merchantCity, merchantStreetAddress, merchantState, merchantPostalCode and merchantCountryCode (3-digit ISO numeric, e.g. 840 US, 702 Singapore, 826 UK), or merchantUrl or merchantPhoneNumber. maxRecords 1-10 (default 5). Alternatively pass transaction {transactionId, transactionDate YYYYMMDD, transactionType A authorization or C clearing} to enrich one Visa transaction by its VisaNet ID. Returns matches best first with mcc (primary), allMccs, mccDescriptions, categoryGroup, address, matchScore, confidenceScore, confidenceRange and matchIndicators. Statuses: no_match, busy (retryAfterSeconds; do not loop), timeout, unreachable, refused (relay the note). Sandbox results are test data and the result says so. A match is Visa's best guess: report confidence, and say so when several matches disagree on the MCC. Read-only.",
               stock_lookup:
                 "Answer a stock question now: price, day change, 12/26/52-week simple averages, 12/26/52-week lows and highs, and all-time low and high (split-adjusted, with 'since' date), each with distance in percent. query is a ticker or company name (or pass a watched stock id); when candidates span exchanges ask the owner which, then repeat with exchange. Returns status busy with retryAfterSeconds when market-data credits are exhausted for now. US listings only. Facts, not advice.",
               watchlist_settings:

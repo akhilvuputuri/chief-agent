@@ -444,6 +444,32 @@ export const action = z.discriminatedUnion("operation", [
       id: id.optional(),
     })
     .strict(),
+  z
+    .object({
+      operation: z.literal("merchant_mcc_lookup"),
+      merchantName: z.string().trim().min(1).max(100).optional(),
+      merchantStreetAddress: z.string().trim().min(1).max(100).optional(),
+      merchantCity: z.string().trim().min(1).max(50).optional(),
+      merchantState: z.string().trim().min(1).max(30).optional(),
+      merchantPostalCode: z.string().trim().min(1).max(20).optional(),
+      merchantCountryCode: z
+        .string()
+        .trim()
+        .regex(/^\d{3}$/, "3-digit ISO 3166 numeric country code, e.g. 702")
+        .optional(),
+      merchantPhoneNumber: z.string().trim().min(1).max(30).optional(),
+      merchantUrl: z.string().trim().min(1).max(200).optional(),
+      maxRecords: z.number().int().min(1).max(10).optional(),
+      transaction: z
+        .object({
+          transactionId: z.string().trim().min(1).max(30),
+          transactionDate: z.string().regex(/^\d{8}$/, "YYYYMMDD"),
+          transactionType: z.enum(["A", "C"]),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
   z.object({ operation: z.literal("portfolio_read") }).strict(),
   z.object({ operation: z.literal("portfolio_status") }).strict(),
   z.object({ operation: z.literal("portfolio_connect") }).strict(),

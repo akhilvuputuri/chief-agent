@@ -119,7 +119,10 @@ function unique(values: string[], what: string) {
  * Host-defined tools an agent may list without depending on them: when one is unavailable
  * the agent stays invocable without it. Packages cannot add to this set.
  */
-export const OPTIONAL_OPERATIONS = new Set(["gmail_recall"]);
+export const OPTIONAL_OPERATIONS = new Set([
+  "gmail_recall",
+  "merchant_mcc_lookup",
+]);
 /** Coordinator and report operations; an agent can never be granted these. */
 export const NEVER_GRANTED = new Set([
   "mcp_tools",
